@@ -212,6 +212,22 @@ test('a build killed by a signal says so; a restart kill is retried at the next 
   assert.ok(!existsSync(join(big.data, 'android/latest.json')) && !existsSync(join(data, 'android/killed-0.apk')));
 });
 
+test('a roll back to an older commit builds it one past the published build, so phones take it (ADR 0012)', async () => {
+  const { live, row, data } = app('rolled');
+  key('rolled');
+  const { b } = builder();
+  const green = git(live, 'rev-parse', 'HEAD');
+  assert.deepEqual(await b.check(row, '#1'), { built: 1 });
+  commit(live, { 'shell/index.html': '<p>broken</p>' });
+  const bad = commit(live, { 'shell/index.html': '<p>still broken</p>' });
+  assert.deepEqual(await b.check(row, '#2'), { built: 3 });
+  git(live, 'checkout', '--quiet', '--detach', green);
+  assert.deepEqual(await b.check(row, '#3'), { built: 4 }, 'commit count 1, published 3: it goes out as 4');
+  assert.deepEqual(feed(data), { versionCode: 4, apk: 'rolled-4.apk', versionName: '1.0', commit: green });
+  git(live, 'checkout', '--quiet', '--detach', bad);
+  assert.deepEqual(await b.check(row, '#4'), { built: 5 }, 'the fix after it climbs on from there');
+});
+
 test('a published build at or above the commit count is refused, not overwritten', async () => {
   const { row, data } = app('ahead');
   key('ahead');

@@ -218,9 +218,13 @@ export class ApkBuilds {
       writeFileSync(keyTold, commit);
       return out;
     }
-    const code = Number((await git(live, 'rev-list', '--count', commit)).out);
-    if (!Number.isInteger(code) || code < 1) return fail(`couldn't count ${commit.slice(0, 9)}'s commits`);
-    if (code <= current) return fail(`its versionCode is its commit count, ${code}, and the published APK is build ${current} already. Phones only update to a higher one: publish one from a release workflow instead, or bump past it.`);
+    const count = Number((await git(live, 'rev-list', '--count', commit)).out);
+    if (!Number.isInteger(count) || count < 1) return fail(`couldn't count ${commit.slice(0, 9)}'s commits`);
+    // A feed this builder wrote (it has a commit) at or past the count is an older commit going live, a roll back to last
+    // green (docs/adr/0012): phones only take a higher versionCode, so it goes out one past the published build.
+    const ours = typeof feed?.commit === 'string';
+    if (count <= current && !ours) return fail(`its versionCode is its commit count, ${count}, and the published APK is build ${current} already. Phones only update to a higher one: publish one from a release workflow instead, or bump past it.`);
+    const code = Math.max(count, current + 1);
 
     const src = join(dir, 'src');
     const log = join(dir, 'build.log');

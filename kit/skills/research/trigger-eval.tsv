@@ -1,0 +1,21 @@
+id	expected	prompt
+1	research	[Josh]: Can we run our CI on Hetzner ARM boxes instead of GitHub runners? Find out what they cost per month and whether actions/runner supports arm64 Linux today.
+2	research	[Cara]: look into whether Godot 4.6 can export to the Quest 3 without the Meta plugin, I need to know before we pick an engine for the VR thing
+3	research	[Josh]: Compare Cloudflare Tunnel, ngrok and Tailscale Funnel for exposing one app on our own domain: price, limits, setup. Short report please.
+4	research	[Cara]: what are the current rate limits on the Gmail API for sending, and does it differ for Workspace accounts?
+5	research	[Josh]: find out whether the EU AI Act's transparency rules apply to a hobby app like Mandate if friends in Germany use it
+6	research	[Cara]: Research what the best practices are for spaced repetition scheduling (FSRS vs SM-2) for the Delve flashcard feature, with sources
+7	research	[Josh]: Is Bun's SQLite driver faster than node:sqlite for our workload? see what benchmarks exist and how recent they are
+8	research	[Cara]: there's a paper on LLM-as-judge position bias, find it and tell me what they recommend for pairwise judging
+9	skills-survey	[Josh]: survey skills for Unity, are there good third-party Claude skills we should take?
+10	diagnosing-bugs	[Cara]: the land queue hung again at 03:12, figure out why
+11	bug-fixing|diagnosing-bugs	[Josh]: investigate why the sidebar shows the wrong count for parked minions
+12	docs-and-mocks	[Cara]: write up a design doc for the new release page with two mockups
+13	claude-api|research	[Josh]: which Claude model should the Mandate agent run on, and what does each cost per million tokens?
+14	self-review	[Cara]: review my PR for the backup schedule before I ship it
+15	none	[Josh]: look through our repo and tell me every place we still read the old tickets.state column
+16	grilling	[Cara]: stress-test my plan to move CI to the desktop, grill me
+17	diagnosing-bugs	[Josh]: our test suite got 40% slower this week, find what did it
+18	upstream-check	[Cara]: are our third-party skill copies out of date against upstream?
+19	dataviz	[Josh]: make a chart of minion spend per scheme for the last month
+20	skill-stocktake	[Cara]: audit the kit's skills and say which to retire

@@ -600,6 +600,11 @@ act for no one, so they take no `person` (tested):
   newest match's own URL, or with `json=1` answers `200 { file }`. 404 when nothing matches.
 - **`GET <file's url>`** (`/api/projects/<scheme id>/ci-files/<id>/<name>`) answers the bytes.
   A file's URL stays the same until the store's rules delete it.
+- **`GET /api/projects/<scheme id>/ci-files/pins`** answers the builds a Roll back to last green
+  holds the scheme's CI packages at, as `200 { pins: [{ target, workflow, run_id, sha, green, from,
+  by, at, files: [<file>, …] }] }` (empty when nothing is rolled back). An updater that reads it
+  hands out a pinned build in place of the newest, even though its run number is older, and goes
+  back to the newest once the pin leaves the list (main has a newer green commit).
 
 Only your home scheme: another scheme's id gets 403, as does any scheme when your app has none.
 The scheme id is your registry entry's `home_scheme` (`id` from `/api/contraptions/home`); it
@@ -972,6 +977,9 @@ red would hold a real release. So name what your updater gates on.
 ## What changed since 2026-11-02
 
 Newest first.
+
+- **2026-11-19:** `/api/projects/<id>/ci-files/pins`: the builds a roll back holds your scheme's CI
+  packages at, for your updater to hand out in place of the newest ("Your home scheme's CI files").
 
 - **2026-11-18:** Roll back to last green on your Releases card, and `migrations` in
   `citadel-app.json` to stop one going back past a data change ("Running and deploying").

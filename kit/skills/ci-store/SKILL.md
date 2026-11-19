@@ -69,5 +69,9 @@ folder:
   `GET $CITADEL_URL/api/projects/<home scheme id>/ci-files/latest?workflow=windows.yml&kind=build&target=windows&json=1`,
   then the bytes from its `url`. Leave out `json=1` and the redirect leads straight to the bytes.
   The contraption-ui skill's `references/api.md` ("Your home scheme's CI files") has the code.
+- A rolled-back CI package (ADR 0012): `/api/projects/<scheme id>/ci-files/pins` lists the builds
+  each pinned target is held at, with their files. An app's updater hands out a pinned build in
+  place of the newest, even though its number is older, until the pin is gone from the list. The
+  store keeps those builds and each target's last green one past the rules' sweep.
 - An Android release run's signed APK (kind `release`, named `<app>-<versionCode>.apk`) is what
   the Releases page's publish step copies into the contraption's `android/` folder.

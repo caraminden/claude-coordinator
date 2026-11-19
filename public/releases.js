@@ -407,10 +407,18 @@ function rollbackBar(projectId, tv) {
         : `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`)
       : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
   const button = !busy && rb.can
-    ? h('button', { type: 'button', class: 'secondary', onclick: press, title: `Deploy ${to}, the newest commit on main that passed the full suite, and hold it there until a newer one passes` }, `Roll back to last green ${to}`)
+    ? h('button', { type: 'button', class: 'secondary', onclick: press, title: rollbackTitle(tv.target.kind, to) }, `Roll back to last green ${to}`)
     : '';
   if (!line && !button) return '';
   return h('div', { class: 'rel-deploy rel-rollback' }, button, line);
+}
+
+/** What the roll back button does on each kind of card (ADR 0012): an APK goes out as the next version, a CI package hands out an existing build. */
+function rollbackTitle(kind, to) {
+  const hold = 'and hold it there until a newer one passes';
+  if (kind === 'apk') return `Sign ${to}, the newest commit on main that passed the full suite, as the next Android build and publish it, so phones update to it, ${hold}`;
+  if (kind === 'ci') return `Hand out the build made at or before ${to}, the newest commit on main that passed the full suite, in place of the newest, ${hold}`;
+  return `Deploy ${to}, the newest commit on main that passed the full suite, ${hold}`;
 }
 
 /** Apps whose Make release key was pressed here, until the server's view stops offering it: "projectId/app". */

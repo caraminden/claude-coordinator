@@ -81,7 +81,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   release key and publishes it. A change elsewhere (the server, a web layer loaded from
   `server.url`) builds nothing. A `webDir` the deploy builds (a gitignored `dist/`) is copied
   from the live slot, and then every deploy with a new commit builds an APK.
-  - **versionCode is the commit count on main** (`git rev-list --count HEAD`), set at build time
+  - **versionCode is the commit count on main** (`git rev-list --count HEAD`), or one past the
+    published APK when that is higher (a roll back to an older commit), set at build time
     by Citadel's Gradle init script (`-Pcitadel.versionCode=N`). Leave `versionCode` in
     `build.gradle` alone; `versionName` is read from it.
   - Needs: the app's release key (above), `npm ci` in its `citadel-app.json` build steps (the
@@ -102,6 +103,14 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   browser downloads them without Citadel's cookie. The tailnet keeps them private.
 - A signed APK built in CI reaches perigee through Citadel's CI store, not a GitHub artifact: the
   release workflow uploads it as kind `release` (the `citadel:ci-store` skill).
+- **Roll back to last green** on the Releases card puts last green on phones as the next version,
+  since Android refuses a lower versionCode (ADR 0012). A Capacitor app's APK rolls back with its
+  app: one button, the build numbered one past the published one. A CI-signed app's roll back
+  points the branch `citadel/rollback` at last green and starts its release workflow there with
+  the input `version_code` (published + 1): the workflow has to take that optional input and build
+  as that versionCode (rewrite it in `build.gradle` before Gradle runs), or the button refuses.
+  After one, the published versionCode is above main's, so the next release bumps past the
+  published one, not main's.
 - Publish a CI or hand-built APK into the contraption's feed with the `publish_release` tool (from
   any turn, container ones too) or the Deploy button on its card on the Releases page, not by
   copying files. Both refuse an APK signed with a different key from the published one, and

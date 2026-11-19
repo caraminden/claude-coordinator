@@ -54,7 +54,7 @@ export function landedOn(landed: Landed, on: (files: string[] | null | undefined
 
 /** What of `landed` changes the app itself: files in its folder but Markdown, as Mandate's own bump rule counts (android/README.md ships in no APK). */
 export function appChanges(t: Found, landed: Landed | null): Landed | null {
-  const app = (files: string[] | null | undefined) => !t.paths?.length || !files || files.some((f) => holds(t, f) && !/\.md$/i.test(f));
+  const app = (files: string[] | null | undefined) => !t.paths?.length || !files || files.some((f) => holds(t, f) && !f.endsWith('.md'));
   return landed && { ...landed, commits: new Map([...landed.commits].filter(([sha]) => app(landed.files.get(sha)))), tickets: landed.tickets.filter((x) => app(landed.ticketFiles.get(x.id))) };
 }
 

@@ -931,6 +931,23 @@ const DEPLOY_CONTRAPTION = {
 };
 
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
+/** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
+const REVIEW_SET = {
+  name: 'review_set',
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. A minion saves only the body; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slug: { type: 'string', description: "The entry's slug, e.g. ui-screenshots" },
+      body: { type: 'string', description: "The entry's own text, whole, with your edit made" },
+      version: { type: 'integer', description: 'The version you read; a save over a newer one is refused, so read it again' },
+      note: { type: 'string', description: 'What changed, a few words for History, e.g. "Calibration board: Josh passed long labels"' },
+      enabled: { type: 'boolean', description: 'Taskmaster only: turn it on or off' },
+      trial: { type: 'boolean', description: 'Taskmaster only: put it on trial or take it off' },
+    },
+  },
+};
+
 const MANDATE_ITEM = {
   name: 'mandate_item',
   description: `Put an item in Mandate (the to-do app) for the person whose own message this turn answers, or clear one. Only that person: a put is refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for someone not on this scheme or without Mandate. It shows on their Today with this scheme's name and links back to this chat. Put the same key again to update it. Clear it as soon as its cause is gone (done, landed, fixed, no longer needed), on whichever turn finds that out: clearing an item this chat put works on any turn, and one left open keeps nagging them. alert: true rings like an alarm on their phone, so use it only for a real problem that needs them now, never for good news or an FYI (a green build, a land, a deploy). When they tick, untick, delete or restore it, a "[Mandate]: …" message arrives in this chat. Returns Mandate's answer: 200 { key, state, mine } (state open, ticked, deleted, cleared or none; mine lists fields they edited, which your puts no longer change), or 400 bad_request, 403 off (they switched this scheme's items off) or 429 limit.`,
@@ -1836,6 +1853,21 @@ async function runTool(name: string, args: any): Promise<string> {
       const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
+    case 'review_set': {
+      if (!args.slug) {
+        const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
+        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.trial ? ', trial' : ''}${e.extends ? `, on kit ${e.extends}` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
+      }
+      const slug = encodeURIComponent(String(args.slug));
+      if (args.body === undefined && args.enabled === undefined && args.trial === undefined) {
+        const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
+        const e = entries.find((x: any) => x.slug === args.slug);
+        if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
+        return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
+      }
+      const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial });
+      return `Saved ${e.slug} as version ${e.version}.`;
+    }
     case 'mandate_item': {
       if (typeof args.key !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(args.key)) throw new Error('key is required: letters, digits and . _ : - only, like pr-13');
       const path = `/api/mandate/items/${args.key}`;
@@ -2260,8 +2292,8 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

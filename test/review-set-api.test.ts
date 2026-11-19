@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, bootServer, REPO, stopProcs, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-api-'));
 const procs: ChildProcess[] = [];
@@ -82,4 +83,25 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   assert.equal((await call(url, { as: otherPage.coordinator.id })).status, 403);
   assert.equal((await call(entry, { method: 'PATCH', body: { enabled: false }, as: otherPage.coordinator.id })).status, 403);
   assert.deepEqual((await call(`/api/projects/${other.id}/reviews`)).data.entries, []);
+
+  // The minion's tool: list, read one, save what it learned.
+  const tool = async (args: Record<string, unknown>) => {
+    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), minion.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread' },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    try {
+      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
+      const { result } = await reply;
+      return { error: !!result.isError, text: result.content[0].text as string };
+    } finally {
+      child.kill();
+    }
+  };
+  assert.match((await tool({})).text, /^ui-screenshots \(critic, on, trial, on kit ui-screenshots\): diff: public\/\*\*, .*\nclaims \(critic, on, trial\): schedule: monthly$/);
+  assert.match((await tool({ slug: 'claims' })).text, /^claims, version 1 \(.+ saved it\)\. As the critic reads it:\n\n---\nname: claims\nwhen: "schedule: monthly"\ntrial: true\n---\n\n# Claims\n/);
+  const saved = await tool({ slug: 'claims', body: '# Claims\n\n## Notes\n\nCara passed the hedged ones.', version: 1, note: 'Calibration' });
+  assert.equal(saved.text, 'Saved claims as version 2.');
+  assert.ok((await tool({ slug: 'claims', enabled: false })).error);
 });

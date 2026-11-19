@@ -192,3 +192,37 @@ dialog.secret-ask .row { gap: 0.5rem; flex-wrap: wrap; }
   .composer .slash-item { flex-direction: column; align-items: stretch; gap: 0.1rem; padding: 0.5rem 0.55rem; }
   .composer .slash-desc { white-space: normal; }
 }
+
+/* The held-mail card (#1067, heldcard.js; Josh picked "C · A next-turn inbox card", 2026-11-19): what the next turn will
+   read, in --held, with a loop-guard hold on top in --waiting. Sections open in place; an open list scrolls past 30% of the view. */
+#chat-held[hidden], #chat-held [hidden] { display: none; }
+.held-card { margin-bottom: 0.5rem; border: 1px solid color-mix(in srgb, var(--held) 40%, var(--line)); border-radius: 10px; background: var(--panel); font-size: 0.85rem; line-height: 1.35; }
+.held-card .hc-head { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.65rem; }
+.held-card .hc-count { flex: none; min-width: 1.4rem; height: 1.4rem; padding: 0 0.3rem; border-radius: 999px; background: var(--held); color: #fff; display: grid; place-items: center; font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.held-card .hc-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.held-card .hc-title > span { color: var(--muted); font-size: 0.8rem; }
+.held-card .hc-sec { border-top: 1px solid var(--line); }
+.held-card .hc-line { display: flex; align-items: center; }
+.held-card .hc-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.45rem; padding: 0.4rem 0.65rem; min-height: var(--control-h); box-sizing: border-box; }
+.held-card button.hc-toggle { border: 0; border-radius: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.held-card button.hc-toggle:hover, .held-card button.hc-toggle:focus-visible { background: color-mix(in srgb, var(--held) 6%, var(--panel)); }
+.held-card .hc-chev { flex: none; color: var(--muted); transition: transform 0.15s; }
+.held-card .hc-toggle[aria-expanded=true] .hc-chev { transform: rotate(90deg); }
+.held-card .hc-row > b { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.held-card .hc-n { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.held-card .hc-pv { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.held-card .hc-row > button { flex: none; }
+.held-card .hc-need .hc-row { background: color-mix(in srgb, var(--waiting) 9%, var(--panel)); }
+.held-card .hc-need .hc-row > b { color: var(--waiting); max-width: none; }
+.held-card .hc-msgs { display: grid; gap: 0.35rem; padding: 0 0.65rem 0.55rem 1.6rem; max-height: 30vh; overflow-y: auto; }
+.held-card .hc-msg { border-left: 2px solid color-mix(in srgb, var(--held) 35%, var(--line)); padding: 0.1rem 0 0.1rem 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.held-card .hc-msg time { color: var(--muted); font-size: 0.75rem; margin-right: 0.35rem; font-variant-numeric: tabular-nums; }
+.held-card .hc-msg .msg-tag { margin: 0 0.35rem 0 0; }
+.held-card .hc-menu { flex: none; position: relative; }
+.held-card .hc-menu > summary { list-style: none; cursor: pointer; padding: 0 0.65rem; min-height: var(--control-h); display: grid; place-items: center; color: var(--muted); }
+.held-card .hc-menu > summary::-webkit-details-marker { display: none; }
+.held-card .hc-pop { position: absolute; right: 0.4rem; top: 100%; z-index: 5; display: grid; padding: 0.3rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+.held-card .hc-pop button { border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; padding: 0.4rem 0.6rem; text-align: left; white-space: nowrap; cursor: pointer; }
+.held-card .hc-pop button:hover, .held-card .hc-pop button:focus-visible { background: var(--line); }
+.held-card .hc-foot { display: flex; align-items: center; gap: 0.55rem; padding: 0.4rem 0.65rem; border-top: 1px solid var(--line); }
+.held-card .hc-foot > span { flex: 1; color: var(--muted); font-size: 0.8rem; }

@@ -186,3 +186,12 @@ test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, a
     assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
   }
 });
+
+test('PATCH saves a scheme\'s never-hold kinds on their own and refuses unknown ones (#1067)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Never hold' } });
+  const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { msg_never_hold: ['note', 'decision', 'note'] } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.msg_never_hold, 'decision,note');
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { msg_never_hold: [] } })).data.msg_never_hold, '');
+  for (const body of [{ msg_never_hold: 'note' }, { msg_never_hold: ['shout'] }]) assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
+});

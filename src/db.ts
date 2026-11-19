@@ -116,6 +116,8 @@ export interface Project {
   msg_loop_min: number;
   msg_cold_min: number;
   msg_hold_h: number;
+  /** Kinds of held mail this scheme never holds (#1067), comma-separated: src/msg-settings.ts neverHold. */
+  msg_never_hold: string;
   /** 1 while the members' pass on Minion rules after setup is open (#1046): onboarding done sets it, "Looks right" clears it. */
   rules_review: number;
   /** Kit skills this scheme turned off on its Skills page (#1062), space-separated folder names under kit/skills ('' = every kit skill on, the default). */
@@ -1334,6 +1336,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'msg_loop_min', 'ALTER TABLE projects ADD COLUMN msg_loop_min INTEGER NOT NULL DEFAULT 10'],
   ['projects', 'msg_cold_min', 'ALTER TABLE projects ADD COLUMN msg_cold_min INTEGER NOT NULL DEFAULT 55'],
   ['projects', 'msg_hold_h', 'ALTER TABLE projects ADD COLUMN msg_hold_h INTEGER NOT NULL DEFAULT 3'],
+  ['projects', 'msg_never_hold', "ALTER TABLE projects ADD COLUMN msg_never_hold TEXT NOT NULL DEFAULT ''"],
   ['projects', 'shot_note', "ALTER TABLE projects ADD COLUMN shot_note TEXT NOT NULL DEFAULT ''"],
   // Today's behaviour by default (#1043): Citadel ships it, a go from high, no try first. shippingFromRules moves the PR schemes.
   ['projects', 'ship_path', "ALTER TABLE projects ADD COLUMN ship_path TEXT NOT NULL DEFAULT 'citadel'"],
@@ -1451,6 +1454,7 @@ export const SCHEMA_HISTORY = [
   [77, 'flake_events (#1063)'],
   [78, 'projects.skills_off (#1062)'],
   [79, 'tickets.closed_at, backfilled from the close notes (#1072)'],
+  [80, 'projects.msg_never_hold (#1067)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1876,7 +1880,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review' | 'skills_off'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

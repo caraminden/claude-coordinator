@@ -1,3 +1,5 @@
+import { NEEDS } from './needs.ts';
+
 // A scheme's message settings (#1059): the loop guard's count and window, when a silent recipient counts as cold, and how
 // long cold mail may wait. One home for the defaults, the bounds and every sentence that quotes them, so the tool text
 // and the "Held" lists never carry a typed number. The defaults are what the constants were before they were settings.
@@ -45,6 +47,20 @@ export function cleanMsgSettings(body: Record<string, unknown>): Row {
   }
   return out;
 }
+/**
+ * Kinds of held mail a scheme never holds (#1067; Josh, 2026-11-19, picked "By kind, scheme-wide"): a message's `need`,
+ * or `note` for Citadel's own notes (leaveMail). Mail of such a kind wakes its receiver instead, as wake: true would;
+ * a parked receiver and the loop guard still hold it. Stored comma-separated in projects.msg_never_hold.
+ */
+export const NEVER_HOLD_KINDS = [...NEEDS, 'note'] as const;
+export const neverHold = (project?: { msg_never_hold?: string } | null): Set<string> =>
+  new Set((project?.msg_never_hold ?? '').split(',').filter((k) => (NEVER_HOLD_KINDS as readonly string[]).includes(k)));
+/** A PATCH body's msg_never_hold: a list of kinds, refused if any isn't one; stored sorted and deduped. */
+export function cleanNeverHold(v: unknown): string {
+  if (!Array.isArray(v) || v.some((k) => !(NEVER_HOLD_KINDS as readonly string[]).includes(k))) throw new Error(`msg_never_hold must be a list of ${NEVER_HOLD_KINDS.join(', ')}`);
+  return [...new Set(v as string[])].sort().join(',');
+}
+
 /** "a message" wording shared by the paused notes and the tool results. */
 export const loopText = (s: MsgSettings) => `${s.loopLimit} messages in ${s.loopMin} minutes`;
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */

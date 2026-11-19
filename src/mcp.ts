@@ -1986,7 +1986,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `${heldToolText(MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
-      const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false || args.need === 'fyi' ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
+      const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : (args.wake === false || args.need === 'fyi') && !r.woke ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':

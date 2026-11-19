@@ -12,6 +12,7 @@ import { projectDir } from '../src/workspace.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
+import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -581,6 +582,37 @@ mock.boards('#takes', { boards: [
       for (const m of to) note(`#${sender.number}'s relay to #${m.number} went out`);
       note(`#${sender.number} cancelled its relay to #${to[0].number}.`);
       return `#/p/${c.project.id}`;
+    },
+  },
+  'held-mail': {
+    about: 'a minion with held mail waiting for its next turn (#1067): a cold hold from two senders, one a loop-guard hold, so its chat shows the inbox card with Continue and Deliver now, and the list its loop badge',
+    seed(c) {
+      const tm = taskmaster(c);
+      const other = minion(c, 'Rail settings page');
+      const t = minion(c, 'Sidebar badge colours', { note: 'waiting on its next turn' });
+      const m = chat(c, t, 12);
+      m.asked('Fix the unread badges\' contrast in dark mode.');
+      m.init();
+      m.said('Fixed the contrast; checking phones next.');
+      m.done('Fixed.');
+      const held = (author: string, text: string, extra: object = {}) => {
+        const id = m.put('user_message', { author, text, mail: true, cold: true, ...extra });
+        return { author, text, images: [], id, from: tm.id };
+      };
+      const mail = [
+        held('Taskmaster', 'Josh asks whether the badge stays round at 390 px. Check it before you ship.', { need: 'ask' }),
+        held('Taskmaster', '(for your tracking; nothing to do) #12 shipped the rail tokens you build on.', { need: 'fyi' }),
+        held('Citadel', `#${other.number} shipped 4f2a91c: the rail colours moved to tokens; rebase before you touch sidebar.css.`, { note: true }),
+      ];
+      c.store.setSetting(mailKey(t.id), mail);
+      c.store.setSetting(coldKey(t.id), Date.now() - 40 * 60_000);
+      const now = Date.now();
+      const loop: LoopState = { sent: Array.from({ length: 8 }, (_, i) => now - (20 - i) * 60_000), held: [
+        { to: t.id, author: 'Taskmaster', text: 'Run the badge tests again and report the counts.', from: tm.id, at: now - 5 * 60_000 },
+        { to: t.id, author: 'Taskmaster', text: 'And screenshot the dark sidebar.', from: tm.id, at: now - 4 * 60_000 },
+      ] };
+      c.store.setSetting(loopKey(t.id), loop);
+      return route(c, t);
     },
   },
   'side-thread': {

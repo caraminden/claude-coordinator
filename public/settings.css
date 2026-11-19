@@ -433,3 +433,5 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .rules-mini:disabled { opacity: 0.35; cursor: default; }
 .rules-hand { font: inherit; font-size: 0.86rem; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; align-self: flex-start; }
 .rules-hand-input { flex: 1; min-width: 10rem; }
+.rules-pick select { width: auto; max-width: 100%; }
+.rules-what .dot { margin-right: 0.4rem; }

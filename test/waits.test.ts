@@ -234,3 +234,25 @@ test('every poll hands the land line to the land alarm (#561): each landing by i
     { seq: 3, name: 'tools/deploy.sh', phase: 'line', ci: null, run: null },
   ], now]]);
 });
+
+test('the land line in the order set on the Releases page (#1002): the holder first, then .order, then the rest by arrival', () => {
+  const { state, waits, ticket, dead } = setup();
+  const a = minion(), b = minion(), c = minion(), d = minion(), e = minion();
+  ticket(1, a.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  ticket(2, b.branch, 0, 'waiting', 60);
+  ticket(3, c.branch, 0, 'waiting', 50);
+  ticket(4, d.branch, 0, 'waiting', 40);
+  waits.poll();
+  // Land next on d: the order names every waiter, d first; the holder isn't one of them.
+  assert.deepEqual(waits.setOrder([4, 1, 2, 4, 99], 'Cara moved #4 to land next'), [4, 2, 3]);
+  assert.equal(readFileSync(join(state, 'queue', '.order'), 'utf8'), '# Cara moved #4 to land next\n0000000004\n0000000002\n0000000003\n');
+  ticket(5, e.branch, 0, 'waiting', 1); // joined after: the back
+  waits.poll();
+  assert.deepEqual(waits.line.map((t) => t.seq), [1, 4, 2, 3, 5]);
+  assert.equal(waits.wait(d.id)!.text, `2nd in line, behind #${a.number} (waiting for CI)`);
+  assert.equal(waits.wait(b.id)!.chip, 'line · 3rd');
+  // Only part of the line named (a stale page): those first, the rest keep their order behind.
+  assert.deepEqual(waits.setOrder([3], 'Josh moved #3 to land next'), [3, 4, 2, 5]);
+  for (const seq of [2, 3, 4, 5]) dead.add(`${seq}00 77`);
+  assert.throws(() => waits.setOrder([3], 'Josh'), /no landing waiting/i, 'all landed or gone meanwhile');
+});

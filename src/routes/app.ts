@@ -11,6 +11,7 @@ import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
+import { ordinal } from '../waits.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -205,6 +206,33 @@ export const appRoutes: Route[] = [
     const c = homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
     await makeKey(app, session, c.name);
     return json(res, 201, { ok: true });
+  } },
+  // The land line's order (#1002; Cara, 2026-11-18: "In the releases tab, I should be able to drag the order and choose which
+  // one gets released next"): any member of the scheme whose line it is sets the order of the landings waiting in it,
+  // `order` their line tickets front first; the holder keeps the lock. `moved` is the one dragged or sent to land next, for
+  // the line in each waiting landing's output and the server log saying who moved what.
+  { method: 'POST', path: '/api/releases/land-order', who: ['person'], handler: async ({ req, res, app: { store, releases, waits }, session }) => {
+    const body = await readJson(req);
+    const projectId = Number(body?.projectId);
+    if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+    const seqs = body?.order;
+    if (!Array.isArray(seqs) || seqs.length > 200 || !seqs.every((n) => Number.isInteger(n) && n > 0)) throw new HttpError(400, 'order must be a list of line tickets');
+    const line = releases.view((id) => id === projectId)[0]?.targets.flatMap((t) => t.line) ?? [];
+    if (!waits || !line.length) throw new HttpError(404, 'This scheme has no land line here');
+    const moved = line.find((e) => e.seq === body?.moved && !e.holds);
+    if (!moved) throw new HttpError(409, 'That landing is no longer waiting in line');
+    const who = store.getUser(session.uid as number)?.name ?? 'a member';
+    const place = seqs.indexOf(moved.seq);
+    const note = `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;
+    let order: number[];
+    try {
+      order = waits.setOrder(seqs, note);
+    } catch (err) {
+      throw new HttpError(409, (err as Error).message);
+    }
+    console.log(`Land line: ${note} (${order.join(', ')})`);
+    releases.poll();
+    return json(res, 200, { order });
   } },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
   { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {

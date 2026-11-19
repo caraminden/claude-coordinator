@@ -4,7 +4,7 @@
 // line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate;
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
 import type { Ship } from './branch.ts';
@@ -73,13 +73,19 @@ const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? `
 
 export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; tests?: TestCounts | null }
 
+/** The waiting tickets' numbers in the order people set on the Releases page (#1002): queue/.order, as deploy-queue.sh reads it. */
+const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
+
 /**
- * The land line in order, its gone processes left out, and the last landings' lengths in s. The holder running
+ * The land line in order, its gone processes left out, and the last landings' lengths in s: the holder first, then the
+ * waiters .order names in its order, then the rest in arrival order (tools/deploy-queue.sh's queue_lock). The holder running
  * the tests gets tools/run-tests.sh's counts: land.sh's run logs to land-test.log, deploy.sh's to test.log.
  */
 export function readLandLine(stateDir: string, alive = procAlive): { line: LandTicket[]; took: number[] } {
   const q = join(stateDir, 'queue');
   const line: LandTicket[] = [];
+  const order = readOrder(q);
+  const rank = (t: LandTicket) => (t.got > 0 ? -1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
   for (const name of files(q).filter((n) => /^\d+$/.test(n)).sort()) {
     const f = join(q, name), text = read(f), at = mtime(f);
     if (text == null || at == null) continue;
@@ -90,6 +96,7 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
     if (ticket.got > 0 && log) ticket.tests = readTestCounts(join(stateDir, `${log}.progress`), at);
     line.push(ticket);
   }
+  line.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
   const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
   return { line, took };
 }
@@ -311,6 +318,25 @@ export class Waits {
 
   /** The land line as the last poll read it (src/releases.ts reads it too). */
   line: LandTicket[] = [];
+
+  /**
+   * Put the waiting landings in this order (#1002, the Releases page): `seqs` first, the ones it leaves out behind them in
+   * the line's order; a holder or a ticket no longer waiting is left out. `note` says who moved what, for the waiters' output.
+   * Returns the order written.
+   */
+  setOrder(seqs: number[], note: string): number[] {
+    if (!this.d.deployState) throw new Error('This server has no land line');
+    this.poll();
+    const waiting = this.line.filter((t) => t.got === 0).map((t) => t.seq);
+    const order = [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
+    if (!order.length) throw new Error('No landing waiting in line to reorder');
+    const f = join(this.d.deployState, 'queue', '.order'), tmp = `${f}.tmp${process.pid}`;
+    // By a rename, as deploy-queue.sh writes its tickets, so a waiter never reads half of it.
+    writeFileSync(tmp, `# ${note.replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
+    renameSync(tmp, f);
+    this.poll();
+    return order;
+  }
 
   /** Labels found to be a minion; a miss is looked up again next time, as its minion may not be there yet. */
   private byLabel = new Map<string, number>();

@@ -95,6 +95,8 @@ export interface LineEntry {
   holds: boolean;
   /** Its place as the line's waits say it: "next", "2nd". */
   place: string;
+  /** Its ticket in the line (tools/deploy-queue.sh): what the Releases page sends to reorder the waiters (#1002). */
+  seq: number;
   stage: string;
   since: number;
 }
@@ -396,7 +398,7 @@ export class CitadelServer implements Reader {
       const ticket = id != null ? store.getTicket(id) : undefined;
       return {
         name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
-        holds: t.got > 0, place: ordinal(i + 1), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
       };
     });
     // A deploy run alone holding the lock carries whatever is on main.

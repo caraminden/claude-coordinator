@@ -85,4 +85,4 @@ export function mountLinkHandler({ on, own, open, base = () => location.href }) 
   addEventListener('auxclick', handle, true);
 }
 // Another tab of Citadel flipping the switch.
-addEventListener('storage', (e) => { if (e.key === KEY) for (const f of listeners) f(firefoxOn()); });
+globalThis.addEventListener?.('storage', (e) => { if (e.key === KEY) for (const f of listeners) f(firefoxOn()); });

@@ -814,7 +814,7 @@ if (typeof document !== 'undefined' && inContraption && !framedIn) {
     own: ownHosts,
     apps: appHosts,
     domain: appsDomain,
-    self: showing,
+    self: () => showing() ?? appHosts()[location.hostname] ?? null,
     open: launchFirefox,
     openWindow: (url) => location.assign(url),
     openApp: (link) => openLayer({ name: link.name, href: new URL(appHash(link), root).href }),

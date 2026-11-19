@@ -270,7 +270,6 @@ test("a framed app copies Citadel's switch into a cookie on its own host, and cl
     return String(await page.eval(`window.echo.cookie`));
   };
   await say(true);
-  await waitFor(page, 'the cookie written', `true`);
   for (const end = Date.now() + 5000; Date.now() < end && !(await cookie()).includes('citadel-open-in-firefox=1'); await new Promise((r) => setTimeout(r, 100)));
   assert.match(await cookie(), /citadel-open-in-firefox=1/);
   await say(false);

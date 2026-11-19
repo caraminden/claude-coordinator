@@ -1212,6 +1212,11 @@ export const projectRoutes: Route[] = [
       return json(res, 201, scheduleView(app, s));
     },
   },
+  // The post-deploy watch's checks per deploy (#1060): this server's own deploys, so Citadel's Releases page only.
+  {
+    method: 'GET', path: '/api/deploy-watch', who: ['person'],
+    handler: ({ res, app }) => json(res, 200, { deploys: app.health?.watch?.report() ?? [] }),
+  },
   // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
   // Taskmasters take and free them (every member decides alike, so any of them frees one whoever holds it).
   {

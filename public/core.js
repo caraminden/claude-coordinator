@@ -15,7 +15,7 @@ import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
-import { loadReleases, onReleases } from './releases.js';
+import { loadReleases, onClaims, onReleases } from './releases.js';
 import { ciChip } from './ci.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
@@ -336,6 +336,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
+    if (msg.type === 'claims') onClaims(msg);
     if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && renderSidebar());
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       renderSidebar();

@@ -10,6 +10,7 @@ import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
+import { claimsBlock, loadClaims, loadWatch, watchBlock } from './release-extras.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -33,11 +34,15 @@ export async function loadReleases() {
   for (const s of schemes.values()) settleDeploys(s);
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
+  for (const id of schemes.keys()) loadClaims(id, redraw);
+  loadWatch(redraw);
   redraw();
   return rowsChanged();
 }
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
+export function onClaims(msg) { loadClaims(msg.projectId, redraw); }
+
 export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
@@ -269,11 +274,15 @@ function openPicker(scope, ids) {
 }
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */
+/** The server's own deploy: the post-deploy watch is this server's, so only Citadel's card shows it. */
+const CITADEL_TARGET_ID = 'citadel-server';
+
 function schemeCards(projectId, alone) {
   const s = schemes.get(projectId);
   if (!s) return alone ? [h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [];
   return [
-    ...s.targets.map((tv) => targetCard(projectId, tv, alone)),
+    claimsBlock(projectId, redraw),
+    ...s.targets.map((tv) => [targetCard(projectId, tv, alone), tv.target.id === CITADEL_TARGET_ID ? watchBlock() : '']),
     // On its own page the scheme's name is in the heading; among every scheme's cards, it leads each card's title.
     s.testCopies.length ? h('article', { class: 'rel-card' },
       h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',

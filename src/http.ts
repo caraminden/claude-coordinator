@@ -255,6 +255,8 @@ export interface App {
   runnerTokens: RunnerTokens;
   /** The CI desktop's load: the runner agents' samples, each PC's view and verdict (src/ci-load.ts, #534). */
   ciLoad: CiLoad;
+  /** citadel-heavy's folder, for the CI page's host load (#1060); absent in tests that don't need it. */
+  heavyDir?: string;
   /** The CI page's snapshot (#968); absent in tests that don't need it. */
   ciHealth?: Pick<CiHealth, 'snapshot'>;
   /** Big uploads in chunks, for the shared folder and contraptions (src/chunked-uploads.ts, #832). */

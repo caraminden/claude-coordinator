@@ -386,3 +386,19 @@ test('turns that stopped on a usage limit are not failed turns, so a burst of th
   await w.tick();
   assert.deepEqual(woken, []);
 });
+
+test('report: each deploy lists its checks as they come due, with the same verdicts the alert uses', () => {
+  const { clock, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  errors(1, clock.now - 10 * MIN);
+  const at = clock.now;
+  deploy(sha('1'));
+  errors(14, at + 5 * MIN);
+  clock.now = at + 25 * MIN;
+  const [d] = w.report();
+  assert.equal(d.commit, sha('1'));
+  assert.equal(d.checks[0].len, 20 * MIN);
+  assert.equal(d.checks[0].readings.find((r) => r.name === 'front-end errors')?.worse, true);
+  assert.equal(d.checks[1].len, null, '+1 h not due yet');
+});

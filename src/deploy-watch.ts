@@ -193,23 +193,44 @@ export class DeployWatch {
     }
   }
 
-  /** The signals that got worse in [at, at + len) against [at - len, at). */
-  compare(at: number, len: number): Finding[] {
+  /** Every reading in [at, at + len) against [at - len, at), each with whether it got worse. */
+  readings(at: number, len: number): (Finding & { worse: boolean })[] {
     const { store } = this.d;
-    const out: Finding[] = [];
+    const out: (Finding & { worse: boolean })[] = [];
     for (const sig of SIGNALS) {
       const b = store.healthCount(sig.key, at - len, at);
       const a = store.healthCount(sig.key, at, at + len);
-      if (worse(b.count, a.count, sig.floor)) out.push({ name: sig.name, before: String(b.count), after: String(a.count), first: a.first, top: a.top });
+      out.push({ name: sig.name, before: String(b.count), after: String(a.count), first: a.first, top: a.top, worse: worse(b.count, a.count, sig.floor) });
     }
     const b = store.turnOutcomes(at - len, at);
     const a = store.turnOutcomes(at, at + len);
     const share = (o: { turns: number; failed: number }) => (o.turns ? o.failed / o.turns : 0);
-    if (a.failed >= TURN_FLOOR && share(a) >= 2 * share(b)) {
-      const pct = (o: { turns: number; failed: number }) => `${Math.round(100 * share(o))}% (${o.failed} of ${o.turns})`;
-      out.push({ name: 'failed turns', before: pct(b), after: pct(a), first: a.first, top: [] });
-    }
+    const pct = (o: { turns: number; failed: number }) => `${Math.round(100 * share(o))}% (${o.failed} of ${o.turns})`;
+    out.push({ name: 'failed turns', before: pct(b), after: pct(a), first: a.first, top: [], worse: a.failed >= TURN_FLOOR && share(a) >= 2 * share(b) });
     return out;
+  }
+
+  /** The signals that got worse in [at, at + len) against [at - len, at). */
+  compare(at: number, len: number): Finding[] {
+    return this.readings(at, len).filter((r) => r.worse).map(({ worse: _w, ...f }) => f);
+  }
+
+  /**
+   * What the Releases page shows (#1060): each watched deploy, newest first, with its checks as far as they have come
+   * due: the readings over the same window the watch itself used, so the page and an alert never disagree.
+   */
+  report(): { commit: string; prev: string; at: number; alerted: boolean; checks: { offset: number; len: number | null; readings: (Finding & { worse: boolean })[] }[] }[] {
+    const now = this.now();
+    const deploys = this.state().deploys;
+    return deploys.map((w) => {
+      const next = deploys.filter((o) => o.at > w.at).reduce((a, o) => Math.min(a, o.at), Infinity);
+      const checks = CHECKS.map((offset) => {
+        if (w.at + offset > now && next === Infinity) return { offset, len: null, readings: [] };
+        const len = Math.min(w.at + offset, next, now) - w.at;
+        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: this.readings(w.at, len) };
+      });
+      return { commit: w.commit, prev: w.prev, at: w.at, alerted: !!w.alerted, checks };
+    }).sort((a, b) => b.at - a.at);
   }
 
   /**

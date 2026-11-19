@@ -579,6 +579,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/deploy-watch": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/files/t1-0.zzzzzz.forged/report.md": {
   "anon": "403 This link has expired; open the file from Citadel again",
   "person": "404 That file is no longer there",
@@ -658,6 +668,16 @@
   "tmB": "400 what must be db, journal, status or units",
   "m1": "400 what must be db, journal, status or units",
   "m2": "400 what must be db, journal, status or units"
+ },
+ "GET /api/host-load": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/invite/not-a-token": {
   "anon": "404 This link has expired or was already used. Ask for a new one.",

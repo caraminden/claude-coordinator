@@ -712,8 +712,8 @@ const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
 // deploy.sh's paths, only where this server was given them (a dev copy rolling back a scratch checkout): the live
 // server's defaults otherwise. A dev copy without them can't roll back, so it never touches the live checkout.
 const deployEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
-/** Citadel's own roll back's job, once it ended: went live, or say why not, and clear it for the next one. */
-function citadelRollbackEnded(current: string | null): boolean {
+/** Whether Citadel's own roll back still runs; once its job ended, say why if it didn't go live, and clear it for the next one. */
+function citadelRollingBack(current: string | null): boolean {
   const job = rollbackJobs.state(ROLLBACK_DIR, 2000);
   if (!job) return false;
   if (job.code === null) return true;
@@ -726,7 +726,7 @@ function citadelRollbackEnded(current: string | null): boolean {
 const rollback = new Rollback({
   lastGreen, repoDir: (id) => store.getProject(id)?.repo_dir ?? null, tell: tellHome, changed: () => releases.poll(),
   get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
-  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollbackEnded(tv.current?.version ?? null) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
+  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
   starters: {
     contraption: (tv, to, by, uid) => {
       const row = store.getContraption(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '');

@@ -226,7 +226,7 @@ export function ciPage(projectId, startTab = 'overview') {
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
         loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-line')?.focus(); },
       })
-        : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
+        : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
   };
   let tried = false;
   const load = async () => {

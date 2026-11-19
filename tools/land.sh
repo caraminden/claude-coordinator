@@ -55,7 +55,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started). A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -251,8 +251,20 @@ smoke() {
       elif [ "$rc" = 2 ]; then # citadel-test couldn't start them (its usage and setup errors), which says nothing about the branch
         say "smoke: citadel-test couldn't run the tests ($(grep -m1 '^citadel-test: ' <<<"$out" || echo exit 2)), so they don't decide: getting in line"
       elif [ "$rc" != 0 ]; then
-        grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: smoke: /' >&2
-        smoke_fail "tests failed (exit $rc)"
+        # Each failed file once more on its own (no always-tests), as run-tests.sh does: one that passes alone is a
+        # likely flake from load, which doesn't decide here (ADR 0006) and gets a flake line. A failure no file names fails.
+        local failed=() still=() f
+        mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
+        for f in "${failed[@]}"; do
+          CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
+        done
+        if [ ${#failed[@]} -gt 0 ] && [ ${#still[@]} -eq 0 ]; then
+          for f in "${failed[@]}"; do retro_log "flake · $f · smoke · $label"; done
+          say "smoke: ${failed[*]} failed, then passed alone: likely load, not your change, so it doesn't decide: getting in line"
+        else
+          grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: smoke: /' >&2
+          smoke_fail "tests failed (exit $rc)"
+        fi
       fi
     fi
   fi

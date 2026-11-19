@@ -18,7 +18,7 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     and it made no ask_question, propose_plan or message to the Taskmaster or a minion. A turn a
     steer reached is skipped. The weekly process digest counts the lines to decide on refusal.
   - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
-    runs, counted from that runner's own summary), failed push, refused stop, would-refuse stop (answer-check.ts) or `process` line (a self-review's `Process:` line, also answer-check.ts) in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) to `<date>/land.md`.
+    runs, counted from that runner's own summary), failed push, refused stop, would-refuse stop (answer-check.ts) or `process` line (a self-review's `Process:` line, also answer-check.ts) in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) and `smoke` lines (a land its quick checks refused before the line) to `<date>/land.md`.
   - `test-first.ts` (PostToolUse on edits and Bash, never blocks): the first time a session edits
     a source file (not a test, doc, config or UI file) before any red test run, it adds one line
     saying to write the failing test first. Once per session; a red run first keeps it quiet.

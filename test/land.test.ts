@@ -636,14 +636,16 @@ test('a conflict still refuses the same when there is no shared dir or it cannot
 });
 
 // The smoke check (#1012): before the line, so its refusals never wait in it. Its tests run through the branch's own
-// tools/citadel-test, a stand-in here that notes its arguments and answers as told.
+// tools/citadel-test, a stand-in here that notes each run's arguments on a line ("alone" for a failed file's rerun
+// without the always-tests) and answers as told.
 function smokeSetup() {
   const r = setup();
   writeFileSync(join(r.source, 'tools', 'always-tests.txt'), '# repo-wide\n\ntest/always.test.ts\n');
   writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
-printf '%s\\n' "$@" >>"$SMOKE_ARGS"
+echo "\${CITADEL_TEST_ALWAYS:+alone }$*" >>"$SMOKE_ARGS"
 sleep "\${SMOKE_SLEEP:-0}"
-[ -z "\${SMOKE_EXIT:-}" ] || { echo "✖ test/always.test.ts:3 › a snapshot"; echo "full output: /somewhere/citadel-test.log"; exit "$SMOKE_EXIT"; }
+code=\${SMOKE_EXIT:-}; [ -z "\${CITADEL_TEST_ALWAYS:-}" ] || code=\${SMOKE_ALONE_EXIT-$code}
+[ -z "$code" ] || [ "$code" = 0 ] || { echo "✖ test/always.test.ts:3 › a snapshot"; echo "full output: /somewhere/citadel-test.log"; exit "$code"; }
 `);
   chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
   writeFileSync(join(r.source, 'test', 'always.test.ts'), '');
@@ -686,7 +688,7 @@ test("the smoke check runs the always-tests and the branch's changed test files,
   const main = git(r.source, 'rev-parse', 'main');
   const res = r.smoke({ SMOKE_EXIT: '1' });
   assert.equal(res.status, 1, res.stderr);
-  assert.deepEqual(r.ran(), ['--timeout', '300', 'test/always.test.ts', 'test/mine.test.ts'], 'not the deleted test, not the comment or blank line');
+  assert.deepEqual(r.ran(), ['--timeout 300 test/always.test.ts test/mine.test.ts', 'alone --timeout 300 test/always.test.ts'], 'not the deleted test, not the comment or blank line; then the failed file alone');
   assert.match(res.stderr, /^land: smoke: ✖ test\/always\.test\.ts:3 › a snapshot$/m);
   assert.doesNotMatch(res.stderr, /full output/, "citadel-test's log is the land's runner's, not the minion's");
   assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line \(\d+ s\), so nothing landed/m);
@@ -702,7 +704,7 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   const res = r.smoke({ SMOKE_SLEEP: '2' });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /^land: smoke: passed in \d+ s$/m);
-  assert.equal(r.ran().length, 4);
+  assert.deepEqual(r.ran(), ['--timeout 300 test/always.test.ts test/mine.test.ts']);
   assert.equal(timings(r.shared).length, 1, landLog(r.shared));
   // The same line as before the smoke check, and its 2 s are not in the line's time.
   assert.match(timings(r.shared)[0], /· timing · ticket\/1-x · line [01] · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/);
@@ -711,13 +713,21 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   const slow = smokeSetup();
   const late = slow.smoke({ SMOKE_EXIT: '124', LAND_SMOKE_TIMEOUT: '7' });
   assert.equal(late.status, 0, late.stderr);
-  assert.equal(slow.ran()[1], '7');
+  assert.deepEqual(slow.ran(), ['--timeout 7 test/always.test.ts test/mine.test.ts'], 'a hang is never rerun');
   assert.match(late.stderr, /smoke: the tests ran past 7 s, so they don't decide: getting in line, and CI runs them all/);
 
   const broken = smokeSetup();
   const setupError = broken.smoke({ SMOKE_EXIT: '2' });
   assert.equal(setupError.status, 0, setupError.stderr);
   assert.match(setupError.stderr, /smoke: citadel-test couldn't run the tests \(exit 2\), so they don't decide: getting in line/);
+
+  // A file that fails in the run and passes alone is a likely flake: it gets a flake line and doesn't decide.
+  const flaky = smokeSetup();
+  const flake = flaky.smoke({ SMOKE_EXIT: '1', SMOKE_ALONE_EXIT: '0' });
+  assert.equal(flake.status, 0, flake.stderr);
+  assert.match(flake.stderr, /smoke: test\/always\.test\.ts failed, then passed alone: likely load, not your change/);
+  assert.match(landLog(flaky.shared), /· flake · test\/always\.test\.ts · smoke · ticket\/1-x$/m);
+  assert.doesNotMatch(landLog(flaky.shared), /^- \S+ · smoke · /m, 'no smoke refusal');
 
   const off = smokeSetup();
   assert.equal(off.smoke({ SMOKE_EXIT: '1', LAND_SMOKE: '0' }).status, 0);

@@ -33,7 +33,7 @@ Create either file when it is first needed.
    `grep -l '<your branch>' "$COORDINATOR_SHARED_DIR"/retro-log/*/*.md` finds your sessions'
    logs. land.sh's rebase conflicts (`land conflict` lines naming the files) and its likely
    flakes (`flake` lines: a test file that failed in the land or deploy run and passed alone,
-   with the load average) go in the day's `retro-log/<date>/land.md`, as it has no session id. Each finding cites one of these,
+   with the load average), and its `smoke` refusals (what the quick checks before the line caught, in seconds) go in the day's `retro-log/<date>/land.md`, as it has no session id. Each finding cites one of these,
    so it reads "the citadel:check-runner was briefed without the test filter and ran the slow
    suite three times", never "checks felt slow". In the gathering, use a subagent and keep
    only what it concludes.

@@ -307,6 +307,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .ci-meter { display: grid; grid-template-columns: 4.5rem minmax(4rem, 12rem) 3rem 1fr; gap: var(--space-2); align-items: center; }
 .ci-meter-bar { height: 8px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
 .ci-meter-bar > span { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--running); }
+.ci-meter-bar[data-level="warm"] > span { background: var(--waiting-tint); }
+.ci-meter-bar[data-level="hot"] > span { background: var(--error); }
 .ci-meter-value { font-variant-numeric: tabular-nums; text-align: right; }
 .ci-meter-detail { min-width: 0; overflow-wrap: anywhere; }
 .ci-facts { margin: 0; }

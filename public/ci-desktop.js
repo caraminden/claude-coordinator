@@ -12,10 +12,14 @@ const styled = (el, props) => Object.assign(el.style, props) && el;
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** A bar filled to `pct`, with its number and what it is beside it. */
+/** The bar's warming hue (#1037): blue to amber at 70%, red at 90%. */
+const level = (pct) => (pct >= 90 ? 'hot' : pct >= 70 ? 'warm' : 'ok');
+const barOf = (label, pct) => h('span', { class: 'ci-meter-bar', role: 'img', 'data-level': level(pct), title: `${label} ${Math.round(pct)}%`, 'aria-label': `${label} ${Math.round(pct)}%` }, styled(h('span'), { width: `${Math.min(100, Math.max(0, pct))}%` }));
+
 function meter(label, pct, detail) {
   return h('div', { class: 'ci-meter' },
     h('span', { class: 'ci-meter-label' }, label),
-    h('span', { class: 'ci-meter-bar', role: 'img', 'aria-label': `${label} ${Math.round(pct)}%` }, styled(h('span'), { width: `${Math.min(100, Math.max(0, pct))}%` })),
+    barOf(label, pct),
     h('span', { class: 'ci-meter-value' }, `${Math.round(pct)}%`),
     h('span', { class: 'ci-meter-detail muted' }, detail));
 }
@@ -118,7 +122,9 @@ export function pcCard(pc) {
 export function pcLine(pc) {
   const now = pc.now;
   return [h('span', { class: `dot ${DOT[pc.verdict.kind] ?? 'asleep'}` }), h('span', { class: 'ci-run-name' }, pc.host),
-    h('span', { class: 'ci-load-nums muted' }, now ? `CPU ${Math.round(now.cpu)}% · Memory ${Math.round((1 - now.mem_free / now.mem_total) * 100)}%` : 'no sample in the last day')];
+    now ? h('span', { class: 'ci-load-bars' },
+      ...[['CPU', now.cpu], ['Memory', (1 - now.mem_free / now.mem_total) * 100]].map(([label, pct]) => h('span', { class: 'ci-load-bar', title: `${label} ${Math.round(pct)}%` }, h('span', { class: 'muted' }, label), barOf(label, pct))))
+      : h('span', { class: 'muted' }, 'no sample in the last day')];
 }
 
 /** What the CI chip warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */

@@ -101,8 +101,10 @@
 .rv-order > span { flex: 1; }
 .rv-onfail { display: flex; flex-direction: column; gap: 0.35rem; }
 .rv-onfail-row { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9em; }
-.rv-onfail-row input { width: 3.5rem; flex: none; }
+.rv-onfail-row .cui-input { min-height: 0; padding: 0.25rem 0.4rem; font-size: 0.95em; }
+.rv-onfail-row input { width: 3.2rem; flex: none; }
 .rv-onfail-row select { flex: 1; min-width: 0; }
+.rv-onfail-row .cui-btn { flex: none; }
 .rv-ctx-switches { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; border: 0; }
 .rv-ctx-switches legend { padding: 0; margin-bottom: 0.2rem; }
 

@@ -86,17 +86,26 @@ test('a person writing to a Taskmaster continues every minion of the scheme with
   const held = minions[150];
   for (let i = 0; i < LOOP_LIMIT; i++) runner.relay(held.id, held.id, 'Taskmaster', `m${i}`);
   assert.equal(runner.relay(held.id, held.id, 'Taskmaster', 'seventh'), true);
+  // A held exchange of each other kind: two minions (loop:minions:a:b) and two Taskmasters (loop:taskmasters:a:b).
+  const [a, b] = [minions[10], minions[200]];
+  for (let i = 0; i < LOOP_LIMIT; i++) runner.relayMinion(a.id, b.id, `#${a.number} M`, `p${i}`);
+  assert.equal(runner.relayMinion(a.id, b.id, `#${a.number} M`, 'pair seventh'), true);
+  const other = store.createTicket({ project_id: store.createProject('Q', null).id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  store.setTicketDir(other.id, root, null);
+  for (let i = 0; i < TASKMASTER_LOOP_LIMIT; i++) runner.relayTaskmaster(other.id, coordinator.id, 'Taskmaster of Q', `t${i}`);
+  assert.equal(runner.relayTaskmaster(other.id, coordinator.id, 'Taskmaster of Q', 'taskmaster seventh').held, true);
 
   const calls: Record<string, number> = { settingKeys: 0, getSetting: 0, ownerCoordinator: 0 };
   for (const name of Object.keys(calls)) {
     const f = (store as any)[name].bind(store);
     (store as any)[name] = (...a: unknown[]) => (calls[name]++, f(...a));
   }
-  assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 1);
+  assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 3);
   assert.ok(said(store, held.id).includes('seventh'));
-  // One read of the loop keys, then only the minion that has one (and the send of its held message): not 300 of each.
-  assert.equal(calls.settingKeys, 2);
-  assert.ok(calls.getSetting < 10 && calls.ownerCoordinator < 10, JSON.stringify(calls));
+  assert.equal(kinds(store, b.id, 'loop_continued').length, 1);
+  assert.equal(kinds(store, coordinator.id, 'loop_continued').filter((c) => c.minion === coordinator.id).length, 1);
+  // A few reads for the chats with loops (and the sends of their held messages), not one of each per minion: 300.
+  assert.ok(calls.settingKeys < 10 && calls.getSetting < 60 && calls.ownerCoordinator < 10, JSON.stringify(calls));
   assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 0);
 
   // One minion with no loop to lift reads its own loop state, not its Taskmaster.
@@ -112,6 +121,18 @@ test('settingKeys finds exactly the keys under a prefix', () => {
   assert.deepEqual(store.settingKeys('loop:minions:'), ['loop:minions:1:2']);
   assert.deepEqual(store.settingKeys('nope:'), []);
   assert.ok(store.settingKeys('').length >= 9);
+  // It reads a range of the key's index, not every key (#1029): the plan of the query it runs.
+  let sql = '', args: unknown[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  const all = Object.getPrototypeOf(prepare('SELECT 1')).all;
+  store.db.prepare = ((q: string) => {
+    const st = prepare(q);
+    if (/FROM settings/.test(q)) { sql = q; st.all = (...a: any[]) => ((args = a), all.apply(st, a)); }
+    return st;
+  }) as typeof store.db.prepare;
+  store.settingKeys('loop:');
+  const plan = (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(args as any[])) as { detail: string }[]).map((r) => r.detail).join('; ');
+  assert.match(plan, /^SEARCH settings USING COVERING INDEX sqlite_autoindex_settings_1 \(key>\? AND key<\?\)/);
 });
 
 test('the window rolls: messages older than the window stop counting', () => {

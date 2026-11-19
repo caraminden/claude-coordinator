@@ -75,3 +75,29 @@ export function machineAuthor(author) {
   // A contraption's ask from before #316 carried no summary: it collapses like the rest.
   return author === APP_AUTHOR || author === GITHUB_NAME || /^#\d+ /.test(author) || /^Contraption .+, for .+ member$/.test(author) ? author : null;
 }
+
+/**
+ * A push note (src/runner.ts notePushes) as its parts, or null for any other note: pull request notes and
+ * the "Couldn't push" warning aren't push notes, so they never collapse.
+ */
+export function pushNote(text) {
+  const m = /^Pushed as @(\S+) \((.+)'s GitHub\)$/s.exec(text ?? '');
+  return m ? { login: m[1], who: m[2] } : null;
+}
+
+/**
+ * Back-to-back push notes show as one line with a count (#996). `run` is the line so far ({ text, count }) or null;
+ * `text` is the next note. Returns the run after it and whether the note joined the line (true) or starts one (false).
+ * Anything that isn't a push note (a message, the minion's words, another note) ends the run: pass `null` text.
+ */
+export function pushRun(run, text) {
+  if (pushNote(text) == null) return { run: null, joined: false };
+  if (run?.text === text) return { run: { text, count: run.count + 1 }, joined: true };
+  return { run: { text, count: 1 }, joined: false };
+}
+
+/** The line for a run: the note as stored for one push, "Pushed 13 times as @login (Name's GitHub)" for more. */
+export function pushRunParts(run) {
+  const { login, who } = pushNote(run.text);
+  return run.count === 1 ? [run.text] : ['Pushed ', { count: run.count }, ` times as @${login} (${who}'s GitHub)`];
+}

@@ -19,7 +19,7 @@ import { stepMark } from './ui/chat.js';
 import { optimistic } from './ui/optimistic.js';
 import { replyChips } from './replies.js';
 import { releaseChip } from './releases.js';
-import { senderTone, shortDuration, shortNote } from './chattext.js';
+import { pushNote, pushRun, pushRunParts, senderTone, shortDuration, shortNote } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
 import { sideEvent } from './sidethread.js';
@@ -977,6 +977,7 @@ function drawEvent(event, scroll) {
     if (struck) nodes.push(struck);
     // A note with output under it (a CI runner add or remove, #339) keeps it collapsed, line breaks and all.
     else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail' }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
+    else if (short != null && pushNote(data.text)) nodes.push(pushLine(data.text));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {
     // A Taskmaster's or a minion's fresh Claude session (#406, #937), with the handoff it starts from behind the toggle.
@@ -1067,6 +1068,7 @@ function drawEvent(event, scroll) {
     if (newest) view.folds.push(newest);
   }
   if (event.kind === 'claude' && data.type === 'result') flushFolds();
+  mergePushNotes(log);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
   if (scroll) renderCardJump();
@@ -1317,3 +1319,25 @@ setInterval(() => {
   if (left && (!est || left.textContent !== leftText(est))) scheduleProgress();
 }, 1000);
 
+
+/** A push note's line (#996): one push says it as stored; mergePushNotes counts it up when more follow back to back. */
+function pushLine(text) {
+  return h('div', { class: 'note', 'data-push': text, 'data-count': '1' }, text);
+}
+
+/**
+ * Back-to-back push notes show as one line with a count. Run after every event, once the folds have had their
+ * say: the updates group, which holds the minion's working lines, doesn't break a run; a person's message or the
+ * minion's reply does. The stored notes stay as they are, so a redraw gives the same result.
+ */
+function mergePushNotes(log) {
+  for (const el of log.querySelectorAll('.note[data-push]')) {
+    let prev = el.previousElementSibling;
+    while (prev?.matches('.narration')) prev = prev.previousElementSibling;
+    if (!prev?.matches('.note[data-push]') || !pushRun({ text: prev.dataset.push, count: 1 }, el.dataset.push).joined) continue;
+    const run = { text: prev.dataset.push, count: Number(prev.dataset.count) + Number(el.dataset.count) };
+    prev.dataset.count = String(run.count);
+    prev.replaceChildren(...pushRunParts(run).map((p) => (typeof p === 'string' ? p : h('span', { class: 'push-count' }, String(p.count)))));
+    el.remove();
+  }
+}

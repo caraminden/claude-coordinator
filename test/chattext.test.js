@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setView } from '../public/base.js';
-import { firstSentence, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
+import { pushNote, pushRun, pushRunParts, firstSentence, machineAuthor, senderTone, shortDuration, shortNote, ticketActionRef } from '../public/chattext.js';
 import { elapsedText } from '../public/wait.js';
 
 test('ticketActionRef links the minion a Taskmaster tool created, messaged or updated, from its result', () => {
@@ -224,4 +224,22 @@ test('senderTone: a Taskmaster is violet, a minion orange, a person plain', () =
   assert.equal(senderTone('GitHub'), '');
   assert.equal(senderTone('Cara'), '');
   assert.equal(senderTone(undefined), '');
+});
+
+test('push notes: back-to-back identical ones count up, anything else ends the run (#996)', () => {
+  const a = "Pushed as @caraminden (Cara's GitHub)";
+  const b = "Pushed as @joshd (Josh's GitHub)";
+  assert.deepEqual(pushNote(a), { login: 'caraminden', who: 'Cara' });
+  // Not push notes: they never collapse.
+  for (const t of ["Opened a pull request as @caraminden (Cara's GitHub)", "Couldn't push: this turn runs for Cara, who hasn't linked GitHub. Link it in Settings → Your account.", 'hello', undefined]) assert.equal(pushNote(t), null);
+  let r = pushRun(null, a);
+  assert.deepEqual(r, { run: { text: a, count: 1 }, joined: false });
+  for (let i = 2; i <= 13; i++) { r = pushRun(r.run, a); assert.equal(r.run.count, i); assert.equal(r.joined, true); }
+  assert.deepEqual(pushRunParts(r.run), ['Pushed ', { count: 13 }, " times as @caraminden (Cara's GitHub)"]);
+  assert.deepEqual(pushRunParts({ text: a, count: 1 }), [a]);
+  // A different login starts its own line; a PR note, the warning or a break (null text) ends the run.
+  assert.deepEqual(pushRun(r.run, b), { run: { text: b, count: 1 }, joined: false });
+  assert.deepEqual(pushRun(r.run, "Opened a pull request as @caraminden (Cara's GitHub)"), { run: null, joined: false });
+  assert.deepEqual(pushRun(r.run, null), { run: null, joined: false });
+  assert.deepEqual(pushRun(pushRun(null, a).run, a).run.count, 2);
 });

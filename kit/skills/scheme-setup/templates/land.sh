@@ -14,11 +14,15 @@
 #   tools/land.sh --verify  the full check and CI on HEAD, a commit already on main, out of line and without the land
 #       lock: Citadel's fast mode runs it behind the lands. It prints "verify: green", or "verify: failing <id>" for
 #       each failure land_failures finds (below) and "verify: red"; exit 0 green, 1 red, 75 CI gave no verdict.
+#       With LAND_VERIFY_IDS (ids, a line each: fast mode's culprit search), only what those need runs: CI only for a
+#       ci: id, and with CHECK_FILE_CMD set, only their test files in place of the whole CHECK.
 # Fast mode (#1017): with LAND_FAST=1 (Citadel sets it for a low or medium risk land in a scheme whose Settings turn
 #    fast mode on), a branch that changes none of tools/land.sh, tools/land.local.sh, the LANES map, .github/* or the
 #    scheme's FAST_FULL patterns lands on the smoke check alone: no check, no CI. The full suite runs behind it on main.
 # Known reds: LAND_KNOWN_RED (from Citadel in fast mode) lists what already fails on main, a line "<id><TAB><who is
-#    fixing it>" each. A smoke, check or CI red whose failures (land_failures) are all known reds doesn't refuse.
+#    fixing it>" each ("#41 is fixing it"). A smoke, check or CI red whose failures (land_failures) are all known reds
+#    doesn't refuse; a file's id stands for every test in it. A check that timed out, or a CI workflow still running,
+#    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
 #    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
@@ -116,6 +120,9 @@ PUSH_MAIN=1
 # Fast mode: the paths (bash case patterns, where * also matches /, split by spaces) that keep a land on the full gate
 # besides the pipeline's own files: 'migrations/* src/auth/*'.
 FAST_FULL=''
+# Fast mode's culprit search: the check on one test file ({file}), as 'node --test {file}' or 'pytest {file}'. Set,
+# a red over several lands reruns only the failing files on each commit; '' reruns the whole CHECK.
+CHECK_FILE_CMD=''
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
@@ -128,17 +135,23 @@ park() { say "$*"; exit 75; }
 #                                 member it landed, from its own worktree: only the arguments name the landing.
 #                                 A failure (or an exit) in it is only warned about.
 #   land_failures                 reads a check's or CI's output on stdin and prints the ids of what failed, one a
-#                                 line (known reds and fast mode's ledger match on them). The one below finds test
-#                                 files in node's test runner, pytest and jest output, and red workflows in CI's.
+#                                 line (known reds and fast mode's ledger match on them): "<file>::<test>" where
+#                                 the output names the test, else "<file>". The one below reads node's test runner
+#                                 (spec and TAP), pytest and jest (files only) output, and red workflows in CI's.
+#                                 A scheme on another runner (cargo test) defines its own in land.local.sh.
 land_failures() {
   awk '
-    /^test at [^ ]+:[0-9]+:[0-9]+/ { p = $3; sub(/:[0-9]+:[0-9]+$/, "", p); print p; next }
-    /^not ok / { tap = 1; next }
-    tap && /^ *location: / { p = $2; gsub(/\047/, "", p); sub(/:[0-9]+:[0-9]+$/, "", p); print p; tap = 0; next }
+    function flush() { if (spec != "") print spec; spec = "" }
+    /^test at [^ ]+:[0-9]+:[0-9]+/ { flush(); spec = $3; sub(/:[0-9]+:[0-9]+$/, "", spec); next }
+    spec != "" && /^\342\234\226 / { n = $0; sub(/^\342\234\226 /, "", n); sub(/ \([0-9.]+m?s\)$/, "", n); print spec "::" n; spec = ""; next }
+    { flush() }
+    /^not ok / { tap = 1; n = $0; sub(/^not ok [0-9]+ - /, "", n); sub(/ # (SKIP|TODO).*$/, "", n); next }
+    tap && /^ *location: / { p = $2; gsub(/\047/, "", p); sub(/:[0-9]+:[0-9]+$/, "", p); print p "::" n; tap = 0; next }
     /^(ok|# Subtest)/ { tap = 0 }
-    /^FAILED [^ ]+::/ { p = $2; sub(/::.*/, "", p); print p; next }
+    /^FAILED [^ ]+::/ { print $2; next }
     /^FAIL [^ ]+/ { print $2; next }
     /^[^ :]+: completed (failure|timed_out)/ { p = $1; sub(/:$/, "", p); print "ci:" p }
+    END { flush() }
   '
 }
 LOCAL=$(dirname "${BASH_SOURCE[0]}")/land.local.sh
@@ -708,6 +721,7 @@ fast_full() {
 FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
 if [ "${LAND_FAST:-}" = 1 ]; then
   why=$(set -f; fast_full)
+  if [ -z "$why" ] && { [ -z "$SMOKE_CMD" ] || [ "${LAND_SMOKE:-1}" = 0 ]; }; then why='a land with no smoke check'; fi
   if [ -z "$why" ]; then
     FAST=1 UNRUN=old CHECK='' LANES='' CI_ON='' CI_WORKFLOWS='' CI_STATUS='' CI_STACK=1 CI_LIMIT=0 CI_BATCH=1 BATCH='' BUILDERS=1 BISECT=0
     # Its ticket says "old" (a land.sh older than batches), so the batches of the gated landings around it never take
@@ -749,11 +763,11 @@ g_last='' g_quiet='' # with batches, the head: when it last asked CI about the c
 
 # CI's verdict on [commit] ($tip if none) in [lane] ($ci_lane if none), by the exit codes in the header at CI_STATUS;
 # what it found goes to $cilog. A lane that runs no CI is green. ci_verdict: the same, but red only on failures that
-# aren't known reds (known_red).
+# aren't known reds (known_red); with those waived, it is the other workflows' (ci_open).
 ci_verdict() {
   local rc=0
   ci_runs "$@" || rc=$?
-  [ "$rc" != 1 ] || ! known_red "CI on $(git rev-parse --short=12 "${1:-$tip}")" <"$cilog" || rc=0
+  [ "$rc" != 1 ] || ! known_red "CI on $(git rev-parse --short=12 "${1:-$tip}")" <"$cilog" || rc=$ci_open
   return "$rc"
 }
 
@@ -765,21 +779,24 @@ known_red() {
   ids=$(land_failures | sed "s|^$here/||" | sort -u)
   [ -n "$ids" ] || return 1
   while IFS= read -r id; do
-    who=$(awk -F'\t' -v i="$id" '$1 == i { print $2; exit }' <<<"$LAND_KNOWN_RED")
+    who=$(awk -F'\t' -v i="$id" '$1 == i || index(i, $1 "::") == 1 { print $2; exit }' <<<"$LAND_KNOWN_RED")
     [ -n "$who" ] || return 1
-    all+="; $id: known red, $who is fixing it"
+    all+="; $id: known red, $who"
   done <<<"$ids"
   say "$1 failed only on known reds, so it goes on${all/#;/:}"
 }
 
+# ci_open: the same verdict over the workflows that aren't red (0 when they're green), so a waived red waits for the rest.
 ci_runs() {
-  local sha=${1:-$tip} ln=${2:-$ci_lane} runs w path id status result one failed skipped j rank worst=0 worst_rank=0
+  local sha=${1:-$tip} ln=${2:-$ci_lane} runs w path id status result one failed skipped j rank worst=0 worst_rank=0 open_rank=0 rc=0
   : >"$cilog"
-  ci_skipped=''
+  ci_skipped='' ci_open=0
   lane_ci "$ln" || return 0
   if [ -n "$CI_STATUS" ]; then
-    timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&-
-    return
+    timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&- || rc=$?
+    # Its lines for workflows still going ("<file>: in_progress …", "<file>: not started …") keep a red from deciding.
+    [ "$rc" != 1 ] || ! grep -Eq '^[^ :]+: (in_progress|queued|waiting|pending|requested|not started)' "$cilog" || ci_open=2
+    return "$rc"
   fi
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
   for w in $LW; do
@@ -813,6 +830,7 @@ ci_runs() {
     # The worst of the workflows: red, then no verdict, not started, running, green.
     case $one in 1) rank=4 ;; 4) rank=3 ;; 3) rank=2 ;; 2) rank=1 ;; *) rank=0 ;; esac
     [ "$rank" -le "$worst_rank" ] || worst=$one worst_rank=$rank
+    [ "$one" = 1 ] || [ "$rank" -le "$open_rank" ] || ci_open=$one open_rank=$rank
   done
   return "$worst"
 }
@@ -1029,7 +1047,7 @@ build() {
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
       echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
     fi
-    if [ "$rc" != 0 ] && ! known_red "the check" <"$log"; then
+    if [ "$rc" != 0 ] && { [ "$rc" = 124 ] || [ "$rc" = 137 ] || ! known_red "the check" <"$log"; }; then
       tail -n 40 "$log" >&2
       keep=$(git rev-parse HEAD)
       blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
@@ -1205,29 +1223,47 @@ smoke() {
 
 # --verify (the header): the full CHECK under the check lock, then with the CI gate on, CI on land/verify (with lanes
 # land/full/verify) within CI_START and CI_LIMIT. Both run, so one verdict names every failure.
+# A red waits for the workflows still going (ci_open), so the verdict names every one that fails; one already red on
+# the commit needs no new run.
+verify_ci() {
+  rc=0
+  ci_runs || rc=$?
+  [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || rc=$ci_open
+}
 verify_run() {
-  local rc=0 log="$state/land-verify.log" red="" ids="" ci=""
+  local rc=0 log="$state/land-verify.log" red="" ids="" ci="" chk=$CHECK want=${LAND_VERIFY_IDS:-} files
   tip=$(git rev-parse HEAD) ci_lane=full
   say "verify: ${tip:0:12}"
-  if [ -n "$CHECK" ]; then
+  if [ -n "$want" ]; then
+    # Only what the ids need: CI for a ci: id, and each test file alone when CHECK_FILE_CMD can run one.
+    grep -q '^ci:' <<<"$want" || CI_ON=''
+    files=$(grep -v '^ci:' <<<"$want" | sed 's/::.*//' | sort -u)
+    if [ -z "$files" ]; then chk=''
+    elif [ -n "$CHECK_FILE_CMD" ] && ! grep -Eqx 'the check|CI' <<<"$files"; then
+      chk='r=0; '
+      while IFS= read -r f; do chk+="{ ${CHECK_FILE_CMD//\{file\}/$(printf %q "$f")}; } || r=1; "; done <<<"$files"
+      chk+='exit $r'
+    fi
+  fi
+  if [ -n "$chk" ]; then
     (
       flock -w "$CHECK_WAIT" 7 || { echo "land: the check lock was still taken after ${CHECK_WAIT}s"; exit 1; }
-      timeout -k 30 "$CHECK_LIMIT" bash -c "$CHECK" 2>&1 7>&-
+      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" 2>&1 7>&-
     ) >"$log" 7>"$state/land-check.lock" || rc=$?
     if [ "$rc" != 0 ]; then
       tail -n 40 "$log" >&2
       red=1 ids=$(land_failures <"$log" | sed "s|^$here/||")
-      [ -n "$ids" ] || ids='the check'
+      # A check that hung, or failed on nothing land_failures can name, is one id of its own.
+      if [ -z "$ids" ] || [ "$rc" = 124 ] || [ "$rc" = 137 ]; then ids+=$'\nthe check'; fi
     fi
   fi
   if [ -n "$CI_ON" ]; then
-    rc=0 ci_clock=$SECONDS
-    ci_runs || rc=$?
-    [ "$rc" = 0 ] || [ "$rc" = 2 ] || ci_push
+    ci_clock=$SECONDS
+    verify_ci
+    [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$rc" = 2 ] || ci_push
     while [ "$rc" != 0 ] && [ "$rc" != 1 ]; do
       sleep "$CI_POLL"
-      rc=0
-      ci_runs || rc=$?
+      verify_ci
       [ "$rc" != 2 ] || ci_begun=1
       if [ "$rc" = 4 ] && [ -z "$retried" ]; then retried=1 && ci_push; continue; fi
       if [ "$rc" = 4 ] || { [ -z "$ci_begun" ] && [ $((SECONDS - ci_clock)) -ge "$CI_START" ]; } || [ $((SECONDS - ci_clock)) -ge "$CI_LIMIT" ]; then

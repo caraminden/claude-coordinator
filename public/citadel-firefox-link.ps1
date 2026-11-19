@@ -40,7 +40,8 @@ Start-Process -FilePath 'firefox' -ArgumentList '-osint', '-url', $uri.AbsoluteU
 
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 Set-Content -LiteralPath $handler -Value $program -Encoding UTF8
-$command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$handler`" `"%1`""
+# conhost --headless: -WindowStyle Hidden alone still flashes a console window before it hides.
+$command = "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$handler`" `"%1`""
 New-Item -Path $key -Force | Out-Null
 Set-ItemProperty -LiteralPath $key -Name '(default)' -Value "URL:$Scheme"
 Set-ItemProperty -LiteralPath $key -Name 'URL Protocol' -Value ''

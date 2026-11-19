@@ -1733,6 +1733,16 @@
   "m1": "400 contraption is required",
   "m2": "400 contraption is required"
  },
+ "GET /api/projects/:p/schedule-audits": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/schedules": {
   "anon": "401 Not logged in",
   "person": "200",

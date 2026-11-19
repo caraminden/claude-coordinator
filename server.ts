@@ -1168,7 +1168,7 @@ if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up.
 setTimeout(() => void safely('static paths', () => apps.backfillStatics()), Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
-const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
+const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets); anything else asking is served as usual.
 const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, async (req, res) => {
@@ -1198,7 +1198,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       if (renewed) res.setHeader('Set-Cookie', renewed);
       await routes(app, req, res, url, session);
     } else if (KIT_FILE.test(url.pathname)) {
-      // The app rail, phone drawers (and their types), the Alt+` switcher and drag to reorder the rail loads, colours and Citadel UI (public/ui/).
+      // The app rail, phone drawers (and their types), the Alt+` switcher, drag to reorder and the Firefox link switch (extlinks.js, #988) the rail loads, colours and Citadel UI (public/ui/).
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);

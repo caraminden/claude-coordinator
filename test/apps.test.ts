@@ -300,6 +300,10 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const reorder = await get('/apps/_citadel/reorder.js');
   assert.equal(reorder.status, 200);
   assert.match(await reorder.text(), /export function dragReorder/);
+  // And the Firefox link switch, which rail.js imports too: without it the whole rail fails to load (#988).
+  const ext = await get('/apps/_citadel/extlinks.js');
+  assert.equal(ext.status, 200);
+  assert.match(await ext.text(), /export function firefoxLink/);
   // With their types beside them (#286).
   for (const f of ['rail', 'drawers']) {
     const types = await get(`/apps/_citadel/${f}.d.ts`);

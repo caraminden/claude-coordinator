@@ -444,3 +444,4 @@ html.frame-topbar .frame-nav { display: inline-flex; }
 .fable-slot { min-height: 3.2rem; }
 .models-table .where-table td, .models-table .where-table th { white-space: normal; vertical-align: top; }
 .models-table .where-table .work { max-width: 34rem; }
+.fable-meter .range-pick button { width: auto; min-width: 8rem; padding: 0 1rem; white-space: nowrap; }

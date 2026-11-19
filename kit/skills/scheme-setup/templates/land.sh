@@ -1214,7 +1214,9 @@ smoke() {
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
   if [ -n "$SMOKE_CMD" ]; then
     out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1) || rc=$?
-    if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    if { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ -n "$FAST" ]; then
+      refuse "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, and a fast land goes live on it alone, so nothing landed. Find what hangs; a land labelled high takes the full gate"
+    elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
       say "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, so it doesn't decide: getting in line"
     elif [ "$rc" != 0 ] && ! known_red "smoke: SMOKE_CMD" <<<"$out"; then
       tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
@@ -1231,16 +1233,16 @@ smoke() {
 verify_ci() {
   rc=0
   ci_runs || rc=$?
-  [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || rc=$ci_open
+  [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || { ci_red=1 rc=$ci_open; }
 }
 verify_run() {
-  local rc=0 log="$state/land-verify.log" red="" ids="" ci="" chk=$CHECK want=${LAND_VERIFY_IDS:-} files
+  local rc=0 log="$state/land-verify.log" red="" ids="" ci="" ci_red="" chk=$CHECK want=${LAND_VERIFY_IDS:-} files
   tip=$(git rev-parse HEAD) ci_lane=full
   say "verify: ${tip:0:12}"
   if [ -n "$want" ]; then
     # Only what the ids need: CI for a ci: id, and each test file alone when CHECK_FILE_CMD can run one.
-    grep -q '^ci:' <<<"$want" || CI_ON=''
-    files=$(grep -v '^ci:' <<<"$want" | sed 's/::.*//' | sort -u)
+    grep -Eq '^(ci:|CI$)' <<<"$want" || CI_ON=''
+    files=$(grep -Ev '^(ci:|CI$)' <<<"$want" | sed 's/::.*//' | sort -u || true)
     if [ -z "$files" ]; then chk=''
     elif [ -n "$CHECK_FILE_CMD" ] && ! grep -Eqx 'the check|CI' <<<"$files"; then
       chk='r=0; '
@@ -1271,6 +1273,8 @@ verify_run() {
       if [ "$rc" = 4 ] && [ -z "$retried" ]; then retried=1 && ci_push; continue; fi
       if [ "$rc" = 4 ] || { [ -z "$ci_begun" ] && [ $((SECONDS - ci_clock)) -ge "$CI_START" ]; } || [ $((SECONDS - ci_clock)) -ge "$CI_LIMIT" ]; then
         cat "$cilog" >&2
+        # A workflow already red is a verdict even if the others never finish.
+        if [ -n "$ci_red" ]; then rc=1; break; fi
         [ -n "$red" ] && break
         hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
         echo "verify: no verdict"

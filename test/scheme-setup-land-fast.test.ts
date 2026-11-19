@@ -212,3 +212,26 @@ test('--verify with LAND_VERIFY_IDS: only those ids, each file alone through CHE
   assert.deepEqual(readFileSync(ran, 'utf8').split('\n').filter(Boolean), ['test/a.test.ts', 'test/b.test.ts'], 'each file once, not the whole check');
   assert.deepEqual(ci.asked(), [], 'no ci: id, so CI was not asked');
 });
+
+test('fast mode: a smoke check that runs past its time limit refuses, since nothing else would run', () => {
+  const r = setup('true', { SMOKE_CMD: 'sleep 20' });
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const out = r.run({ LAND_FAST: '1', LAND_SMOKE_TIMEOUT: '1' });
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /ran past 1 s, and a fast land goes live on it alone, so nothing landed/);
+  assert.equal(git(r.main, 'log', '-1', '--format=%s', 'main'), 'base');
+});
+
+test('--verify: a CI-only id list asks only CI, and a workflow already red is red even if another never finishes', () => {
+  const r = setup('exit 9', CI);
+  const ci = fakeCi(r.dir);
+  const v = join(r.dir, 'verify');
+  git(r.main, 'worktree', 'add', '-q', '--detach', v, 'main');
+  ci.answer(git(v, 'rev-parse', 'HEAD'), 1, 'ci.yml: completed failure https://x\nother.yml: in_progress https://y\n');
+  const run = (extra: Record<string, string>) => spawnSync('bash', [join(v, 'tools', 'land.sh'), '--verify'], { cwd: v, encoding: 'utf8', timeout: 30_000, env: { ...env, ...ci.env, LAND_CI_TIMEOUT: '1', ...extra } });
+  const only = run({ LAND_VERIFY_IDS: 'ci:ci.yml' });
+  assert.equal(only.stdout, 'verify: failing ci:ci.yml\nverify: red\n', only.stderr);
+  assert.doesNotMatch(only.stderr, /exit 9|the check/);
+  const full = run({});
+  assert.equal(full.stdout, 'verify: failing ci:ci.yml\nverify: failing the check\nverify: red\n', 'the check failed with no id, and ci.yml stays red');
+});

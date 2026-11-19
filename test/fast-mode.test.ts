@@ -255,6 +255,10 @@ test("a land during a pass isn't lost; an old red escalates while a run is going
   w.fm.reset(PEEK);
   await w.tick();
   assert.equal(w.runs.length, runs, 'the run going survives a reset and is not started again');
+  const tm = w.tm.length;
+  await w.finish(red('a'));
+  assert.equal(w.tm.length, tm, "its result is dropped: it may have been a pinning run's few ids");
+  assert.equal(w.runs.length, runs + 1, 'and the head is run afresh');
   await w.finish(red('a'));
   assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
 });

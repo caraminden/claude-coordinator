@@ -46,7 +46,7 @@ export interface FastState {
   /** The commit the suite last gave no verdict on (CI never answered, land.sh crashed): not retried until main moves. */
   stuck?: string;
   /** What runs now. */
-  running?: { sha: string; at: number };
+  running?: { sha: string; at: number; stale?: boolean };
   pin?: Pinning;
   reds: KnownRed[];
   /** A landing's commit on main, to the minion that landed it (newest 200). */
@@ -124,10 +124,11 @@ export class FastMode {
   }
 
   /** Fast mode was turned on: start from main's head as it is now, with no ledger from an earlier spell. A run still
-   * going (fast, off and fast again) is kept, so its job isn't started twice; its result reads as a first run. */
+   * going (fast, off and fast again) is kept so its job isn't started twice, but its result is dropped: it may have been
+   * a pinning run that checked only a few ids. */
   reset(projectId: number) {
     const { running } = this.state(projectId);
-    this.d.set(key(projectId), { reds: [], landed: {}, ...(running ? { running } : {}) });
+    this.d.set(key(projectId), { reds: [], landed: {}, ...(running ? { running: { ...running, stale: true } } : {}) });
   }
 
   /** A clean land on main (src/land.ts): who landed `commit`, and a run now if nothing runs. */
@@ -173,9 +174,9 @@ export class FastMode {
         this.escalate(projectId, s);
         return save();
       }
-      const sha = s.running.sha;
+      const { sha, stale } = s.running;
       delete s.running;
-      await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
+      if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
     }
     this.escalate(projectId, s);
     const next = s.pin ? s.pin.shas[s.pin.next] : await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);

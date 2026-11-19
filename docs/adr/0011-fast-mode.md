@@ -37,8 +37,8 @@ build, rollback first").
 Limits we know about:
 
 - A fast land still queues behind gated landings in the same line. It is a batch of its own and doesn't wait for theirs.
-- Ids are what the parser in land.sh (`land_failures`) can name: `file::test` from node's spec output and pytest, the
-  file alone from node's TAP and jest, `ci:<file>` per CI workflow. A known file id or workflow lets through every other
+- Ids are what the parser in land.sh (`land_failures`) can name: `file::test` from node's spec and TAP output and pytest,
+  the file alone from jest, `ci:<file>` per CI workflow. A known file id or workflow lets through every other
   failure in it until it clears. A scheme on another runner (cargo, go test) overrides `land_failures` in
   `tools/land.local.sh`, or its failures have no ids.
 - A failing check whose output names no id, run beside a known red, isn't told apart from it at land time. A check that

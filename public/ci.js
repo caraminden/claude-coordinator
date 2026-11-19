@@ -5,7 +5,9 @@
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
 import { ago, api, h, view } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
-import { pcCard, pcLine, trouble } from './ci-desktop.js';
+import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
+import { settingsRow } from './settings.js';
+import { pcCard, trouble } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
@@ -23,26 +25,6 @@ function stateOf(s, now) {
 }
 const STATE_WORDS = { down: 'needs a person', fix: 'being handled', ready: 'all clear', asleep: 'not read lately' };
 const RANK = { down: 3, fix: 2, asleep: 1, ready: 0 };
-
-/** One open problem: what happened, why, the fix, and whether it rings. */
-function problemCard(x) {
-  return h('div', { class: `ci-problem${x.quiet ? '' : ' rings'}` },
-    h('div', { class: 'ci-problem-head' },
-      h('span', { class: `dot ${x.quiet ? 'fix' : 'down'}` }),
-      h('strong', {}, x.title.replace(/^CI(, [^:]+)?: /, '')),
-      h('span', { class: 'ci-tag' }, x.quiet ? 'quiet' : 'rings')),
-    x.why ? h('p', {}, h('span', { class: 'muted' }, 'Why: '), x.why) : '',
-    x.fix ? h('p', {}, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '',
-    problemLink(x.link));
-}
-
-/** Who is on it (#992): the fix minion's chat, else the Taskmaster's at its wake. The row is always there, so a link arriving moves nothing. */
-function problemLink(l) {
-  return h('p', { class: 'ci-problem-link' }, l ? [
-    h('span', { class: 'muted' }, l.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
-    h('a', { href: l.href }, l.label),
-    l.closed ? h('span', { class: 'muted' }, ' (closed)') : ''] : '');
-}
 
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');
 
@@ -65,6 +47,53 @@ const GENERIC = /^(self-hosted|windows|linux|macos|x64|arm64)$/i;
 const labelName = (ls) => ls.filter((l) => !GENERIC.test(l)).join(', ') || ls.join(', ');
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
+const LOAD_OPEN = 'ci-load-open';
+
+/** A block of the overview in Citadel's look (#1068): a heading in its hue over a box of rows that open, as Host load is. */
+const block = (title, hue, cls, ...rows) => h('section', { class: `ci-block ${cls}` }, h('h3', { class: 'settings-section', 'data-hue': hue }, title), h('div', { class: 'settings-rows' }, ...rows));
+const tones = (...cs) => cs.filter(Boolean);
+/** Who a run or job tests, as plain text beside its name (a link when it is a minion's chat). */
+const whoText = (x) => x.who?.href ? h('a', { href: x.who.href, title: x.who.label }, x.who.label) : h('span', { class: 'muted' }, x.who?.label ?? x.branch ?? '');
+const age = (t) => ago(typeof t === 'number' ? t : Date.parse(t));
+
+/** Open problems: what happened, why, the fix, and whether it rings. */
+function problemsBlock(s) {
+  const ring = s.problems.filter((x) => !x.quiet).length, quiet = s.problems.length - ring;
+  const [row] = settingsRow({ key: `ci-problems-${s.id}`, icon: 'shield', hue: ring ? 'danger' : quiet ? 'held' : 'done', title: 'Open problems', open: ring > 0,
+    summary: s.problems.length ? tones(ring && toneChip('danger', `${ring} ring${ring === 1 ? 's' : ''}`), quiet && toneChip('warn', `${quiet} quiet`)) : [toneChip('ok', 'None'), 'nothing needs fixing'] },
+  s.problems.length ? statTiles([String(ring), 'ring a person', ring ? 'danger' : 'done'], [String(quiet), 'being handled', quiet ? 'held' : 'done']) : null,
+  s.problems.length ? h('div', { class: 'hue-rows' }, ...s.problems.map((x) => hueRow({ hue: x.quiet ? 'held' : 'danger', lead: x.quiet ? 'quiet' : 'rings' },
+    h('strong', {}, x.title.replace(/^CI(, [^:]+)?: /, '')),
+    x.why ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Why: '), x.why) : '',
+    x.fix ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '',
+    // The line is always there, so a link arriving moves nothing (#992).
+    h('span', { class: 'ci-detail-line ci-problem-link' }, x.link ? [h('span', { class: 'muted' }, x.link.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
+      h('a', { href: x.link.href }, x.link.label), x.link.closed ? h('span', { class: 'muted' }, ' (closed)') : ''] : '')))) 
+    : emptyCard('Nothing needs fixing', 'A red run or a stuck runner shows here with why and the fix.'));
+  return block('Open problems', ring ? 'danger' : quiet ? 'held' : 'done', 'ci-problems', row);
+}
+
+/** Each workflow's verdict on the branch. */
+function verdictsBlock(v) {
+  const ws = v.workflows;
+  const state = (w) => (!w.verdict ? 'none' : w.verdict.status !== 'completed' ? 'running' : w.verdict.conclusion === 'success' ? 'ok' : w.verdict.conclusion === 'failure' ? 'bad' : 'other');
+  const bad = ws.filter((w) => state(w) === 'bad' && !w.quiet).length, going = ws.filter((w) => state(w) === 'running').length, ok = ws.filter((w) => state(w) === 'ok').length;
+  const item = (w) => {
+    if (!w.verdict) return hueRow({ hue: 'held', lead: 'none' }, w.name, ' ', h('span', { class: 'muted' }, 'no verdict'));
+    const r = w.verdict, st = state(w);
+    const word = r.status === 'completed' ? r.conclusion ?? 'done' : r.status.replace('_', ' ');
+    return hueRow({ hue: w.quiet ? 'held' : { running: 'running', ok: 'done', bad: 'danger' }[st] ?? 'held', lead: word, meta: age(r.at) },
+      ext(r.url, w.name), w.quiet ? [' ', toneChip('neutral', 'quiet')] : '', ' · ', whoText(r),
+      w.skipped.length ? h('span', { class: 'ci-detail-line muted' }, `Green, but skipped ${w.skipped.join(', ')}, which ran in the verdict before it.`) : '');
+  };
+  const [tone, word] = bad ? ['danger', `${bad} failing`] : going ? ['info', `${going} running`] : ok ? ['ok', 'Green'] : ['neutral', 'No verdict'];
+  const [row] = settingsRow({ key: `ci-verdicts-${v.slug}`, icon: 'check', hue: bad ? 'danger' : going ? 'running' : 'done', title: `Verdicts on ${v.branch}`,
+    summary: [toneChip(tone, word), `${ok} of ${ws.length} workflows green`] },
+  statTiles([String(ok), 'green', 'done'], bad && [String(bad), 'failing', 'danger'], going && [String(going), 'running', 'running']),
+  ws.length ? showFirst({ key: `ci-verdicts-${v.slug}`, items: ws.map(item), n: 6, noun: 'workflows' }) : emptyCard('No workflows', 'This repo has none that report here.', { mark: '·', hue: 'muted' }));
+  return block('Verdicts', bad ? 'danger' : 'done', 'ci-verdicts', row);
+}
+
 /** The queue per set of labels, for Running now's header: "peek-auras-ci: 1 runner, 9 queued". */
 const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.runners, 'runner')}, `
   : q.runners === 0 && q.labels.some((l) => /^self-hosted$/i.test(l)) ? 'no runner online, ' : ''}${q.jobs} queued`;
@@ -74,65 +103,62 @@ const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.run
  * with which job for which minion and for how long, idle or offline, then one row for GitHub's own runners that opens to a row per
  * job. Rows are per runner, not per job, so the section keeps its height as jobs come and go between reads.
  */
-function runningNow(s, now, ui) {
+function runningBlock(s, now, ui) {
   const v = s.view;
   const running = v.running ?? [];
   const own = v.runners ?? [];
   const names = new Set(own.map((r) => r.name));
-  const jobLink = (j) => ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name);
-  const jobCell = (j) => h('span', { class: 'ci-run-who', title: `${j.name} · ${j.who?.label ?? j.branch ?? ''}` }, jobLink(j), ' · ', j.who?.href ? h('a', { href: j.who.href }, j.who.label) : h('span', { class: 'muted' }, j.who?.label ?? j.branch ?? ''));
-  const age = (j) => h('span', { class: 'ci-run-age muted' }, j ? shortSpan(now - Date.parse(j.since)) : '');
+  const jobCell = (j) => [ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name), ' · ', whoText(j)];
+  const since = (j) => (j ? shortSpan(now - Date.parse(j.since)) : null);
   const rows = own.map((r) => {
     const j = running.find((x) => x.runner === r.name);
     const word = r.status === 'offline' ? 'offline' : j || r.busy || r.job ? 'busy' : 'idle';
-    return h('div', { class: 'ci-run ci-now', title: `${r.name}: ${r.labels.join(', ')}` },
-      h('span', { class: `dot ${{ offline: 'down', busy: 'running', idle: 'ready' }[word]}` }),
-      h('span', { class: 'ci-run-word' }, word),
-      h('span', { class: 'ci-run-name', title: r.name }, r.name),
-      j ? jobCell(j) : h('span', { class: 'ci-run-who muted' }, word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline')
-        : r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work')),
-      age(j));
+    return { word, el: hueRow({ hue: { offline: 'danger', busy: 'running', idle: 'done' }[word], lead: word, meta: since(j) },
+      h('strong', { title: `${r.name}: ${r.labels.join(', ')}` }, r.name), ' ',
+      j ? jobCell(j) : h('span', { class: 'muted' }, word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline')
+        : r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work'))) };
   });
+  const count = (w) => rows.filter((r) => r.word === w).length;
   // GitHub's own runners (and every runner, when the repo's can't be listed): one row, opened by a click to a row per job.
   const theirs = running.filter((j) => !names.has(j.runner));
   const where = v.runners === null ? 'Runners' : "GitHub's runners";
-  rows.push(h('button', { type: 'button', class: 'ci-run ci-now ci-now-more', 'aria-expanded': String(ui.hostedOpen), disabled: !theirs.length, onclick: ui.toggleHosted },
-    h('span', { class: `dot ${theirs.length ? 'running' : 'ready'}` }),
-    h('span', { class: 'ci-run-word' }, theirs.length ? `${theirs.length} running` : 'none'),
-    h('span', { class: 'ci-run-name' }, where),
-    h('span', { class: 'ci-run-who muted' }, theirs.length ? (ui.hostedOpen ? 'hide jobs' : theirs.map((j) => j.name).join(', ')) : 'nothing running'),
-    h('span', { class: 'ci-run-age muted' }, theirs.length ? (ui.hostedOpen ? '▴' : '▾') : '')));
-  if (ui.hostedOpen) rows.push(...theirs.map((j) => h('div', { class: 'ci-run ci-now' },
-    h('span', { class: 'dot running' }), h('span', { class: 'ci-run-word' }, 'running'), h('span', { class: 'ci-run-name', title: j.runner }, j.runner), jobCell(j), age(j))));
+  const items = rows.map((r) => r.el);
+  items.push(hueRow({ hue: theirs.length ? 'running' : 'done', lead: theirs.length ? `${theirs.length} running` : 'none',
+    meta: theirs.length ? h('button', { type: 'button', class: 'secondary small ci-now-more', 'aria-expanded': String(ui.hostedOpen), onclick: ui.toggleHosted }, ui.hostedOpen ? 'Hide jobs' : 'Show jobs') : null },
+  h('strong', {}, where), ' ', h('span', { class: 'muted' }, theirs.length ? (ui.hostedOpen ? '' : theirs.map((j) => j.name).join(', ')) : 'nothing running')));
+  if (ui.hostedOpen) items.push(...theirs.map((j) => hueRow({ hue: 'running', lead: 'running', meta: since(j) }, h('strong', { title: j.runner }, j.runner), ' ', jobCell(j))));
   const queues = v.queues ?? [];
   const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
   // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.
   const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub."
     : !own.length ? "No self-hosted runners; jobs run on GitHub's." : '';
-  return h('section', { class: 'ci-block' },
-    h('div', { class: 'ci-block-head' }, h('h4', {}, 'Runners and what they run'), h('span', { class: 'muted small ci-queues', title: head }, head)),
-    note ? h('p', { class: 'muted small' }, note) : '',
-    h('div', { class: 'ci-runs' }, ...rows));
+  const busy = count('busy') + theirs.length, off = count('offline');
+  const [tone, word] = off ? ['warn', `${off} offline`] : busy ? ['info', `${busy} busy`] : ['ok', 'Idle'];
+  const [row] = settingsRow({ key: `ci-running-${s.id}`, icon: 'box', hue: busy ? 'running' : 'done', title: 'Runners and what they run', summary: [toneChip(tone, word), head] },
+    statTiles([String(busy), 'busy', 'running'], [String(count('idle')), 'idle', 'done'], off && [String(off), 'offline', 'danger']),
+    showFirst({ key: `ci-running-${s.id}`, items, n: 6, noun: 'runners' }),
+    note ? h('p', { class: 'look-prose' }, note) : null);
+  return block('Running now', 'running', 'ci-running', row);
 }
-
-const LOAD_OPEN = 'ci-load-open';
 
 /**
  * CI desktop load (#1019, Cara 2026-11-18: "a collapsed version (something like just showing CPU and Memory) ... that can be expanded
- * for the full details"): a line per PC, opened by a click to its cards in place. Collapsed by default, remembered per device.
+ * for the full details"): one row, closed by default and remembered per device; opened, a line per PC and then its cards.
  */
 function desktopLoad(pcs, ui) {
   if (!pcs.length) return '';
-  const open = ui.loadOpen;
-  return h('section', { class: 'ci-block ci-desktops' }, h('h4', {}, 'CI desktop load'),
-    h('div', { class: 'ci-runs' }, ...pcs.map((pc) => h('button', { type: 'button', class: 'ci-run ci-load-line', 'aria-expanded': String(open), onclick: ui.toggleLoad,
-      title: `${pc.verdict.text} ${open ? 'Hide' : 'Show'} the details.` }, ...pcLine(pc), h('span', { class: 'ci-run-age muted' }, open ? '▴' : '▾')))),
-    ...(open ? pcs.map(pcCard) : []));
+  const bad = pcs.filter(trouble).length;
+  const hot = (pc) => pc.now && Math.max(pc.now.cpu, (1 - pc.now.mem_free / pc.now.mem_total) * 100) >= 70;
+  const [tone, word] = bad ? ['danger', `${bad} in trouble`] : pcs.some(hot) ? ['warn', 'Busy'] : ['ok', 'Fine'];
+  const [row] = settingsRow({ icon: 'monitor', hue: bad ? 'danger' : 'held', title: 'CI desktops', open: ui.loadOpen,
+    summary: [toneChip(tone, word), pcs.map((pc) => (pc.now ? `${pc.host} CPU ${Math.round(pc.now.cpu)}% · Mem ${Math.round((1 - pc.now.mem_free / pc.now.mem_total) * 100)}%` : `${pc.host} no sample`)).join(' · ')] },
+  ...pcs.map(pcCard));
+  row.addEventListener('toggle', () => ui.setLoad(row.open));
+  return block('CI desktop load', 'held', 'ci-desktops', row);
 }
 
-const waitRow = (j, slug) => h('div', { class: 'ci-run', title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` },
-  h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${slug}/actions/runs/${j.run}`, j.name),
-  whoCell(j), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))));
+const waitItem = (j, slug) => hueRow({ hue: 'waiting', lead: 'queued', meta: age(j.since) },
+  h('span', { title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` }, ext(`https://github.com/${slug}/actions/runs/${j.run}`, j.name)), ' · ', whoText(j));
 
 /** The queue in its order, adjacent jobs for one minion (or, with none, one kind of run) as one group (#1019, Cara: "sequential queued jobs for the same minion could be grouped"). */
 function queueGroups(waiting) {
@@ -145,42 +171,34 @@ function queueGroups(waiting) {
   return groups;
 }
 
-/** A group's rows: one job as it is; several as one row (count, names, minion, labels, oldest wait) that opens to each job on a click. */
+/** A group's rows: one job as it is; several as one row (count, minion, labels, oldest wait) that opens to each job on a click. */
 function queueRows(g, slug, ui) {
   const [first] = g.jobs;
-  if (g.jobs.length === 1) return [waitRow(first, slug)];
+  if (g.jobs.length === 1) return [waitItem(first, slug)];
   const id = `${g.key}:${first.run}:${first.name}`, open = ui.queueOpen.has(id);
   const labels = [...new Set(g.jobs.flatMap((j) => j.labels))].join(', ');
   const oldest = Math.min(...g.jobs.map((j) => Date.parse(j.since)));
-  const names = g.jobs.map((j) => j.name).join(', ');
-  const row = h('div', { class: 'ci-verdict-row ci-queue-group' },
-    h('div', { class: 'ci-run', title: `${g.jobs.length} jobs for a runner with ${labels}, the oldest queued ${when(new Date(oldest).toISOString())}`,
-      onclick: (e) => { if (!e.target.closest('a, button')) ui.toggleQueue(id); } },
-      h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'),
-      h('button', { type: 'button', class: 'ci-group-toggle', 'aria-expanded': String(open), 'data-group': id, onclick: () => ui.toggleQueue(id) },
-        `${g.jobs.length} jobs ${open ? '▴' : '▾'}`),
-      whoCell(first), h('span', { class: 'ci-run-age muted' }, ago(oldest))),
-    h('p', { class: 'muted small ci-skipped' }, `${names} · on ${labels}`));
-  return [row, ...(open ? g.jobs.map((j) => { const r = waitRow(j, slug); r.classList.add('ci-group-job'); return r; }) : [])];
+  const row = hueRow({ hue: 'waiting', lead: 'queued', meta: ago(oldest) },
+    h('button', { type: 'button', class: 'secondary small queue-toggle', 'aria-expanded': String(open), 'data-group': id, onclick: () => ui.toggleQueue(id),
+      title: `${g.jobs.length} jobs for a runner with ${labels}, the oldest queued ${when(new Date(oldest).toISOString())}` }, `${g.jobs.length} jobs ${open ? '▴' : '▾'}`),
+    ' ', whoText(first), h('span', { class: 'ci-detail-line muted' }, `${g.jobs.map((j) => j.name).join(', ')} · on ${labels}`));
+  return [row, ...(open ? g.jobs.map((j) => h('div', { class: 'queue-sub' }, waitItem(j, slug))) : [])];
+}
+
+function waitingBlock(s, now, ui) {
+  const v = s.view, n = v.waiting.length;
+  const oldest = n ? Math.min(...v.waiting.map((j) => Date.parse(j.since))) : 0;
+  const groups = queueGroups(v.waiting);
+  const [row] = settingsRow({ key: `ci-waiting-${s.id}`, icon: 'rows', hue: n ? 'waiting' : 'done', title: 'Waiting for a runner',
+    summary: n ? [toneChip('warn', `${n} waiting`), `oldest ${shortSpan(now - oldest)}`] : [toneChip('ok', 'Nobody'), 'no job is waiting'] },
+  n ? statTiles([String(n), 'jobs queued', 'waiting'], [shortSpan(now - oldest), 'oldest wait', 'waiting']) : null,
+  n ? showFirst({ key: `ci-waiting-${s.id}`, items: groups.map((g) => queueRows(g, v.slug, ui)), n: 5, noun: 'groups', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) })
+    : emptyCard('No job is waiting', 'Jobs queue here when every runner is busy.'));
+  return block('Waiting for a runner', n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
 function overview(s, pcs, now, ui) {
-  const v = s.view;
-  return [
-    h('section', { class: 'ci-block' }, h('h4', {}, 'Open problems'),
-      s.problems.length ? h('div', { class: 'ci-problems' }, ...s.problems.map(problemCard)) : h('p', { class: 'muted' }, 'Nothing needs fixing.')),
-    h('section', { class: 'ci-block' }, h('h4', {}, `Verdicts on ${v.branch}`),
-      h('div', { class: 'ci-runs' }, ...v.workflows.map((w) => w.verdict
-        ? h('div', { class: 'ci-verdict-row' }, runRow({ ...w.verdict, name: w.name }, w.quiet),
-          w.skipped.length ? h('p', { class: 'muted small ci-skipped' }, `Green, but skipped ${w.skipped.join(', ')}, which ran in the verdict before it.`) : '')
-        : h('div', { class: 'ci-run' }, h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word muted' }, 'no verdict'), h('span', { class: 'ci-run-name' }, w.name))))),
-    runningNow(s, now, ui),
-    h('section', { class: 'ci-block' }, h('h4', {}, 'Waiting for a runner'),
-      v.waiting.length ? h('div', { class: 'ci-runs' }, ...queueGroups(v.waiting).flatMap((g) => queueRows(g, v.slug, ui)))
-        : h('p', { class: 'muted' }, 'No job is waiting.')),
-    desktopLoad(pcs, ui),
-    hostLoadBlock(ui.host),
-  ];
+  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), desktopLoad(pcs, ui), hostLoadBlock(ui.host)];
 }
 
 /** The page: `projectId` is the scheme it opened from, selected first. */
@@ -229,9 +247,9 @@ export function ciPage(projectId, startTab = 'overview') {
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); if (k === 'health') readTab(s.id); } }, label))),
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
         host: host,
-        queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.ci-group-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
+        queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
-        loadOpen, toggleLoad: () => { loadOpen = !loadOpen; localStorage.setItem(LOAD_OPEN, loadOpen ? '1' : '0'); draw(); detail.querySelector('.ci-load-line')?.focus(); },
+        loadOpen, setLoad: (on) => { loadOpen = on; localStorage.setItem(LOAD_OPEN, on ? '1' : '0'); },
       })
         : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, () => readTab(s.id))
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));

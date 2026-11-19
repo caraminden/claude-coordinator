@@ -54,10 +54,10 @@ export function showFirst({ key, items, n = 5, noun = 'rows', wrap = (xs) => h('
   const box = h('div', { class: 'show-first' });
   const draw = () => {
     const all = shownAll.has(key) || items.length <= n + 1; // never hide just one
-    box.replaceChildren(wrap(all ? items : items.slice(0, n)), items.length > n + 1 ? h('button', {
+    box.replaceChildren(wrap(all ? items : items.slice(0, n)), ...(items.length > n + 1 ? [h('button', {
       type: 'button', class: 'show-more', 'aria-expanded': String(all),
       onclick: () => { if (shownAll.has(key)) shownAll.delete(key); else shownAll.add(key); draw(); },
-    }, all ? `Show the first ${n} only` : `Show all ${items.length} ${noun}`) : null);
+    }, all ? `Show the first ${n} only` : `Show all ${items.length} ${noun}`)] : [])); // replaceChildren writes a null as "null"
   };
   draw();
   return box;

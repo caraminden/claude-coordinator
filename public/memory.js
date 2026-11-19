@@ -4,6 +4,7 @@ import { api, h, view } from './base.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { icon } from './base.js';
 import { optimistic } from './ui/optimistic.js';
+import { emptyCard, statTiles, toneChip } from './look.js';
 
 const kb = (b) => (b < 1024 ? `${b} B` : `${Math.round(b / 1024)} KB`);
 const day = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
@@ -53,12 +54,17 @@ export function memoryPage() {
         label: `delete ${n.name}`,
       }).catch(() => {});
     } }, 'Delete');
-    const chips = flagChips(n.flags).map((t) => h('span', { class: 'chip warn memory-flag' }, t));
+    const chips = flagChips(n.flags).map((t) => toneChip('warn', t));
     const key = `${f.id}:${n.file}`;
-    const [row] = settingsRow({ icon: 'doc', hue: n.flags.closed.length || n.flags.datesPast.length ? 'held' : 'running', title: n.name, summary: `${chips.length ? `⚠ ${chips[0].textContent.split(':')[0]} · ` : ''}${n.description ? `${n.description} · ` : ''}${day(n.modified)}`, open: openRows.has(key) },
+    const stale = n.flags.closed.length || n.flags.datesPast.length;
+    // Closed line: a toned chip for the note's state, then what it is and when it changed.
+    const state = chips.length ? toneChip(stale ? 'warn' : 'info', stale ? 'Stale?' : 'Date soon') : toneChip('ok', 'Current');
+    const [row] = settingsRow({ icon: 'doc', hue: stale ? 'held' : chips.length ? 'waiting' : 'running', title: n.name,
+      summary: [state, ` ${n.description ? `${n.description} · ` : ''}${day(n.modified)}`], open: openRows.has(key) },
+      statTiles([kb(n.bytes), 'size', 'accent'], [day(n.modified), 'last changed', 'done']),
       chips.length ? h('div', { class: 'chips' }, ...chips) : '', body, edit,
       h('div', { class: 'memory-actions' }, editBtn, save, cancel, del),
-      h('p', { class: 'muted small' }, `${n.file} · ${kb(n.bytes)}. The Taskmaster and minions read this on their next session.`));
+      h('p', { class: 'muted small look-prose' }, `${n.file} · ${kb(n.bytes)}. The Taskmaster and minions read this on their next session.`));
     row.addEventListener('toggle', () => openRows[row.open ? 'add' : 'delete'](key));
     rows.push({ row, n });
     return row;
@@ -75,15 +81,15 @@ export function memoryPage() {
     for (const { row, n } of rows) row.hidden = !!n.gone || (!!q && !`${n.name} ${n.description} ${n.text}`.toLowerCase().includes(q));
     empty.hidden = !q || rows.some(({ row }) => !row.hidden);
   };
-  const empty = h('p', { class: 'muted', hidden: true }, 'No note matches.');
+  const empty = h('div', { hidden: true }, emptyCard('No note matches', 'Try another word from its name, description or text.', { mark: '∅', hue: 'waiting' }));
   const render = () => {
     rows.length = 0;
     count();
     list.replaceChildren(...folders.flatMap((f) => [
-      folders.length > 1 && h('h3', { class: 'settings-section' }, f.label),
-      !f.reachable ? h('p', { class: 'muted' }, 'Not reachable: this login has no memory folder for the scheme yet.')
+      folders.length > 1 && h('h3', { class: 'settings-section', 'data-hue': 'accent' }, f.label),
+      !f.reachable ? emptyCard('Not reachable', 'This login has no memory folder for the scheme yet.', { mark: '!', hue: 'held' })
         : f.notes.length ? h('div', { class: 'settings-rows' }, ...f.notes.map((n) => note(f, n)))
-        : h('p', { class: 'muted' }, 'No notes in this folder.'),
+        : emptyCard('No notes in this folder', 'The Taskmaster and minions add them as they work.', { mark: '∅', hue: 'accent' }),
     ].filter(Boolean)), empty);
     filter();
   };

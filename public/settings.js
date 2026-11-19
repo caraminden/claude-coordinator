@@ -7,6 +7,7 @@ import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
+import { hueRow, meter, pips, statTiles, toneChip } from './look.js';
 import { elsewhereRows, pickers } from './minion-rules.js';
 import { HOME_SCHEME } from './schemes.js';
 import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping.js';
@@ -196,18 +197,17 @@ const count = (n) => n.toLocaleString('en');
  * Call update() whenever the text may have changed.
  */
 function instructionAids(textarea, cap) {
-  const bar = h('span', { class: 'aids-fill' });
-  const meterText = h('span', { class: 'muted small' });
-  const meter = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' }, h('span', { class: 'aids-bar' }, bar), meterText);
+  const gauge = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' });
   const list = h('ol', { class: 'aids-outline' });
-  const box = h('div', { class: 'aids-box' }, meter, h('details', {}, h('summary', {}, 'Outline of ## sections'), list));
+  const box = h('div', { class: 'aids-box' }, gauge, h('details', {}, h('summary', {}, 'Outline of ## sections'), list));
   const update = () => {
     const text = textarea.value;
     const n = text.trim().length;
-    bar.style.width = `${Math.min(100, (n / cap) * 100)}%`;
-    bar.className = `aids-fill${n > cap ? ' over' : n > cap * 0.8 ? ' warn' : ''}`;
-    meter.setAttribute('aria-valuenow', n);
-    meterText.textContent = `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%). Every turn reads all of it.`;
+    // Size is cost: ok under 80% of the cap, warn near it, danger over it (the meter and the chip share the hue).
+    const [tone, hue, word] = n > cap ? ['danger', 'danger', 'Over the limit'] : n > cap * 0.8 ? ['warn', 'waiting', 'Near the limit'] : ['ok', 'done', 'Fits'];
+    gauge.setAttribute('aria-valuenow', n);
+    gauge.dataset.hue = hue;
+    gauge.replaceChildren(toneChip(tone, word), meter(n / cap, `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%)`), h('span', { class: 'muted small' }, 'Every turn reads all of it.'));
     const marks = [...text.matchAll(/^##[ \t]+(.+)$/gm)];
     list.replaceChildren(...(marks.length ? marks.map((m, i) => {
       const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
@@ -230,8 +230,8 @@ function repoSetupCard() {
   const long = (t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
   const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
   api(`api/projects/${p.id}/repo-setup`).then((r) => {
-    const parts = [];
-    if (!r.facts) parts.push(h('p', {}, 'No Project facts: the kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
+    const parts = [statTiles([r.facts ? r.facts.length : 0, 'project facts', r.facts ? 'done' : 'waiting'], [r.rules.length, 'rules', 'running'], [r.skills.length, 'own skills', 'teal'])];
+    if (!r.facts) parts.push(h('p', {}, toneChip('warn', 'No Project facts'), ' The kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
     else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
     parts.push(h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
       r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}`
@@ -563,7 +563,8 @@ function rulesReviewBanner() {
   const p = view.project;
   const box = h('section', { class: 'rules-review', 'data-rules-review': '', 'aria-label': 'Check the rules after setup' });
   const ok = h('button', { type: 'button' }, 'Looks right');
-  const list = h('ul', {});
+  const list = h('div', { class: 'hue-rows' });
+  const summary = h('div', { class: 'row' });
   const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
   const draw = () => {
     box.hidden = !view.project.rules_review;
@@ -577,10 +578,12 @@ function rulesReviewBanner() {
       ['Default effort', q.default_effort || "Claude Code's default", q.default_effort === 'high'],
       ['Plugin folders', `${lines(q.plugin_dirs)} folder${lines(q.plugin_dirs) === 1 ? '' : 's'}`, lines(q.plugin_dirs) === 0],
     ];
-    list.replaceChildren(...rows.map(([what, value, dflt]) => h('li', {}, h('span', { class: 'rr-what' }, what), h('span', { class: 'rr-value' }, value), h('span', { class: `rr-tag${dflt ? '' : ' set'}` }, dflt ? 'starting value' : 'changed'))));
+    const changed = rows.filter((r) => !r[2]).length;
+    summary.replaceChildren(toneChip(changed ? 'ok' : 'warn', changed ? `${changed} of ${rows.length} changed` : 'All starting values'), pips(changed, rows.length));
+    list.replaceChildren(...rows.map(([what, value, dflt]) => hueRow({ hue: dflt ? 'muted' : 'done', meta: toneChip(dflt ? 'neutral' : 'ok', dflt ? 'starting value' : 'changed') }, h('b', {}, what), ' ', value)));
   };
   box.append(
-    h('h3', {}, 'Setup is done: check these rules'),
+    h('h3', {}, 'Setup is done: check these rules'), summary,
     h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. "Starting value" is what a new scheme begins with. "Looks right" clears this for every member.'),
     list, h('div', { class: 'row' }, ok));
   box.addEventListener('settings-refresh', draw);

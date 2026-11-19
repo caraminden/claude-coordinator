@@ -2,38 +2,45 @@
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
 import { ago, api, h } from './base.js';
+import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
+import { settingsRow } from './settings.js';
 import { openDialog } from './ui/dialog.js';
 
 const LA = { timeZone: 'America/Los_Angeles', timeZoneName: 'short' };
 const when = (t) => new Date(t).toLocaleString('en-US', { ...LA, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+// state -> [tone, closed word, hue, why]
 const FAST = {
-  running: ['running', 'running', 'The full check is running on main now.'],
-  pinning: ['running', 'finding the culprit', "A red covers several ships; each commit is being checked oldest first to find whose change broke it."],
-  verified: ['ready', 'verified', "Main's newest commit has a verdict: green, or red only on the known reds below."],
-  stuck: ['fix', 'stuck', "The last run gave no verdict (CI never answered); it isn't retried until main moves."],
-  idle: ['asleep', 'waiting', 'Fast mode has not run its check on main yet.'],
+  running: ['info', 'Running', 'running', 'The full check is running on main now.'],
+  pinning: ['info', 'Finding the culprit', 'running', "A red covers several ships; each commit is being checked oldest first to find whose change broke it."],
+  verified: ['ok', 'Verified', 'done', "Main's newest commit has a verdict: green, or red only on the known reds below."],
+  stuck: ['warn', 'Stuck', 'waiting', "The last run gave no verdict (CI never answered); it isn't retried until main moves."],
+  idle: ['neutral', 'Waiting', 'held', 'Fast mode has not run its check on main yet.'],
 };
+const block = (title, hue, row) => h('section', { class: 'ci-block' }, h('h3', { class: 'settings-section', 'data-hue': hue }, title), h('div', { class: 'settings-rows' }, row));
 
 function fastBlock(s, fast, now) {
-  if (!fast) return h('section', { class: 'ci-block' }, h('h4', {}, 'Fast mode'), h('p', { class: 'muted' }, 'Fast mode is off here: every ship waits for the full tests before it goes live.'));
-  const [dot, word, why] = FAST[fast.state] ?? FAST.idle;
+  if (!fast) {
+    const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: 'held', title: 'Fast mode', summary: [toneChip('neutral', 'Off'), 'every ship waits for the full tests'] },
+      h('p', { class: 'look-prose' }, 'Fast mode is off here: every ship waits for the full tests before it goes live.'));
+    return block('Fast mode', 'held', row);
+  }
+  const [tone, word, hue, why] = FAST[fast.state] ?? FAST.idle;
   const reds = fast.reds.map((r) => {
     const left = r.escalateAt - now;
     const timer = r.escalated ? 'the Taskmaster has it' : left > 0 ? `reaches the Taskmaster in ${Math.ceil(left / 60_000)} min` : 'reaches the Taskmaster now';
-    return h('div', { class: 'ci-run ci-health-run', title: r.ids.join(', ') },
-      h('span', { class: 'dot down' }), h('span', { class: 'ci-run-word' }, 'red'),
-      h('span', { class: 'ci-run-name', title: r.ids.join(', ') }, r.ids.join(', ')),
-      h('span', { class: 'ci-run-who muted' }, `since ${r.sha.slice(0, 9)} · ${r.n ? `#${r.n} is fixing it` : 'no minion pinned'} · ${timer}`),
-      h('span', { class: 'ci-run-age muted' }, ago(r.at)));
+    return hueRow({ hue: 'danger', lead: 'red', meta: ago(r.at) }, h('strong', { title: r.ids.join(', ') }, r.ids.join(', ')),
+      h('span', { class: 'ci-detail-line muted' }, `since ${r.sha.slice(0, 9)} · ${r.n ? `#${r.n} is fixing it` : 'no minion pinned'} · ${timer}`));
   });
-  return h('section', { class: 'ci-block' }, h('h4', {}, 'Fast mode'),
-    h('div', { class: 'ci-runs' },
-      h('div', { class: 'ci-run ci-health-run', title: why }, h('span', { class: `dot ${dot}` }), h('span', { class: 'ci-run-word' }, word),
-        h('span', { class: 'ci-run-name' }, 'Full check on main'), h('span', { class: 'ci-run-who muted' }, why), h('span', { class: 'ci-run-age muted' }, fast.verified ? fast.verified.slice(0, 9) : '')),
-      ...reds,
-      ...(fast.pin ? [h('div', { class: 'ci-run ci-health-run' }, h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'pinning'),
-        h('span', { class: 'ci-run-name' }, fast.pin.ids.join(', ')), h('span', { class: 'ci-run-who muted' }, 'failing ids not yet blamed on a commit'), h('span', { class: 'ci-run-age muted' }))] : [])),
-    reds.length || fast.pin ? '' : h('p', { class: 'muted small' }, 'No known reds: nothing is failing on main.'));
+  const nReds = reds.length;
+  const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: nReds ? 'danger' : hue, title: 'Fast mode',
+    summary: [toneChip(tone, word), nReds ? toneChip('danger', `${nReds} known red${nReds === 1 ? '' : 's'}`) : 'no known reds'] },
+  statTiles([word, 'full check on main', hue], [String(nReds), 'known reds', nReds ? 'danger' : 'done'], fast.verified && [fast.verified.slice(0, 9), 'last verified commit', 'done']),
+  h('div', { class: 'hue-rows' },
+    hueRow({ hue, lead: word.toLowerCase(), meta: fast.verified ? fast.verified.slice(0, 9) : null }, h('strong', {}, 'Full check on main'), h('span', { class: 'ci-detail-line muted' }, why)),
+    ...reds,
+    ...(fast.pin ? [hueRow({ hue: 'waiting', lead: 'pinning' }, h('strong', {}, fast.pin.ids.join(', ')), h('span', { class: 'ci-detail-line muted' }, 'failing ids not yet blamed on a commit'))] : [])),
+  nReds || fast.pin ? null : emptyCard('No known reds', 'Nothing is failing on main.'));
+  return block('Fast mode', nReds ? 'danger' : hue, row);
 }
 
 /** The brief, read first, then a Start button: a person confirms before the minion exists. */
@@ -66,14 +73,18 @@ async function startFix(projectId, f, refresh) {
 }
 
 function flakeBlock(s, flakes, refresh) {
-  const row = (f) => h('div', { class: 'ci-run ci-health-run' },
-    h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, `${f.count}×`),
-    h('span', { class: 'ci-run-name', title: f.file }, f.file),
-    h('span', { class: 'ci-run-who muted' }, `last ${when(f.last)}`, f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.ticketId}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
-    h('span', { class: 'ci-run-act' }, f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} is on it`)
-      : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it')));
-  return h('section', { class: 'ci-block' }, h('h4', {}, 'Flaky tests, last 14 days'),
-    flakes.length ? h('div', { class: 'ci-runs' }, ...flakes.map(row)) : h('p', { class: 'muted' }, 'No flaky test file reported in the last 14 days. Only schemes whose land script prints flake lines report them.'));
+  const total = flakes.reduce((n, f) => n + f.count, 0);
+  const item = (f) => hueRow({ hue: 'waiting', lead: `${f.count}×`,
+    meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} is on it`)
+      : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it') },
+  h('strong', { title: f.file }, f.file),
+  h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.ticketId}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'));
+  const [row] = settingsRow({ key: `health-flakes-${s.id}`, icon: 'chart', hue: flakes.length ? 'waiting' : 'done', title: 'Flaky tests, last 14 days',
+    summary: flakes.length ? [toneChip('warn', `${flakes.length} file${flakes.length === 1 ? '' : 's'}`), `${total} flake${total === 1 ? '' : 's'}`] : [toneChip('ok', 'None'), 'no flaky test file reported'] },
+  flakes.length ? statTiles([String(flakes.length), 'flaky files', 'waiting'], [String(total), 'flakes in 14 days', 'waiting']) : null,
+  flakes.length ? showFirst({ key: `health-flakes-${s.id}`, items: flakes.map(item), n: 5, noun: 'files' })
+    : emptyCard('No flaky test file', 'Only schemes whose land script prints flake lines report them.'));
+  return block('Flaky tests', flakes.length ? 'waiting' : 'done', row);
 }
 
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */

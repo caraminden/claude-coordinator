@@ -118,15 +118,6 @@ export function pcCard(pc) {
     pools(pc));
 }
 
-/** A PC's one line for the collapsed CI desktop load (#1019, Cara 2026-11-18: "just showing CPU and Memory"): its dot, name, CPU and memory. */
-export function pcLine(pc) {
-  const now = pc.now;
-  return [h('span', { class: `dot ${DOT[pc.verdict.kind] ?? 'asleep'}` }), h('span', { class: 'ci-run-name' }, pc.host),
-    now ? h('span', { class: 'ci-load-bars' },
-      ...[['CPU', now.cpu], ['Memory', (1 - now.mem_free / now.mem_total) * 100]].map(([label, pct]) => h('span', { class: 'ci-load-bar', title: `${label} ${Math.round(pct)}%` }, h('span', { class: 'muted' }, label === 'Memory' ? 'Mem' : label), barOf(label, pct))))
-      : h('span', { class: 'muted' }, 'no sample in the last day')];
-}
-
 /** What the CI chip warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */
 export function trouble(pc) {
   if (pc.verdict.kind === 'over') return 'CI is overloading its desktop';

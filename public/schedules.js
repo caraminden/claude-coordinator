@@ -2,9 +2,16 @@
 // by the clock in its header.
 import { ago, api, h, view } from './base.js';
 import { modelName } from './composer.js';
+import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
+import { settingsRow } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 
+// A chip's tone as the hue of its row's tile and bar (Citadel's look, #1068).
+const HUE = { ok: 'done', warn: 'waiting', danger: 'danger', info: 'running', neutral: 'held' };
+
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+const soon = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 const money = (n) => `$${n.toFixed(n < 10 ? 2 : 0)}`;
 
@@ -29,10 +36,10 @@ function toggle(label, body) {
 }
 
 function runLine(s, r) {
-  if (r.skip) return h('li', { class: 'muted' }, ago(r.at), ' · skipped by the gate');
+  if (r.skip) return hueRow({ hue: 'held', lead: '–', meta: ago(r.at) }, h('span', { class: 'muted' }, 'skipped by the gate'));
   const [tone, word] = outcome(r.status, r.state);
-  return h('li', {}, r.number != null ? h('a', { href: `#/p/${s.project_id}/t/${r.number}` }, `#${r.number}`) : 'a deleted minion', ' ', ago(r.at), ' ',
-    h('span', { class: 'cui-chip state-chip', 'data-tone': tone }, word), r.note ? ` ${r.note}` : '', r.cost ? [' · ', h('span', { class: 'tnum' }, money(r.cost))] : '');
+  return hueRow({ hue: HUE[tone], meta: ago(r.at) }, r.number != null ? h('a', { href: `#/p/${s.project_id}/t/${r.number}` }, `#${r.number}`) : 'a deleted minion', ' ',
+    toneChip(tone, word), r.note ? ` ${r.note}` : '', r.cost ? [' · ', h('span', { class: 'tnum' }, money(r.cost))] : '');
 }
 
 /** Each kit template against this scheme's rows: flags a missing one and two for one, and shows a deliberate omission as such. */
@@ -41,43 +48,60 @@ function auditsCheck(audits) {
   if (!bad.length) return '';
   const line = (a) => {
     const ids = a.rows.map((r) => `"${r.name}"${r.template ? '' : ' (hand-made)'}`).join(' and ');
-    if (a.state === 'left-out') return h('li', { class: 'muted' }, `${a.name}: left out on purpose`);
-    if (a.state === 'duplicate') return h('li', {}, `${a.name}: two rows, ${ids}. Delete the hand-made one.`);
-    return h('li', {}, `${a.name}: no row. `, h('button', { type: 'button', class: 'secondary small', onclick: async (e) => {
+    if (a.state === 'left-out') return hueRow({ hue: 'held', lead: '–' }, h('span', { class: 'muted' }, `${a.name}: left out on purpose`));
+    if (a.state === 'duplicate') return hueRow({ hue: 'waiting', lead: '2' }, `${a.name}: two rows, ${ids}. Delete the hand-made one.`);
+    return hueRow({ hue: 'danger', lead: '0', meta: h('button', { type: 'button', class: 'secondary small', onclick: async (e) => {
       e.currentTarget.disabled = true;
       try { await api(`api/projects/${view.projectId}/schedules`, { method: 'POST', body: { template: a.slug } }); } catch (ex) { e.currentTarget.disabled = false; alert(ex.message); }
-    } }, 'Add from template'));
+    } }, 'Add from template') }, `${a.name}: no row`);
   };
-  return h('div', { class: 'schedule-audits small' }, h('strong', {}, 'Standard audits'), h('ul', {}, bad.map(line)));
+  const [row] = settingsRow({ key: 'schedule-audits', icon: 'check', hue: 'waiting', title: 'Standard audits',
+    summary: [toneChip('warn', `${bad.length} to fix`), `of ${audits.length} kit templates`] },
+    h('div', { class: 'hue-rows' }, bad.map(line)));
+  return h('div', { class: 'settings-rows schedule-audits' }, row);
 }
 
 function scheduleRow(s) {
   const last = s.last_number != null
     ? h('a', { href: `#/p/${s.project_id}/t/${s.last_number}` }, `#${s.last_number}`, ' ', ago(s.last_run_at))
     : s.last_run_at ? ago(s.last_run_at) : '';
-  // One status chip leads the row (#492); the facts stay as quiet text under the name.
+  // One status chip leads the row (#492); the facts sit inside it once opened.
   const [tone, word, tip] = s.paused ? ['warn', 'Paused', 'It starts nothing until resumed']
     : s.last_error ? ['danger', 'Failed', "Its last run didn't start"]
     : s.last_run_at ? outcome(s.last_status, s.last_state)
     : ['neutral', 'New', 'It has not run yet'];
   const cron = `${s.when} (server time) · cron: ${s.cron}`;
-  return h('li', { class: `schedule${s.paused ? ' paused' : ''}`, 'data-schedule': s.id },
-    h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
-      // A standard audit (#799) follows the kit's template: each run gets its current text plus this scheme's notes.
-      s.template ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `Follows the kit's ${s.template} template; each run gets its current text${s.notes ? ', plus this scheme\'s notes' : ''}` }, 'Standard') : '',
-      h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
-    h('div', { class: 'muted small', title: cron }, s.paused ? ['Would run ', s.when] : ['Next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when]),
-    h('div', { class: 'muted small' }, runsAs(s), s.last_run_at || s.last_number != null ? ['last run ', last] : 'not run yet'),
-    s.last_note || s.last_cost ? h('div', { class: 'muted small schedule-found' }, s.last_note ? [`“${s.last_note}”`, ' '] : '', s.last_cost ? h('span', { class: 'tnum', title: 'What its last run cost, at API prices' }, money(s.last_cost)) : '') : '',
-    s.skips14 ? h('div', { class: 'muted small', title: 'Slots the activity gate skipped in the last 14 days' }, `${s.skips14} skipped in 14 days`) : '',
-    s.last_skip ? h('div', { class: 'muted small', title: 'The activity gate skipped this slot: no minion was made' }, s.last_skip) : '',
-    s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
+  const chip = toneChip(tone, word);
+  chip.title = tip;
+  // A standard audit (#799) follows the kit's template: each run gets its current text plus this scheme's notes.
+  const std = s.template ? toneChip('info', 'Standard') : '';
+  if (s.template) std.title = `Follows the kit's ${s.template} template; each run gets its current text${s.notes ? ', plus this scheme\'s notes' : ''}`;
+  const hue = s.paused ? 'held' : HUE[tone];
+  const tiles = [s.last_cost ? [money(s.last_cost), 'last run cost', 'accent'] : null, s.skips14 ? [String(s.skips14), 'skipped in 14 days', 'held'] : null].filter(Boolean);
+  const [row] = settingsRow({ key: `schedule:${s.id}`, icon: 'rows', hue, title: s.name,
+    summary: [chip, std, s.paused ? s.when : h('span', { title: cron }, `next ${soon(s.next_run_at)}`)] },
+    tiles.length ? statTiles(...tiles) : '',
+    h('div', { class: 'hue-rows schedule-facts' },
+      hueRow({ hue, lead: s.paused ? 'Would run' : 'Next', meta: undefined }, h('span', { title: cron }, s.paused ? s.when : [h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when])),
+      hueRow({ hue: 'accent', lead: 'Runs as' }, runsAs(s) || 'the scheme’s defaults'),
+      hueRow({ hue: 'teal', lead: 'Last run' }, s.last_run_at || s.last_number != null ? last : 'not run yet'),
+      s.last_note || s.last_cost ? hueRow({ hue: 'done', lead: 'Found' }, s.last_note ? `“${s.last_note}”` : '', s.last_cost ? [' ', h('span', { class: 'tnum', title: 'What its last run cost, at API prices' }, money(s.last_cost))] : '') : '',
+      s.last_skip ? hueRow({ hue: 'held', lead: 'Skipped' }, h('span', { title: 'The activity gate skipped this slot: no minion was made' }, s.last_skip)) : '',
+      s.last_error ? hueRow({ hue: 'danger', lead: 'Error' }, "Last run didn't start: ", s.last_error) : ''),
     gateFields(s),
     toggle('Brief', () => h('pre', { class: 'schedule-brief small' }, s.brief)),
-    s.runs.length ? toggle(`Last ${s.runs.length} runs`, () => h('ul', { class: 'schedule-runs small' }, s.runs.map((r) => runLine(s, r)))) : '',
+    s.runs.length ? toggle(`Last ${s.runs.length} runs`, () => {
+      const items = s.runs.map((r) => runLine(s, r));
+      // showFirst appends a literal "null" when it has nothing to cut (look.js), so a short list skips it.
+      return items.length > 6 ? showFirst({ key: `schedule-runs:${s.id}`, items, n: 5, noun: 'runs' }) : h('div', { class: 'hue-rows' }, items);
+    }) : '',
     h('div', { class: 'row schedule-actions' },
-      h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),
-      h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('li')) }, 'Delete')));
+      h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('[data-schedule]')) }, s.paused ? 'Resume' : 'Pause'),
+      h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('[data-schedule]')) }, 'Delete')));
+  row.classList.add('schedule-row');
+  if (s.paused) row.classList.add('paused');
+  row.dataset.schedule = s.id;
+  return row;
 }
 
 /**
@@ -110,7 +134,7 @@ function save(s, patch) {
   const was = Object.fromEntries(Object.keys(patch).map((k) => [k, s[k]]));
   const show = (values) => {
     Object.assign(s, values);
-    document.querySelector(`li.schedule[data-schedule="${s.id}"]`)?.replaceWith(scheduleRow(s));
+    document.querySelector(`.schedule-row[data-schedule="${s.id}"]`)?.replaceWith(scheduleRow(s));
   };
   optimistic({
     key: `schedule:${s.id}`,
@@ -156,7 +180,15 @@ function remove(s, row) {
 /** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
 function runsAs(s) {
   const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
-  return set.length ? [h('span', { title: 'What each run starts with' }, set.join(', ')), ' · '] : '';
+  return set.length ? h('span', { title: 'What each run starts with' }, set.join(', ')) : '';
+}
+
+/** The schedules as rows that open under a heading: its heading counts them, and the paused and failed ones. */
+function scheduleList(schedules) {
+  const bad = schedules.filter((s) => s.last_error).length, paused = schedules.filter((s) => s.paused).length;
+  return h('div', { class: 'schedule-list' },
+    h('h3', { class: 'settings-section', 'data-hue': bad ? 'danger' : 'teal' }, `Scheduled · ${schedules.length}`, bad ? ` · ${bad} failed` : '', paused ? ` · ${paused} paused` : ''),
+    h('div', { class: 'settings-rows' }, schedules.map(scheduleRow)));
 }
 
 /** Someone added, changed or ran a schedule: redraw the list if it is open on that scheme. */
@@ -186,8 +218,8 @@ export async function showSchedules(sidebar) {
   try {
     const [{ schedules }, { audits }] = await Promise.all([api(`api/projects/${view.projectId}/schedules`), api(`api/projects/${view.projectId}/schedule-audits`)]);
     pane.replaceChildren(auditsCheck(audits), schedules.length
-      ? h('ul', { class: 'schedule-list' }, schedules.map(scheduleRow))
-      : h('p', { class: 'muted' }, 'Nothing scheduled in this scheme yet.'));
+      ? scheduleList(schedules)
+      : emptyCard('Nothing scheduled yet', 'A schedule starts a minion on a timer; ask the Taskmaster to add one.', { mark: '◷', hue: 'muted' }));
   } catch (ex) {
     pane.replaceChildren(h('p', { class: 'error' }, ex.message));
   }

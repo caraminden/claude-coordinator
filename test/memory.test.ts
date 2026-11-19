@@ -354,20 +354,20 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 });
 
 test('a search with a selective filter yields between pages of rows scanned, and still finds matches on late pages (#1034)', async () => {
-  const { store, A, a1, a2 } = world(join(root, 'paged.db'));
-  const put = store.db.prepare("INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model) VALUES (?, ?, NULL, 'turn', ?, ?, ?, ?, 'fake')");
+  const { store, A, a1 } = world(join(root, 'paged.db'));
+  const put = store.db.prepare("INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model) VALUES (?, ?, ?, 'turn', ?, ?, ?, ?, 'fake')");
   const vec = new Uint8Array(fakeVec('dentist').buffer);
-  // 600 chunks of one minion, then 100 of another: a search for the second's matches only on its last page of 256.
+  // 600 chunks of one person, then 100 of another: a search for the second's matches only on its last page of 256.
   store.db.exec('BEGIN');
-  for (let i = 0; i < 700; i++) put.run(A.id, i < 600 ? a1.id : a2.id, 1000 + i, Date.now() + 1000, `chunk ${i}`, vec);
+  for (let i = 0; i < 700; i++) put.run(A.id, a1.id, i < 600 ? 1 : 2, 1000 + i, Date.now() + 1000, `chunk ${i}`, vec);
   store.db.exec('COMMIT');
   let ticks = 0, going = true;
   const tick = () => { ticks++; if (going) setImmediate(tick); };
   setImmediate(tick);
-  const hits = await store.memory.search(A.id, 'dentist', embed, 'fake', { ticketId: a2.id, limit: 20 });
+  const hits = await store.memory.search(A.id, 'dentist', embed, 'fake', { personId: 2, limit: 20 });
   going = false;
   assert.equal(hits.length, 20);
-  assert.ok(hits.every((h) => h.ticket_id === a2.id));
+  assert.ok(hits.every((h) => h.source_id >= 1600));
   // 700 rows are 3 pages of 256, so the search yields twice.
   assert.ok(ticks >= 2, `the search held the loop for all 700 rows at once (${ticks} ticks)`);
 });

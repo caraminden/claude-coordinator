@@ -239,11 +239,11 @@ export class Memory {
     // Every row of the project index comes back, matching or not (vec null when not), so a page is 256 rows scanned and a
     // selective filter can't walk the whole scheme in one call (it held the loop up to 2.8 s, #1034).
     const page = this.db.prepare(`SELECT m.id, CASE WHEN t.project_id = ?1 AND m.ts >= t.created_at
-        ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
+        ${opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
         ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}
         THEN m.vec END AS vec
       FROM memory_chunks m LEFT JOIN tickets t ON t.id = m.ticket_id
-      WHERE m.project_id = ?1 AND m.model = ?2 AND m.id > ?4
+      WHERE m.project_id = ?1 AND m.model = ?2 AND m.id > ?4 ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : ''}
       ORDER BY m.id LIMIT ${SEARCH_PAGE}`);
     const top: { id: number; score: number }[] = [];
     // In pages with a yield between them: read cold, Citadel's 3.5k vectors (14 MB) held the server 1.0 s in one go (#614).

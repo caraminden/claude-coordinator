@@ -2,7 +2,8 @@
 // collapsed under "Hidden (N)" with Unhide, and a note inside one opened by its link. Only ever your own. Hiding
 // lives on the scheme's Members tab, not on the list's rows (Cara, 2026-11-12: "Lets move the hide button to just
 // a setting, its not worth the cost of making the scheme button look weird and short").
-import { api, h, me, schemeIcon, view } from './base.js';
+import { account, api, h, me, schemeIcon, view } from './base.js';
+import { schemeSwitchHash } from './scheme-switch.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
@@ -68,7 +69,9 @@ function redrawHidden() {
 
 // quiet: no count or spinner, for the ones you hid and the ones you aren't in.
 const row = (p, button = null, quiet = p.hidden) => h('div', { class: 'scheme-row' },
-  h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name },
+  h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: schemeSwitchHash(location.hash, p.id, !!account?.admin), title: p.name,
+    // The hash at the click, not at the draw: the page may have changed since the shelf was drawn.
+    onclick: (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); location.hash = schemeSwitchHash(location.hash, p.id, !!account?.admin); } },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), quiet ? null : schemeCount(p)),
   button);
 

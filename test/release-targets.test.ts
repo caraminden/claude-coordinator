@@ -503,6 +503,12 @@ test("a CI-signed APK's roll back (ADR 0012): its run on the roll back branch si
   assert.deepEqual([v.current?.number, v.current?.commit, v.next], [6, 'shaG', null]);
   assert.ok(!reader.rollingBack(p.id, t.id));
 
+  // A newer green ends the pin: phones still run the roll back's build, so its card still names last green's commit.
+  pin = null;
+  await reader.refresh();
+  [v] = reader.read();
+  assert.deepEqual([v.current?.number, v.current?.commit], [6, 'shaG']);
+
   // A second roll back whose run fails: said once, nothing handed on.
   pin = { sha: 'shaH', from: 'shaG', by: 'Cara', at: now + 20 * m, code: 7 };
   back.unshift({ ...run(21, 'completed', 'failure', now + 21 * m, now + 25 * m), head_branch: ROLLBACK_BRANCH, head_sha: 'shaH' });
@@ -1276,9 +1282,11 @@ test("a CI package's last green build is the newest released run last green hold
   const order = ['sha1', 'sha2', 'sha3', 'sha4'];
   let green = { sha: 'sha4', at: 1 };
   const pins: Record<string, Pin> = {};
+  let clock = now;
+  let unsure = '';
   const reader = new CiPackageReader({
-    store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => now,
-    contains: async (_d, a, b) => order.indexOf(a) <= order.indexOf(b),
+    store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => clock,
+    contains: async (_d, a, b) => (a === unsure ? null : order.indexOf(a) <= order.indexOf(b)),
     lastGreen: { get: () => green, pinned: (_p, id) => pins[id] ?? null },
   });
   await reader.refresh();
@@ -1294,6 +1302,30 @@ test("a CI package's last green build is the newest released run last green hold
   assert.equal(held.next, null);
   assert.deepEqual(held.recent.map((r) => r.version), ['sha3', 'sha1'], 'the build after it is a previous one');
   assert.deepEqual([...reader.keeps()], [`${p.id}/2`]);
+
+  // A newer build git can't place against last green yet (a timeout): last green's build stays what it was, so the CI
+  // store keeps it meanwhile.
+  delete pins[t.id];
+  order.splice(2, 0, 'sha5');
+  runs.unshift(run(5, 'completed', 'success', now - 20 * m, now - 10 * m));
+  jobs[5] = [job(5, 'release', 'completed', 'success', now - 15 * m, now - 10 * m)];
+  store.putCiFile({ project_id: p.id, workflow: 'windows.yml', run_id: 5, run_attempt: 1, sha: 'sha5', ref: '', target: '', size: 1, sha256: '', created_at: now, name: 'peek-5.zip', kind: 'build' });
+  unsure = 'sha5';
+  clock += 10 * m;
+  await reader.refresh();
+  assert.equal(reader.read()[0].current?.version, 'sha5', 'read again');
+  assert.deepEqual(reader.greenBuild(p.id, t.id), { run: 2, sha: 'sha2', workflow: 'windows.yml' }, "git couldn't tell: last green's build is kept");
+  assert.ok(reader.keeps().has(`${p.id}/2`));
+  unsure = '';
+
+  // Pinned again, then newer runs push the held one out of the page GitHub lists: it's still what people get.
+  pins[t.id] = { sha: 'sha2', from: 'sha3', at: 1, by: 'Cara', build: { run: 2, sha: 'sha2', workflow: 'windows.yml' } };
+  runs.splice(runs.findIndex((r) => r.id === 2), 1);
+  clock += 10 * m;
+  await reader.refresh();
+  const [gone] = reader.read();
+  assert.deepEqual([gone.current?.version, gone.current?.outcome, gone.next], ['sha2', 'live', null], 'the held build is current from its pin');
+  assert.ok(reader.keeps().has(`${p.id}/2`), 'and the store keeps it');
   green = { sha: 'sha1', at: 3 };
   await reader.refresh();
   assert.equal(reader.greenBuild(p.id, t.id), null, 'run 1 is gone from the store: nothing to hand out');

@@ -30,7 +30,7 @@ export interface RollbackDeps {
   lastGreen: LastGreen;
   /** A scheme's clone, where last green and what runs are compared. */
   repoDir: (projectId: number) => string | null;
-  /** By target kind: 'contraption', 'citadel-server', 'ci'. */
+  /** By target kind: 'contraption', 'citadel-server', 'ci', 'apk'. */
   starters: Record<string, Starter>;
   /**
    * The target whose roll back this one's is, by id in its scheme, or null for its own (ADR 0012, Q2 "Yes, together"):
@@ -119,7 +119,7 @@ export class Rollback {
     if (!tv) throw new HttpError(404, `${of.target.name} rolls back with its app, which isn't on the Releases page`);
     const { projectId, id, name, kind } = tv.target;
     const start = this.d.starters[kind];
-    if (!start) throw new HttpError(404, `${name} can't roll back: only an app and Citadel's server can deploy an older commit`);
+    if (!start) throw new HttpError(404, `${name} can't roll back: its kind of release has no way back to an older commit`);
     const green = this.d.lastGreen.get(projectId);
     if (!green) throw new HttpError(409, `No commit on main has passed the full suite since Citadel started watching, so there's no last green to go back to.`);
     const key = keyOf(projectId, id);

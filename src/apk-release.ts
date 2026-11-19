@@ -9,6 +9,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { ANDROID_SDK, androidEnv } from './claude-link.ts';
+import { HttpError } from './http.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 
 const run = promisify(execFile);
@@ -63,6 +64,39 @@ export async function pointBranch(slug: string, branch: string, sha: string, as:
     if (!/Reference does not exist|Not Found|HTTP 404|HTTP 422/.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw err;
     await run('gh', ['api', '-X', 'POST', `repos/${slug}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], o);
   }
+}
+
+/** What a CI-signed APK's roll back needs (ADR 0012): the target's workflow, repo and published build, and the GitHub calls. */
+export interface RollbackApk {
+  name: string;
+  /** Its release workflow's path or file name; null when it has none. */
+  workflow: string | null;
+  slug: string | null;
+  /** The published versionCode. */
+  current: number | null | undefined;
+  /** A copy of Citadel (a preview, a dev copy): it shares the live feed's folder and the scheme's GitHub, so it never releases. */
+  copy: boolean;
+  as: GithubEnv;
+  branch: string;
+  point?: typeof pointBranch;
+  start?: typeof dispatch;
+}
+
+/** Point `o.branch` at `sha` (last green) and start its release workflow there numbered one past the published build.
+ * Returns the versionCode it signs as; throws an HttpError a card shows. */
+export async function rollBackApk(o: RollbackApk, sha: string): Promise<number> {
+  if (!o.workflow || !o.slug || !Number.isInteger(o.current)) throw new HttpError(409, `${o.name} has no release workflow, published build or GitHub repo to roll back with`);
+  if (o.copy) throw new HttpError(409, "This copy of Citadel doesn't release, so it can't roll an APK back");
+  const file = o.workflow.replace(/^.*\//, '');
+  const code = o.current! + 1;
+  await (o.point ?? pointBranch)(o.slug, o.branch, sha, o.as);
+  try {
+    await (o.start ?? dispatch)(o.slug, file, o.branch, o.as, { version_code: String(code) });
+  } catch (err: any) {
+    if (/Unexpected inputs/i.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw new HttpError(409, `Last green's ${file} doesn't take a version_code input yet, so it can't sign last green as build ${code}: its scheme adds the input (ADR 0012), and once that's on last green this button works.`);
+    throw err;
+  }
+  return code;
 }
 
 /** A signed APK's file name ("mandate-7.apk") as its versionCode, or null when it doesn't carry one. */

@@ -85,7 +85,7 @@ import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
-import { dispatch, OldApk, OtherKey, pointBranch, publish } from './src/apk-release.ts';
+import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
@@ -688,6 +688,8 @@ const apkReader = new ApkReader({
   // A CI-signed APK's roll back (ADR 0012): its release run on citadel/rollback signs last green, published once signed.
   pinned: (id, t) => lastGreen.pinned(id, t),
   rolledBack: (t, run, current, code) => {
+    // A copy (a preview, a dev copy) reads the live scheme's runs and shares the live feed's folder: only the live server publishes.
+    if (services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) return;
     const pin = lastGreen.pinned(t.projectId, t.id);
     void publishRun(t, run, current, { code, name: null }, pin?.by ?? 'a roll back', null).then(
       () => void releases.refresh(),
@@ -791,20 +793,8 @@ const rollback = new Rollback({
     apk: async (tv, to) => {
       const t = targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id);
       const p = store.getProject(tv.target.projectId);
-      const slug = p && repoSlug(p.repo_url);
-      const cur = tv.current?.number;
-      if (!t?.workflow || !t.contraption || !p?.repo_dir || !slug || !Number.isInteger(cur)) throw new HttpError(409, `${tv.target.name} has no release workflow, published build or GitHub repo to roll back with`);
-      // A copy (a dev copy, a preview) shares the live feed's folder and the scheme's GitHub: it never releases.
-      if (services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) throw new HttpError(409, "This copy of Citadel doesn't release, so it can't roll an APK back");
-      const as = githubOf(p.repo_dir);
-      const code = cur! + 1;
-      await pointBranch(slug, ROLLBACK_BRANCH, to, as);
-      try {
-        await dispatch(slug, t.workflow.replace(/^.*\//, ''), ROLLBACK_BRANCH, as, { version_code: String(code) });
-      } catch (err: any) {
-        if (/Unexpected inputs/i.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw new HttpError(409, `Last green's ${t.workflow.replace(/^.*\//, '')} doesn't take a version_code input yet, so it can't sign last green as build ${code}: its scheme adds the input (ADR 0012), and once that's on last green this button works.`);
-        throw err;
-      }
+      if (!t?.contraption || !p?.repo_dir) throw new HttpError(409, `${tv.target.name} has no app or repo to roll back with`);
+      const code = await rollBackApk({ name: tv.target.name, workflow: t.workflow ?? null, slug: repoSlug(p.repo_url), current: tv.current?.number, copy: services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR, as: githubOf(p.repo_dir), branch: ROLLBACK_BRANCH }, to);
       apkReader.started(t);
       void releases.refresh();
       return { code };

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { apkCode, certDigests, dispatch, nextFeed, OldApk, OtherKey, publish } from '../src/apk-release.ts';
+import { apkCode, certDigests, dispatch, nextFeed, OldApk, OtherKey, publish, rollBackApk } from '../src/apk-release.ts';
 
 // src/apk-release.ts (#629): an APK target's release step, as Mandate's android/README.md does it by hand. A fake gh on
 // PATH stands in for GitHub: `run download` writes the artifact named by APK_NAME, and every call is logged.
@@ -102,4 +102,26 @@ test('a publish is kept: who, which build, which run and when, by scheme (#663)'
 test('dispatch starts the release workflow on the branch', async () => {
   await dispatch('o/mandate', 'android-release.yml', 'main', undefined);
   assert.match(readFileSync(log, 'utf8'), /^api -X POST repos\/o\/mandate\/actions\/workflows\/android-release\.yml\/dispatches -f ref=main$/m);
+});
+
+test('a CI-signed APK\'s roll back points the branch at last green, then signs it one past the published build; a copy of Citadel never does (ADR 0012)', async () => {
+  const calls: string[] = [];
+  const o = {
+    name: 'Mandate', workflow: '.github/workflows/android-release.yml', slug: 'cara/mandate', current: 11, copy: false, as: undefined, branch: 'citadel/rollback',
+    point: async (slug: string, branch: string, sha: string) => void calls.push(`point ${slug} ${branch} ${sha}`),
+    start: async (slug: string, file: string, ref: string, _as: unknown, inputs: Record<string, string> = {}) => void calls.push(`dispatch ${slug} ${file} ${ref} ${JSON.stringify(inputs)}`),
+  };
+  assert.equal(await rollBackApk(o, 'abc123'), 12);
+  assert.deepEqual(calls, ['point cara/mandate citadel/rollback abc123', 'dispatch cara/mandate android-release.yml citadel/rollback {"version_code":"12"}']);
+
+  calls.length = 0;
+  await assert.rejects(rollBackApk({ ...o, copy: true }, 'abc123'), (e: any) => e.status === 409 && /doesn't release/.test(e.message));
+  await assert.rejects(rollBackApk({ ...o, current: null }, 'abc123'), (e: any) => e.status === 409);
+  assert.deepEqual(calls, [], 'a refused roll back moves no branch and starts no run');
+
+  // Last green's workflow from before the scheme added the input: GitHub's 422 becomes what the card says to do.
+  const old = { ...o, start: async () => { throw Object.assign(new Error('gh: Unexpected inputs provided: ["version_code"] (HTTP 422)'), { stderr: '' }); } };
+  await assert.rejects(rollBackApk(old, 'abc123'), (e: any) => e.status === 409 && /doesn't take a version_code input yet/.test(e.message) && /build 12/.test(e.message));
+  const down = { ...o, start: async () => { throw new Error('HTTP 502'); } };
+  await assert.rejects(rollBackApk(down, 'abc123'), /HTTP 502/);
 });

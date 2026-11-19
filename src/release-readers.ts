@@ -561,19 +561,20 @@ export class CiPackageReader implements Reader {
   private async findGreen(t: Found, runs: RunJobs[]) {
     const green = this.d.lastGreen?.get(t.projectId);
     const dir = this.d.store.getProject(t.projectId)?.repo_dir;
-    this.greens.delete(tkey(t));
-    if (!green || !dir || !this.d.contains || !t.workflow) return;
+    if (!green || !dir || !this.d.contains || !t.workflow) return void this.greens.delete(tkey(t));
     for (const r of runs) {
       if (!this.cache.released(t, r) || !this.cache.file(r.run.id)) continue;
       const key = `${green.sha} ${r.run.head_sha}`;
       if (!this.inGreen.has(key)) {
         if (this.inGreen.size > 500) this.inGreen.clear();
         const yes = await this.d.contains(dir, r.run.head_sha, green.sha);
-        if (yes === null) return; // git couldn't tell: ask again next refresh
+        // git couldn't tell: keep what it found before (the CI store keeps that build meanwhile) and ask again next refresh
+        if (yes === null) return;
         this.inGreen.set(key, yes);
       }
       if (this.inGreen.get(key)) return void this.greens.set(tkey(t), { run: r.run.id, sha: r.run.head_sha, workflow: t.workflow.replace(/^.*\//, '') });
     }
+    this.greens.delete(tkey(t));
   }
 
   /** Last green's build of a target, with a download in the CI store; null when none is in view. */
@@ -604,9 +605,12 @@ export class CiPackageReader implements Reader {
       // card's roll back line says what waits.
       const held = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
       const heldRun = held && runs.find((r) => r.run.id === held.run);
-      if (heldRun) {
+      if (held) {
         const recent = runs.filter((r) => r !== heldRun && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
-        return { target: targetOf(t), current: runRelease(heldRun, 'live', ch(heldRun), file(heldRun), num.of(heldRun)), next: null, line: [], recent };
+        // Newer runs can push the held one out of the page GitHub lists: it is still what people get, so show it from the pin.
+        const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), file(heldRun), num.of(heldRun))
+          : { version: held.sha, number: null, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} };
+        return { target: targetOf(t), current, next: null, line: [], recent };
       }
       const cur = runs.find(out);
       // A build that shipped but never went out (its needed workflow didn't pass) reached no one: not a release, nor a failed one.
@@ -715,13 +719,15 @@ export class ApkReader implements Reader {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
       // Held by a roll back that signs last green again (ADR 0012): its run on the roll back branch, read while pinned.
       const pin = this.d.pinned?.(t.projectId, t.id);
-      if (pin?.code && t.workflow) {
+      const pub = feed && t.contraption ? this.d.store.lastApkPublish(t.projectId, t.contraption) : null;
+      // Also after the pin ends, while the published APK is still the roll back's: its card names that run's commit.
+      const fromBack = !!pub && pub.version_code === feed?.versionCode && !runs.some((r) => r.run.id === pub.run_id);
+      if ((pin?.code || fromBack) && t.workflow) {
         // Read every refresh until it is published: GitHub can take a while to list a dispatched run.
-        if (feed && feed.versionCode < pin.code) this.cache.forget(this.rb(t));
+        if (pin?.code && feed && feed.versionCode < pin.code) this.cache.forget(this.rb(t));
         await this.cache.read(this.rb(t));
       }
-      const back = pin?.code ? (this.cache.runs.get(tkey(this.rb(t))) ?? []) : [];
-      const pub = feed && t.contraption ? this.d.store.lastApkPublish(t.projectId, t.contraption) : null;
+      const back = this.cache.runs.get(tkey(this.rb(t))) ?? [];
       const built = !feed ? null : (pub?.version_code === feed.versionCode ? [...runs, ...back].find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
       if (built) this.builtAt.set(tkey(t), built.run.head_sha);
       else this.builtAt.delete(tkey(t));

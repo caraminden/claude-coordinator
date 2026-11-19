@@ -135,3 +135,24 @@ export function addAppTurnsChecks(store: Store, dataDir: string): string[] {
   const homes = new Set(store.listContraptions().map((c) => c.home_scheme).filter((id): id is number => id !== null));
   return [...homes].map((id) => addAppTurnsCheck(store, dataDir, id)).filter((l): l is string => !!l);
 }
+
+/** One template's state in a scheme (H1, #1057): rows that follow it or are hand-made copies of it, and whether it is missing or was left out on purpose. */
+export interface AuditCheck { slug: string; name: string; rows: { id: number; name: string; template: boolean }[]; state: 'ok' | 'missing' | 'duplicate' | 'left-out' }
+
+/**
+ * The scheme's rows against the kit's templates. "Left out on purpose" is a template the scheme's entry in STANDARD_AUDITS
+ * doesn't list; a scheme with no entry has left nothing out. Two rows for one template (a hand-made copy beside the
+ * template row, matched by COPY_NAMES) is a duplicate.
+ */
+export function checkAudits(store: Store, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates()): AuditCheck[] {
+  const p = store.getProject(projectId);
+  const picks = p ? STANDARD_AUDITS[p.name] : undefined;
+  const rows = store.schedules.list(projectId);
+  return [...templates.values()].map((t) => {
+    const mine = rows
+      .filter((s) => s.template === t.slug || (!s.template && (COPY_NAMES[t.slug] ?? [t.name]).includes(s.name)))
+      .map((s) => ({ id: s.id, name: s.name, template: s.template === t.slug }));
+    const state = mine.length > 1 ? 'duplicate' : mine.length ? 'ok' : picks && !(t.slug in picks) ? 'left-out' : 'missing';
+    return { slug: t.slug, name: t.name, rows: mine, state };
+  });
+}

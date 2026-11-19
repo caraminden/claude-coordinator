@@ -22,6 +22,7 @@ import { personGithub } from '../github-link.ts';
 import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
+import { checkAudits } from '../standard-audits.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -289,7 +290,17 @@ function scheduleTemplate(app: App, project: Pick<Project, 'id' | 'name'>, body:
 
 /** A schedule for the API: its cron in words and its last run's minion number. */
 function scheduleView(app: App, s: Schedule) {
-  return { ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? (app.store.getTicket(s.last_ticket_id)?.number ?? null) : null };
+  // What each run found and cost is read from the minion and the turns by id, never copied (H1, #1057).
+  const run = (id: number | null) => {
+    const t = id ? app.store.getTicket(id) : null;
+    return t ? { number: t.number, state: t.state, status: t.status, note: t.note, cost: app.store.ticketCost(t.id) } : null;
+  };
+  const last = run(s.last_ticket_id);
+  const runs = app.store.schedules.runs(s.id).map((r) => ({ at: r.at, skip: r.skip, ...(run(r.ticket_id) ?? {}) }));
+  return {
+    ...s, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
+    last_note: last?.note ?? null, last_cost: last?.cost ?? null, runs, skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
+  };
 }
 
 /** A new minion's `parent` (#N in this scheme), or null for none; a number with no minion here is refused. */
@@ -1218,6 +1229,10 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, project }) => json(res, 200, { schedules: app.store.schedules.list(project.id).map((s) => scheduleView(app, s)) }),
+  },
+  {
+    method: 'GET', path: '/api/projects/:project/schedule-audits', who: PEOPLE_AND_TASKMASTER,
+    handler: ({ res, app, project }) => json(res, 200, { audits: checkAudits(app.store, project.id) }),
   },
   {
     method: 'POST', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,

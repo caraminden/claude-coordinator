@@ -145,7 +145,7 @@ while it runs. The session trusts the summary and CI; it does not re-run what th
 
 ## Reviewer Grunts and fix loops
 
-A Grunt whose result you need this turn runs with `run_in_background: false`; if started in the background, wait for it with a blocking command before ending the turn.
+An Agent call that leaves out `run_in_background` runs in the foreground (the kit's grunt-model hook fills in `false`), so a Grunt whose result you need this turn just leaves it out. Pass `true` only for a Grunt you won't wait on; a stop while it runs goes through, and Claude Code wakes the turn with its result.
 
 A reviewer's brief says: don't trust the author's report, read the diff; you don't dispatch
 subagents; look outside the diff only to test a named risk.

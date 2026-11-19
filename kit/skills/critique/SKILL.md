@@ -58,7 +58,7 @@ The rubric's other `when:` parts still match as above.
 
 Start a `citadel:critic` Grunt per batch with `model` and `effort` on the call from the rubric. A
 rubric that names neither gets the format's defaults, and you write them into the rubric the next
-time you touch it. Set `run_in_background: false` on the Agent call (a backgrounded critic is a refused stop), about 6 items a call, several calls in parallel for a bigger set. Brief:
+time you touch it. Set `run_in_background: false` on the Agent call, about 6 items a call, several calls in parallel for a bigger set. Brief:
 
 > Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`[; the next round is the last].
 > [Max findings: `<max_findings>` an item.]

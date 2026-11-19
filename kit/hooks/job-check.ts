@@ -1,7 +1,9 @@
 /**
  * The job check (Stop hook, minions only): refuses to end the turn while this session's own
- * background job is still running, at most twice per prompt, and says to wait inside the turn. A
- * minion's turn is one `claude -p`; once it ends the minion shows idle and the job may not outlive it.
+ * background Bash job is still running, at most twice per prompt, and says to wait inside the turn.
+ * A running Grunt never blocks the stop (#1031): `claude -p` holds the turn open for it (Claude Code's
+ * quiet background wait, checked on 2.1.323) and wakes the session with its result, so the turn ends
+ * once the Grunt is done and its result read. Refusing that stop only cost a retry.
  * Ported from Delve's mod (tools/mods/delve/hooks/runs.ts), which tracked the jobs itself; Claude Code
  * now lists them in the Stop input (background_tasks).
  */
@@ -23,25 +25,23 @@ export function runningTasks(input: any): { id: string; what: string; grunt: boo
     .map((t: any) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: /agent/i.test(String(t.type ?? '')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
 }
 
-/** The background jobs still running, as "id (what it is)". */
+/** The background Bash jobs still running (Grunts left out), as "id (what it is)". */
 export function runningJobs(input: any): string[] {
-  return runningTasks(input).map((t) => `${t.id} (${t.what})`);
+  return runningTasks(input).filter((t) => !t.grunt).map((t) => `${t.id} (${t.what})`);
 }
 
-/** The one action that ends the wait for this job. */
+/** The one action that ends the wait for this Bash job. */
 function wayOut(t: ReturnType<typeof runningTasks>[number]): string {
-  return t.grunt
-    ? `${t.id} (${t.what}), a Grunt: wait for its result with SendMessage to ${t.id}, or stop it with TaskStop ${t.id}`
-    : `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it); without the pid, \`citadel-wait cmd '<test>'\` / \`port <n>\` / \`file <path>\`, or stop it with TaskStop ${t.id}`;
+  return `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it); without the pid, \`citadel-wait cmd '<test>'\` / \`port <n>\` / \`file <path>\`, or stop it with TaskStop ${t.id}`;
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */
 export function jobCheck(input: any, role: string | undefined, blocks: number): string | null {
   if (role !== 'thread' || blocks >= MAX_STOP_BLOCKS) return null;
-  const jobs = runningJobs(input);
+  const jobs = runningTasks(input).filter((t) => !t.grunt);
   if (!jobs.length) return null;
-  const lines = runningTasks(input).map((t) => `- ${wayOut(t)}`).join('\n');
-  return `[citadel job check] Your own background job is still running, and ending the turn now would leave it unwatched. Keep its task in progress and end the wait with the action beside each job (\`sleep N; check\` is refused):\n${lines}\nA Grunt whose result this turn needs starts with \`run_in_background: false\` on its Agent call, so it can't hold up a later stop.`;
+  const lines = jobs.map((t) => `- ${wayOut(t)}`).join('\n');
+  return `[citadel job check] Your own background job is still running, and ending the turn now would leave it unwatched. Keep its task in progress and end the wait with the action beside each job (\`sleep N; check\` is refused):\n${lines}`;
 }
 
 /** Runs the check for one Stop, counting refusals per prompt in a temp file; prints the block, if any. */

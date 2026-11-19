@@ -10,7 +10,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   Hard refusals belong in the tripwire (`src/tripwire.ts`), not here. A hook meant for minions
   only checks `COORDINATOR_ROLE` (`thread`), since Taskmasters load the kit too. Today's hooks:
   - `job-check.ts` (Stop, minions only): refuses to end the turn while the session's own
-    background job runs, at most twice per prompt.
+    background Bash job runs, at most twice per prompt. A running Grunt doesn't block it:
+    `claude -p` holds the turn for the Grunt and wakes it with the result (#1031).
   - `answer-check.ts` (Stop, minions and Taskmasters; job-check.ts runs it on each stop it lets
     through): a trial that refuses nothing. It writes a
     `would refuse` retro-log line when a turn of five or more tool calls ends on a thin last
@@ -32,6 +33,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     definition sets it, or the definition says `inherit`). The reason quotes the job table in
     `skills/subagents/SKILL.md`, the one place its rows live. Built-ins need both on the call; forks
     and agents it can't read (another plugin's) go through.
+    A call it lets through without `run_in_background` gets `false`, so Grunts run in the
+    foreground unless a call asks otherwise (#1031).
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
 - `schedules/<slug>.md` are the standard audits' templates (#799): a scheduled run whose row names one

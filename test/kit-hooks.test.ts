@@ -37,15 +37,17 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   assert.match(jobCheck(stop(), 'thread', 0)!, /still running.*b1 \(Run the test suite\), a Bash job/s);
   assert.match(jobCheck(stop(), 'thread', 0)!, /`citadel-wait pid <pid>`/, 'names a wait Claude Code lets through (#481)');
   assert.match(jobCheck(stop({ background_tasks: [{ ...running, pid: 4242 }] }), 'thread', 0)!, /`citadel-wait pid 4242`/, 'the pid when the task has it');
-  const grunt = { id: 'a7', type: 'agent', status: 'running', description: 'Review the diff' };
+  // #1031: a running Grunt never blocks the stop. claude -p holds the turn open for it and wakes the session with its
+  // result (Claude Code's quiet background wait, probed on 2.1.323), so a refusal only cost a retry.
+  const grunt = { id: 'a7', type: 'subagent', status: 'running', description: 'Review the diff', agent_type: 'citadel:reviewer' };
+  assert.equal(jobCheck(stop({ background_tasks: [grunt] }), 'thread', 0), null, 'a Grunt alone: the stop goes through');
+  assert.equal(jobCheck(stop({ background_tasks: [{ ...grunt, type: 'local_agent' }, { ...grunt, id: 'a8' }] }), 'thread', 0), null, 'older type names, and several Grunts');
   const both = jobCheck(stop({ background_tasks: [running, grunt] }), 'thread', 0)!;
-  assert.match(both, /a7 \(Review the diff\), a Grunt: wait for its result with SendMessage to a7, or stop it with TaskStop a7/, 'a Grunt gets its own way out');
-  assert.match(both, /b1 .*`citadel-wait pid <pid>`/s, 'each job lists its own action');
-  assert.match(both, /`run_in_background: false`/);
+  assert.match(both, /b1 \(Run the test suite\), a Bash job.*`citadel-wait pid <pid>`/s, 'a Bash job beside a Grunt is still refused');
+  assert.doesNotMatch(both, /a7|Grunt|SendMessage/, 'and the refusal names only the Bash job');
   assert.match(both, /`citadel-wait cmd '<test>'`/, 'a Bash job without a pid keeps the other waits');
   const other = jobCheck(stop({ background_tasks: [{ id: 'm1', type: 'monitor', status: 'running', description: 'watch' }] }), 'thread', 0)!;
-  assert.match(other, /m1 \(watch\), a Bash job.*TaskStop m1/s, 'an unknown type is not told to SendMessage');
-  assert.match(jobCheck(stop({ background_tasks: [{ ...grunt, type: 'local_agent' }] }), 'thread', 0)!, /a Grunt: wait for its result with SendMessage/);
+  assert.match(other, /m1 \(watch\), a Bash job.*TaskStop m1/s, 'an unknown type is not taken for a Grunt');
   assert.equal(jobCheck(stop(), 'thread', MAX_STOP_BLOCKS), null);
   assert.equal(jobCheck(stop(), 'coordinator', 0), null, 'the Taskmaster loads the kit too, and is left alone');
   assert.equal(jobCheck(stop({ background_tasks: [{ ...running, status: 'completed' }] }), 'thread', 0), null);
@@ -62,6 +64,10 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   assert.equal(stopHook(stop({ stop_hook_active: true }), env, dir), null, 'a third stop ends the turn');
   assert.ok(stopHook(stop({ prompt_id: 'p2' }), env, dir), 'the next prompt counts afresh');
   assert.equal(logLines(env.COORDINATOR_SHARED_DIR).filter((l) => l.includes('refused stop')).length, 3);
+  assert.equal(stopHook(stop({ prompt_id: 'p3', background_tasks: [grunt] }), env, dir), null, 'a stop with only a Grunt running goes through');
+  assert.equal(logLines(env.COORDINATOR_SHARED_DIR).filter((l) => l.includes('refused stop')).length, 3, 'and logs no refused stop');
+  stopHook(stop({ prompt_id: 'p4', background_tasks: [running, grunt] }), env, dir);
+  assert.doesNotMatch(logLines(env.COORDINATOR_SHARED_DIR).filter((l) => l.includes('refused stop')).at(-1)!, /a7/, 'a mixed stop logs only its Bash job');
   // Without a prompt id, only a first stop is refused.
   assert.ok(stopHook(stop({ session_id: 's2', prompt_id: undefined }), env, dir));
   assert.equal(stopHook(stop({ session_id: 's2', prompt_id: undefined, stop_hook_active: true }), env, dir), null);
@@ -275,6 +281,8 @@ test('grunt-model guard: sends back an Agent call with no deliberate model or ef
   const call = (tool_input: object, tool_name = 'Agent') => gruntModelHook({ hook_event_name: 'PreToolUse', tool_name, cwd: repo, tool_input: { description: 'd', prompt: 'p', ...tool_input } });
   const denied = (out: string | null) => out && JSON.parse(out).hookSpecificOutput.permissionDecision === 'deny';
   const reason = (out: string | null) => JSON.parse(out!).hookSpecificOutput.permissionDecisionReason as string;
+  // A call it lets through runs, in the foreground when it didn't say (#1031).
+  const ran = (out: string | null) => !!out && (!JSON.parse(out).hookSpecificOutput.permissionDecision && JSON.parse(out).hookSpecificOutput.updatedInput.run_in_background === false);
 
   // A bare call (general-purpose by default) and built-ins with half a choice are sent back, pointing at the table.
   for (const ti of [{}, { subagent_type: 'general-purpose' }, { subagent_type: 'Explore', model: 'sonnet' }, { subagent_type: 'Plan', effort: 'high' }]) assert.ok(denied(call(ti)), JSON.stringify(ti));
@@ -284,21 +292,28 @@ test('grunt-model guard: sends back an Agent call with no deliberate model or ef
   assert.match(reason(call({ subagent_type: 'Explore' })), /Row for Explore: .*sonnet, low/, 'names the row when the agent type has one');
   assert.match(reason(call({ subagent_type: 'Explore', model: 'sonnet' })), /no effort/);
   // Both on the call, a definition that pins both, or a definition plus the missing half on the call go through.
-  assert.equal(call({ subagent_type: 'general-purpose', model: 'sonnet', effort: 'medium' }), null);
-  assert.equal(call({ model: 'haiku', effort: 'low' }), null);
-  assert.equal(call({ subagent_type: 'pinned' }), null);
-  assert.equal(call({ subagent_type: 'other-name' }), null, 'found by its name: field, not only its file name');
+  assert.ok(ran(call({ subagent_type: 'general-purpose', model: 'sonnet', effort: 'medium' })));
+  assert.ok(ran(call({ model: 'haiku', effort: 'low' })));
+  assert.ok(ran(call({ subagent_type: 'pinned' })));
+  assert.ok(ran(call({ subagent_type: 'other-name' })), 'found by its name: field, not only its file name');
   assert.ok(denied(call({ subagent_type: 'half' })), 'a definition with effort but no model');
-  assert.equal(call({ subagent_type: 'half', model: 'opus' }), null);
+  assert.ok(ran(call({ subagent_type: 'half', model: 'opus' })));
   assert.ok(denied(call({ subagent_type: 'inherits' })), 'model: inherit is not a choice');
-  assert.equal(call({ subagent_type: 'inherits', model: 'sonnet' }), null);
+  assert.ok(ran(call({ subagent_type: 'inherits', model: 'sonnet' })));
   // The kit's own agents pin both, so a plain call goes through.
-  for (const f of readdirSync(join(HOOKS, '..', 'agents'))) assert.equal(call({ subagent_type: `citadel:${f.replace(/\.md$/, '')}` }), null, f);
+  for (const f of readdirSync(join(HOOKS, '..', 'agents'))) assert.ok(ran(call({ subagent_type: `citadel:${f.replace(/\.md$/, '')}` })), f);
   // Forks run on the parent by design; agents it can't read (another plugin's, a missing one) and other tools fail open.
-  assert.equal(call({ subagent_type: 'fork' }), null);
-  assert.equal(call({ subagent_type: 'someplugin:thing' }), null);
-  assert.equal(call({ subagent_type: 'nowhere' }), null);
+  assert.ok(ran(call({ subagent_type: 'fork' })));
+  assert.ok(ran(call({ subagent_type: 'someplugin:thing' })));
+  assert.ok(ran(call({ subagent_type: 'nowhere' })));
   assert.equal(gruntModelHook({ tool_name: 'Read', cwd: repo, tool_input: {} }), null);
+  // Claude Code backgrounds a Grunt by default; a call that leaves it out runs in the foreground, with the rest of its input kept.
+  const fg = JSON.parse(call({ model: 'haiku', effort: 'low' })!).hookSpecificOutput;
+  assert.deepEqual(fg, { hookEventName: 'PreToolUse', updatedInput: { description: 'd', prompt: 'p', model: 'haiku', effort: 'low', run_in_background: false } });
+  assert.equal(call({ model: 'haiku', effort: 'low', run_in_background: true }), null, 'a call that asks for the background keeps it');
+  assert.equal(call({ subagent_type: 'fork', run_in_background: false }), null, 'and one that already says false is left alone');
+  assert.equal(JSON.parse(call({ subagent_type: 'nowhere' })!).hookSpecificOutput.updatedInput.run_in_background, false, 'an agent it fails open on runs in the foreground too');
+  assert.ok(denied(call({ run_in_background: true })), 'a missing model is still sent back, whatever it asked for');
   // The older tool name is checked too.
   assert.ok(denied(call({}, 'Task')));
 

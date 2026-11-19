@@ -6,6 +6,9 @@
  * call, the definition or CLAUDE_CODE_EFFORT_LEVEL. Built-ins (general-purpose, Explore, Plan) have no definition, so
  * they need both on the call. Forks run on the parent's model by design and pass. The reason quotes the job table in
  * citadel:subagents (the one place its rows live). Fails open: an agent it can't find or read goes through.
+ * A call it lets through without `run_in_background` gets `false` (#1031): Claude Code backgrounds a Grunt by
+ * default, and a turn that ends on "started it" reads as its answer until the result wakes it. A call that
+ * sets it either way keeps its choice.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -80,20 +83,22 @@ export function jobTable(file = join(KIT, 'skills', 'subagents', 'SKILL.md')): {
   return rows;
 }
 
-/** One hook call; returns what to print (a deny for Claude Code), or null to let the call run. */
+/** One hook call; returns what to print (a deny, or the call in the foreground), or null to let the call run as it is. */
 export function gruntModelHook(input: any): string | null {
   if (input?.tool_name !== 'Agent' && input?.tool_name !== 'Task') return null;
   const ti = input?.tool_input ?? {};
+  // Only a plugin's hook may change a call's input; Claude Code refuses the call if a user's settings hook tries.
+  const pass = () => (ti.run_in_background === undefined ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: false } } }) : null);
   const type = String(ti.subagent_type || 'general-purpose');
-  if (type === 'fork') return null;
+  if (type === 'fork') return pass();
   let def: Record<string, string> | null = {};
   if (!BUILT_INS.has(type)) {
     def = definition(type, String(input?.cwd ?? process.cwd()));
-    if (!def) return null;
+    if (!def) return pass();
   }
   const hasModel = Boolean(ti.model) || Boolean(def.model && def.model !== 'inherit');
   const hasEffort = Boolean(ti.effort) || Boolean(def.effort) || Boolean(process.env.CLAUDE_CODE_EFFORT_LEVEL);
-  if (hasModel && hasEffort) return null;
+  if (hasModel && hasEffort) return pass();
   const missing = [!hasModel && 'no model', !hasEffort && 'no effort'].filter(Boolean).join(' and ');
   const rows = jobTable();
   const mine = rows.filter((r) => r.job.includes(`\`${type}\``));

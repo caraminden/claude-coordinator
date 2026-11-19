@@ -1,4 +1,5 @@
 // Decisions (#1064): every dated, quoted decision, parsed live from where it is written. Nothing is copied: the
+import { frontmatter } from './memory-files.ts';
 // Citadel-wide and scheme instructions (with their edit history), a scheme repo's CLAUDE.md, rules and ADRs, the kit
 // (with git history) and the memory notes (src/memory-files.ts's mapping). Josh, 2026-11-19, #1064's grilling:
 // a decision is Reversed when its source's own history replaced it with a newer one, or the text itself says so
@@ -52,7 +53,7 @@ function quotesIn(s: string): string[] {
     if (!close) continue;
     const j = s.indexOf(close, i + 1);
     if (j < 0) break;
-    const q = s.slice(i + 1, j).trim();
+    const q = s.slice(i + 1, j).replace(/\s+/g, ' ').trim();
     if (q.length >= 2 && !/^#?\d+$/.test(q)) out.push(q);
     i = j;
   }
@@ -125,14 +126,15 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
     let rule = '';
     if (paren) {
       const lead = text.slice(Math.max(paraStart, lineStarts[lineOf(open)]), open).replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|\*\*)/, '').trim();
-      rule = lastSentence(lead);
+      rule = lastSentence(lead.replace(/^(description|name):\s*"?/, ''));
     }
     if (!rule && opts.title) rule = opts.title;
     if (!rule) {
-      const before = lineText.slice(0, m.start - lineStarts[line]).replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+)/, '').trim();
+      const before = lineText.slice(0, m.start - lineStarts[line]).replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|(description|name):\s*"?)/, '').trim();
       rule = lastSentence(before) || heading(line);
     }
     rule = rule.replace(/\*\*/g, '').replace(/[:,(—-]\s*$/, '').trim();
+    rule = rule.replace(new RegExp(`^(${who}),?\\s+${DATE}[:,]?\\s*`, 'u'), '').replace(/^\p{Ll}/u, (c) => c.toUpperCase());
     const para = text.slice(paraStart, paraEnd);
     const key = `${m.who}|${m.date}|${quotes.map(norm).join('|') || norm(rule)}`;
     if (seen.has(key)) return;
@@ -445,4 +447,11 @@ function catFiles(repo: string, specs: string[]): Promise<Map<string, string>> {
 export function githubHref(repoUrl: string | null | undefined, ref: string, file: string, line?: number): string | null {
   const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(repoUrl ?? '');
   return m ? `https://github.com/${m[1]}/${m[2]}/blob/${ref}/${file.split('/').map(encodeURIComponent).join('/')}${line ? `#L${line}` : ''}` : null;
+}
+
+/** A memory note's title for the rule column: its description's first clause, without a leading "Cara 2026-11-18:". */
+export function memTitle(text: string): string {
+  const { name, description } = frontmatter(text);
+  const d = description.replace(/\\"/g, '"').split(/\s+[—–]\s+|;\s+/)[0].replace(/^\p{Lu}\p{Ll}+,?\s+20\d\d-\d\d-\d\d[:,]?\s*/u, '').trim();
+  return lastSentence(d || name.replace(/-/g, ' ')).slice(0, 120);
 }

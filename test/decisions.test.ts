@@ -1,4 +1,9 @@
 import { test } from 'node:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Store } from '../src/db.ts';
+import { loadDecisions } from '../src/decisions-load.ts';
 import assert from 'node:assert/strict';
 import { adrDir, assemble, githubHref, parseAdr, parseDecisions, replay, searchDecisions, type Doc } from '../src/decisions.ts';
 
@@ -46,9 +51,7 @@ test('replay: the Land then Ship edit reverses Land; a rewording or a cut does n
   assert.equal(revs[0].old.rule, 'Land, not merge');
   assert.equal(revs[0].by.rule, 'Ship, not land or merge');
   // Same person and day, reworded, no words of reversal: the same decision.
-  const reworded = LAND.replace('picked "Land" and', 'picked "Land" (and').replace('"Retire it":', '"Retire it"):');
   assert.deepEqual(replay([{ before: LAND, after: LAND.replace('"Retire it": "fold', '"Retire it", "fold'), at: 1, by: 'x' }], parse), []);
-  assert.ok(reworded);
   // A cut with nothing in its place: hidden, so not a reversal.
   const cut = LAND.replace(/Land, not merge \(Cara[^\n]*\n/, '');
   assert.deepEqual(replay([{ before: LAND, after: cut, at: 1, by: 'x' }], parse), []);
@@ -118,4 +121,31 @@ test('githubHref links GitHub repos and nothing else', () => {
   assert.equal(githubHref('https://github.com/o/r.git', 'main', 'docs/adr/a b.md', 3), 'https://github.com/o/r/blob/main/docs/adr/a%20b.md#L3');
   assert.equal(githubHref('git@github.com:o/r.git', 'abc', 'CLAUDE.md'), 'https://github.com/o/r/blob/abc/CLAUDE.md');
   assert.equal(githubHref('/some/folder', 'main', 'CLAUDE.md'), null);
+});
+
+test('loadDecisions: the Land then Ship save shows as a reversal, and its Taskmaster gets one held note for the copy left behind', async () => {
+  const store = new Store(join(mkdtempSync(join(tmpdir(), 'decisions-')), 'db.sqlite'));
+  store.createUser({ name: 'Cara', login: 'cara' });
+  const project = store.createProject('Peek', null);
+  const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
+  const mail: string[] = [];
+  const app = { store, claude: { accounts: () => null, configDir: () => null }, runner: { leaveMail: (to: number, _a: string, text: string) => mail.push(`${to}|${text}`) } } as any;
+  store.setAppInstructions(LAND, 'Cara');
+  store.setProjectInstructions(project.id, '- Say land (Cara, 2026-11-19: "Retire it" and "Land").', 'Cara');
+  const first = await loadDecisions(app, store.getProject(project.id)!);
+  assert.ok(first.decisions.some((d) => d.rule === 'Land, not merge' && !d.reversed));
+  assert.deepEqual(mail, [], 'the first look only records');
+  store.setAppInstructions(SHIP, 'Taskmaster');
+  const { decisions, counts } = await loadDecisions(app, store.getProject(project.id)!);
+  const land = decisions.find((d) => d.rule === 'Land, not merge')!;
+  assert.equal(decisions.find((d) => d.id === land.reversed!.by)!.rule, 'Ship, not land or merge');
+  assert.equal(land.reversed!.editor, 'Taskmaster');
+  assert.deepEqual(land.reversed!.stale.map((p) => p.label), ['Scheme instructions']);
+  assert.ok(counts.find((c) => c.kind === 'kit')!.count > 0, "the kit is read from the server's checkout");
+  assert.equal(mail.length, 1);
+  assert.match(mail[0], new RegExp(`^${tm.id}\\|.*Land, not merge.*Ship, not land or merge.*Still written in: Scheme instructions`, 's'));
+  await loadDecisions(app, store.getProject(project.id)!);
+  store.setProjectInstructions(project.id, '- Say land (Cara, 2026-11-19: "Retire it" and "Land"). Again.', 'Cara');
+  await loadDecisions(app, store.getProject(project.id)!);
+  assert.equal(mail.length, 1, 'told once per reversal');
 });

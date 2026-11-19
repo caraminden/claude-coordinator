@@ -30,7 +30,9 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { deleteNote, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
+import { deleteNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
+import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
+import { searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -868,6 +870,7 @@ export const projectRoutes: Route[] = [
       }
       if (instructions !== project.instructions) {
         store.setProjectInstructions(project.id, instructions, session.name);
+        recheckDecisions(app, [store.getProject(project.id)!]);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { everyone: true,
@@ -960,6 +963,7 @@ export const projectRoutes: Route[] = [
       }
       if (text !== store.appInstructions().text) {
         store.setAppInstructions(text, session.name);
+        recheckDecisions(app, store.listProjects());
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
           const coordinator = store.getOverlord(p.id);
@@ -1012,6 +1016,7 @@ export const projectRoutes: Route[] = [
       const by = `#${ticket.id} for ${(askerId === null ? undefined : store.getUser(askerId))?.name ?? 'nobody'}`;
       if (citadel) store.setAppInstructions(text, by);
       else store.setProjectInstructions(project.id, text, by);
+      recheckDecisions(app, citadel ? store.listProjects() : [store.getProject(project.id)!]);
       const where = citadel ? `${APP_NAME}-wide` : 'scheme';
       const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);
       const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
@@ -1150,12 +1155,7 @@ export const projectRoutes: Route[] = [
   {
     method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
     async handler({ req, res, url, app, project }) {
-      // Each login's own config dir; a container login mounts the server's copy, so it is the same folder.
-      const logins: MemoryLogin[] = app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
-        const configDir = app.claude.configDir(u.id, a.n);
-        return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
-      }) : []));
-      const folders = memoryFolders(project.repo_dir, logins);
+      const folders = memoryFolders(project.repo_dir, memoryLogins(app));
       const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
       if (req.method !== 'GET') {
         const body = req.method === 'PUT' ? await readJson(req) : {};
@@ -1204,6 +1204,19 @@ export const projectRoutes: Route[] = [
     },
   },
 
+  // Every dated decision this scheme can see, parsed live from where it is written (the Scheme → Decisions page and
+  // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
+  {
+    method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],
+    async handler({ res, url, app, project }) {
+      const scope = url.searchParams.get('scope') ?? 'all';
+      if (!['scheme', 'citadel', 'all'].includes(scope)) throw new HttpError(400, 'scope must be scheme, citadel or all');
+      const q = (url.searchParams.get('q') ?? '').slice(0, 200);
+      const { decisions, counts } = await loadDecisions(app, project);
+      const inScope = decisions.filter((d) => scope === 'all' || d.scope === scope);
+      json(res, 200, { decisions: q.trim() ? searchDecisions(inScope, q) : inScope, counts, all: decisions.length });
+    },
+  },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
     method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],

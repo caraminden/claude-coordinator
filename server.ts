@@ -61,6 +61,7 @@ import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { sweepKept } from './src/replay-keep.ts';
+import { loadDecisions } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
@@ -1285,6 +1286,12 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
+// Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
+if (!BOOT_CHECK && !PREVIEW) {
+  const sweepDecisions = () => void safely('decisions sweep', async () => { for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {}); });
+  setTimeout(sweepDecisions, 15 * 60_000).unref();
+  setInterval(sweepDecisions, 24 * 60 * 60_000).unref();
+}
 // A reply's status trailer (#711) goes through set_thread_status's checks; one they refuse is noted, and the state stays cleared.
 runner.onStatusTrailer = (id, fields) => {
   const ticket = store.getTicket(id);

@@ -3,7 +3,7 @@
 // schemes settings pages"). A minion's chat is the exception: it opens the new scheme's Taskmaster.
 
 const ADMIN_ONLY = new Set(['app-instructions', 'people', 'contraptions']);
-const KEEP = new Set(['artifacts', 'shared', 'instructions', 'settings', 'approvals', 'properties', 'members', 'memory', 'machines',
+const KEEP = new Set(['artifacts', 'shared', 'instructions', 'settings', 'approvals', 'properties', 'members', 'memory', 'decisions', 'machines',
   'my-instructions', 'account', 'notifications', 'usage', 'app-instructions', 'people', 'contraptions']);
 
 /** The hash to open for scheme `id` when you click it while on `hash`. `isAdmin` gates the admin Settings tabs. */

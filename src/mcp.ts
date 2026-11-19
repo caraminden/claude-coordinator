@@ -1000,7 +1000,7 @@ function turnText(t: any, whole: boolean): string {
 const MEMORY = process.env.COORDINATOR_MEMORY === '1';
 const SEARCH_MEMORY = {
   name: 'search_memory',
-  description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. They are leads to check (read_ticket, the decisions logs), not facts: the newest word wins, and a chunk can be out of date.",
+  description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. For what people decided (who, when, their words, and whether it was reversed), use search_decisions. These chunks are leads to check (read_ticket, search_decisions), not facts: the newest word wins, and a chunk can be out of date.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1009,6 +1009,20 @@ const SEARCH_MEMORY = {
       limit: { type: 'integer', description: 'How many chunks (default 5, max 20)' },
     },
     required: ['query'],
+  },
+};
+
+/** The Decisions page's entries (#1064): every dated, quoted decision, parsed live from where it is written. */
+const SEARCH_DECISIONS = {
+  name: 'search_decisions',
+  description: "Search what people decided: every dated, quoted decision written in the Citadel-wide and scheme instructions, the repo's CLAUDE.md, rules and ADRs, the kit and the scheme's memory notes, the same entries as the Scheme → Decisions page. Each gives who, when, their words, the rule it backs, where it is written and whether a later decision reversed it (and which copies still say the old one). Use it before asking people something they may already have decided, and to quote a decision with its date. Leave query empty for the newest.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Words to find, e.g. "land ship" or "Fable cap"; empty lists the newest' },
+      scope: { type: 'string', enum: ['all', 'scheme', 'citadel'], description: "all (default); scheme: this scheme's own sources; citadel: the Citadel-wide instructions and the kit" },
+      limit: { type: 'integer', description: 'How many (default 10, max 50)' },
+    },
   },
 };
 
@@ -1166,6 +1180,22 @@ function memoryText(hits: any[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   return hits.map((h) => `${h.kind === 'coordinator' ? 'Taskmaster' : `#${h.number} ${h.title}`} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
+}
+
+/** search_decisions' answer: one block per decision, newest or best first, then what each source holds. */
+function decisionsText(r: { decisions: any[]; counts: { label: string; count: number; files: number }[] }, limit: number): string {
+  const where = (p: any) => `${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}`;
+  const byId = new Map(r.decisions.map((d) => [d.id, d]));
+  const rows = r.decisions.slice(0, limit).map((d) => {
+    const head = `${d.date} · ${d.who} · ${d.rule}${d.quote ? `\n  "${d.quote}"` : ''}`;
+    const at = d.places.length ? `\n  Written in: ${d.places.map(where).join('; ')}` : '';
+    const by = d.reversed ? byId.get(d.reversed.by) : null;
+    const rev = d.reversed ? `\n  REVERSED by ${by ? `${by.date} ${by.who}: ${by.rule}${by.quote ? ` "${by.quote}"` : ''}` : d.reversed.byText}${d.reversed.stale.length ? `. Still written in: ${d.reversed.stale.map(where).join('; ')}` : ''}` : '';
+    const revs = d.reverses.length ? `\n  Reverses: ${d.reverses.map((id: string) => byId.get(id)).filter(Boolean).map((o: any) => `${o.date} ${o.who} "${o.quote || o.rule}"`).join('; ')}` : '';
+    return head + at + rev + revs;
+  });
+  const counts = `Sources: ${r.counts.map((c) => `${c.label} ${c.count} in ${c.files} file${c.files === 1 ? '' : 's'}`).join(', ')}.`;
+  return `${rows.length ? rows.join('\n\n') : 'No decision matches.'}${r.decisions.length > limit ? `\n\n(${r.decisions.length - limit} more: narrow the query or raise limit.)` : ''}\n\n${counts}`;
 }
 
 /** What contraption_read hands back: a list of read commands, or a command's answer. */
@@ -1887,6 +1917,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
       return memoryText((await call('GET', `/api/projects/${PROJECT}/memory?${q}`)).hits);
     }
+    case 'search_decisions': {
+      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', scope: ['all', 'scheme', 'citadel'].includes(args.scope) ? args.scope : 'all' });
+      const r = await call('GET', `/api/projects/${PROJECT}/decisions?${q}`);
+      return decisionsText(r, Math.min(Math.max(Number(args.limit) || 10, 1), 50));
+    }
     case 'contraption_turns': {
       const q = new URLSearchParams();
       if (args.app) q.set('app', String(args.app));
@@ -2273,7 +2308,7 @@ function toolList() {
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
-  const memory = MEMORY ? [SEARCH_MEMORY] : [];
+  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];

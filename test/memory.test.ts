@@ -295,6 +295,10 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     const text = (await mcp(true, 'tools/call', { name: 'search_memory', arguments: { query: 'dentist reminders' } })).content[0].text;
     assert.match(text, new RegExp(`^#${a1.number} Dentist reminders · \\d{4}-\\d\\d-\\d\\d · `));
     assert.ok(!text.includes('B dentist secret'));
+    // search_decisions (#1064) is listed with or without chat search, and answers with the page's entries and its sources.
+    assert.ok((await names(false)).includes('search_decisions'));
+    const said = (await mcp(false, 'tools/call', { name: 'search_decisions', arguments: { query: 'no such decision anywhere', scope: 'scheme' } })).content[0].text;
+    assert.match(said, /^No decision matches\.\n\nSources: Citadel-wide instructions 0 in 1 file, Scheme instructions 0 in 1 file, The kit \d+ in \d+ files\.$/);
 
     // Open minions only, titles and notes only: the duplicate check's scope (#488).
     const minions = (await search(A.id, 'dentist reminders usage bar', undefined, '&scope=minions')).data.hits;

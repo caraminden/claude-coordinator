@@ -149,7 +149,7 @@ export function notificationsPage() {
   if (pushSupported) refresh();
   return h('section', { class: 'artifacts-main people-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.')),
@@ -321,23 +321,49 @@ const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 // The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue, every page with an
-// icon. On a phone it is one row of chips that scrolls sideways, the open page scrolled into view.
+// icon and a one-line summary for the phone's list (#1018). On a phone the menu hides: Settings opens on that list
+// (settingsHome), and each page's bar has a back link to it and the page's own name (Cara picked "A list of pages,
+// each opens full screen").
 const SETTINGS_GROUPS = [
-  ['Scheme', 'running', [['instructions', 'Instructions', 'doc'], ['approvals', 'Minion rules', 'shield'], ['properties', 'Properties', 'tag'], ['members', 'Members', 'users']]],
-  ['You', 'held', [['my-instructions', 'My instructions', 'pen'], ['account', 'Your account', 'user'], ['machines', 'Machines', 'monitor'], ['notifications', 'Notifications', 'bell'], ['usage', 'Usage', 'chart']]],
-  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe'], ['people', 'People', 'people'], ['contraptions', 'Contraptions', 'box']], true],
+  ['Scheme', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
+    ['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['members', 'Members', 'users', 'Who works in this scheme']]],
+  ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
+    ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend']]],
+  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
 ];
+const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
+const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
 
 export function settingsTabs() {
   const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
-    SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin).map(([label, hue, items]) =>
+    settingsGroups().map(([label, hue, items]) =>
       h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label),
         items.map(([kind, text, ic]) =>
           h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null },
-            icon(ic), h('span', { class: 'label' }, text),
-            kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')))));
-  setTimeout(() => { const on = nav.querySelector('a.active'); if (on) nav.scrollLeft += on.getBoundingClientRect().right - nav.getBoundingClientRect().right + 16; });
+            icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
   return nav;
+}
+
+/** A settings page's title: "Settings" beside the desktop menu; on a phone a back link to the list and the page's name. */
+export function settingsTitle() {
+  const page = SETTINGS_GROUPS.flatMap(([, , items]) => items).find(([kind]) => kind === view.main);
+  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/settings`, title: 'All settings' }, icon('back'), 'Settings'),
+    h('h2', {}, h('span', { class: 'settings-title-wide' }, 'Settings'), h('span', { class: 'settings-title-narrow' }, page?.[1] ?? 'Settings'))];
+}
+
+/** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. */
+export function settingsHome() {
+  return h('section', { class: 'artifacts-main settings-home' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
+    h('nav', { 'aria-label': 'Settings' }, settingsGroups().flatMap(([label, hue, items]) => [
+      h('h3', { class: 'settings-section', 'data-hue': hue }, label),
+      h('div', { class: 'settings-rows' }, items.map(([kind, text, ic, sum]) =>
+        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
+          h('span', { class: 'settings-tile' }, icon(ic)),
+          h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
+          h('span', { class: 'settings-row-chev' }, icon('forward')))))])));
 }
 
 /** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */
@@ -484,7 +510,7 @@ export function approvalsEditor() {
   };
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
@@ -517,7 +543,7 @@ function renderInstructionsHead() {
   if (!el) return;
   const p = view.project;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
       h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },
@@ -635,7 +661,7 @@ export function myInstructionsEditor() {
   const layer = (name, who, cls) => h('li', { class: cls }, h('strong', {}, name), h('span', { class: 'muted small' }, who));
   const section = h('section', { class: 'artifacts-main instructions-main my-instructions' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.')),
@@ -691,7 +717,7 @@ function renderAppInstructionsHead() {
   if (!el) return;
   const a = appInstructions;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },
@@ -976,7 +1002,7 @@ export function machinesPage() {
   const runners = account?.admin ? machineAddForm(true, 'Add CI runner host') : null;
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, account?.admin

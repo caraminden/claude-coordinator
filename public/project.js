@@ -2,7 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciChip, ciPage } from './ci.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
@@ -60,6 +60,7 @@ function renderCrumbs(main) {
   const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
     main.kind === 'files' ? [projectLink, ' / ', 'Files']
+      : main.kind === 'settings' ? [projectLink, ' / ', 'Settings']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'my-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'My instructions']
@@ -198,6 +199,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     sidebar.open = panelOpen('threads');
   };
   const section = main.kind === 'files' ? filesView(main.folder)
+    : main.kind === 'settings' ? settingsHome()
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'app-instructions' ? appInstructionsEditor()
     : main.kind === 'my-instructions' ? myInstructionsEditor()

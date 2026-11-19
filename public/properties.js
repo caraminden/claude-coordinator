@@ -1,7 +1,7 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, icon, me, view } from './base.js';
 import { threadRefs } from './core.js';
-import { settingsHelp, settingsRow, settingsTabs, tuneUpButton } from './settings.js';
+import { settingsHelp, settingsRow, settingsTabs, settingsTitle, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { otherOwner, takeOver } from './payer.js';
 import { renderSidebar } from './sidebar.js';
@@ -296,7 +296,7 @@ async function loadProperties() {
 
 /** The overview's Settings link and the Settings page's Properties tab: how many property proposals wait for a person's review. */
 export async function renderSettingsCount() {
-  const counts = () => [...document.querySelectorAll('#settings-count, .settings-tabs .props-count')];
+  const counts = () => [...document.querySelectorAll('#settings-count, .settings-tabs .props-count, .settings-home .props-count')];
   if (!counts().length) return;
   const reg = await loadProperties().catch(() => null);
   if (!reg) return;
@@ -324,7 +324,7 @@ export function propertiesPage() {
   const p = view.project;
   const section = h('section', { class: 'artifacts-main props-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value.')),

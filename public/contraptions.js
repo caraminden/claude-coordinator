@@ -1,7 +1,7 @@
 // Settings → Contraptions, admins only: register personal apps, edit them, choose who each is
 // enabled for, and rotate their keys (src/routes/contraptions.ts).
 import { account, api, h, icon, view } from './base.js';
-import { settingsHelp, settingsRow, settingsTabs } from './settings.js';
+import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { showRail } from './rail.js';
 import { optimistic } from './ui/optimistic.js';
 
@@ -240,7 +240,7 @@ export function contraptionsPage() {
   }).catch(fail);
   return h('section', { class: 'artifacts-main people-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here.')),

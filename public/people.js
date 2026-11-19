@@ -1,14 +1,14 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
-import { firefoxControls, settingsHelp, settingsRow, settingsTabs } from './settings.js';
+import { firefoxControls, settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
 function head(title, meta) {
   return h('div', { class: 'ticket-head' },
-    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' }, meta));

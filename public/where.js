@@ -1,7 +1,7 @@
 // "Where it went" (#905): your own spend over the last 7 days against the 7 before, by model, scheme, kind of work,
 // and the 10 costliest minions, from /api/costs/mine (src/costs.ts whereItWent). One series per table, so one hue and no legend.
 import { account, api, costText, h, icon, threadHref, view } from './base.js';
-import { settingsJump, settingsTabs } from './settings.js';
+import { settingsJump, settingsTabs, settingsTitle } from './settings.js';
 import { costDetail } from './cost.js';
 import { codexWindowsBlock } from './core.js';
 
@@ -95,7 +95,7 @@ export function usagePage() {
   setTimeout(() => choose(pickedRange));
   return h('section', { class: 'artifacts-main usage-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),

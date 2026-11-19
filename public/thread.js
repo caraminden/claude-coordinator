@@ -1334,7 +1334,7 @@ function mergePushNotes(log) {
   for (const el of log.querySelectorAll('.note[data-push]')) {
     let prev = el.previousElementSibling;
     while (prev?.matches('.narration')) prev = prev.previousElementSibling;
-    if (!prev?.matches('.note[data-push]') || !pushRun({ text: prev.dataset.push, count: 1 }, el.dataset.push).joined) continue;
+    if (!prev?.matches('.note[data-push]') || prev.dataset.session !== el.dataset.session || !pushRun({ text: prev.dataset.push, count: 1 }, el.dataset.push).joined) continue;
     const run = { text: prev.dataset.push, count: Number(prev.dataset.count) + Number(el.dataset.count) };
     prev.dataset.count = String(run.count);
     prev.replaceChildren(...pushRunParts(run).map((p) => (typeof p === 'string' ? p : h('span', { class: 'push-count' }, String(p.count)))));

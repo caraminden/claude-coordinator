@@ -428,8 +428,8 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       : `You can message the ${AGENT_NAME}s of the schemes the person you work for is in, and always the ${APP_NAME} scheme's ${AGENT_NAME}: send it bug reports and feature asks for ${APP_NAME} itself.`,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short, end on what you did, and put what you need in a card (or the link of the one waiting), not a closing prose question.',
     ...CHAT_FACTS,
-    // Not the list (#760): a Taskmaster writes only in the shared folder, and a block says why.
-    'A tripwire hook checks every tool call and stops known accidents; when it blocks one, it says why: don\'t get around it.',
+    // Not the list (#760): a Taskmaster writes only in the shared folder, and a block says why. The .env habit is a Taskmaster's alone (#1030: only its turns close .env files).
+    'A tripwire hook checks every tool call and stops known accidents; when it blocks one, it says why: don\'t get around it. A recursive grep over a folder holding a .env file needs `--exclude=\'.env*\'`; rg is fine without `--hidden`.',
   ].join('\n');
 }
 

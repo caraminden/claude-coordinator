@@ -255,6 +255,13 @@ test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel
   // Allowed through: it gets as far as the repo nobody set.
   for (const t of [DelveTM, DelveMinion]) assert.match(await call(t), /Twin has no repo set|Mandate has no repo set/);
   assert.match(await call(CitadelTM, true), /has no repo set/);
+  // Rolled back to last green (#1016): a turn's deploy waits for the fix; an admin's goes ahead (here, to the missing repo).
+  const pins = { [`${Delve.id}/app:twin`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), by: 'Cara', at: 1 } };
+  store.setSetting('last-green:pins', pins);
+  for (const t of [DelveTM, DelveMinion]) assert.match(await call(t), /rolled back to last green aaaaaaaaa by Cara, and stays there/);
+  assert.match((await srv.call('/api/contraptions/twin/deploy', {}, 'POST')).data.error, /has no repo set/);
+  assert.deepEqual(store.getSetting('last-green:pins'), pins, "a deploy that didn't start keeps the pin");
+  store.setSetting('last-green:pins', {});
   // Refused: a minion of another scheme, and Citadel's Taskmaster on a non-admin's turn.
   assert.match(await call(Minion), /Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption/);
   turnFor(CitadelTM, olive.id);

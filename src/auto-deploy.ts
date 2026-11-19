@@ -123,9 +123,8 @@ export class AutoDeploy {
     if (!t || !deployer) throw new HttpError(404, `${target} has no release step Citadel can start`);
     const key = keyOf(projectId, target);
     if (this.starting.has(key)) throw new HttpError(409, `${t.name} is being deployed already`);
-    const pin = this.d.held?.pinned(projectId, target);
     // A minion's deploy (by "#N", the land's deploy of its scheme's apps too) waits for the fix; a person's is the override.
-    if (pin && by.startsWith('#')) throw new HttpError(409, `${t.name} was rolled back to last green ${pin.sha.slice(0, 9)} by ${pin.by}, and stays there until main has a newer commit that passes the full suite, then auto-deploy ships it. A person's Deploy on its Releases card ships main now.`);
+    const pin = this.holding(projectId, target, t.name, by.startsWith('#'));
     // Held from here, before the first await, so two presses at once start one deploy.
     this.starting.add(key);
     try {
@@ -138,6 +137,17 @@ export class AutoDeploy {
     } finally {
       this.starting.delete(key);
     }
+  }
+
+  /** A rolled-back target's pin (src/last-green.ts): an agent's deploy is refused until the fix; a person's goes ahead and, once started, lets go of it (unhold). */
+  holding(projectId: number, target: string, name: string, agent: boolean) {
+    const pin = this.d.held?.pinned(projectId, target) ?? null;
+    if (pin && agent) throw new HttpError(409, `${name} was rolled back to last green ${pin.sha.slice(0, 9)} by ${pin.by}, and stays there until main has a newer commit that passes the full suite, then auto-deploy ships it. A person's Deploy on its Releases card ships main now.`);
+    return pin;
+  }
+
+  unhold(projectId: number, target: string) {
+    this.d.held?.unpin(projectId, target);
   }
 
   /** A scheme's Android target whose feed is contraption `name`'s, if it has one Citadel can release (publish_release). */

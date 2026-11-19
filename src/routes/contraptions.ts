@@ -565,7 +565,14 @@ export const contraptionRoutes: Route[] = [
       const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : app.store.getUser(session.uid as number)?.name ?? 'an admin';
       // The install check reads the app's page as the person deploying (a turn's: whoever asked for it).
       const uid = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
-      return service(async () => json(res, 202, startDeploy(app, c, by, caller, typeof uid === 'number' ? uid : null)));
+      // Rolled back to last green (#1016): a turn's deploy waits for the fix; an admin's ships it and ends the hold.
+      const target = `app:${c.name}`;
+      const pin = c.home_scheme === null ? null : app.autoDeploy.holding(c.home_scheme, target, c.name, !!caller);
+      return service(async () => {
+        const started = startDeploy(app, c, by, caller, typeof uid === 'number' ? uid : null);
+        if (pin) app.autoDeploy.unhold(c.home_scheme!, target);
+        return json(res, 202, started);
+      });
     },
   },
   {

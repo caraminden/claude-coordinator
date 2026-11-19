@@ -853,6 +853,7 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 | `build` | Up to 20 shell commands, run in the repo root in order at nice 10, with `PATH` as above and none of Citadel's variables (no `PORT`, `DATA_DIR`). Each runs in a heavy slot (shown as `<name> deploy`) in its own systemd unit, `citadel-build-<name>.service`, so a Citadel restart doesn't kill it. Any failing fails the deploy |
 | `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20. Time waiting in line for a heavy slot doesn't count |
 | `disk_warn_gb` | A number of GB above 0: Settings marks the app once its `DATA_DIR` passes it ("Heavy steps and disk use") |
+| `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A Roll back to last green past a commit that touched one is refused (below) |
 
 The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes
 your `DATA_DIR` beyond creating it when missing.
@@ -894,6 +895,16 @@ of the log. After a good deploy it checks the two things every contraption ships
 What's still missing comes back first in the tool's answer as **To do** lines, shows under the
 deploy in Settings, and goes to your home scheme's Taskmaster as a to-do (once per new list, and not
 when that Taskmaster deployed it itself). It never fails the deploy, so a first shell can ship.
+
+**Roll back to last green.** While your app runs a commit newer than your home scheme's last green
+(the newest commit on its default branch whose every CI workflow passed), its Releases card offers
+**Roll back to last green**. Any member can press it: it deploys that commit as above (steps 1 to 4,
+the same two checkouts), refusing one off the branch or past a change to a `migrations` path, since
+code that old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations").
+Once it is live, auto-deploy leaves the app there until main has a newer green commit, and a
+minion's `deploy_contraption` is refused meanwhile; a person's Deploy on the card ships main at
+once. Your home scheme's Taskmaster is told either way. With no CI, there is no last green and no
+button.
 
 Service status, start, stop, restart, its journal and installing over a hand-made unit are
 admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_service`).
@@ -962,6 +973,8 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-18:** Roll back to last green on your Releases card, and `migrations` in
+  `citadel-app.json` to stop one going back past a data change ("Running and deploying").
 - **2026-11-18:** The rule for release targets: a target is live only when its people can get that version ("Release targets").
 - **2026-11-18:** A release target can wait on other workflows: `targets[].release.needs` in
   `citadel-app.json` ("Release targets").

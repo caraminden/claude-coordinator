@@ -137,7 +137,15 @@ const AsyncFunction = (async () => {}).constructor;
 let quit = false;
 try {
   await sleep(1500);
-  const app = await install(cfg.route);
+  // CITADEL_WCO_TAB=1 (or an install that never gets its dialog) keeps the page in an Edge tab: no title bar overlay,
+  // but the same prompts and the same real clicks, for checks that don't need the overlay (#988's links).
+  let app;
+  try { if (process.env.CITADEL_WCO_TAB) throw new Error('tab mode'); app = await install(cfg.route); }
+  catch (e) { log('no installed app, using the tab:', String(e.message).slice(0, 80)); app = (await session('/c/').catch(async () => {
+    const { targetId } = await send('Target.createTarget', { url: `${origin}/c/#${cfg.route.replace(/^#/, '')}` });
+    await sleep(2000);
+    return { targetId };
+  })).targetId; }
   log('installed; app window target', app, 'origin', origin);
   await fetch(`${base}/ready`, { method: 'POST' });
   for (let after = 0, last = Date.now(); !quit && Date.now() - last < IDLE_MS;) {

@@ -2,7 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciChip, ciPage } from './ci.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, projectTitle, pushControls, renderGithubStrip } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip } from './settings.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
@@ -70,6 +70,7 @@ function renderCrumbs(main) {
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
+      : main.kind === 'notifications' ? [projectLink, ' / ', settingsLink, ' / ', 'Notifications']
       : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
@@ -167,7 +168,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'account' },
       // The CI chip by the usage meter (#968, Cara: "Chip by the usage meter"), its dot the CI page's worst.
       h('div', { class: 'meter-row' }, usageMeter(), ciChip(projectId)),
-      pushControls(project),
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
         h('span', { class: 'who' }, me),
@@ -208,6 +208,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'contraptions' ? contraptionsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
+    : main.kind === 'notifications' ? notificationsPage()
     : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'ci' ? ciPage(projectId)

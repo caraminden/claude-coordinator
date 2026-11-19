@@ -144,7 +144,7 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   "GitHub". The gh account is the minions' own, so its remarks, merges and closes during that
   minion's turns are skipped, as are bots. Handled events are kept in `github_seen`, so
   nothing is sent twice, and a PR's first look sends nothing.
-- **Push notifications**: "Notify me on this device" in the overview panel subscribes that
+- **Push notifications**: "Notify me on this device" (Settings → Notifications) subscribes that
   browser (desktop, or the installed Android app) with Web Push, and once on, a scheme can be
   muted there, or the device kept to "Only my pinned minions": the minions that person pinned,
   anyone's, in schemes they're still in, plus the Taskmaster, which can't be pinned. Claude only pings for decisions, blockers and results: a question card (from a

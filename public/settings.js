@@ -69,28 +69,41 @@ export function firefoxControls() {
     h('label', { class: 'toggle', title: 'Send links to other websites to Firefox, not this browser. Needs a one-time setup on this PC' }, on, 'Open links in Firefox'), hint);
 }
 
-/** "Notify me on this device", and once on, pinned-only and a mute for this project; in the account box. */
-export function pushControls(project) {
-  if (!pushSupported) return null;
+/**
+ * Settings → Notifications (#1004; these sat in the rail's account box): "Notify me on this device", and once on,
+ * pinned-only (this device) and, for the open scheme, a mute and "Everything" (this device). Same calls as before.
+ */
+export function notificationsPage() {
+  const project = view.project;
   const on = h('input', { type: 'checkbox' });
   const mute = h('input', { type: 'checkbox' });
   const pinned = h('input', { type: 'checkbox' });
   const all = h('input', { type: 'checkbox' });
   const hint = h('span', { class: 'hint', hidden: true });
-  const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this scheme on this device' }, mute, `Mute ${project.name} here`);
-  const pinnedRow = h('label', { class: 'toggle', hidden: true, title: 'On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster' }, pinned, 'Only my pinned minions');
+  const toggle = (box, text, title) => h('label', { class: 'toggle', title }, box, text);
+  const row = (ic, hue, title, summary, ...body) => settingsRow({ icon: ic, hue, title, summary, open: true }, ...body)[0];
+  const onRow = row('bell', 'accent', 'Notify me on this device', 'This device only',
+    toggle(on, 'Notify me on this device', 'Questions for you, failed turns, and your minions that are ready or blocked'), hint,
+    settingsHelp('Questions for you, failed turns, and your minions that are ready or blocked, as a notification on this browser or app. Other devices are set up on their own.'));
+  const pinnedRow = row('pin', 'held', 'Only my pinned minions', 'This device only',
+    toggle(pinned, 'Only my pinned minions', 'On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster'),
+    settingsHelp('On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster.'));
   // #690: a minion's pings go to its owner; this device can still hear every minion in the scheme.
-  const allRow = h('label', { class: 'toggle', hidden: true, title: 'On this device, hear about every minion in this scheme, not only yours, the ones you pinned and the unassigned ones' }, all, `Everything in ${project.name}`);
-  const el = h('div', { class: 'push' },
-    h('label', { class: 'toggle', title: 'Questions for you, failed turns, and your minions that are ready or blocked' }, on, 'Notify me on this device'),
-    allRow, pinnedRow, muteRow, hint);
+  const allRow = row('users', 'running', `Everything in ${project.name}`, `This device · scheme ${project.name}`,
+    toggle(all, `Everything in ${project.name}`, 'On this device, hear about every minion in this scheme, not only yours, the ones you pinned and the unassigned ones'),
+    settingsHelp(`On this device, hear about every minion in ${project.name}, not only yours, the ones you pinned and the unassigned ones.`));
+  const muteRow = row('belloff', 'danger', `Mute ${project.name}`, `This device · scheme ${project.name}`,
+    toggle(mute, `Mute ${project.name} here`, 'Stop notifications from this scheme on this device'),
+    settingsHelp(`Stop notifications from ${project.name} on this device. Other schemes keep notifying.`));
+  const deviceRows = [pinnedRow];
+  const schemeRows = [allRow, muteRow];
   const show = (state, err) => {
     pushState = state;
     on.checked = state.subscribed;
     mute.checked = state.muted.includes(project.id);
     pinned.checked = !!state.onlyPinned;
     all.checked = !!state.everything?.includes(project.id);
-    muteRow.hidden = pinnedRow.hidden = allRow.hidden = !state.subscribed;
+    for (const r of [...deviceRows, ...schemeRows]) r.hidden = !state.subscribed;
     const denied = Notification.permission === 'denied';
     on.disabled = denied && !state.subscribed;
     hint.textContent = err ?? (denied && !state.subscribed ? 'Blocked for this site in the browser settings' : '');
@@ -133,8 +146,16 @@ export function pushControls(project) {
     return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
   }));
   show(pushState);
-  refresh();
-  return el;
+  if (pushSupported) refresh();
+  return h('section', { class: 'artifacts-main people-main' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      settingsTabs(),
+      h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.')),
+    pushSupported
+      ? [...settingsSection('This device', onRow, pinnedRow), ...settingsSection(`${project.name} on this device`, allRow, muteRow)]
+      : h('p', { class: 'muted' }, 'This browser can\'t show notifications. Install Citadel as an app, or use a browser that supports them.'));
 }
 
 // Clicking a notification while the app is open: the service worker asks this tab to show the thread.
@@ -303,7 +324,7 @@ const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\
 // icon. On a phone it is one row of chips that scrolls sideways, the open page scrolled into view.
 const SETTINGS_GROUPS = [
   ['Scheme', 'running', [['instructions', 'Instructions', 'doc'], ['approvals', 'Minion rules', 'shield'], ['properties', 'Properties', 'tag'], ['members', 'Members', 'users']]],
-  ['You', 'held', [['my-instructions', 'My instructions', 'pen'], ['account', 'Your account', 'user'], ['machines', 'Machines', 'monitor'], ['usage', 'Usage', 'chart']]],
+  ['You', 'held', [['my-instructions', 'My instructions', 'pen'], ['account', 'Your account', 'user'], ['machines', 'Machines', 'monitor'], ['notifications', 'Notifications', 'bell'], ['usage', 'Usage', 'chart']]],
   ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe'], ['people', 'People', 'people'], ['contraptions', 'Contraptions', 'box']], true],
 ];
 

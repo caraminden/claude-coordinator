@@ -8,7 +8,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, buildOwnerKey, EFFORTS, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
@@ -680,12 +680,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch and land_mode; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill and gh_runners; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -694,6 +694,10 @@ export const projectRoutes: Route[] = [
       if (body.onboarding !== undefined) settings.onboarding = required(body.onboarding, ONBOARDING, 'onboarding') as Project['onboarding'];
       if (body.onboarding_mode !== undefined) settings.onboarding_mode = required(body.onboarding_mode, ONBOARDING_MODES, 'onboarding_mode') as Project['onboarding_mode'];
       if (body.land_mode !== undefined) settings.land_mode = required(body.land_mode, LAND_MODES, 'land_mode') as Project['land_mode'];
+      if (body.fable_ok !== undefined) settings.fable_ok = required(body.fable_ok, FABLE_OKS, 'fable_ok') as Project['fable_ok'];
+      if (body.builds !== undefined) settings.builds = required(body.builds, BUILDS_MODES, 'builds') as Project['builds'];
+      if (body.grill !== undefined) settings.grill = required(body.grill, GRILL_MODES, 'grill') as Project['grill'];
+      if (body.gh_runners !== undefined) settings.gh_runners = required(body.gh_runners, GH_RUNNERS_MODES, 'gh_runners') as Project['gh_runners'];
       // Fast mode is the kit's land.sh's LAND_FAST (#1017): a land.sh without it would land every change on the full gate.
       if (settings.land_mode === 'fast' && project.land_mode !== 'fast') {
         const land = project.repo_dir ? await readFile(join(project.repo_dir, 'tools', 'land.sh'), 'utf8').catch(() => '') : '';

@@ -496,9 +496,9 @@ export function approvalsEditor() {
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
     settingsSection('Approvals', rules.approvals()),
-    settingsSection('Shipping', fastModeRow(p)),
+    settingsSection('Shipping', fastModeRow(p), rules.builds(), rules.ghRunners()),
     // Plugins load code from any folder on the server, so only an admin changes them.
-    settingsSection('Minions', rules.listGroups(), rules.effort()),
+    settingsSection('Minions', rules.listGroups(), rules.effort(), rules.fable(), rules.grill()),
     settingsSection('Plugins', rules.plugins()),
     settingsSection('CI', rules.ci()),
     settingsSection('Elsewhere', ...elsewhere));

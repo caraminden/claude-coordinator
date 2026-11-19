@@ -76,8 +76,8 @@ export function guessType(text) {
 }
 
 /** The table as one line of prose, for the Taskmaster's prompt. */
-export function tableText() {
-  const tiers = TIERS.map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');
+export function tableText(fable = true) {
+  const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model)).map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');
   // xhigh and max are in create_ticket's effort description, which every Taskmaster reads with the tool.
-  return `${tiers}.`;
+  return `${tiers}.${fable ? '' : ' Fable is off in this scheme: never pick it for a minion, a Grunt or a review; the nearest tier below it is Opus 5.5 at high.'}`;
 }

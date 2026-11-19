@@ -199,7 +199,26 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       return cur ? cur[0].toUpperCase() + cur.slice(1) : 'Claude default';
     });
 
-  return { approvals, plugins, listGroups, ci, effort, data, refreshAll };
+  /** A row that is one pick of a few, saved at once (#1045): `pick` is the project field, `opts` its [value, label] choices. */
+  const choice = (meta, help, field, opts, fallback, label) => live(meta, help, (mount) => {
+    const cur = stored()[field] ?? fallback;
+    mount.replaceChildren(seg(opts, cur, (v) => save({ [field]: v }, `set ${label}`), false, label));
+    return opts.find(([v]) => v === cur)?.[1] ?? cur;
+  });
+  const fable = () => choice({ icon: 'spark', hue: 'running', title: 'Fable' },
+    settingsHelp('Whether Fable can be used in this scheme, for a minion or a Grunt.', 'Off takes it out of the Taskmaster\'s model table, greys it in the model picker and tells every minion not to use it. A minion already on Fable keeps its model until you change it.'),
+    'fable_ok', [['on', 'On'], ['off', 'Off']], 'on', 'Fable');
+  const builds = () => choice({ icon: 'spark', hue: 'running', title: 'Major builds' },
+    settingsHelp('Whether the Taskmaster may suggest a numbered build for a big multi-minion feature.', 'Off leaves the builds line out of its prompt. Builds already running carry on.'),
+    'builds', [['suggest', 'Suggest'], ['off', 'Off']], 'suggest', 'Major builds');
+  const grill = () => choice({ icon: 'spark', hue: 'running', title: 'Grill before code' },
+    settingsHelp('How much a feature minion questions its requester, as cards, before it writes code.', 'Design is the Citadel-wide rule: only features that need design. All grills every feature; Never skips it. Bugs and chores skip it either way.'),
+    'grill', [['design', 'Design only'], ['all', 'Every feature'], ['never', 'Never']], 'design', 'Grill before code');
+  const ghRunners = () => choice({ icon: 'spark', hue: 'running', title: 'GitHub\'s own runners' },
+    settingsHelp('CI on GitHub\'s runners (CI_RUNNER=github) costs Actions minutes.', 'Ask makes a minion get a person\'s go first; OK lets it use them; Never keeps CI on this scheme\'s own runners.'),
+    'gh_runners', [['ask', 'Ask first'], ['ok', 'OK'], ['never', 'Never']], 'ask', 'GitHub runners');
+
+  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, data, refreshAll };
 }
 
 /** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */

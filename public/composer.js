@@ -887,7 +887,11 @@ export function renderModelPicker() {
   const defModel = !t.model && t.last_model ? modelName(t.last_model) : onPhone ? 'Default' : 'Model';
   const blocked = codexBlocked();
   model.replaceChildren(h('option', { value: '' }, defModel),
-    h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => h('option', { value: id }, name))),
+    h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => {
+      // The scheme's Minion rules can turn Fable off (#1045): greyed, but a minion already on it keeps showing it.
+      const noFable = view.project?.fable_ok === 'off' && /fable/.test(id) && t.model !== id;
+      return h('option', { value: id, disabled: noFable, title: noFable ? 'Fable is off in this scheme (Minion rules)' : null }, name);
+    })),
     h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' },
       ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))));
   // A model set outside these lists (say, by an older version) still shows as itself.

@@ -89,6 +89,14 @@ export interface Project {
   ci_watch: string;
   /** How its lands go (#1017, src/fast-mode.ts): off, the full gate; fast, a low or medium risk land lands on the smoke check and the full suite runs behind it. */
   land_mode: LandMode;
+  /** Whether Fable may be used for this scheme's sessions and Grunts (#1045): on, the model table as it stands; off, the table and the prompt drop it. */
+  fable_ok: FableOk;
+  /** Whether its Taskmaster may suggest numbered builds (#1045): suggest, as before; off, the builds line is left out. */
+  builds: BuildsMode;
+  /** Grilling before code (#1045): design, the Citadel-wide rule as written; all, every feature; never, none. */
+  grill: GrillMode;
+  /** CI on GitHub's own runners (#1045, they cost Actions minutes): ask a person first, ok to use, or never. */
+  gh_runners: GhRunnersMode;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -191,6 +199,15 @@ export type OnboardingMode = (typeof ONBOARDING_MODES)[number];
 /** A scheme's land modes (#1017): Settings shows them as a toggle. */
 export const LAND_MODES = ['off', 'fast'] as const;
 export type LandMode = (typeof LAND_MODES)[number];
+/** The four Minion rules switches (#1045); the first value of each is today's behaviour. */
+export const FABLE_OKS = ['on', 'off'] as const;
+export type FableOk = (typeof FABLE_OKS)[number];
+export const BUILDS_MODES = ['suggest', 'off'] as const;
+export type BuildsMode = (typeof BUILDS_MODES)[number];
+export const GRILL_MODES = ['design', 'all', 'never'] as const;
+export type GrillMode = (typeof GRILL_MODES)[number];
+export const GH_RUNNERS_MODES = ['ask', 'ok', 'never'] as const;
+export type GhRunnersMode = (typeof GH_RUNNERS_MODES)[number];
 
 /** Whether a scheme is still being set up, which is what gives its Taskmaster the onboarding section. */
 export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !== 'done' && p.onboarding !== 'skipped';
@@ -1261,6 +1278,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'ci_quiet', "ALTER TABLE projects ADD COLUMN ci_quiet TEXT NOT NULL DEFAULT ''"],
   ['projects', 'ci_watch', "ALTER TABLE projects ADD COLUMN ci_watch TEXT NOT NULL DEFAULT ''"],
   ['projects', 'land_mode', "ALTER TABLE projects ADD COLUMN land_mode TEXT NOT NULL DEFAULT 'off'"],
+  ['projects', 'fable_ok', "ALTER TABLE projects ADD COLUMN fable_ok TEXT NOT NULL DEFAULT 'on'"],
+  ['projects', 'builds', "ALTER TABLE projects ADD COLUMN builds TEXT NOT NULL DEFAULT 'suggest'"],
+  ['projects', 'grill', "ALTER TABLE projects ADD COLUMN grill TEXT NOT NULL DEFAULT 'design'"],
+  ['projects', 'gh_runners', "ALTER TABLE projects ADD COLUMN gh_runners TEXT NOT NULL DEFAULT 'ask'"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1362,6 +1383,7 @@ export const SCHEMA_HISTORY = [
   [68, 'contraptions.static_paths (#987)'],
   [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
   [70, 'projects.land_mode (#1017)'],
+  [71, 'projects.fable_ok, builds, grill, gh_runners (#1045)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1750,7 +1772,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

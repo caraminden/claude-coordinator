@@ -166,6 +166,7 @@ test('(a) a helper named self-test.ts is not a test file; a name the package\'s 
   assert.equal(isTestPath('app/shared/self-test.ts'), false);
   assert.equal(isTestPath('app/shared/self-test.ts', 'node --test shared/', 'shared/self-test.ts'), true, 'the script runs that folder');
   assert.equal(isTestPath('app/x-test.ts', "node --test '**/*-test.ts'", 'x-test.ts'), true, 'a glob in the script');
+  assert.doesNotThrow(() => isTestPath('app/x-test.ts', 'tools/citadel-node --test --test-concurrency=${N:-2} test/', 'x-test.ts'));
   assert.ok(isTestPath('test/x-test.ts') && isTestPath('src/a.spec.ts') && isTestPath('src/a.test.ts') && isTestPath('pkg/foo_test.py'));
 });
 

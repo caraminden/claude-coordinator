@@ -55,7 +55,7 @@ export function isTestPath(p: string, script = '', rel = p): boolean {
   if (parts.slice(0, -1).some((s) => ['test', 'tests', '__tests__', 'spec', 'testdata', 'fixtures'].includes(s))) return true;
   if (JS_DASH_TEST.test(name) && !/\.(?:test|spec)\./.test(name)) {
     const d = dirname(rel);
-    return script.split(/\s+/).map((a) => a.replace(/^['"]|['"]$/g, '')).some((a) => a === rel || matchesGlob(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
+    return script.split(/\s+/).map((a) => a.replace(/^['"]|['"]$/g, '')).some((a) => a === rel || globs(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
   }
   return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
 }
@@ -212,6 +212,14 @@ export function nodeCommand(script: string, file: string): string[] {
   const flags = [...script.matchAll(/(?:^|\s)(--test-global-setup=\S+|--test-timeout=\d+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
   return [launcher, '--test', '--test-force-exit', '--test-reporter=tap', ...flags.map((f) => f.replace(/^['"]|['"]$/g, '')), file];
 }
+
+const globs = (rel: string, a: string): boolean => {
+  try {
+    return matchesGlob(rel, a);
+  } catch {
+    return false;
+  }
+};
 
 /** The test script of the package.json nearest above a path ('' when none), and the path from that package's folder. */
 function pkgScript(root: string, path: string): string {
@@ -448,7 +456,7 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
     argv = [venv ?? 'python3', '-m', 'pytest', '-rA', '-q', '-p', 'no:cacheprovider', relative(dir, e.path)];
     if (spawnSync(argv[0], ['-c', 'import pytest'], { cwd }).status !== 0) return `pytest isn't installed for ${argv[0]}`;
     // A shared venv can hold the branch's own package (an editable install): then the run would test the branch, not the base.
-    const probe = spawnSync(argv[0], ['-c', PY_PROBE, cwd, join(cwd, 'src')], { cwd, env, encoding: 'utf8' });
+    const probe = spawnSync(argv[0], ['-c', PY_PROBE, cwd, join(cwd, 'src'), join(root, dir), join(root, dir, 'src')], { cwd, env, encoding: 'utf8' });
     if (probe.status !== 0) return `couldn't check which copy of the code python imports (${(probe.stderr ?? '').trim().split('\n').at(-1) ?? 'no output'}): run it on the base by hand`;
     const leaks = pyLeaks(probe.stdout ?? '', root, tree);
     if (leaks.length) return `python imports ${leaks.join(', ')} from the branch's checkout (a shared venv), not the base: run it on the base by hand`;

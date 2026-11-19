@@ -1131,19 +1131,25 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
   try {
     const d = join(tmp, 'data');
     const repo = join(d, 'projects/3/repo');
-    for (const dir of ['src/lib', 'app', 'web/node_modules/pkg', 'web/src', 'tool/.git']) mkdirSync(join(repo, dir), { recursive: true });
+    for (const dir of ['src/lib', 'app', 'web/node_modules/pkg', 'web/src', 'tool/.git/objects/ab', 'kit/.git']) mkdirSync(join(repo, dir), { recursive: true });
     writeFileSync(join(repo, 'src/lib/a.ts'), 'SECRET');
     writeFileSync(join(repo, 'app/.env.local'), 'SECRET=x');
-    writeFileSync(join(repo, 'tool/.git/.env'), 'x');
+    writeFileSync(join(repo, 'tool/.git/objects/ab/.env'), 'x');
+    writeFileSync(join(repo, 'kit/.git/.env'), 'x');
     const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live'), envFiles: [d] };
     const run = (command: string) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read another scheme' }, cwd: join(d, 'projects/2/coordinator') }, c)?.reason ?? null;
     const grepTool = (path: string) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', path }, cwd: d }, c)?.reason ?? null;
     for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET --exclude='.env*' ${repo}`, `rg --hidden SECRET ${repo}/src`, `cd ${repo}/src && grep -r SECRET .`, `grep -rn SECRET ${repo}/src ${repo}/web`]) assert.equal(run(cmd), null, cmd);
     assert.equal(grepTool(join(repo, 'src')), null);
-    assert.equal(run(`grep -rn SECRET ${repo}/tool`), null, 'git keeps no file by its own name, so a .git below the root is skipped');
-    assert.match(run(`grep -rn SECRET ${repo}/tool/.git`) ?? '', /\.env/, 'one named as the root is walked');
-    for (const cmd of [`grep -rn SECRET ${repo}`, `grep -rn SECRET ${repo}/app`, `grep -rn SECRET ${d}/projects`, `rg -uu SECRET ${repo}`, `grep -rn SECRET ${repo}/src ${repo}/app`]) assert.match(run(cmd) ?? '', /could print \.env files \(.*app\/\.env\.local\)/, cmd);
-    assert.match(grepTool(repo) ?? '', /\.env\.local/);
+    assert.equal(run(`grep -rn SECRET ${repo}/tool`), null, 'git\'s object store holds files named by hash, so it is skipped');
+    assert.match(run(`grep -rn SECRET ${repo}/kit`) ?? '', /kit\/\.git\/\.env/, 'the rest of .git is walked: GNU grep searches it');
+    // Only options grep reads as options count: a pattern that looks like one excludes nothing.
+    assert.match(run(`grep -rn -e --exclude-dir=app -e SECRET ${repo}/app`) ?? '', /\.env\.local/);
+    // Archives: the walk can't see inside them.
+    assert.match(run(`grep -rn --decompress SECRET ${repo}/src`) ?? '', /archives it would open/);
+    assert.match(run(`grep -rzn SECRET ${repo}/src`) ?? '', /archives it would open/);
+    for (const cmd of [`grep -rn SECRET ${repo}`, `grep -rn SECRET ${repo}/app`, `grep -rn SECRET ${d}/projects`, `rg -uu SECRET ${repo}`, `grep -rn SECRET ${repo}/src ${repo}/app`]) assert.match(run(cmd) ?? '', /could print \.env files \(.*\.env(\.local)?\)/, cmd);
+    assert.match(grepTool(join(repo, 'app')) ?? '', /\.env\.local/);
     // grep -r searches node_modules, so the walk does too, unless the search leaves it out.
     writeFileSync(join(repo, 'web/node_modules/pkg/.env'), 'SECRET=x');
     assert.match(run(`grep -rn SECRET ${repo}/web`) ?? '', /node_modules\/pkg\/\.env/);
@@ -1161,8 +1167,13 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     assert.equal(run(`grep -rn SECRET ${repo}/src`), null);
     assert.match(run(`grep -Rn SECRET ${repo}/src`) ?? '', /symlink it would follow/);
     assert.match(run(`rg -L --hidden SECRET ${repo}/src`) ?? '', /symlink it would follow/);
+    for (const cmd of [`grep -rnS SECRET ${repo}/src`, `grep -rn --deref SECRET ${repo}/src`, `grep -rn --dereference-files SECRET ${repo}/src`]) assert.match(run(cmd) ?? '', /symlink it would follow/, cmd);
     symlinkSync(join(repo, 'app'), join(repo, 'web/node_modules/app'));
     assert.match(run(`grep -Rn SECRET --exclude='.env' ${repo}/web`) ?? '', /\.env/);
+    // A link to a .env file counts as the file, followed or not.
+    mkdirSync(join(repo, 'cfgs'));
+    symlinkSync(join(repo, 'app/.env.local'), join(repo, 'cfgs/cfg'));
+    assert.match(run(`grep -rn SECRET ${repo}/cfgs`) ?? '', /a link to .*app\/\.env\.local/);
     // The walk stops at its bound, across every root of one search, and counts the search as unsafe.
     const src = join(repo, 'src');
     assert.equal(envBelow([src], c, false), null);

@@ -167,22 +167,35 @@ function searchesEnv(name: string, args: Word[]): boolean {
   const only = values(/^--include$/);
   return !coversEnv(values(/^--exclude$/)) && !(only.length && !globCovers(only, '.env') && !globCovers(only, '.env.local'));
 }
-/** Whether a recursive search follows symlinks it meets below its root: grep -R, rg -L, ag -f. */
-const follows = (name: string, args: Word[]) => args.some((w) => name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$/.test(w.text) : /^-[a-zA-Z]*R|^--dereference-recursive$/.test(w.text));
+/** Whether a recursive search follows symlinks it meets below its root: grep -R, ugrep -S and --dereference(-files), rg -L, ag -f. */
+const follows = (name: string, args: Word[]) => args.some((w) => name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$|^-[a-zA-Z]*f/.test(w.text) : /^-[a-zA-Z]*[RS]|^--deref/.test(w.text));
+/** Whether a search opens archives (ugrep and ag -z, rg --search-zip), whose insides the .env walk can't see. */
+const opensArchives = (args: Word[]) => args.some((w) => /^-[a-zA-Z]*z|^--(decompress|search-zip)\b/.test(w.text));
 
 /** How many folder entries the .env walk reads, across every root of one search, before it gives up and counts the search as unsafe. */
 export const ENV_WALK_LIMIT = 10_000;
 
+/** An option's values as the searcher reads them: `--opt=v` or `--opt v`, never a word another option takes as its value (`-e --exclude-dir=x` is a pattern). */
+function optionValues(args: Word[], opt: string): string[] {
+  const out: string[] = [];
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (t === '--') break;
+    if (t.startsWith(opt + '=')) out.push(t.slice(opt.length + 1));
+    else if (t === opt) { if (args[k + 1]) out.push(args[k + 1].text); k++; }
+    else if (SEARCH_VALUE.test(t)) k++;
+  }
+  return out.map((g) => g.replace(/^['"]|['"]$/g, ''));
+}
+
 /** Folders grep's `--exclude-dir` leaves out of a search, for the .env walk to skip as well. */
-const excludedDirs = (name: string, args: Word[]) => SEARCHERS.has(name) && name !== 'rg' && name !== 'ag'
-  ? args.flatMap((w, k) => (/^--exclude-dir=/.test(w.text) ? [w.text.slice(14)] : w.text === '--exclude-dir' && args[k + 1] ? [args[k + 1].text] : [])).map((g) => g.replace(/^['"]|['"]$/g, ''))
-  : [];
+const excludedDirs = (name: string, args: Word[]) => (name === 'rg' || name === 'ag' ? [] : optionValues(args, '--exclude-dir'));
 
 /**
  * What a recursive search over roots could reach of a closed .env file (#1030), or null when it can't: walks the part of each root
- * inside a closed folder, and answers on finding one, on a symlink the search would follow (`follow`), on a folder it can't read or a
- * glob it can't settle, or once it has read `limit` entries in all. It skips .git (git never keeps a file by its own name there) and
- * the folders the search itself excludes (`skip`, globs). So a search of a scheme's src with no .env below passes without an --exclude.
+ * inside a closed folder, and answers on finding one (or a link to one), on a symlink the search would follow (`follow`), on a folder it
+ * can't read or a glob it can't settle, or once it has read `limit` entries in all. It skips git's object store (files named by hash,
+ * the bulk of a repo's entries) and the folders the search itself excludes (`skip`, globs). So a search of a scheme's src with no .env below passes without an --exclude.
  */
 export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, skip: string[] = [], limit = ENV_WALK_LIMIT): string | null {
   const todo: string[] = [];
@@ -213,8 +226,15 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
         if (++seen > limit) return `more than ${limit} files to check for them`;
         const path = join(dir, e.name);
         if (ENV_FILE.test(e.name)) return path;
-        if (e.isSymbolicLink()) { if (follow) return `a symlink it would follow, ${path}`; continue; }
-        if (e.isDirectory() && e.name !== '.git' && !globCovers(skip, e.name)) todo.push(path);
+        if (e.isSymbolicLink()) {
+          if (follow) return `a symlink it would follow, ${path}`;
+          // Some greps follow a link to a file even without -R (ugrep -S); one to a .env counts as the file.
+          let real = '';
+          try { real = realpathSync(path); } catch { /* a broken link reads nothing */ }
+          if (ENV_FILE.test(basename(real))) return `${path}, a link to ${real}`;
+          continue;
+        }
+        if (e.isDirectory() && !(e.name === 'objects' && dir.split('/').includes('.git')) && !globCovers(skip, e.name)) todo.push(path);
       }
     } finally { d.closeSync(); }
   }
@@ -1342,7 +1362,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       const secret = secretInside(p, cfg);
       if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
     }
-    const env = cfg.envFiles && searchesEnv(name, args) ? envBelow(paths, cfg, follows(name, args), excludedDirs(name, args)) : null;
+    const env = cfg.envFiles && searchesEnv(name, args) ? (opensArchives(args) && paths.some((p) => cfg.envFiles!.some((r) => under(p, r) || under(r, p))) ? 'archives it would open' : envBelow(paths, cfg, follows(name, args), excludedDirs(name, args))) : null;
     if (env) {
       const p = paths.length === 1 ? paths[0] : 'there';
       return hard(`Searching ${p} could print .env files (${env}). ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);

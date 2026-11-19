@@ -226,7 +226,3 @@
 .schedule .tnum { font-variant-numeric: tabular-nums; }
 .schedules-pane, .schedule-list > li, .schedule-audits { min-width: 0; box-sizing: border-box; }
 .schedule-runs li, .schedule-audits li { overflow-wrap: anywhere; }
-
-.held-row { display: grid; gap: 0.2rem; padding: 0.4rem 0.5rem; border-top: 1px solid var(--line); }
-.held-row .held-text { overflow-wrap: anywhere; }
-.held-row button { justify-self: start; }

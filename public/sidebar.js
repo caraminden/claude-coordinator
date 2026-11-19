@@ -10,7 +10,6 @@ import { startScheme } from './schemes.js';
 import { presenceChip } from './presence.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
-import { heldBox } from './held.js';
 import { renderInbox } from './inbox.js';
 import { pendingRelease, releaseOrder } from './releases.js';
 import { replaceHash } from './navstack.js';
@@ -183,7 +182,7 @@ export function renderSidebar() {
     closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
   }
   el.replaceChildren(
-    pinnedGroup, ...sections, closedGroup, heldBox(),
+    pinnedGroup, ...sections, closedGroup,
     !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
   // An open chip popover follows its chip into the new rows (tip.js); its words follow the minion's news.

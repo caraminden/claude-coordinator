@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cargoArgs, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
+import { cargoArgs, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, pyLeaks, pyPath, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
 import { git } from './git.ts';
 
 const SCRIPT = join(import.meta.dirname, '..', 'kit', 'skills', 'self-review', 'scripts', 'base-check.ts');
@@ -159,4 +159,41 @@ test('end to end: a fix whose new test fails on main is not flagged; a test that
   r = check(none);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /nothing to check: the diff changes no test files/);
+});
+
+test('(a) a helper named self-test.ts is not a test file; a name the package\'s test script covers, and the usual names, still are', () => {
+  assert.equal(isTestPath('app/shared/self-test.ts', 'node --test test/', 'shared/self-test.ts'), false);
+  assert.equal(isTestPath('app/shared/self-test.ts'), false);
+  assert.equal(isTestPath('app/shared/self-test.ts', 'node --test shared/', 'shared/self-test.ts'), true, 'the script runs that folder');
+  assert.ok(isTestPath('test/x-test.ts') && isTestPath('src/a.spec.ts') && isTestPath('src/a.test.ts') && isTestPath('pkg/foo_test.py'));
+});
+
+test('(b) a tools/*-test.sh shell test is a test file, and its exit status judges it', () => {
+  assert.ok(isTestPath('tools/land-test.sh') && isTestPath('tools/test-land.sh') && isTestPath('scripts/a_test.sh'));
+  assert.ok(!isTestPath('tools/land.sh'));
+  const sh = repo('shell');
+  writeFileSync(join(sh, 'math.ts'), 'export const double = (n: number) => n * 2;\nexport const half = (n: number) => n / 2;\n');
+  mkdirSync(join(sh, 'tools'));
+  writeFileSync(join(sh, 'tools', 'half-test.sh'), "#!/bin/bash\ngrep -q half math.ts\n");
+  writeFileSync(join(sh, 'tools', 'double-test.sh'), "#!/bin/bash\ngrep -q double math.ts\n");
+  git(sh, 'add', '-A');
+  commit(sh);
+  const r = check(sh);
+  assert.match(r.stdout, /^red +tools\/half-test\.sh/m, r.stdout + r.stderr);
+  assert.match(r.stdout, /^PASSES ON BASE +tools\/double-test\.sh: the whole file passed on the base$/m);
+  assert.equal(r.status, 1);
+});
+
+test('(c) a Python run drops inherited paths into the branch and flags a module that resolves outside the base tree', () => {
+  assert.equal(pyPath('/t/tree/app', '/r/repo', '/r/repo/app:/usr/lib/x', true), '/t/tree/app/src:/t/tree/app:/usr/lib/x');
+  assert.equal(pyPath('/t/tree', '/r/repo', undefined, false), '/t/tree');
+  assert.deepEqual(pyLeaks('MOD export /r/repo/app/export.py\nMOD util /t/tree/app/util.py\nMOD json /usr/lib/python3/json/__init__.py', '/r/repo', '/t/tree'), ['export']);
+});
+
+test('(d) --cmd runs from the repo root through sh -c, so `cd test && …` works', () => {
+  const pin = repo('cmd');
+  writeFileSync(join(pin, 'test', 'math.test.ts'), "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\ntest('doubles three', () => assert.equal(double(3), 6));\n");
+  commit(pin);
+  const r = spawnSync(process.execPath, [SCRIPT, '--cmd', 'cd test && node --test --test-reporter=tap {file}'], { cwd: pin, env, encoding: 'utf8' });
+  assert.match(r.stdout, /^PASSES ON BASE +test\/math\.test\.ts › doubles three$/m, r.stdout + r.stderr);
 });

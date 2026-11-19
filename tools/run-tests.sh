@@ -4,6 +4,10 @@
 # --test-force-exit ends a test file once its tests are done even if one leaked a handle (a server a
 # failed test never closed), and the time limit stops a test that hangs outright, with a line saying so.
 # DEPLOY_TEST_TIMEOUT sets the limit in seconds (default 600; the suite takes 1-2 minutes).
+# Each test (and hook) also has its own limit, CITADEL_TEST_TIMEOUT seconds (default 60; the slowest without its own
+# { timeout } takes about 14 s), so one hang fails in a minute by name instead of holding the deploy lock for the whole
+# limit (#999; tools/citadel-test and npm test use it too). Before any test, tools/parse-check.ts fails the run on a
+# tracked .ts file that doesn't parse, which would hang every test that starts it.
 #
 # Test files run at most half the cores at once (#521): node's default is about 15 at a time on the 16-core box, and since
 # #506 took away the idle-priority brake one run could fill it. CITADEL_TEST_CONCURRENCY overrides the number (npm test
@@ -35,6 +39,7 @@ set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
 rerun_limit=${DEPLOY_RERUN_TIMEOUT:-120}
+test_limit=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) # each test, in ms (#999); a test's own { timeout } wins
 budget=${DEPLOY_RERUN_BUDGET:-300}
 concurrency=${CITADEL_TEST_CONCURRENCY:-$((($(nproc 2>/dev/null || echo 2) + 1) / 2))}
 max_reruns=5 # more failed files than this is a broken change, not load
@@ -118,11 +123,20 @@ if [ -r tools/lanes ] && kit_lane; then
   fi
 fi
 
+# A tracked .ts file that doesn't parse fails the run before any test (#999): every test that starts it as a child would
+# hang to the limit below. Only its "does not parse" lines count; the check itself failing (no git) is no verdict.
+unparsed=$("$tools/citadel-node" --no-warnings "$tools/parse-check.ts" 2>/dev/null)
+if [ -n "$unparsed" ]; then
+  sed 's/^/run-tests: /; s/$/, so no test ran/' <<<"$unparsed" | tee -a "$log" >&2
+  rm -f "$failed"
+  exit 1
+fi
+
 progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
-CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
+CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-timeout="$test_limit" "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" "${targets[@]}" >>"$log" 2>&1
 rc=$?
 rm -f "$progress" "$progress.tmp"
@@ -174,7 +188,7 @@ for i in "${!files[@]}"; do
   want=$((took[i] * 3 / 2 > rerun_limit ? took[i] * 3 / 2 : rerun_limit))
   this=$((left < want ? left : want))
   echo "== $f" >>"$rerun_log"
-  timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit "$f" >>"$rerun_log" 2>&1
+  timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" "$f" >>"$rerun_log" 2>&1
   case $? in
     0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
     124 | 137) say "$f: hung when rerun alone (stopped after ${this}s): a real failure" ;;

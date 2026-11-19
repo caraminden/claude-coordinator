@@ -10,6 +10,7 @@ tools/deploy.sh
 tools/deploy-queue.sh
 tools/kit-land-drift.sh
 tools/run-tests.sh
+tools/parse-check.ts
 tools/lanes
 tools/lane.sh
 tools/kit-tests.ts

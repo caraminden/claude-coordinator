@@ -15,7 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'run-tests-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make the inner `node --test` report to this runner; COORDINATOR_SHARED_DIR would write
 // into the real scheme's retro log; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope (run-tests-scope.test.ts).
-const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined };
+const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined, CITADEL_TEST_TIMEOUT: undefined };
 
 const FIXTURES: Record<string, string> = {
   'ok.test.mjs': "import test from 'node:test';\ntest('fine', () => {});\n",
@@ -73,7 +73,7 @@ async function run(files: string[], extra: Record<string, string> = {}, prep?: (
   const dir = join(root, String(++n));
   mkdirSync(join(dir, 'tools'), { recursive: true });
   mkdirSync(join(dir, 'test'));
-  for (const f of ['run-tests.sh', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+  for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   // A name with no fixture of its own always fails.
   for (const f of files) writeFileSync(join(dir, 'test', f), FIXTURES[f] ?? FIXTURES['always.test.mjs']);
   prep?.(dir);
@@ -146,6 +146,45 @@ test('a hang is never rerun: the time limit fails the run with its line, and not
   assert.doesNotMatch(r.log, /passed alone|failed again alone/);
   assert.equal(existsSync(join(r.dir, 'land-test-rerun.log')), false, 'nothing was rerun');
   assert.equal(r.retro, '');
+});
+
+// #999: one test that hangs (a client waiting on a tool server that died) held the land line for the whole 10 minutes
+// and read as CI trouble. Each test now has its own limit, so the hang fails in a minute, by name.
+test('a test that hangs fails at its own time limit, by name, long before the whole run\'s limit', async () => {
+  const t0 = Date.now();
+  const r = await run(['ok.test.mjs', 'hang.test.mjs'], { CITADEL_TEST_TIMEOUT: '2', DEPLOY_TEST_TIMEOUT: '80' });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /✖ hangs \(\d+(\.\d+)?ms\)[\s\S]*test timed out after 2000ms/);
+  assert.match(r.log, /test\/hang\.test\.mjs: failed again alone: a real failure/, 'the rerun has the same limit');
+  assert.ok(Date.now() - t0 < 40_000, `took ${Date.now() - t0} ms`);
+});
+
+// #993's three failed lands: a .ts file that didn't parse hung every test that started it. Now it fails the run first.
+test('a tracked .ts file that does not parse fails the run before any test runs, and names the file', async () => {
+  const r = await run(['ok.test.mjs'], {}, (dir) => {
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'good.ts'), "import { a, type B } from './b.ts';\nexport const x: number = 1;\n");
+    writeFileSync(join(dir, 'src', 'bad.ts'), "export const say = (s: string) => s;\nsay('it's broken');\n");
+    writeFileSync(join(dir, 'src', 'types.d.ts'), 'declare module "x" { export = whatever ', 'utf8'); // .d.ts is never run
+    writeFileSync(join(dir, 'src', 'untracked.ts'), 'not ( typescript');
+    git(dir, 'init', '-q');
+    git(dir, 'add', 'src/good.ts', 'src/bad.ts', 'src/types.d.ts');
+  });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.stderr, /run-tests: src\/bad\.ts does not parse \(.+\), so no test ran/);
+  assert.doesNotMatch(r.stderr, /good\.ts|types\.d\.ts|untracked\.ts/);
+  assert.doesNotMatch(r.log, /✔ fine/);
+});
+
+test('a repo whose tracked .ts files all parse runs its tests as before', async () => {
+  const r = await run(['ok.test.mjs'], {}, (dir) => {
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'good.ts'), 'export const x: number = 1;\n');
+    git(dir, 'init', '-q');
+    git(dir, 'add', 'src/good.ts');
+  });
+  assert.equal(r.code, 0, r.log);
+  assert.match(r.log, /✔ fine/);
 });
 
 test('a file that hangs when rerun alone is stopped and counts as a real failure', async () => {

@@ -56,7 +56,7 @@ test('a failing test still fails the run through the scope, and its rerun alone 
   try {
     const r = run();
     assert.equal(r.status, 1);
-    assert.match(r.calls[2], /CPUWeight=500 .*-- \S*\/citadel-node --test --test-force-exit test\/b\.test\.mjs$/);
+    assert.match(r.calls[2], /CPUWeight=500 .*-- \S*\/citadel-node --test --test-force-exit --test-timeout=\d+ test\/b\.test\.mjs$/);
   } finally {
     rmSync(join(repo, 'test', 'b.test.mjs'));
   }

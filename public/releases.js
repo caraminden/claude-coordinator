@@ -79,6 +79,9 @@ const stageName = (key) => {
 };
 const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
+/** Where Releases opens from scheme `id` with no scope named (Josh, 2026-11-19): that scheme's own, and every scheme's only from Citadel (project 2). */
+export const defaultScope = (id) => (Number(id) === 2 ? 'all' : Number(id));
+
 const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
 const tookText = (r) => (r.started && r.live ? shortSpan(r.live - r.started) : null);
@@ -155,7 +158,7 @@ export function releaseRows(projectId) {
 
 /** The Releases link beside the Schemes heading, styled as Browse beside Artifacts: opens All. */
 export function releasesLink() {
-  return h('a', { class: `browse${view?.main === 'releases' && page?.scope === 'all' ? ' active' : ''}`, href: pageHref('all'), onclick: opening, title: 'Releases of every scheme you\'re a member of' }, 'Releases');
+  return h('a', { class: `browse${view?.main === 'releases' && page?.scope === defaultScope(view.projectId) ? ' active' : ''}`, href: pageHref(defaultScope(view?.projectId)), onclick: opening, title: Number(view?.projectId) === 2 ? 'Releases of every scheme you\'re a member of' : 'This scheme\'s releases' }, 'Releases');
 }
 
 // ---------- tracks ----------

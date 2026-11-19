@@ -15,8 +15,9 @@ test('admin tabs fall back to the first tab for a non-admin', () => {
 test('files, CI and releases keep their place', () => {
   assert.equal(schemeSwitchHash('#/p/3/shared', 5), '#/p/5/shared');
   assert.equal(schemeSwitchHash('#/p/3/ci/history', 5), '#/p/5/ci/history');
+  assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 2), '#/p/2/releases/all');
   assert.equal(schemeSwitchHash('#/p/3/ci', 5), '#/p/5/ci');
-  assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 5), '#/p/5/releases/all');
+  assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 5), '#/p/5/releases/5');
 });
 test('a chat or the Taskmaster goes to the new Taskmaster', () => {
   assert.equal(schemeSwitchHash('#/p/3/t/42', 5), '#/p/5');

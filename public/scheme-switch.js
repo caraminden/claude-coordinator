@@ -13,8 +13,8 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   if (!m) return home;
   const [, page, rest] = m;
   if (page === 'ci') return /^(overview|history|runs|runners)$/.test(rest ?? '') ? `${home}/ci/${rest}` : `${home}/ci`;
-  // A release is one scheme's own; the list of all of them is every scheme's.
-  if (page === 'releases') return `${home}/releases/all`;
+  // Releases open on the scheme you switch to; only Citadel's opens on All.
+  if (page === 'releases') return `${home}/releases/${Number(id) === 2 ? 'all' : id}`;
   if (!KEEP.has(page) || rest) return home;
   if (ADMIN_ONLY.has(page) && !isAdmin) return `${home}/instructions`;
   return `${home}/${page}`;

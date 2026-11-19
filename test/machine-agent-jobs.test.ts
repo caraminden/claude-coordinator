@@ -35,7 +35,9 @@ if (cmd === 'run') {
 } else if (cmd === 'wait') {
   const tick = () => {
     const s = read(name);
-    if (!s || s.waitFails) { console.error(s ? 'Error: wait interrupted' : 'no such container'); process.exit(125); }
+    if (!s) { console.error('no such container'); process.exit(125); }
+    // Fails once and takes its own flag down, so a test never has to clear it while a later wait may be reading it.
+    if (s.waitFails) { set(name, { ...s, waitFails: false }); console.error('Error: wait interrupted'); process.exit(125); }
     if (s.status === 'exited' || s.status === 'removed') { console.log(s.code); process.exit(0); }
     setTimeout(tick, 30);
   };
@@ -307,7 +309,8 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   assert.equal(app.logs.get(msg.id), 'loading model\ndone\n');
   assert.ok(statesOf(msg.id).some((s) => s.state === 'uploading'));
   assert.equal(container(msg.id).status, 'removed');
-  assert.deepEqual(r.known().filter((k: any) => k.id === msg.id), []);
+  // The app has the report before the runner has its answer, so the job leaves known() a moment after 'done' shows.
+  await until('the runner hears the app took its last report', () => !r.known().some((k: any) => k.id === msg.id), 6000, statesTail);
 });
 
 test('outFiles never follows a folder link, and lists a broken link', () => {
@@ -573,11 +576,11 @@ test('podman wait failing while the container still runs does not end the job', 
   await r.handle(msg);
   await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
   setBox(msg.id, { status: 'running', waitFails: true });
-  await until('wait failed', () => podmanCalls().filter((c) => c.join(' ') === `wait citadel-job-${msg.id}`).length >= 2, 6000, statesTail);
-  setBox(msg.id, { status: 'running' });
-  const waits = () => podmanCalls().filter((c) => c.join(' ') === `wait citadel-job-${msg.id}`).length;
-  const seen = waits();
-  await until('another wait attempt after the failure', () => waits() > seen, 6000, statesTail);
+  // The runner inspects only after a wait has failed, so a wait logged after that inspect is the new attempt. Counting
+  // waits raced the fake: a wait logs its argv before it reads the flag, and one that read it cleared waited for good.
+  const mine = () => podmanCalls().filter((c) => c.at(-1) === `citadel-job-${msg.id}`).map((c) => c[0]);
+  await until('another wait attempt after the failed one', () => mine().indexOf('inspect') >= 0 && mine().lastIndexOf('wait') > mine().indexOf('inspect'), 6000, statesTail);
+  assert.equal(container(msg.id).waitFails, false);
   assert.equal(lastState(msg.id)!.state, 'running');
   exitContainer(msg.id, 0);
   await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);

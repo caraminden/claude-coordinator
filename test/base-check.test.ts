@@ -165,12 +165,13 @@ test('(a) a helper named self-test.ts is not a test file; a name the package\'s 
   assert.equal(isTestPath('app/shared/self-test.ts', 'node --test test/', 'shared/self-test.ts'), false);
   assert.equal(isTestPath('app/shared/self-test.ts'), false);
   assert.equal(isTestPath('app/shared/self-test.ts', 'node --test shared/', 'shared/self-test.ts'), true, 'the script runs that folder');
+  assert.equal(isTestPath('app/x-test.ts', "node --test '**/*-test.ts'", 'x-test.ts'), true, 'a glob in the script');
   assert.ok(isTestPath('test/x-test.ts') && isTestPath('src/a.spec.ts') && isTestPath('src/a.test.ts') && isTestPath('pkg/foo_test.py'));
 });
 
 test('(b) a tools/*-test.sh shell test is a test file, and its exit status judges it', () => {
-  assert.ok(isTestPath('tools/land-test.sh') && isTestPath('tools/test-land.sh') && isTestPath('scripts/a_test.sh'));
-  assert.ok(!isTestPath('tools/land.sh'));
+  assert.ok(isTestPath('tools/land-test.sh') && isTestPath('scripts/a_test.sh'));
+  assert.ok(!isTestPath('tools/land.sh') && !isTestPath('tools/test-lib.sh'));
   const sh = repo('shell');
   writeFileSync(join(sh, 'math.ts'), 'export const double = (n: number) => n * 2;\nexport const half = (n: number) => n / 2;\n');
   mkdirSync(join(sh, 'tools'));

@@ -22,7 +22,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, matchesGlob, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type Runner = 'node' | 'vitest' | 'cargo' | 'pytest' | 'sh' | 'cmd';
@@ -34,7 +34,7 @@ type Verdict = { kind: 'flag' | 'red' | 'skipped'; label: string; detail: string
 const BUDGET = 540; // seconds for all files together
 const JS_TEST = /(?:\.(?:test|spec)|[-_]test)\.[cm]?[jt]sx?$/;
 const JS_DASH_TEST = /[-_]test\.[cm]?[jt]sx?$/; // also names a helper (self-test.ts): a test file only where the package's test script runs it
-const SH_TEST = /(?:[-_]test|^test[-_].*)\.sh$/;
+const SH_TEST = /[-_]test\.sh$/; // a shell test; test-lib.sh could be a helper, so only the suffix
 const PY_TEST = /(?:^test_.*|_test)\.py$/;
 // A test file by its name in any language (math_test.rb, test_x.lua, FooTest.php), as against a helper or fixture.
 const ANY_TEST = /^tests?[_.-]|[._-](?:tests?|spec)\.\w+$|Tests?\.\w+$/;
@@ -55,7 +55,7 @@ export function isTestPath(p: string, script = '', rel = p): boolean {
   if (parts.slice(0, -1).some((s) => ['test', 'tests', '__tests__', 'spec', 'testdata', 'fixtures'].includes(s))) return true;
   if (JS_DASH_TEST.test(name) && !/\.(?:test|spec)\./.test(name)) {
     const d = dirname(rel);
-    return script.split(/\s+/).some((a) => a === rel || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
+    return script.split(/\s+/).map((a) => a.replace(/^['"]|['"]$/g, '')).some((a) => a === rel || matchesGlob(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
   }
   return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
 }
@@ -449,6 +449,7 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
     if (spawnSync(argv[0], ['-c', 'import pytest'], { cwd }).status !== 0) return `pytest isn't installed for ${argv[0]}`;
     // A shared venv can hold the branch's own package (an editable install): then the run would test the branch, not the base.
     const probe = spawnSync(argv[0], ['-c', PY_PROBE, cwd, join(cwd, 'src')], { cwd, env, encoding: 'utf8' });
+    if (probe.status !== 0) return `couldn't check which copy of the code python imports (${(probe.stderr ?? '').trim().split('\n').at(-1) ?? 'no output'}): run it on the base by hand`;
     const leaks = pyLeaks(probe.stdout ?? '', root, tree);
     if (leaks.length) return `python imports ${leaks.join(', ')} from the branch's checkout (a shared venv), not the base: run it on the base by hand`;
   } else if (e.runner === 'sh') {

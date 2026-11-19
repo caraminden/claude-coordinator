@@ -455,3 +455,12 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .rules-review .rr-value { flex: 1 1 10rem; }
 .rules-review .rr-tag { font-size: 0.72rem; color: var(--muted); }
 .rules-review .rr-tag.set { color: var(--accent, var(--text)); font-weight: 600; }
+
+
+/* Settings → Memory (#1058) */
+.memory-main > input[type=search] { align-self: flex-start; width: min(100%, 24rem); margin: 0.75rem 0; }
+.memory-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.memory-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0; font-size: 0.85em; padding: 0.5rem 0.65rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
+.memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.chip.warn { border-color: var(--warn, #b7791f); background: color-mix(in srgb, var(--warn, #b7791f) 14%, var(--panel)); }

@@ -28,6 +28,7 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
+import { deleteNote, ensureFolder, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -1124,6 +1125,37 @@ export const projectRoutes: Route[] = [
     handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
+  // The scheme's Claude Code memory notes, read and written in place (the Scheme → Memory page). Not /memory, which is search over chats.
+  {
+    method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
+    async handler({ req, res, url, app, project }) {
+      // Each login's own config dir; a container login mounts the server's copy, so it is the same folder.
+      const logins: MemoryLogin[] = app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
+        const configDir = app.claude.configDir(u.id, a.n);
+        return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
+      }) : []));
+      const folders = memoryFolders(project.repo_dir, logins);
+      const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
+      if (req.method !== 'GET') {
+        const body = req.method === 'PUT' ? await readJson(req) : {};
+        const folder = folders[Number(req.method === 'PUT' ? body.folder : url.searchParams.get('folder'))];
+        const file = noteFile(req.method === 'PUT' ? body.file : url.searchParams.get('file'));
+        if (!folder || !file) throw new HttpError(400, 'Say which folder and note');
+        try {
+          if (req.method === 'DELETE') deleteNote(folder.dir, file);
+          else {
+            if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
+            ensureFolder(folder.dir);
+            saveNote(folder.dir, file, body.text);
+          }
+        } catch (err: any) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(404, err.message);
+        }
+      }
+      return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
+    },
+  },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
     method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],

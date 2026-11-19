@@ -10,6 +10,7 @@ import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
+import { claudeConfigDir, projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
@@ -672,6 +673,29 @@ mock.boards('#takes', { boards: [
       }
       w.done('Seven jobs on the desktop: one waits on your go.');
       return route(c, t, first);
+    },
+  },
+  memory: {
+    about: "Settings → Memory (#1058): the Seeded scheme with a repo folder and six Claude Code memory notes in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index",
+    seed(c) {
+      const repo = join(c.dataDir, 'seeded-repo');
+      mkdirSync(repo, { recursive: true });
+      c.store.setProjectRepoDir(c.project.id, repo);
+      const closed = minion(c, 'Old export fix', { status: 'closed' }, 'bug');
+      const dir = join(claudeConfigDir(process.env), 'projects', projectSlug(repo), 'memory');
+      mkdirSync(dir, { recursive: true });
+      const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+      const notes: [string, string, string, string][] = [
+        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.'],
+        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".'],
+        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`],
+        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`],
+        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`],
+        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.'],
+      ];
+      for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
+      writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
+      return `Settings → Memory in "${c.project.name}": #/p/${c.project.id}/memory`;
     },
   },
   ci: {

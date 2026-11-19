@@ -201,6 +201,7 @@ export function onProjectUpdate(project) {
     if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
     el?.dispatchEvent(new Event('settings-refresh'));
   }
+  document.getElementById('land-mode')?.dispatchEvent(new Event('settings-refresh'));
   renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
   // Someone else saved: show their text unless this tab has edits of its own.
@@ -387,6 +388,28 @@ export function tuneUpButton() {
 }
 
 /**
+ * Fast mode (#1017): Off or Fast. A low or medium land goes live on the smoke check alone and the full suite runs on
+ * main behind it; the server refuses it while the scheme's land.sh is older than the kit's, and the toast says so.
+ */
+function fastModeRow(p) {
+  const on = h('input', { type: 'checkbox', id: 'land-mode', checked: p.land_mode === 'fast' });
+  const [row, sum] = settingsRow({ icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
+    h('label', { class: 'toggle', title: 'Land now, test behind' }, on, 'Land now, test behind'),
+    settingsHelp('Low and medium lands go live on the smoke check alone, and the full suite runs on main behind them.',
+      'A red reopens the minion whose land broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other lands up. High-risk lands and changes to the land pipeline keep the full gate, and CI reds on main from lands send no Mandate alerts.'));
+  const shown = () => {
+    on.checked = view.project?.land_mode === 'fast';
+    sum.textContent = on.checked ? 'On' : 'Off';
+  };
+  on.addEventListener('settings-refresh', shown);
+  on.addEventListener('change', () => {
+    const land_mode = on.checked ? 'fast' : 'off';
+    saveProject(p, { land_mode }, { land_mode }, `turn fast mode ${on.checked ? 'on' : 'off'}`, shown);
+  });
+  return row;
+}
+
+/**
  * Save some of a scheme's settings optimistically: `mine` (the fields as the page shows them saved) goes into
  * view.project at once and shown(true) redraws; the PATCH sends `body` behind it. A refusal puts the old values
  * back, unless a later save changed them again, and shown(false) says so; the page's fields keep what was typed,
@@ -534,7 +557,8 @@ export function approvalsEditor() {
           'Every other workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. One workflow file per line. A minion that dispatched a run on its own branch still hears its result.')] }),
       setting({ id: 'ci-watch', key: 'ci_watch', placeholder: 'desktop.yml', title: 'Watched CI workflows', ic: 'eye', hue: 'running', unit: 'workflow',
         help: [settingsHelp(['Watched even when it is in the quiet list above, like ', h('code', {}, 'desktop.yml'), '.'],
-          'When a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] })));
+          'When a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] }),
+      fastModeRow(p)));
   return section;
 }
 

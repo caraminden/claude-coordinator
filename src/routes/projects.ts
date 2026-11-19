@@ -1,13 +1,13 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, buildOwnerKey, EFFORTS, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, EFFORTS, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
@@ -682,12 +682,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet and ci_watch; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch and land_mode; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -695,6 +695,12 @@ export const projectRoutes: Route[] = [
       };
       if (body.onboarding !== undefined) settings.onboarding = required(body.onboarding, ONBOARDING, 'onboarding') as Project['onboarding'];
       if (body.onboarding_mode !== undefined) settings.onboarding_mode = required(body.onboarding_mode, ONBOARDING_MODES, 'onboarding_mode') as Project['onboarding_mode'];
+      if (body.land_mode !== undefined) settings.land_mode = required(body.land_mode, LAND_MODES, 'land_mode') as Project['land_mode'];
+      // Fast mode is the kit's land.sh's LAND_FAST (#1017): a land.sh without it would land every change on the full gate.
+      if (settings.land_mode === 'fast' && project.land_mode !== 'fast') {
+        const land = project.repo_dir ? await readFile(join(project.repo_dir, 'tools', 'land.sh'), 'utf8').catch(() => '') : '';
+        if (!/\bLAND_FAST\b/.test(land) || !/--verify\b/.test(land)) throw new HttpError(409, `This scheme's tools/land.sh ${land ? "doesn't know fast mode yet" : 'is missing'}: re-sync it from the kit's land template (kit/skills/scheme-setup/templates/land.sh) on main first, then turn fast mode on.`);
+      }
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
       try {
@@ -768,6 +774,12 @@ export const projectRoutes: Route[] = [
         }
         if (coordinator && settings.ci_watch !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the watched CI workflows to: ${shown(settings.ci_watch)}. When one goes red on main, you're woken once per red streak and told when it's back to green.` });
+        }
+        if (settings.land_mode === 'fast') app.fastMode?.reset(project.id);
+        if (coordinator && settings.land_mode !== undefined) {
+          runner.emit(coordinator.id, 'note', { everyone: true, text: settings.land_mode === 'fast'
+            ? `${session.name} turned fast mode on. Low and medium lands now go live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose land broke it, and comes to you if it isn't fixed in 30 minutes. High-risk lands and pipeline changes keep the full gate.`
+            : `${session.name} turned fast mode off. Every land waits for the full check and CI again.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });

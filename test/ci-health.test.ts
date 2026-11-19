@@ -852,6 +852,24 @@ test('every workflow but a quiet one is watched: a red on main from any trigger 
   assert.match(told[3][0], /back to green on main: .*runs\/8005 .*after run 8005 failed\.$/);
 });
 
+test("fast mode: a land's push going red on main wakes no one and makes no item; a scheduled red still does (#1017)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, text: string) => (told.push(text), true) });
+  w.store.setProjectSettings(w.peek.id, { land_mode: 'fast' });
+  const run = (fields: Partial<Run>) => runOf({ workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', ...fields });
+  w.gh.mainRuns = [run({ id: 9101, event: 'push', head_sha: 'bad0101fff', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  await health.tick(NOW + RED_FIX_MS);
+  assert.deepEqual(told, [], 'fast mode handles it');
+  assert.ok(!w.puts.some(([, key]) => /^ci\.(red|open)/.test(key)), 'no Mandate item');
+  w.gh.mainRuns = [run({ id: 9102, event: 'schedule', head_sha: 'bad0102fff', created_at: iso(-MIN), updated_at: iso(-2 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + RED_FIX_MS + MIN);
+  assert.equal(told.length, 1);
+  assert.match(told[0], /run 9102 failed on bad0102 \(schedule/);
+});
+
 test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on with no fix minion naming the run, or once it is still red after the fix closed (#968)', async () => {
   const w = outsideWorld();
   w.quietDelve();

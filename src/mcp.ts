@@ -757,7 +757,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, quiet CI workflows, watched CI workflows, default effort, fast mode, onboarding step, and/or the name and repo URL of this scheme; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -787,6 +787,7 @@ const TOOLS = [
           description: "Workflow file names, like desktop.yml, to watch on the default branch even when quiet_workflows lists them (every workflow is watched unless quiet): when one's newest finished run there fails, you're woken once for that red streak (any trigger, lands' pushes too), and get held mail when it's back to green.",
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
+        land_mode: { type: 'string', enum: ['off', 'fast'], description: "fast: low and medium lands go live on the smoke check alone and the full suite runs on main behind them (a red reopens the minion that broke it); high-risk and pipeline changes keep the full gate. Only when a member asks. Refused until the scheme's tools/land.sh is re-synced from the kit." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
         name: { type: 'string', description: "Rename this scheme (never another). Refused if another scheme has the name. Nothing else changes: everything goes by the scheme's id, and your chat gets a note. Old \"<scheme> #N\" text keeps the old name." },
         repo_url: { type: 'string', description: "Record this scheme's repo URL (https:// or git@). Clones nothing and re-points no checkout: a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. Refused when one is set, unless replace_repo is true." },
@@ -1779,7 +1780,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
@@ -1789,6 +1790,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.quiet_workflows !== undefined) body.ci_quiet = args.quiet_workflows;
       if (args.watch_workflows !== undefined) body.ci_watch = args.watch_workflows;
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
+      if (args.land_mode !== undefined) body.land_mode = args.land_mode;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
       if (args.name !== undefined) body.name = args.name;
@@ -1796,10 +1798,10 @@ async function runTool(name: string, args: any): Promise<string> {
         body.repo_url = args.repo_url;
         if (args.replace_repo === true) body.replace_repo = true;
       }
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, onboarding, onboarding_mode, name, repo_url or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, onboarding, onboarding_mode, name, repo_url or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);

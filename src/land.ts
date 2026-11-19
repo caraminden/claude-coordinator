@@ -421,6 +421,8 @@ export interface HandoffDeps {
   /** The minion's scheme's apps a clean land on main deploys (#712): its home contraptions; none where deploys can't run. */
   apps?(id: number): string[];
   deployOps?: DeployOps;
+  /** A clean land on main moved it to `commit` (fast mode's testing behind, src/fast-mode.ts, #1017). */
+  landed?(id: number, commit: string): void;
 }
 
 /**
@@ -515,6 +517,7 @@ export class LandHandoffs {
       return;
     }
     const into = h.args[0] === '--into' ? h.args[1] : null;
+    if (!into && r.commit) this.d.landed?.(id, r.commit);
     const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
     const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build lands.` : 'Landed.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');

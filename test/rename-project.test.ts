@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -125,4 +125,28 @@ test('PATCH /api/projects/:id saves the watched CI workflows, cleaned like the q
   assert.equal(ok.status, 200);
   assert.equal(ok.data.ci_watch, 'windows.yml\ndesktop.yml');
   assert.equal(ok.data.ci_quiet, '', 'the quiet list stays as it was');
+});
+
+test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it, and tells the Taskmaster (#1017)", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Fast' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'quick' } })).status, 400);
+  const none = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'fast' } });
+  assert.equal(none.status, 409);
+  assert.match(none.data.error, /tools\/land\.sh is missing/);
+  const repo = join(root, 'fast-repo');
+  mkdirSync(join(repo, 'tools'), { recursive: true });
+  new Store(join(root, 'data', 'coordinator.db')).setProjectRepoDir(p.id, repo);
+  writeFileSync(join(repo, 'tools', 'land.sh'), '#!/bin/bash\n# an old template\n');
+  const old = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'fast' } });
+  assert.equal(old.status, 409);
+  assert.match(old.data.error, /doesn't know fast mode yet.*re-sync/);
+  writeFileSync(join(repo, 'tools', 'land.sh'), '#!/bin/bash\n[ "$1" = --verify ] && exit 0\n[ -n "${LAND_FAST:-}" ]\n');
+  const on = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'fast' } });
+  assert.equal(on.status, 200);
+  assert.equal(on.data.land_mode, 'fast');
+  const off = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'off' } });
+  assert.equal(off.data.land_mode, 'off');
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  assert.equal(notes.filter((t: string) => /fast mode/i.test(t)).length, 2, notes.join('\n'));
 });

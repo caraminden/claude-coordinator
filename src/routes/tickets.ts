@@ -1241,6 +1241,13 @@ export const ticketRoutes: Route[] = [
       if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
       const env = app.runner.hostEnv(ticket, String(req.headers.authorization).replace(/^Bearer /, ''));
       if (body.fix === true) env.LAND_FIX = '1';
+      // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
+      const scheme = app.store.getProject(ticket.project_id);
+      if (scheme?.land_mode === 'fast') {
+        if (h.risk !== 'high') env.LAND_FAST = '1';
+        const known = app.fastMode?.knownRed(ticket.project_id);
+        if (known) env.LAND_KNOWN_RED = known;
+      }
       // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
       const clash = await landConflict(ticket.cwd, env, args);
       if (clash) throw new HttpError(409, `Not handed off: ${clash}`);

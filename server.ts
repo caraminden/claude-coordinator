@@ -84,6 +84,7 @@ import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
+import { FastMode, type FastState } from './src/fast-mode.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
@@ -989,8 +990,31 @@ const ciHealth = new CiHealth(store, {
 });
 if (!BOOT_CHECK) ciHealth.start();
 // Handed-off lands (#706): the server reports each once its land.sh ends, with no turn on a clean land (src/land.ts).
+// Fast mode's testing behind (#1017, src/fast-mode.ts): the full suite on main after fast lands, in each fast scheme.
+const fastMode = new FastMode({
+  schemes: () => store.listProjects().filter((p) => p.land_mode === 'fast' && p.repo_dir).map((p) => ({ id: p.id, repo: p.repo_dir! })),
+  get: (k) => store.getSetting<FastState>(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  jobs: new HostJobs(() => runner.units), dir: (id) => join(DATA_DIR, 'run', 'fast-mode', String(id)),
+  // As the lander's land ran (its person's GitHub login), with no Citadel token of its own: it calls no tools, and a fresh one would log a live turn out (#225).
+  env: (id, ticketId) => {
+    const t = (ticketId != null ? store.getTicket(ticketId) : null) ?? store.getOverlord(id);
+    return t ? runner.hostEnv(t, '') : turnEnv(process.env);
+  },
+  ticketOf: (id, n) => store.getTicketByNumber(id, n)?.id ?? null, numberOf: (id) => store.getTicket(id)?.number ?? null,
+  tell: (id, text) => runner.send(id, APP_NAME, text), taskmaster: tellHome,
+  green: (id, sha) => {
+    const p = store.getProject(id);
+    if (p?.repo_dir) lastGreen.note(id, p.repo_dir, 'refs/heads/main', [{ head_sha: sha, workflow_id: 0, status: 'completed', conclusion: 'success', created_at: new Date().toISOString(), file: 'land.sh --verify' }])
+      .then(() => releases.poll(), (err) => console.error(`Last green of ${p.name} failed:`, err));
+  },
+});
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fast mode', () => fastMode.tick()), 30_000).unref();
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
+  landed: (id, commit) => {
+    const t = store.getTicket(id);
+    if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
+  },
   runnersBack: (id, reason) => {
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);
     if (!project || !repoSlug(project.repo_url ?? null) || !runnerLabel(project.name)) return false;
@@ -1194,7 +1218,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

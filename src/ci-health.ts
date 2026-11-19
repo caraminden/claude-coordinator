@@ -37,6 +37,7 @@
 // #983 (Cara, 2026-11-18: "CI alerts need to wake their respective taskmasters to fix the issue"): every problem that rings
 // also wakes its scheme's Taskmaster once as it opens (wakeFor; the land gate wakes the live checkout's scheme), so a ring
 // is never the first anyone hears of it. The person ring stays the backup, and the #869 wake no longer sends CI's bundle to Citadel's.
+// #1017: in a scheme in fast mode, a land's push going red on main is fast mode's to handle (src/fast-mode.ts), not an alert.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { quietUntil, type AlertPart } from './alert-wakes.ts';
@@ -1079,7 +1080,11 @@ export class CiHealth {
     const since = this.store.getSetting<number>(DISPATCH_SINCE) ?? (this.store.setSetting(DISPATCH_SINCE, now), now);
     const quiet = new Set(lines(p.ci_quiet));
     const watch = new Set(lines(p.ci_watch ?? ''));
-    const watched = (r: Run) => watch.has(workflowFile(r)) || !quiet.has(workflowFile(r));
+    // Fast mode (#1017; Cara, 2026-11-18: "We should also not send Mandate alerts for CI failures in fast mode, they are
+    // expected to some extent"): a land's push red on main is src/fast-mode.ts's to pin and hand out, so it neither wakes
+    // the Taskmaster nor makes an item. Scheduled and dispatched reds still do.
+    const landed = (r: Run) => p.land_mode === 'fast' && r.event === 'push';
+    const watched = (r: Run) => !landed(r) && (watch.has(workflowFile(r)) || !quiet.has(workflowFile(r)));
     const save = () => {
       // Ids GitHub no longer lists are dropped, but only when the list was read, so a bad answer can't forget them.
       this.store.setSetting(key, Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told]);

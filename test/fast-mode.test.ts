@@ -100,7 +100,7 @@ test("a red on one land tells that land's minion; later reds only on that id bla
   assert.equal(w.told.length, 1);
   assert.equal(w.told[0].ticket, 7);
   assert.match(w.told[0].text, /test\/x\.test\.ts/);
-  assert.equal(w.fm.knownRed(PEEK), 'test/x.test.ts\t#70');
+  assert.equal(w.fm.knownRed(PEEK), 'test/x.test.ts\t#70 is fixing it');
   w.fm.landed(PEEK, 8, w.commit('three'));
   await w.tick();
   await w.finish(red('test/x.test.ts'));
@@ -112,11 +112,11 @@ test("a red on one land tells that land's minion; later reds only on that id bla
   assert.equal(w.told.length, 2);
   assert.equal(w.told[1].ticket, 9, 'a new id has its own culprit');
   assert.doesNotMatch(w.told[1].text, /x\.test/);
-  assert.equal(w.fm.knownRed(PEEK), 'test/x.test.ts\t#70\ntest/y.test.ts\t#90');
+  assert.equal(w.fm.knownRed(PEEK), 'test/x.test.ts\t#70 is fixing it\ntest/y.test.ts\t#90 is fixing it');
   w.commit('five');
   await w.tick();
   await w.finish(red('test/y.test.ts'));
-  assert.equal(w.fm.knownRed(PEEK), 'test/y.test.ts\t#90', 'x passed, so it left the ledger');
+  assert.equal(w.fm.knownRed(PEEK), 'test/y.test.ts\t#90 is fixing it', 'x passed, so it left the ledger');
   w.commit('six');
   await w.tick();
   await w.finish(GREEN);
@@ -172,7 +172,7 @@ test("the first run's red, a range too long to pin, and a red left 30 minutes go
   assert.equal(w.told.length, 0);
   assert.equal(w.tm.length, 1);
   assert.match(w.tm[0], /first run since fast mode went on/);
-  assert.equal(w.fm.knownRed(PEEK), 'old\tthe Taskmaster');
+  assert.equal(w.fm.knownRed(PEEK), 'old\tthe Taskmaster has it');
   for (let i = 0; i < 10; i++) w.commit(`c${i}`);
   await w.tick();
   await w.finish(red('old', 'new'));
@@ -203,4 +203,58 @@ test("the first run's red, a range too long to pin, and a red left 30 minutes go
   assert.equal(w.runs.length, runs + 1);
   w.fm.reset(PEEK);
   assert.equal(w.fm.knownRed(PEEK), '');
+});
+
+test("each id is pinned on the first commit failing it: the run reruns only the ids left, its 30 minutes start at the red, and they're known red meanwhile", async () => {
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(GREEN);
+  const c2 = w.commit('two'), c3 = w.commit('three'), c4 = w.commit('four');
+  w.fm.landed(PEEK, 2, c2.slice(0, 9)); // land.sh's "landed" line gives a short sha
+  w.fm.landed(PEEK, 4, c4);
+  await w.tick();
+  await w.finish(red('a', 'b'));
+  assert.equal(w.runs.at(-1)!.sha, c2);
+  assert.equal(w.runs.at(-1)!.env.LAND_VERIFY_IDS, 'a\nb', 'a pinning run checks only the new ids');
+  assert.equal(w.fm.knownRed(PEEK), 'a\tCitadel is finding whose land broke it\nb\tCitadel is finding whose land broke it');
+  w.wait(ESCALATE_MS / 2);
+  await w.finish(red('a'));
+  assert.deepEqual(w.told.map((t) => t.ticket), [2], 'a is two\'s, found by its short sha');
+  assert.doesNotMatch(w.told[0].text, /- b/);
+  assert.equal(w.runs.at(-1)!.sha, c3);
+  assert.equal(w.runs.at(-1)!.env.LAND_VERIFY_IDS, 'b', 'b goes on alone');
+  await w.finish(GREEN);
+  assert.deepEqual(w.told.map((t) => t.ticket), [2, 4], "b passed on three, so it's four's: the head's own");
+  assert.equal(w.fm.knownRed(PEEK), 'a\t#20 is fixing it\nb\t#40 is fixing it');
+  assert.equal(w.tm.length, 0);
+  w.wait(ESCALATE_MS / 2 + 1);
+  await w.tick();
+  assert.equal(w.tm.length, 2, 'the 30 minutes ran from when the red was seen, not from the blame: one note per entry');
+});
+
+test("a land during a pass isn't lost; an old red escalates while a run is going; reset keeps the run", async () => {
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(GREEN);
+  const c2 = w.commit('two');
+  const pass = w.tick();
+  w.fm.landed(PEEK, 6, c2); // while the pass awaits git
+  await pass;
+  assert.equal(w.kv.get(`fast-mode:${PEEK}`)!.landed[c2], 6);
+  await w.finish(red('a'));
+  assert.equal(w.told.at(-1)!.ticket, 6);
+  w.commit('three');
+  await w.tick();
+  const runs = w.runs.length;
+  assert.ok(w.kv.get(`fast-mode:${PEEK}`)!.running);
+  w.wait(ESCALATE_MS + 1);
+  await w.tick();
+  assert.equal(w.tm.length, 1, 'escalated with the run still going');
+  w.fm.reset(PEEK);
+  await w.tick();
+  assert.equal(w.runs.length, runs, 'the run going survives a reset and is not started again');
+  await w.finish(red('a'));
+  assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
 });

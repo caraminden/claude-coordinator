@@ -33,8 +33,11 @@ interface Pinning {
   /** The range's commits before `head`, oldest first, and which of them is next. */
   shas: string[];
   next: number;
-  /** The ids no ledger entry had: the first commit failing on one of them is the culprit. */
+  /** The ids no ledger entry had and no commit is blamed for yet: the first commit failing on one is its culprit. */
   ids: string[];
+  /** When the red was seen (the 30 minutes start then), and its run's output, for the ids left on `head`. */
+  at?: number;
+  output?: string;
 }
 
 export interface FastState {
@@ -88,6 +91,9 @@ export function verifyResult(output: string): { verdict: 'green' } | { verdict: 
   return { verdict: 'none' };
 }
 
+/** The last 40 lines of a run's output, without its verify: lines. */
+const tailOf = (output: string) => output.trim().split('\n').filter((l) => !/^verify: /.test(l)).slice(-40).join('\n');
+
 export class FastMode {
   /** The pass that runs now; a tick meanwhile asks it to go round again, and waits for it. */
   private busy: Promise<void> | null = null;
@@ -106,14 +112,22 @@ export class FastMode {
     return { reds: [], landed: {}, ...this.d.get(key(projectId)) };
   }
 
-  /** The known-red ledger as land.sh's LAND_KNOWN_RED reads it: "id<TAB>#N" lines ("the Taskmaster" with no minion). */
+  /** The known-red ledger as land.sh's LAND_KNOWN_RED reads it: "id<TAB>who" lines, who as land.sh prints it after
+   * "known red, ". Ids still being pinned count too: main fails on them whoever lands next. */
   knownRed(projectId: number): string {
-    return this.state(projectId).reds.flatMap((e) => e.ids.map((id) => `${id}\t${e.n ? `#${e.n}` : 'the Taskmaster'}`)).join('\n');
+    const s = this.state(projectId);
+    const who = (e: KnownRed) => (e.n ? `#${e.n} is fixing it` : 'the Taskmaster has it');
+    return [
+      ...s.reds.flatMap((e) => e.ids.map((id) => `${id}\t${who(e)}`)),
+      ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose land broke it`),
+    ].join('\n');
   }
 
-  /** Fast mode was turned on: start from main's head as it is now, with no ledger from an earlier spell. */
+  /** Fast mode was turned on: start from main's head as it is now, with no ledger from an earlier spell. A run still
+   * going (fast, off and fast again) is kept, so its job isn't started twice; its result reads as a first run. */
   reset(projectId: number) {
-    this.d.set(key(projectId), { reds: [], landed: {} });
+    const { running } = this.state(projectId);
+    this.d.set(key(projectId), { reds: [], landed: {}, ...(running ? { running } : {}) });
   }
 
   /** A clean land on main (src/land.ts): who landed `commit`, and a run now if nothing runs. */
@@ -151,9 +165,14 @@ export class FastMode {
   private async step(projectId: number, repo: string) {
     const s = this.state(projectId);
     const jobDir = join(this.d.dir(projectId), 'job');
+    // land() writes `landed` while this awaits git: save with the newest map, not the one read here.
+    const save = () => this.d.set(key(projectId), { ...s, landed: this.state(projectId).landed });
     if (s.running) {
       const job = this.d.jobs.state(jobDir, 20_000);
-      if (job && job.code === null) return;
+      if (job && job.code === null) {
+        this.escalate(projectId, s);
+        return save();
+      }
       const sha = s.running.sha;
       delete s.running;
       await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
@@ -161,7 +180,7 @@ export class FastMode {
     this.escalate(projectId, s);
     const next = s.pin ? s.pin.shas[s.pin.next] : await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);
     if (next && (s.pin || (next !== s.verified && next !== s.stuck))) await this.start(projectId, repo, s, next);
-    this.d.set(key(projectId), s);
+    save();
   }
 
   private async start(projectId: number, repo: string, s: FastState, sha: string) {
@@ -172,28 +191,40 @@ export class FastMode {
       await this.git(repo, 'worktree', 'prune');
       await this.git(repo, 'worktree', 'add', '-q', '--detach', wt, sha);
     } else await this.git(wt, 'checkout', '-q', '-f', '--detach', sha);
-    const env = { ...this.d.env(projectId, this.owner(s, sha)), LAND_KNOWN_RED: '', LAND_FAST: '' };
+    // A pinning run checks only the ids it is pinning (land.sh reruns just their files when it can).
+    const env = { ...this.d.env(projectId, this.owner(s, sha)), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: s.pin ? s.pin.ids.join('\n') : '' };
     this.d.jobs.start({ dir: join(this.d.dir(projectId), 'job'), cwd: wt, argv: ['bash', 'tools/land.sh', '--verify'], env, unit: `citadel-fast-verify-${projectId}-${Date.now()}`, description: `tools/land.sh --verify ${sha.slice(0, 9)} (fast mode)`, ticketId: 0 });
     s.running = { sha, at: this.now() };
   }
 
   /** The minion that landed `sha`: the landing whose commit is `sha` or the nearest after it on main. */
+  /** Landings may be recorded by a short sha (land.sh's "landed" line), so a prefix of at least 7 matches. */
   private owner(s: FastState, sha: string, after: string[] = []): number | null {
-    for (const c of [sha, ...after]) if (s.landed[c] != null) return s.landed[c];
+    const keys = Object.keys(s.landed).filter((k) => k.length >= 7);
+    for (const c of [sha, ...after]) {
+      const k = s.landed[c] != null ? c : keys.find((k) => c.startsWith(k) || k.startsWith(c));
+      if (k) return s.landed[k];
+    }
     return null;
   }
 
   private async read(projectId: number, repo: string, s: FastState, sha: string, r: ReturnType<typeof verifyResult>, output: string) {
     if (s.pin) {
+      // Each id is blamed on the first commit failing it; the rest go on to the next commit, and what's left at the
+      // end is the head's own commit's.
       const pin = s.pin;
-      const hit = r.verdict === 'red' && r.ids.some((id) => pin.ids.includes(id));
-      if (!hit && pin.next + 1 < pin.shas.length) {
+      const hit = r.verdict === 'red' ? pin.ids.filter((id) => r.ids.includes(id)) : [];
+      if (hit.length) {
+        pin.ids = pin.ids.filter((id) => !hit.includes(id));
+        await this.open(projectId, repo, s, sha, hit, output, undefined, pin.at);
+      }
+      if (pin.ids.length && pin.next + 1 < pin.shas.length) {
         pin.next++;
         return;
       }
       delete s.pin;
       s.verified = pin.head;
-      await this.open(projectId, repo, s, hit ? sha : pin.head, pin.ids, hit ? output : '');
+      if (pin.ids.length) await this.open(projectId, repo, s, pin.head, pin.ids, pin.output ?? '', undefined, pin.at);
       return;
     }
     if (r.verdict === 'none') {
@@ -219,12 +250,12 @@ export class FastMode {
     if (range.length <= 1) return this.open(projectId, repo, s, sha, fresh, output);
     if (range.length - 1 > PIN_MAX) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, after ${range.length} lands: more than ${PIN_MAX} to pin the culprit`);
     s.verified = from;
-    s.pin = { head: sha, shas: range.slice(0, -1), next: 0, ids: fresh };
+    s.pin = { head: sha, shas: range.slice(0, -1), next: 0, ids: fresh, at: this.now(), output: tailOf(output) };
   }
 
   /** A new red: its ledger entry, and its culprit's minion told (the Taskmaster when there is none, or it wasn't pinned). */
   /** `unpinned`: why no commit could be blamed (the Taskmaster gets it at once). */
-  private async open(projectId: number, repo: string, s: FastState, sha: string, ids: string[], output: string, unpinned?: string) {
+  private async open(projectId: number, repo: string, s: FastState, sha: string, ids: string[], output: string, unpinned?: string, at = this.now()) {
     const pinned = !unpinned;
     const after = (await this.git(repo, 'rev-list', '--reverse', '--first-parent', '--ancestry-path', `${sha}..refs/heads/${BRANCH}`).catch(() => '')).split('\n').filter(Boolean);
     let ticket = pinned ? this.owner(s, sha, after) : null;
@@ -233,10 +264,10 @@ export class FastMode {
       ticket = n ? this.d.ticketOf(projectId, n) : null;
     }
     const n = ticket != null ? this.d.numberOf(ticket) : null;
-    const entry: KnownRed = { ids, sha, ticket, ...(n ? { n } : {}), at: this.now() };
+    const entry: KnownRed = { ids, sha, ticket, ...(n ? { n } : {}), at };
     s.reds.push(entry);
     const list = ids.map((id) => `- ${id}`).join('\n');
-    const tail = output.trim().split('\n').filter((l) => !/^verify: /.test(l)).slice(-40).join('\n');
+    const tail = tailOf(output);
     const what = `The full suite went red on ${BRANCH} behind fast-mode lands, ${unpinned ?? `on ${sha.slice(0, 12)}, the first commit it fails on`}. New failing ids:\n${list}`;
     if (ticket != null) {
       this.d.tell(ticket, `${what}\n\nIt's yours to fix: your land is the culprit. Each id is in the scheme's known-red ledger, so other lands that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`);

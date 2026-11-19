@@ -52,6 +52,12 @@ export function landedOn(landed: Landed, on: (files: string[] | null | undefined
   return { ...landed, commits: new Map([...landed.commits].filter(([sha]) => on(landed.files.get(sha)))), tickets: landed.tickets.filter((x) => on(landed.ticketFiles.get(x.id))) };
 }
 
+/** What of `landed` changes the app itself: files in its folder but Markdown, as Mandate's own bump rule counts (android/README.md ships in no APK). */
+export function appChanges(t: Found, landed: Landed | null): Landed | null {
+  const app = (files: string[] | null | undefined) => !t.paths?.length || !files || files.some((f) => holds(t, f) && !/\.md$/i.test(f));
+  return landed && { ...landed, commits: new Map([...landed.commits].filter(([sha]) => app(landed.files.get(sha)))), tickets: landed.tickets.filter((x) => app(landed.ticketFiles.get(x.id))) };
+}
+
 const asChange = (x: { id: number; number: number | null; title: string }) => ({ ticketId: x.id, number: x.number, title: x.title });
 
 /** A contraption's stages: main waits for someone to call deploy_contraption, then the deploy's own steps. */
@@ -573,7 +579,7 @@ export class ApkReader implements Reader {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
       const pub = feed && t.contraption ? this.d.store.lastApkPublish(t.projectId, t.contraption) : null;
       const built = !feed ? null : (pub?.version_code === feed.versionCode ? runs.find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
-      this.ahead.set(tkey(t), await this.cache.since(t, built?.run.head_sha ?? null));
+      this.ahead.set(tkey(t), appChanges(t, await this.cache.since(t, built?.run.head_sha ?? null)));
       const p = this.d.store.getProject(t.projectId);
       if (!p?.repo_dir) continue;
       const head = (await git(['rev-parse', '--verify', '--quiet', `${t.branch}^{commit}`], p.repo_dir))?.trim();

@@ -9,7 +9,7 @@ import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
-import { changeEta, COLUMNS, columnOf, segments, shortSpan } from './releasemath.js';
+import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -104,8 +104,6 @@ const etaTitle = (eta, since) => (eta <= Date.now() && since
  * What people call a release (Cara, 2026-11-12: "a numbered build/release system instead of commit hashes"): "Release 14",
  * "#14" where space is short; a try that never went live has no number, so it's "a failed try".
  */
-// A target with its own names (#764: Peek's "Build 997") sends `name`; the rest are "Release <n>".
-const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : r.name ?? `Release ${r.number}`) : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : 'a failed try');
 /** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
 

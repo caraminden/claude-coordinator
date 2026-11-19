@@ -34,3 +34,10 @@ export function columnOf(stages, c) {
   const at = list.findIndex((s) => s.name === c.stage);
   return at < 0 ? 0 : at <= Math.floor((list.length - 1) / 2) ? 1 : 2;
 }
+
+/**
+ * What people call a release: "Release 14", "#14" where space is short. A target with its own names (#764: Peek's "Build 997")
+ * sends `name`. With no number: a try that failed is "a failed try"; a next not numbered yet keeps its name.
+ */
+export const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : r.name ?? `Release ${r.number}`)
+  : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : r.outcome === 'failed' ? 'a failed try' : r.name ?? 'Next release');

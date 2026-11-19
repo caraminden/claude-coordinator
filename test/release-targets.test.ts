@@ -886,6 +886,31 @@ test('an APK: changes to its folder on main with no version bump wait on one; th
   assert.equal(reader.pending(t), null, 'nothing for auto-deploy to start');
 });
 
+test('an APK: a change that only edits Markdown in its folder is no change to the app, so nothing waits on a version bump', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `apk-md-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(), m = 60_000;
+  writeFileSync(join(repo, 'x'), '');
+  mkdirSync(join(repo, 'android/app'), { recursive: true });
+  writeFileSync(join(repo, 'android/app/build.gradle'), 'defaultConfig {\n  versionCode 5\n  versionName "1.4"\n}\n');
+  git(repo, 'add', '-A');
+  gitAt(now - 300 * m, repo, 'commit', '-q', '-m', 'v5');
+  const built = git(repo, 'rev-parse', 'HEAD');
+  const p = store.createProject('Mandate', 'https://github.com/o/mandate');
+  store.setProjectRepoDir(p.id, repo);
+  store.setTicketDir(store.createTicket({ project_id: p.id, title: 'Docs', permission_mode: 'default', created_by: 'Cara' }).id, root, 'ticket/1-docs');
+  landOne(repo, Date.now() + 1000, 'android/README.md', 'ticket/1-docs');
+  const web: Found = { id: 'app:mandate', projectId: p.id, name: 'Web', kind: 'contraption', link: '/apps/mandate/', branch: 'main', contraption: 'mandate' };
+  const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: '/apps/mandate/android/', branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate', paths: ['android/'] };
+  const { actions } = fakeActions([{ ...run(6, 'completed', 'success', now - 290 * m, now - 280 * m), head_sha: built }], {});
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 5, runId: 6, by: 'Cara', uid: null });
+  const reader = new ApkReader({ store, finder: finderOf([web, t]), actions, now: () => now, feed: async () => ({ versionCode: 5, apk: 'mandate-5.apk', at: now - 200 * m }) });
+  await reader.refresh();
+  assert.equal(reader.read()[0].next, null);
+});
+
 test("a CI job's runs are read again early only when main's new head is in its push filter (#764)", async () => {
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `early-${n}`);

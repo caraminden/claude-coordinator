@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { changeEta, columnOf, shortSpan } from '../public/releasemath.js';
+import { changeEta, columnOf, releaseName, shortSpan } from '../public/releasemath.js';
 
 const citadel = [{ name: 'line', usual: null }, { name: 'rebase', usual: 5 }, { name: 'test', usual: 90 }, { name: 'deploy', usual: 70 }, { name: 'restart', usual: 40 }, { name: 'live', usual: 0 }];
 
@@ -56,4 +56,13 @@ test('changeEta: the later of the release estimate and this change\'s own stages
   assert.equal(changeEta(next, { stage: 'line', since: 0, usual: null, waitingOn: null }), null);
   const unknownAfter = { eta: 1, stages: [{ name: 'main', usual: 0 }, { name: 'deploy call', usual: null }, { name: 'live', usual: 0 }] };
   assert.equal(changeEta(unknownAfter, { stage: 'main', since: 0, usual: 0, waitingOn: null }), null);
+});
+
+test('releaseName: only a try that failed is "a failed try"; a next with no number yet keeps its own name', () => {
+  assert.equal(releaseName({ number: 14 }), 'Release 14');
+  assert.equal(releaseName({ number: 997, name: 'Build 997' }, false), 'Build 997');
+  assert.equal(releaseName({ number: null, outcome: 'failed' }), 'a failed try');
+  assert.equal(releaseName({ number: null, name: 'Next build' }), 'Next build');
+  assert.equal(releaseName({ number: null }), 'Next release');
+  assert.equal(releaseName({ number: null, outcome: 'signed' }), 'a signed build');
 });

@@ -119,8 +119,8 @@ const LAST = 5;
 
 /**
  * Walk the timeline minion by minion, turn by turn (a turn ends at its result event). A skill run's phase: an error since
- * the last edit or skill run in the turn makes it "after an error"; else a ship handed off later in the same turn makes it
- * "before a ship"; else whether the turn had edited a file yet. A Grunt's own events count as the minion's.
+ * the last edit or skill run in the turn makes it "after an error"; else whether the turn had edited a file yet, and a run
+ * after edits becomes "before a ship" when the same turn later hands off a ship. A Grunt's own events count as the minion's.
  */
 export function usageFrom(t: SkillTimeline, since: number): UsageReport {
   const tickets = new Map(t.tickets.map((k) => [k.id, k]));
@@ -175,7 +175,7 @@ export function usageFrom(t: SkillTimeline, since: number): UsageReport {
       errored = false;
     }
     if (e.error && !e.grunt) errored = true;
-    if (e.ship && !e.grunt) for (const o of open) if (o.phase !== 'after an error') o.phase = 'before a ship';
+    if (e.ship && !e.grunt) for (const o of open) if (o.phase === 'after edits') o.phase = 'before a ship';
     if (e.result && !e.grunt) endTurn();
   }
   endTurn();

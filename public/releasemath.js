@@ -41,3 +41,11 @@ export function columnOf(stages, c) {
  */
 export const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : r.name ?? `Release ${r.number}`)
   : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? 'an earlier release' : r.outcome === 'failed' ? 'a failed try' : r.name ?? 'Next release');
+
+/** How long a change may wait on something outside the pipeline (a CI runner, a fix) before it reads as stuck (#1019). */
+export const STUCK_MS = 30 * 60_000;
+/** How long change or release `p` has been stuck (ms), or 0: a wait past STUCK_MS. A place in the land line is a queue, not stuck. */
+export const stuckFor = (p, now = Date.now()) => {
+  const ms = p?.waitingOn && !['line', 'land'].includes(p.stage) ? now - p.since : 0;
+  return ms > STUCK_MS ? ms : 0;
+};

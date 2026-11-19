@@ -9,7 +9,7 @@ import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
-import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan } from './releasemath.js';
+import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -174,7 +174,11 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
  * Where a change or release is, in a few words: its short ones first (Josh, 2026-11-13: "the line should be apparent
  * from the list you are looking at"): "Line · 2nd", "Test · CI: the full suite" (#630's), then its wait, time left or text.
  */
-const nowWords = (p, eta, full = false) => p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' left', since: p.since, full }) : p.text);
+const nowWords = (p, eta, full = false) => {
+  const stuck = stuckFor(p);
+  if (stuck) return `stuck ${shortSpan(stuck)}: ${p.waitingOn}`;
+  return p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' left', since: p.since, full }) : p.text);
+};
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
 function changeNow(next, c) {
@@ -692,7 +696,7 @@ export function pendingRelease(t) {
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
     // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
     const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
-    return { name: inLine ? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text };
+    return { name: inLine ? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
   }
   return null;
 }

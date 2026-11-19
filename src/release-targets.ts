@@ -31,6 +31,9 @@ export interface Found extends Target {
   jobName?: string;
   /** The repo folders it ships (#764): a change touching one goes to it; a target with none takes what no target's folder holds. */
   paths?: string[];
+  /** ci: the workflow files ("desktop.yml") that must also run every job green on a build's commit before it goes out to
+   * people (#1019, citadel-app.json `release.needs`): until then its changes are still on their way. */
+  needs?: string[];
 }
 
 export interface Override {
@@ -41,7 +44,7 @@ export interface Override {
   /** The folders it ships, as path prefixes or globs ("companion/", "android/**"): see Found.paths. */
   paths?: string[];
   /** How its releases are numbered and named (Target.numbering). */
-  release?: { name?: string; number?: string };
+  release?: { name?: string; number?: string; needs?: string[] };
 }
 
 /** A build a minion shared (the artifacts table): a file people install or run, and what it is for. */
@@ -332,9 +335,10 @@ export function detect(f: SchemeFacts): Found[] {
     if (o?.hidden) continue;
     const paths = Array.isArray(o?.paths) ? o.paths.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
     const numbering = numberingOf(o?.release);
+    const needs = t.kind === 'ci' ? needsOf(o?.release) : [];
     kept.push({
       ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}),
-      ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}),
+      ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}), ...(needs.length ? { needs } : {}),
     });
   }
   return kept;
@@ -346,6 +350,12 @@ function numberingOf(r: Override['release']): Target['numbering'] | null {
   const name = typeof r.name === 'string' && r.name.includes('{n}') ? r.name.trim() : undefined;
   const number = r.number === 'run' || r.number === 'count' ? r.number : undefined;
   return name || number ? { ...(name ? { name } : {}), ...(number ? { number } : {}) } : null;
+}
+
+/** An override's `release.needs`: workflow file names (".github/workflows/desktop.yml" or "desktop.yml"), as file names. */
+function needsOf(r: Override['release']): string[] {
+  const list = r && typeof r === 'object' && Array.isArray(r.needs) ? r.needs : [];
+  return [...new Set(list.filter((w): w is string => typeof w === 'string').map((w) => w.trim().replace(/^.*\//, '')).filter((w) => /^[\w.-]+\.ya?ml$/.test(w)))];
 }
 
 /** The overrides in a citadel-app.json's text: its `targets`, the well-formed entries only. */

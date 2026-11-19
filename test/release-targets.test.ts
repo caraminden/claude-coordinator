@@ -111,6 +111,9 @@ test('a target owns its folders: a contraption its workdir, an APK its top folde
   assert.equal(bad({ name: 'Build', number: 'sometimes' }), undefined, 'a name with no {n} and an unknown number are both dropped');
   assert.deepEqual(bad({ number: 'count' }), { number: 'count' });
   assert.equal(bad('Build {n}'), undefined);
+  const needs = (release: unknown) => detect(facts({ workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }], overrides: [{ id: 'ci:windows:release', release: release as never }] }))[0].needs;
+  assert.deepEqual(needs({ needs: ['.github/workflows/desktop.yml', 'desktop.yml', 'e2e.yaml', 'x/../../etc', 3] }), ['desktop.yml', 'e2e.yaml'], 'workflow files by name, once each; anything else is dropped (#1019)');
+  assert.equal(needs({ name: 'Build {n}' }), undefined);
 });
 
 test('pushPaths and workdirOf read the folder a workflow and a contraption ship from', () => {
@@ -1103,4 +1106,96 @@ test("each target's part of a scheme's land line, in the line's order, with why 
   assert.deepEqual(order, [2, 4]);
   assert.equal(readFileSync(join(q, '.order'), 'utf8'), '# Cara moved #2 to land next\n0000000002\n0000000004\n');
   assert.deepEqual(look().line.map(([name]) => name), ['#1', '#2', '#4', '#3']);
+});
+
+test('a CI package with release.needs: a build that passed its own job is not live until every workflow it needs ran every job green on its commit (#1019)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `peek-gate-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(), m = 60_000;
+  const base = landOne(repo, now - 120 * m, 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const minion = (title: string, branch: string) => {
+    const t = store.createTicket({ project_id: p.id, title, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, branch);
+    return t;
+  };
+  minion('Sound tab', 'ticket/1-sound');
+  minion('Panel drag', 'ticket/2-drag');
+  const at = Date.now() + 1000;
+  const one = landOne(repo, at, 'crates/app/sound.rs', 'ticket/1-sound');
+  const two = landOne(repo, at + 1000, 'crates/app/drag.rs', 'ticket/2-drag');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', numbering: { name: 'Build {n}', number: 'run' }, needs: ['desktop.yml'] };
+  // Tonight's shape: three windows runs whose release job passed; desktop.yml green on the oldest only, cancelled on the
+  // next, and queued for a runner for 22 minutes on the newest.
+  const win: Run[] = [
+    { ...run(1291, 'completed', 'success', now - 30 * m, now - 25 * m), head_sha: two },
+    { ...run(1289, 'completed', 'success', now - 40 * m, now - 35 * m), head_sha: one },
+    { ...run(1275, 'completed', 'success', now - 110 * m, now - 100 * m), head_sha: base },
+  ];
+  const desk: Run[] = [
+    { ...run(1000, 'queued', null, now - 22 * m), name: 'desktop', head_sha: two },
+    { ...run(998, 'completed', 'cancelled', now - 40 * m, now - 30 * m), name: 'desktop', head_sha: one },
+    { ...run(984, 'completed', 'success', now - 110 * m, now - 60 * m), name: 'desktop', head_sha: base },
+  ];
+  const jobs: Record<number, Job[]> = {
+    1291: [job(1291, 'release', 'completed', 'success', now - 28 * m, now - 25 * m)],
+    1289: [job(1289, 'release', 'completed', 'success', now - 38 * m, now - 35 * m)],
+    1275: [job(1275, 'release', 'completed', 'success', now - 105 * m, now - 100 * m)],
+    1000: [],
+    998: [job(998, 'screen', 'completed', 'cancelled', now - 39 * m, now - 30 * m)],
+    984: [job(984, 'screen', 'completed', 'success', now - 100 * m, now - 90 * m), job(984, 'e2e', 'completed', 'success', now - 90 * m, now - 60 * m)],
+  };
+  const actions: Actions = {
+    async workflowRuns(_p, workflow) { return workflow === 'desktop.yml' ? desk : workflow === 'windows.yml' ? win : []; },
+    async runJobs(_p, r) { return jobs[r.id] ?? []; },
+  };
+  let clock = now;
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => clock });
+  await reader.refresh();
+  let [v] = reader.read();
+  named(v);
+  assert.equal(v.current?.name, 'Build 1275', 'what people have: the newest build whose desktop tests all passed, not the newest whose release job did');
+  assert.deepEqual(v.next?.stages.map((s) => s.name), ['ci', 'package', 'desktop', 'live'], 'the workflows it needs are stages of their own');
+  assert.deepEqual([v.next?.name, v.next?.stage, v.next?.waitingOn], ['Build 1291', 'desktop', 'desktop waiting for a CI runner']);
+  assert.equal(v.next?.since, now - 22 * m, 'since the desktop run was queued');
+  assert.deepEqual(v.next?.changes.map((c) => [c.title, c.stage]), [['Sound tab', 'desktop'], ['Panel drag', 'desktop']], 'both minions are still on their way, in the newest build');
+  assert.deepEqual(v.recent.map((r) => r.name), [], 'the builds whose desktop tests never passed never reached anyone');
+  assert.equal(store.countReleases(p.id, t.id), 1, 'only the build that went out is counted as a release');
+
+  // The runner takes it and every job goes green: Build 1291 is live and nothing is left on its way.
+  desk[0] = { ...run(1000, 'completed', 'success', now - 22 * m, now), name: 'desktop', head_sha: two };
+  jobs[1000] = [job(1000, 'screen', 'completed', 'success', now - 5 * m, now - 3 * m), job(1000, 'e2e', 'completed', 'success', now - 3 * m, now)];
+  clock += 10_000;
+  await reader.refresh();
+  [v] = reader.read();
+  named(v);
+  assert.deepEqual([v.current?.name, v.current?.changes.map((c) => c.title)], ['Build 1291', ['Sound tab', 'Panel drag']]);
+  assert.equal(v.next, null);
+  assert.deepEqual(v.recent.map((r) => r.name), ['Build 1275']);
+  assert.equal(store.countReleases(p.id, t.id), 2);
+});
+
+test('a CI package with release.needs: a needed workflow that skipped a job, or failed, keeps the build from going out (#1019)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', needs: ['desktop.yml'] };
+  const now = Date.now(), m = 60_000;
+  const win = [run(3, 'completed', 'success', now - 30 * m, now - 25 * m), run(2, 'completed', 'success', now - 60 * m, now - 55 * m)];
+  const desk = [{ ...run(13, 'completed', 'failure', now - 30 * m, now - 5 * m), head_sha: 'sha3' }, { ...run(12, 'completed', 'success', now - 60 * m, now - 40 * m), head_sha: 'sha2' }];
+  const jobs: Record<number, Job[]> = {
+    3: [job(3, 'release', 'completed', 'success', now - 28 * m, now - 25 * m)],
+    2: [job(2, 'release', 'completed', 'success', now - 58 * m, now - 55 * m)],
+    13: [job(13, 'screen', 'completed', 'failure', now - 20 * m, now - 5 * m)],
+    // Its run says success, but a job was skipped (NOT RUN): that isn't tested.
+    12: [job(12, 'screen', 'completed', 'success', now - 50 * m, now - 45 * m), job(12, 'e2e', 'completed', 'skipped', null, null)],
+  };
+  const actions: Actions = { async workflowRuns(_p, w) { return w === 'desktop.yml' ? desk : win; }, async runJobs(_p, r) { return jobs[r.id] ?? []; } };
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
+  await reader.refresh();
+  const [v] = reader.read();
+  assert.equal(v.current, null, 'neither build went out');
+  assert.deepEqual([v.next?.number, v.next?.stage, v.next?.waitingOn], [1, 'desktop', 'desktop failed: it waits on a fix'], 'its first release, waiting on a fix');
 });

@@ -262,6 +262,11 @@ function span(r: RunJobs): { start: number | null; started: number | null; end: 
 
 /** A run that shipped: completed, and its job (or the run, for a whole-workflow target) succeeded. */
 const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'success' : r.run.conclusion === 'success');
+/** A needed workflow's run (Found.needs) that ran every job and each passed: a run that skipped some (NOT RUN) still says success. */
+const allGreen = (r: RunJobs) => r.run.status === 'completed' && r.run.conclusion === 'success' && r.jobs.length > 0 && r.jobs.every((j) => j.status === 'completed' && j.conclusion === 'success');
+/** A needed workflow's short name, its stage on the track: "desktop.yml" → "desktop". */
+const needName = (w: string) => w.replace(/^.*\//, '').replace(/\.ya?ml$/, '');
+
 /** A run that tried to ship and didn't: its job ran (not skipped) and failed. */
 const failedShip = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'failure' : r.run.conclusion === 'failure');
 
@@ -305,11 +310,11 @@ class RunsCache {
   private d: ActionsDeps;
   runs = new Map<string, RunJobs[]>();
   private readAt = new Map<string, number>();
-  /** What each run's commits carry since the shipped run before it, with their files, by run id. */
-  private landed = new Map<number, Landed | null>();
+  /** What each run's commits carry since the release before it (the commit it was read from), with their files, by run id. */
+  private landed = new Map<number, { from: string | null; landed: Landed | null }>();
   /** The minions in a run's commits since the shipped run before it that ship on `t` (#764). */
   changes(t: Found, r: RunJobs): Release['changes'] {
-    const l = this.landed.get(r.run.id);
+    const l = this.landed.get(r.run.id)?.landed;
     return l ? landedOn(l, shipsOnTarget(t, this.d.finder.list())).tickets.map(asChange) : [];
   }
   /** The download of what each shipped run made, in Citadel's CI store, by run id: looked up each read, since the store sweeps. */
@@ -340,6 +345,37 @@ class RunsCache {
     return this.touched.get(key)!;
   }
 
+  /** The runs of each workflow a target needs (Found.needs, #1019) on its branch, with their jobs, newest first, by target. */
+  private needRuns = new Map<string, Map<string, RunJobs[]>>();
+
+  /**
+   * A run that went out to people: it shipped, and every workflow its target needs ran every job green on its commit (Peek
+   * Auras' companion takes a Windows build only then: a build whose desktop tests haven't passed reaches no PC).
+   */
+  released(t: Found, r: RunJobs): boolean {
+    if (!shipped(r)) return false;
+    const need = this.needRuns.get(tkey(t));
+    return !t.needs?.length || (!!need && t.needs.every((w) => (need.get(w) ?? []).some((d) => d.run.head_sha === r.run.head_sha && allGreen(d))));
+  }
+
+  /** Where a shipped run that isn't released yet is: the first workflow it needs that hasn't passed on its commit. */
+  needProgress(t: Found, r: RunJobs, now: number): Progress {
+    const need = this.needRuns.get(tkey(t));
+    const w = t.needs!.find((x) => !(need?.get(x) ?? []).some((d) => d.run.head_sha === r.run.head_sha && allGreen(d))) ?? t.needs![0];
+    const name = needName(w);
+    const d = (need?.get(w) ?? []).find((x) => x.run.head_sha === r.run.head_sha);
+    const wait = (text: string, since: number): Progress => ({ stage: name, since, usual: null, waitingOn: text, text });
+    if (!d) return wait(`${name} not started yet`, span(r).end ?? now);
+    const st = d.run.status;
+    if (st === 'queued' || st === 'waiting' || st === 'pending' || st === 'requested') return wait(`${name} waiting for a CI runner`, ms(d.run.created_at) ?? now);
+    if (st !== 'completed') {
+      const done = d.jobs.filter((j) => j.status === 'completed').length;
+      return { stage: name, since: ms(d.run.run_started_at ?? d.run.created_at) ?? now, usual: null, waitingOn: null, text: `${name} running`, ...(d.jobs.length ? { done, total: d.jobs.length } : {}) };
+    }
+    const why = d.run.conclusion === 'cancelled' ? 'was cancelled' : d.run.conclusion === 'success' ? "didn't run every job" : 'failed';
+    return wait(`${name} ${why}: it waits on a fix`, ms(d.run.updated_at) ?? now);
+  }
+
   /** Read a target's runs again on the next refresh, moving or not (a run was just started for it). */
   forget(t: Found) {
     this.readAt.delete(tkey(t));
@@ -350,7 +386,8 @@ class RunsCache {
     if (!p || !t.workflow) return;
     const now = (this.d.now ?? Date.now)();
     const had = this.runs.get(tkey(t));
-    const moving = had?.some((r) => r.run.status !== 'completed');
+    // A needed workflow still running on a build that hasn't gone out keeps it moving too.
+    const moving = had?.some((r) => r.run.status !== 'completed') || [...(this.needRuns.get(tkey(t))?.values() ?? [])].some((l) => l.some((d) => d.run.status !== 'completed'));
     const age = now - (this.readAt.get(tkey(t)) ?? 0);
     if (had && !moving && age < IDLE_MS) {
       const [head, ct] = (p.repo_dir ? (await git(['log', '-1', '--format=%H %ct', t.branch], p.repo_dir))?.trim().split(' ') : null) ?? [];
@@ -377,6 +414,23 @@ class RunsCache {
       // A run whose job is missing or skipped (a light lane, a gate that didn't pass) shipped nothing.
       if (job && job.conclusion !== 'skipped') out.push({ run, jobs: [job] });
       else if (run.status !== 'completed') out.push({ run, jobs: [] });
+    }
+    if (t.needs?.length) {
+      const need = new Map<string, RunJobs[]>();
+      for (const w of t.needs) {
+        const list = await this.d.actions.workflowRuns(p, w, t.branch);
+        if (!list) return;
+        const read: RunJobs[] = [];
+        for (const run of list) {
+          // Only the commits this target's runs built matter, and a finished run's jobs are kept by the poller.
+          if (!out.some((r) => r.run.head_sha === run.head_sha)) continue;
+          const jobs = await this.d.actions.runJobs(p, run);
+          if (!jobs) return;
+          read.push({ run, jobs });
+        }
+        need.set(w, read);
+      }
+      this.needRuns.set(tkey(t), need);
     }
     this.runs.set(tkey(t), out);
     const kept = new Set([...this.runs.values()].flat().map((r) => r.run.id));
@@ -405,12 +459,16 @@ class RunsCache {
       if (!a || (a.expires_at && Date.parse(a.expires_at) <= now)) continue;
       this.d.mirror.want({ project: p, slug, run: r.run, artifact: a, workflow: t.workflow.replace(/^.*\//, ''), kind: this.kind, target: t.job ?? '', done: () => this.forget(t) });
     }
-    // What each run carries since the run before it that shipped (read once a run is done).
+    // What each run carries since the run before it that went out (read again only when that one changes): a build
+    // that shipped but never went out (its needed workflow cancelled) hands what it carried on to the next.
     if (p.repo_dir) {
       for (const [i, r] of out.entries()) {
-        if (this.landed.has(r.run.id) && r.run.status === 'completed') continue;
-        const prev = out.slice(i + 1).find(shipped);
-        this.landed.set(r.run.id, prev && prev.run.head_sha !== r.run.head_sha ? await landedIn(this.d.store, p, prev.run.head_sha, r.run.head_sha) : null);
+        // shortcut: with no release in the page of runs, read from the oldest run listed; misses what landed before it.
+        const prev = out.slice(i + 1).find((x) => this.released(t, x)) ?? (t.needs?.length ? out.at(-1) : undefined);
+        const from = prev && prev !== r && prev.run.head_sha !== r.run.head_sha ? prev.run.head_sha : null;
+        const had = this.landed.get(r.run.id);
+        if (had && had.from === from && r.run.status === 'completed') continue;
+        this.landed.set(r.run.id, { from, landed: from ? await landedIn(this.d.store, p, from, r.run.head_sha) : null });
       }
     }
   }
@@ -423,9 +481,12 @@ class RunsCache {
     const seen = new Set(this.recorded(t));
     // Every shipped run in view is counted, those from before counting began too (Cara, 2026-11-12: "This should say
     // the build number, not "earlier release""); they're numbered by run, so a late one slots into its place.
-    for (const r of (this.runs.get(tkey(t)) ?? []).filter((r) => shipped(r) && !seen.has(runKey(r))).reverse()) {
+    for (const r of (this.runs.get(tkey(t)) ?? []).filter((r) => this.released(t, r) && !seen.has(runKey(r))).reverse()) {
       const s = span(r);
-      this.d.store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${runKey(r)}`, changes: '[]', started_at: s.start, live_at: s.end, outcome: 'live', stages: '{}' });
+      // Live once the last workflow it needs finished, when that was after its own job.
+      const gated = [...(this.needRuns.get(tkey(t))?.values() ?? [])].flatMap((l) => l.filter((d) => d.run.head_sha === r.run.head_sha && allGreen(d)).map((d) => ms(d.run.updated_at) ?? 0));
+      const live = Math.max(s.end ?? 0, ...gated) || s.end;
+      this.d.store.addRelease({ project_id: t.projectId, target: t.id, version: `run:${runKey(r)}`, changes: '[]', started_at: s.start, live_at: live, outcome: 'live', stages: '{}' });
     }
   }
 
@@ -478,7 +539,8 @@ export class CiPackageReader implements Reader {
     for (const t of this.d.finder.list('ci')) {
       await this.cache.read(t);
       this.cache.record(t);
-      const cur = (this.cache.runs.get(tkey(t)) ?? []).find(shipped);
+      const runs = this.cache.runs.get(tkey(t)) ?? [];
+      const cur = runs.find((r) => this.cache.released(t, r)) ?? (t.needs?.length ? runs.at(-1) : undefined);
       this.pending.set(tkey(t), await this.cache.since(t, cur?.run.head_sha ?? null));
     }
   }
@@ -490,13 +552,15 @@ export class CiPackageReader implements Reader {
       const ch = (r: RunJobs) => this.cache.changes(t, r);
       const file = (r: RunJobs) => this.cache.file(r.run.id);
       const num = this.cache.numbers(t);
-      const cur = runs.find(shipped);
-      const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, shipped(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
+      const out = (r: RunJobs) => this.cache.released(t, r);
+      const cur = runs.find(out);
+      // A build that shipped but never went out (its needed workflow didn't pass) reached no one: not a release, nor a failed one.
+      const recent = runs.filter((r) => r !== cur && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
       const usual = runUsual(runs);
-      // The newest run in flight leads; a run older than the current release can't be its next.
+      // The newest run in flight leads, or one that shipped and waits on a workflow it needs; a run older than the current release can't be its next.
       const newer = (r: RunJobs) => !cur || runs.indexOf(r) < runs.indexOf(cur);
-      const moving = runs.find((r) => r.run.status !== 'completed' && newer(r));
-      const running = moving ? runProgress(moving, usual, now) : null;
+      const moving = runs.find((r) => newer(r) && (r.run.status !== 'completed' || (!!t.needs?.length && shipped(r))));
+      const running = moving ? (moving.run.status === 'completed' ? this.cache.needProgress(t, moving, now) : runProgress(moving, usual, now)) : null;
       // On main past the current release and not in a run in flight (#764): waiting for CI to build it, or for a fix
       // when the newest run after the current release failed.
       const ahead = this.pending.get(tkey(t));
@@ -512,7 +576,8 @@ export class CiPackageReader implements Reader {
       const lead = running ?? waiting;
       // A target numbered by run knows its number once its run exists.
       const number = t.numbering?.number === 'run' ? (moving?.run.run_number ?? null) : num.total + 1;
-      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(CI_TRACK, usual, lead, changes, number) : null, line: [], recent };
+      const track = t.needs?.length ? [...CI_TRACK.slice(0, -1), ...t.needs.map(needName), 'live'] : CI_TRACK;
+      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(track, usual, lead, changes, number) : null, line: [], recent };
     });
   }
 }

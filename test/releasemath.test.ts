@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { changeEta, columnOf, releaseName, shortSpan } from '../public/releasemath.js';
+import { changeEta, columnOf, releaseName, shortSpan, STUCK_MS, stuckFor } from '../public/releasemath.js';
 
 const citadel = [{ name: 'line', usual: null }, { name: 'rebase', usual: 5 }, { name: 'test', usual: 90 }, { name: 'deploy', usual: 70 }, { name: 'restart', usual: 40 }, { name: 'live', usual: 0 }];
 
@@ -65,4 +65,14 @@ test('releaseName: only a try that failed is "a failed try"; a next with no numb
   assert.equal(releaseName({ number: null, name: 'Next build' }), 'Next build');
   assert.equal(releaseName({ number: null }), 'Next release');
   assert.equal(releaseName({ number: null, outcome: 'signed' }), 'a signed build');
+});
+
+test('stuckFor: a wait outside the pipeline past half an hour is stuck; work in progress and a place in the land line are not (#1019)', () => {
+  const now = 10 * STUCK_MS;
+  const runner = { stage: 'desktop', since: now - STUCK_MS - 60_000, waitingOn: 'desktop waiting for a CI runner' };
+  assert.equal(stuckFor(runner, now), STUCK_MS + 60_000);
+  assert.equal(stuckFor({ ...runner, since: now - 22 * 60_000 }, now), 0, '22 minutes for a runner is still waiting');
+  assert.equal(stuckFor({ ...runner, waitingOn: null }, now), 0, 'running, however long, is not a wait');
+  assert.equal(stuckFor({ ...runner, stage: 'line', waitingOn: '3rd in line' }, now), 0);
+  assert.equal(stuckFor(null, now), 0);
 });

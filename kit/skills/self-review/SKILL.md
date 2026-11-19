@@ -160,7 +160,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
 - **High:** stop before shipping. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card with `kind: "merge"` (its chip reads "ship"), "Ship this high-risk change?" (Ship it /
+  and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this high-risk change?" (Ship It /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
   and end the turn. Ship only on a go.
 

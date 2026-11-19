@@ -73,7 +73,7 @@ export function approvalCard(ticketId, card) {
   const rest = lead ? Object.fromEntries(Object.entries(input).filter(([k]) => k !== lead && k !== 'description')) : {};
   const status = h('span', { class: 'muted', role: 'status' });
   const m = card.merge;
-  const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? (intoBuild(m) ? 'Merge into the build' : 'Ship it') : 'Approve');
+  const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? (intoBuild(m) ? 'Merge into the build' : 'Ship It') : 'Approve');
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
   const desc = typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '';
   const call = [
@@ -152,7 +152,7 @@ function mergeHead(m, desc, call) {
   ].filter(Boolean);
   return [
     h('div', { class: 'who' }, speaker(intoBuild(m) ? 'asks to merge into the build' : 'asks to ship')),
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, intoBuild(m) ? 'Merge' : 'Ship'),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, intoBuild(m) ? 'Merge' : 'Ship It'),
       pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener', 'data-github': '' }, name) : h('span', { class: 'mnum' }, name),
       pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : ''),
     pr?.head ? h('div', { class: 'mbranch' }, h('code', {}, pr.head), ' → ', h('code', {}, pr.base)) : '',
@@ -535,7 +535,7 @@ export function questionCard(ticketId, card, opts = {}) {
     const gallery = q.options.some((o) => o.image);
     return h('div', { class: 'q', 'data-q': i },
       // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
-      h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
+      h('div', { class: 'qtitle' }, card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? 'Ship It' : q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
         q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
       card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
       gallery

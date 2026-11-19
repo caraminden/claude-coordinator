@@ -118,7 +118,7 @@ test("the scheme's list counts an open minion's steps and leaves a dismissed one
 });
 
 test('a question card asked with kind merge reads as a ship card on the list; an unknown kind is refused (#575)', async () => {
-  const q = [{ question: 'Ship this high-risk change?', header: 'Ship', options: [{ label: 'Ship it', recommended: true }, { label: 'Hold' }] }];
+  const q = [{ question: 'Ship this high-risk change?', header: 'Ship It', options: [{ label: 'Ship It', recommended: true }, { label: 'Hold' }] }];
   const asked = await tool('ask_question', { questions: q, kind: 'merge' });
   assert.equal(asked.error, false, asked.text);
   const { data: scheme } = await srv.call(`/api/projects/${A.id}`);

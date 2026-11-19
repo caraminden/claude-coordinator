@@ -5,6 +5,7 @@
 // for its open choices cards (#821, each with Open the page beside it) and secret cards.
 import { fileHref, h, me } from './base.js';
 import { openHash } from './core.js';
+import { cardWord } from './threadstate.js';
 import { stripCards } from './waiting-cards.js';
 
 /**
@@ -14,7 +15,7 @@ import { stripCards } from './waiting-cards.js';
 export function waitingStrip(t) {
   // A choices card shows only its page's title (its label is "picks on “Takes”"); its button says what it is.
   const whatOf = (c) => {
-    const what = c.doc ? '' : c.what ?? c.kind;
+    const what = c.doc ? '' : cardWord(c);
     return what || c.to ? h('span', { class: 'what' }, what, c.to ? `${what ? ' ' : ''}for ${c.to}` : '') : '';
   };
   const cards = stripCards(t, me);

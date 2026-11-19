@@ -218,11 +218,15 @@ export function rowBar(t, st) {
  * else the oldest's kind and how many more ("plan +1"), as the chip opens the oldest.
  */
 export function cardChip(cards) {
-  const word = (c) => c.what ?? c.kind;
-  const first = word(cards[0]);
+  const first = cardWord(cards[0]);
   if (cards.length === 1) return first;
-  return cards.every((c) => word(c) === first) ? `${cards.length} ${first}s` : `${first} +${cards.length - 1}`;
+  if (!cards.every((c) => cardWord(c) === first)) return `${first} +${cards.length - 1}`;
+  return CARD_WORDS[cards[0].what] ? `${first} ×${cards.length}` : `${cards.length} ${first}s`;
 }
+
+/** A card's kind as its chip says it: the go card reads "Ship It" (Cara, 2026-11-19: "The Chip and card should say "Ship It""). */
+const CARD_WORDS = { ship: 'Ship It' };
+export const cardWord = (c) => CARD_WORDS[c.what] ?? c.what ?? c.kind;
 
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
 export const SHIP = {

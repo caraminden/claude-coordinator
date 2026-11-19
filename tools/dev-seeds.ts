@@ -137,7 +137,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
     },
   },
   'ship-card': {
-    about: 'a minion waiting on a ship card (kind merge, the self-review\'s high-risk go, its chip reads "ship") and a `gh pr merge` card for main (#1021)',
+    about: 'a minion waiting on a ship card (kind merge, the self-review\'s high-risk go, its chip reads "Ship It") and a `gh pr merge` card for main (#1021)',
     seed(c) {
       const t = minion(c, 'Session cookie rotation', { note: 'risk high: needs a go to ship', state: 'ready' });
       const w = chat(c, t, 10);
@@ -148,8 +148,8 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
         target: '41', repo: null, method: 'squash', auto: false, admin: false, moved: false,
         pr: { number: 41, title: 'Rotate session cookies weekly', url: 'https://github.com/example/seeded/pull/41', state: 'OPEN', draft: false, head: 'ticket/41-cookies', base: 'main', checks: 'passed', additions: 48, deletions: 6, files: 3, commits: 2 },
       } });
-      const e = w.put('question', { id: hex(), kind: 'merge', questions: [{ question: 'Ship this high-risk change? It changes how sign-in cookies rotate.', header: 'Ship', multiSelect: false, options: [
-        { label: 'Ship it', description: 'It goes onto main and goes live after the restart.', recommended: true },
+      const e = w.put('question', { id: hex(), kind: 'merge', questions: [{ question: 'Ship this high-risk change? It changes how sign-in cookies rotate.', header: 'Ship It', multiSelect: false, options: [
+        { label: 'Ship It', description: 'It goes onto main and goes live after the restart.', recommended: true },
         { label: 'Hold', description: 'It waits on its branch.' },
       ] }] });
       w.done('Asked for the go to ship.');

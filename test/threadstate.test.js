@@ -226,7 +226,11 @@ test('rowUnread: an unseen row is unread only when it has something for a person
 
 test('cardChip: names the kind of card, counts one kind, and gives the oldest kind plus how many more when they differ (#575)', () => {
   const c = (what) => ({ kind: what === 'ship' || what === 'tripwire' ? 'approval' : what, what });
-  for (const what of ['question', 'plan', 'ship', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
+  for (const what of ['question', 'plan', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
+  // The go card reads "Ship It" (Cara, 2026-11-19), and two of them don't make "2 Ship Its".
+  assert.equal(cardChip([c('ship')]), 'Ship It');
+  assert.equal(cardChip([c('ship'), c('ship')]), 'Ship It ×2');
+  assert.equal(cardChip([c('ship'), c('plan')]), 'Ship It +1');
   assert.equal(cardChip([c('question'), c('question')]), '2 questions');
   assert.equal(cardChip([c('plan'), c('question'), c('ship')]), 'plan +2', 'mixed: the oldest, which the chip opens');
   assert.equal(cardChip([{ kind: 'plan' }]), 'plan', 'a card from before `what` falls back to its kind');

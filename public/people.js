@@ -212,7 +212,9 @@ function accountRow(ic, hue, title, card, fallback = '') {
   const [row, sum] = settingsRow({ icon: ic, hue, title }, card);
   const sync = () => {
     const chip = card.querySelector(':scope > h3 .link-chip');
-    sum.replaceChildren(chip ? chip.cloneNode(true) : fallback);
+    // A card whose load failed holds only its error: say so while the row is closed.
+    const err = !chip && card.querySelector('.error');
+    sum.replaceChildren(chip ? chip.cloneNode(true) : err ? "Couldn't load: open for details" : fallback);
   };
   new MutationObserver(sync).observe(card, { childList: true, subtree: true, characterData: true });
   sync();

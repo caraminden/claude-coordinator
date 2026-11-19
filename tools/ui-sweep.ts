@@ -80,7 +80,7 @@ export const SCREENS: Screen[] = [
   { name: 'shared-handoff', hash: `#/s/${S}/handoffs%2Fburst-ui-flow-sweep.md`, about: 'A shared Markdown handoff opened in the file viewer, with its Start-as-minion button.' },
   { name: 'settings-instructions', hash: `#/p/${S}/settings`, about: 'Settings → the scheme\'s instructions editor, with its tab strip.' },
   { name: 'settings-app-instructions', hash: `#/p/${S}/app-instructions`, about: 'Settings → Citadel-wide instructions editor.' },
-  { name: 'settings-approvals', hash: `#/p/${S}/approvals`, about: 'Settings → Needs approval: what the scheme asks a person before doing.' },
+  { name: 'settings-approvals', hash: `#/p/${S}/approvals`, about: 'Settings → Minion rules: what the scheme asks a person before doing, plugins, list groups and CI.' },
   { name: 'settings-properties', hash: `#/p/${S}/properties`, about: 'Settings → Properties: the scheme\'s property registry.' },
   { name: 'settings-members', hash: `#/p/${S}/members`, about: 'Settings → Members of the scheme.' },
   { name: 'settings-people', hash: `#/p/${S}/people`, about: 'Settings → People (admins): everyone, invites and resets.' },

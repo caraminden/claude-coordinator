@@ -129,7 +129,8 @@
 .thread-row.s-closed .name { color: var(--muted); }
 /* Deploying rows are in flight, not finished (Josh, 2026-11-19: "deploying minions shouldnt be greyed out, in fact that should
    probably have a colored background"): full brightness whatever their state, on a soft cyan tint (Josh, 2026-11-19: purple is the Taskmaster's, "swap that to something that isnt already used"). */
-.g-deploying .thread-row { opacity: 1; background: color-mix(in srgb, var(--deploy) 12%, var(--panel)); }
+.g-deploying .thread-row, .g-deploying .thread-row:nth-of-type(even) { opacity: 1; background: color-mix(in srgb, var(--deploy) 12%, var(--panel)); }
+/* The even-row zebra stripe (0,3,0) outranked the tint (0,2,0), so every second Deploying row went grey: the second selector matches it, and comes later. */
 .g-deploying .thread-row.s-closed .name { color: var(--ink); }
 .g-deploying .thread-row:hover { background: color-mix(in srgb, var(--deploy) 18%, var(--panel)); }
 .g-deploying .thread-row.active, .g-deploying .thread-group .thread-row.active { background: color-mix(in srgb, var(--deploy) 24%, var(--panel)); }

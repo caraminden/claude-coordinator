@@ -76,6 +76,13 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
 Use Edge, which the driver does. Chrome for Testing is a dead end: its app window never offers the overlay. A
 CDP `PWA.install` opens in a tab, so the driver installs through Edge's own address-bar chip and dialog.
 
+## Links out of the installed app (#988)
+
+`scripts/firefox-link/` (`check.ps1`, `t.html`) proves the `citadel-firefox:` protocol on its own: an Edge app
+window, a real mouse click, then the window title and Firefox's command lines. `rig.ts run firefox` (in the WCO
+rig, `checks/firefox.js`) proves Citadel's "Open links in Firefox" switch in the installed app and in a framed
+contraption; read Firefox's command lines on the box after it.
+
 ## What you get back
 
 - **Busy:**

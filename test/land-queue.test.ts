@@ -228,9 +228,10 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock, 
     writeFileSync(join(state, 'go'), '');
     await until('c to take the lock', () => order(state).length === 2);
     assert.deepEqual(order(state), ['a', 'c']);
-    // Awake again while the one that passed it has the lock: that is a landing in line, not something outside it.
+    // Awake again while the one that passed it has the lock: that is a landing in line, not something outside it, and
+    // like any holder it is ahead of every waiter (#1002).
     process.kill(b.child.pid!, 'SIGCONT');
-    await until('b to say what it waits for now', () => /next in line for the deploy lock \(ahead: c, starting\)/.test(b.stderr()));
+    await until('b to say what it waits for now', () => /2nd in line for the deploy lock, about \d+ min \(ahead: c, starting\)/.test(b.stderr()));
     assert.doesNotMatch(b.stderr(), /outside the line/);
     writeFileSync(join(state, 'go2'), '');
     assert.equal(await c.exit, 0, cs());
@@ -418,5 +419,37 @@ test('a queue/.seq that holds no number is named, and the next ticket still goes
     assert.deepEqual(readdirSync(join(state, 'queue')).filter((f) => f.includes('.tmp')), [], 'no half-written tickets left');
   } finally {
     for (const w of [a, b]) w?.child.kill('SIGKILL');
+  }
+});
+
+// #1002 (Cara, 2026-11-18: "I should be able to drag the order and choose which one gets released next"): the Releases
+// page writes queue/.order, the waiting tickets in the order people set. The holder keeps the lock; the waiters take it
+// in that order, and one that joins later, or that .order doesn't name, goes behind them in arrival order.
+test('the waiters take the lock in the order .order sets, a later one goes to the back, and each says who reordered', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const ws = [a];
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    for (const [i, label] of ['b', 'c', 'd'].entries()) {
+      ws.push(waiter(state, label, 'true'));
+      await until(`${label}'s ticket`, () => issued(state) === i + 2);
+    }
+    const [, tb, tc, td] = tickets(state);
+    await until('d to say its place', () => /4th in line/.test(ws[3].stderr()));
+    writeFileSync(join(state, 'queue', '.order'), `# Cara moved #4 to the front\n${td}\n${tb}\n`);
+    await until('d to see it is next', () => /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: a, starting\)/.test(ws[3].stderr().split('Cara moved')[1] ?? ''));
+    assert.match(ws[3].stderr(), /queue: Cara moved #4 to the front/);
+    assert.match(ws[2].stderr(), /queue: Cara moved #4 to the front/);
+    ws.push(waiter(state, 'e', 'true'));
+    await until("e's ticket", () => issued(state) === 5);
+    await until('e to see its place', () => /5th in line/.test(ws[4].stderr()));
+    assert.ok(tc, 'c is in line');
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) assert.equal(await w.exit, 0, w.stderr());
+    assert.deepEqual(order(state), ['a', 'd', 'b', 'c', 'e']);
+  } finally {
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) w.child.kill('SIGKILL');
   }
 });

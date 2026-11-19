@@ -13,6 +13,9 @@
 #                                    all the way, so its time counts toward the waiters' estimate
 # A ticket is four lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits), its
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
+# The order of the waiters is the tickets' numbers, unless <state>/queue/.order (written by the Releases page, #1002)
+# names some: a "# " line saying who set it, then ticket numbers, front first. Those go first in that order, and the
+# rest (a landing that joined since) behind them in arrival order. Whoever holds the lock counts as ahead of every waiter.
 # Outside the line, a queued restart from before the restart lock (below) and a land.sh from a branch older than
 # the line take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
 # is doing in <state>/restart ("<pid> <the pid's start time>", then its phase), which counts as progress like a ticket's phase (#553).
@@ -110,13 +113,28 @@ queue_done() {
   rm -f "$t"
 }
 
+# <queue dir> <ticket>: its sort key in the line, "0<place in .order>" or "1<ticket>". queue_order loads .order first.
+queue_order() {
+  local t i=0
+  QUEUE_RANK=() QUEUE_ORDER_BY=""
+  [ -f "$1/.order" ] || return 0
+  while read -r t; do
+    if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; fi
+  done <"$1/.order" 2>/dev/null || true
+}
+queue_key() {
+  if [ -n "${QUEUE_RANK[$1]:-}" ]; then printf '0%010d' "${QUEUE_RANK[$1]}"; else echo "1$1"; fi
+}
+
 queue_ordinal() {
   case $1 in 1) echo next ;; 2) echo 2nd ;; 3) echo 3rd ;; *) echo "${1}th" ;; esac
 }
 
 queue_lock() {
   # The stall is timed in microseconds: $SECONDS ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last change (#790).
-  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line
+  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by=""
+  local -A QUEUE_RANK=()
+  local QUEUE_ORDER_BY=""
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
   if ! exec 9>"$1/lock"; then
@@ -145,21 +163,36 @@ queue_lock() {
   export DEPLOY_QUEUE_TICKET="$q/$n"
   trap queue_done EXIT
 
+  queue_order "$q"
+  by=$QUEUE_ORDER_BY # an order set before this joined is no news to it
   while :; do
-    ahead=0 head=""
+    ahead=0 head="" headkey=""
+    queue_order "$q"
+    if [ "$QUEUE_ORDER_BY" != "$by" ]; then
+      by=$QUEUE_ORDER_BY
+      [ -z "$by" ] || echo "queue: $by" >&2
+    fi
+    mine=$(queue_key "$n")
     for t in "$q"/[0-9]*; do
       [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
-      [[ ${t##*/} < $n ]] || break
+      [ "${t##*/}" != "$n" ] || continue
       mapfile -t l 2>/dev/null <"$t" || continue
       # Its process is gone (killed, or its turn was stopped): it leaves the line.
       if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
         rm -f "$t"
         continue
       fi
-      # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
-      if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
+      # The holder is ahead of everyone; a waiter only if it comes before this one in the line's order.
+      if [ "${l[1]:-0}" = 0 ]; then
+        key=$(queue_key "${t##*/}")
+        [[ $key < $mine ]] || continue
+        # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
+        [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
+      else
+        key=0 # before any waiter's, so the holder is the head
+      fi
       ahead=$((ahead + 1))
-      [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
+      if [ -z "$head" ] || [[ $key < $headkey ]]; then head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *} headkey=$key; fi
     done
 
     # The caller's own check while others are ahead (land.sh's early conflict check, #770): a failure leaves the line.

@@ -3,7 +3,7 @@
 // needs a state no scenario has adds one here rather than in a scratch seed.ts. Each adds a fresh minion (or a few)
 // to a scheme named "Seeded", so they work on --data empty and on a copy of the live data alike.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
@@ -704,6 +704,7 @@ mock.boards('#takes', { boards: [
         mkdirSync(join(repo, path, '..'), { recursive: true });
         writeFileSync(join(repo, path), text);
       };
+      rmSync(repo, { recursive: true, force: true }); // seeded again: a fresh line, not the last one's
       mkdirSync(repo, { recursive: true });
       execFileSync('git', ['init', '-q', '-b', 'main', repo]);
       // Two targets: a Windows and a Linux build, each a release job; the land script follows .order (the template's queue_order).

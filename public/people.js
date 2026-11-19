@@ -1,7 +1,7 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
-import { settingsRow, settingsTabs } from './settings.js';
+import { firefoxControls, settingsRow, settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -243,6 +243,7 @@ export function accountPage() {
       status.textContent = err.message;
     }
   };
+  const firefoxCard = firefoxControls();
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
@@ -253,6 +254,8 @@ export function accountPage() {
       accountRow('globe', 'held', 'OpenRouter', openrouterCard()),
       accountRow('vault', 'done', 'Secrets', secretsCard(), 'Passwords and keys for minions and apps'),
       accountRow('check', 'teal', 'App chats for replay tests', replayCard(), 'Whether apps may keep your first few turns'),
+      // Only on a Windows desktop (firefoxControls is null elsewhere).
+      firefoxCard && accountRow('globe', 'ink', 'Open links in Firefox', firefoxCard, 'This device'),
       // Last, and closed until asked for (Cara picked "Password behind a button").
       settingsRow({ icon: 'lock', hue: 'muted', title: 'Password', summary: 'Change the password you sign in with' }, form)[0]));
 }

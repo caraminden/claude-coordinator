@@ -65,7 +65,7 @@ export function firefoxControls() {
   on.addEventListener('change', () => { setFirefoxOn(on.checked); hint.hidden = !on.checked; });
   const hint = h('span', { class: 'hint', hidden: !on.checked }, 'Needs a one-time setup on this PC: ',
     h('a', { href: 'citadel-firefox-link.ps1', download: '' }, 'download the setup script'), ', run it in PowerShell, and tick "Always allow" when the browser asks.');
-  return h('div', { class: 'push' },
+  return h('div', { class: 'account-card' }, h('h3', {}, 'Links on this device'),
     h('label', { class: 'toggle', title: 'Send links to other websites to Firefox, not this browser. Needs a one-time setup on this PC' }, on, 'Open links in Firefox'), hint);
 }
 

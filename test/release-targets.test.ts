@@ -9,6 +9,7 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
+import type { Pin } from '../src/last-green.ts';
 import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { BEHIND_OLD, CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
@@ -1201,4 +1202,40 @@ test('a CI package with release.needs: a needed workflow that skipped a job, or 
   const [v] = reader.read();
   assert.equal(v.current, null, 'neither build went out');
   assert.deepEqual([v.next?.number, v.next?.stage, v.next?.waitingOn], [1, 'desktop', 'desktop failed: it waits on a fix'], 'its first release, waiting on a fix');
+});
+
+test("a CI package's last green build is the newest released run last green holds; a roll back's pin shows it as current and the store keeps both (ADR 0012)", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  store.setProjectRepoDir(p.id, root);
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
+  const now = Date.now(), m = 60_000;
+  const runs = [3, 2, 1].map((i) => run(i, 'completed', 'success', now - (40 - i) * m, now - (30 - i) * m));
+  const jobs = Object.fromEntries([3, 2, 1].map((i) => [i, [job(i, 'release', 'completed', 'success', now - (35 - i) * m, now - (30 - i) * m)]]));
+  // Run 1 has no file left in the store: never a build to hand out.
+  for (const i of [3, 2]) store.putCiFile({ project_id: p.id, workflow: 'windows.yml', run_id: i, run_attempt: 1, sha: `sha${i}`, ref: '', target: '', size: 1, sha256: '', created_at: now, name: `peek-${i}.zip`, kind: 'build' });
+  const order = ['sha1', 'sha2', 'sha3', 'sha4'];
+  let green = { sha: 'sha4', at: 1 };
+  const pins: Record<string, Pin> = {};
+  const reader = new CiPackageReader({
+    store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => now,
+    contains: async (_d, a, b) => order.indexOf(a) <= order.indexOf(b),
+    lastGreen: { get: () => green, pinned: (_p, id) => pins[id] ?? null },
+  });
+  await reader.refresh();
+  assert.deepEqual(reader.greenBuild(p.id, t.id), { run: 3, sha: 'sha3', workflow: 'windows.yml' }, 'last green past the newest build: the newest');
+  green = { sha: 'sha2', at: 2 };
+  await reader.refresh();
+  assert.deepEqual(reader.greenBuild(p.id, t.id), { run: 2, sha: 'sha2', workflow: 'windows.yml' });
+  assert.equal(reader.read()[0].current?.version, 'sha3', 'unpinned, the newest build is current');
+  pins[t.id] = { sha: 'sha2', from: 'sha3', at: 1, by: 'Cara', build: { run: 2, sha: 'sha2', workflow: 'windows.yml' } };
+  const [held] = reader.read();
+  assert.equal(held.current?.version, 'sha2');
+  assert.match(held.current?.link ?? '', /peek-2\.zip$/);
+  assert.equal(held.next, null);
+  assert.deepEqual(held.recent.map((r) => r.version), ['sha3', 'sha1'], 'the build after it is a previous one');
+  assert.deepEqual([...reader.keeps()], [`${p.id}/2`]);
+  green = { sha: 'sha1', at: 3 };
+  await reader.refresh();
+  assert.equal(reader.greenBuild(p.id, t.id), null, 'run 1 is gone from the store: nothing to hand out');
 });

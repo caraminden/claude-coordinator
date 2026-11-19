@@ -7,6 +7,7 @@ import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
+import type { Contains, Green, Pin } from './last-green.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
 import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
@@ -524,13 +525,23 @@ const runKey = (r: RunJobs) => r.run.run_number ?? r.run.id;
 
 export const CI_TRACK = ['ci', 'package', 'live'];
 
+export interface CiPackageDeps extends ActionsDeps {
+  /** Each scheme's last green and the roll back pins (src/last-green.ts, ADR 0012). */
+  lastGreen?: { get: (projectId: number) => Green | null; pinned: (projectId: number, target: string) => Pin | null };
+  contains?: Contains;
+}
+
 /** A CI package (Peek Auras' Windows build): a release is the newest run on main whose shipping job passed; the next is a run in flight. */
 export class CiPackageReader implements Reader {
-  private d: ActionsDeps;
+  private d: CiPackageDeps;
   private cache: RunsCache;
   /** What is on main past the current release and ships on it (#764), by target. */
   private pending = new Map<string, Landed | null>();
-  constructor(d: ActionsDeps) {
+  /** Last green's build by target: the newest released run with a download whose commit last green holds. */
+  private greens = new Map<string, { run: number; sha: string; workflow: string }>();
+  /** Whether a run's commit is in last green's history, by "<green> <commit>": answers don't change. */
+  private inGreen = new Map<string, boolean>();
+  constructor(d: CiPackageDeps) {
     this.d = d;
     this.cache = new RunsCache(d);
   }
@@ -542,7 +553,43 @@ export class CiPackageReader implements Reader {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
       const cur = runs.find((r) => this.cache.released(t, r)) ?? (t.needs?.length ? runs.at(-1) : undefined);
       this.pending.set(tkey(t), await this.cache.since(t, cur?.run.head_sha ?? null));
+      await this.findGreen(t, runs);
     }
+  }
+
+  /** Find last green's build of `t` among its runs (ADR 0012): the build a roll back holds it at. */
+  private async findGreen(t: Found, runs: RunJobs[]) {
+    const green = this.d.lastGreen?.get(t.projectId);
+    const dir = this.d.store.getProject(t.projectId)?.repo_dir;
+    this.greens.delete(tkey(t));
+    if (!green || !dir || !this.d.contains || !t.workflow) return;
+    for (const r of runs) {
+      if (!this.cache.released(t, r) || !this.cache.file(r.run.id)) continue;
+      const key = `${green.sha} ${r.run.head_sha}`;
+      if (!this.inGreen.has(key)) {
+        if (this.inGreen.size > 500) this.inGreen.clear();
+        const yes = await this.d.contains(dir, r.run.head_sha, green.sha);
+        if (yes === null) return; // git couldn't tell: ask again next refresh
+        this.inGreen.set(key, yes);
+      }
+      if (this.inGreen.get(key)) return void this.greens.set(tkey(t), { run: r.run.id, sha: r.run.head_sha, workflow: t.workflow.replace(/^.*\//, '') });
+    }
+  }
+
+  /** Last green's build of a target, with a download in the CI store; null when none is in view. */
+  greenBuild(projectId: number, target: string): { run: number; sha: string; workflow: string } | null {
+    return this.greens.get(`${projectId}:${target}`) ?? null;
+  }
+
+  /** The runs the CI store keeps whatever its rules say, as "<projectId>/<run id>": each target's last green build and pinned build. */
+  keeps(): Set<string> {
+    const out = new Set<string>();
+    for (const [k, g] of this.greens) out.add(`${k.split(':')[0]}/${g.run}`);
+    for (const t of this.d.finder.list('ci')) {
+      const b = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
+      if (b) out.add(`${t.projectId}/${b.run}`);
+    }
+    return out;
   }
 
   read(): Omit<TargetView, 'testCopies'>[] {
@@ -553,6 +600,14 @@ export class CiPackageReader implements Reader {
       const file = (r: RunJobs) => this.cache.file(r.run.id);
       const num = this.cache.numbers(t);
       const out = (r: RunJobs) => this.cache.released(t, r);
+      // Held at last green's build by a roll back (ADR 0012): that build is what people get until the pin goes, and its
+      // card's roll back line says what waits.
+      const held = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
+      const heldRun = held && runs.find((r) => r.run.id === held.run);
+      if (heldRun) {
+        const recent = runs.filter((r) => r !== heldRun && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
+        return { target: targetOf(t), current: runRelease(heldRun, 'live', ch(heldRun), file(heldRun), num.of(heldRun)), next: null, line: [], recent };
+      }
       const cur = runs.find(out);
       // A build that shipped but never went out (its needed workflow didn't pass) reached no one: not a release, nor a failed one.
       const recent = runs.filter((r) => r !== cur && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));

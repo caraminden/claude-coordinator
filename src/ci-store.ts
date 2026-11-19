@@ -154,10 +154,12 @@ type Row = Pick<CiFile, 'id' | 'project_id' | 'workflow' | 'run_id' | 'kind' | '
  * newest published row per scheme and place), nor the newest run's builds and releases of each workflow and target.
  * By rule: reports past reportMs, builds beyond the newest buildRuns runs, releases beyond the newest releaseRuns runs
  * and older than releaseMs. Then, for a scheme over schemeBytes and for all over totalBytes, the oldest unprotected
- * files go first: reports, then builds, then releases.
+ * files go first: reports, then builds, then releases. `keep` ("<project id>/<run id>"): runs kept whatever the rules
+ * say, a CI package's last green build and the one a roll back holds it at (ADR 0012).
  */
-export function sweepPlan(rows: Row[], now: number, rules: Rules = RULES): number[] {
+export function sweepPlan(rows: Row[], now: number, rules: Rules = RULES, keep: Set<string> = new Set()): number[] {
   const protect = new Set<number>();
+  for (const r of rows) if (r.kind !== 'report' && keep.has(`${r.project_id}/${r.run_id}`)) protect.add(r.id);
   const gone = new Set<number>();
   // The newest published file per scheme and place is what that feed links to now.
   const live = new Map<string, Row>();
@@ -231,6 +233,8 @@ export class CiStore {
   private dataDir: string;
   private tokens: RunTokens;
   rules: Rules;
+  /** Runs kept whatever the rules say (sweepPlan's `keep`): server.ts sets it to the CI packages' last green and pinned builds. */
+  keep: () => Set<string> = () => new Set();
   /** Told when a scheme's upload is refused for room, at most once a day per scheme: a note for its Taskmaster's chat. */
   onFull: (project: Project, words: string) => void = () => {};
   private toldFull = new Map<number, number>();
@@ -363,7 +367,7 @@ export class CiStore {
     const was = rows.find((r) => r.project_id === key.project_id && r.workflow === key.workflow && r.run_id === key.run_id && r.run_attempt === key.run_attempt && r.name === key.name);
     const mine = { ...key, ...meta, id: was?.id ?? -1, published_to: null, published_at: null };
     const next = [...rows.filter((r) => r !== was), mine];
-    const gone = new Set(sweepPlan(next, Date.now(), this.rules));
+    const gone = new Set(sweepPlan(next, Date.now(), this.rules, this.keep()));
     const left = next.filter((r) => !gone.has(r.id));
     const sum = (list: { size: number }[]) => list.reduce((n, r) => n + r.size, 0);
     if (gone.has(mine.id) || (!evict && gone.size) || sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) return null;
@@ -425,7 +429,7 @@ export class CiStore {
     return this.locked(async () => {
       const rows = this.store.ciFiles();
       const byId = new Map(rows.map((r) => [r.id, r]));
-      const ids = sweepPlan(rows, Date.now(), this.rules);
+      const ids = sweepPlan(rows, Date.now(), this.rules, this.keep());
       for (const id of ids) await this.remove(byId.get(id)!);
       if (strays) {
         const known = new Set(this.store.ciFiles().map((r) => this.path(r)));

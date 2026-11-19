@@ -99,6 +99,9 @@ test('the rules: reports by age, builds and releases by count, and the newest an
   releases[5].published_to = 'mandate/android';
   releases[5].published_at = NOW;
   assert.ok(sweepPlan([...releases], NOW).includes(releases[0].id));
+  // A run kept by name (a CI package's last green or pinned build, ADR 0012) stays, its reports don't.
+  const report = row({ kind: 'report', run_id: builds[0].run_id, created_at: NOW - 8 * DAY });
+  assert.deepEqual(sweepPlan([...builds, report], NOW, RULES, new Set([`1/${builds[0].run_id}`])).sort((a, b) => a - b), [builds[1].id, report.id]);
 });
 
 test('the caps take the oldest unprotected first, reports then builds then releases, and never a protected file', () => {
@@ -346,7 +349,19 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     assert.equal((await newest.json()).file.name, 'mandate-9.apk');
     // The redirect's stable URL takes the key too, so a plain fetch follows it to the bytes.
     assert.equal(await (await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release`, { headers: mandateApp })).text(), 'apk from the script');
-    for (const path of ['ci-files', 'ci-files/latest?kind=release', `ci-files/${file.id}/mandate-7.apk`]) {
+    // The builds a roll back holds its CI packages at (ADR 0012): its app's updater reads them with its key.
+    assert.deepEqual((await (await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp })).json()).pins, []);
+    const pinDb = new DatabaseSync(join(srv.data, 'coordinator.db'));
+    pinDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('last-green:pins', JSON.stringify({
+      [`${id}/ci:android:build`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), at: 5, by: 'Cara', build: { run: 4500, sha: 'c'.repeat(40), workflow: 'android.yml' } },
+      [`${id}/app:mandate`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), at: 5, by: 'Cara' },
+      [`${id + 1}/ci:android:build`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), at: 5, by: 'Cara', build: { run: 4500, sha: 'c'.repeat(40), workflow: 'android.yml' } },
+    }));
+    pinDb.close();
+    const pins = (await (await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp })).json()).pins;
+    assert.deepEqual(pins.map((p: any) => [p.target, p.workflow, p.run_id, p.by, p.files.map((f: any) => f.name)]), [['ci:android:build', 'android.yml', 4500, 'Cara', ['mandate-9.apk']]], 'only its own scheme\'s held builds, with their files and no reports');
+    assert.equal(await (await fetch(`${srv.base}${pins[0].files[0].url}`, { headers: mandateApp })).text(), 'apk from the script');
+    for (const path of ['ci-files', 'ci-files/latest?kind=release', `ci-files/${file.id}/mandate-7.apk`, 'ci-files/pins']) {
       const theirs = await fetch(`${srv.base}/api/projects/${id}/${path}`, { headers: otherApp });
       assert.equal(theirs.status, 403, `another scheme's contraption: ${path}`);
       assert.match((await theirs.json()).error, /only read its own home scheme/);

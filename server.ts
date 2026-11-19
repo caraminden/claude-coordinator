@@ -81,7 +81,7 @@ import { Builds } from './src/builds.ts';
 import { Waits, readHeavy } from './src/waits.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
-import { LastGreen } from './src/last-green.ts';
+import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
@@ -670,7 +670,9 @@ const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.w
 // Big uploads (#832); UPLOAD_FLOOR_GB moves the free-disk floor (tests, a dev copy on a small disk).
 const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Number(process.env.UPLOAD_FLOOR_GB) * 1024 ** 3 : DISK_FLOOR);
 const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
-const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror });
+// Last green and the pins come from lastGreen below, read only once refreshes run.
+const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) } });
+ciStore.keep = () => ciPackageReader.keeps();
 const apkReader = new ApkReader({
   store, finder: targetFinder, actions, mirror: ciMirror,
   feed: async (name) => {
@@ -744,6 +746,13 @@ const rollback = new Rollback({
         if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
         throw err;
       }
+    },
+    // A CI package (ADR 0012, "Feed, no rebuild"): held at last green's existing build in the CI store, which its card
+    // shows as current and the CI store's pins hand to its app's updater. Nothing deploys.
+    ci: (tv) => {
+      const build = ciPackageReader.greenBuild(tv.target.projectId, tv.target.id);
+      if (!build) throw new HttpError(409, `${tv.target.name} has no build from last green or before it in Citadel's CI store, so there's nothing to hand out.`);
+      return { build };
     },
     // Citadel's server (the every-scheme skill's §1: only the scheme whose repo this server runs has it): deploy.sh
     // --to in a unit of its own, as a landing runs, since its restart ends this server. The next one reads how it went.

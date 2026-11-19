@@ -127,3 +127,25 @@ test("an APK Citadel builds after each deploy rolls back with its app: its card'
   assert.match(w.told[0], /rolled Peek back to last green aaaaaaaaa from bbbbbbbbb .*from its Android card: its APK build follows the app/);
   assert.equal(w.rb.info(apk, [w.tv(A), apk])?.pin?.sha, A, 'its card shows the app\'s pin');
 });
+
+test("a CI package's roll back holds it at last green's existing build: the pin keeps the build, and showing it doesn't end the pin", async () => {
+  const store = new Store(join(root, `t-${++dbs}.db`));
+  const lastGreen = new LastGreen(store, contains);
+  const told: string[] = [];
+  // Its newest build at or before last green A was made at another commit, X.
+  const build = { run: 41, sha: X, workflow: 'windows.yml' };
+  const rb = new Rollback({
+    lastGreen, repoDir: () => '/repo', contains, starters: { ci: () => ({ build }) },
+    running: () => false, tell: (_p, text) => told.push(text), changed: () => {},
+    get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  });
+  store.setSetting('last-green:3', { sha: A, at: 1 });
+  const tv = (current: string): Omit<TargetView, 'testCopies'> => ({
+    target: { id: 'ci:windows:release', projectId: 3, name: 'Windows', kind: 'ci', link: null },
+    current: { version: current, number: 7, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next: null, line: [], recent: [],
+  });
+  assert.equal(await rb.rollBack(tv(B), 'Cara', 1), A);
+  assert.deepEqual(lastGreen.pinned(3, 'ci:windows:release')?.build, build);
+  assert.match(told[0], /ci-files\/pins/);
+  assert.equal(rb.info(tv(X))?.pin?.build?.run, 41, 'its card shows the held build: the pin stays');
+});

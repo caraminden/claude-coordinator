@@ -5,6 +5,7 @@ import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { KINDS, uploadAsk } from '../ci-store.ts';
 import type { CiFile } from '../db.ts';
+import { LastGreen } from '../last-green.ts';
 import { HttpError, json, type App, type Ctx, type Route } from '../http.ts';
 
 /**
@@ -76,6 +77,20 @@ export const ciStoreRoutes: Route[] = [
       if (ctx.url.searchParams.get('json')) return json(ctx.res, 200, { file: view });
       ctx.res.writeHead(302, { Location: view.url });
       ctx.res.end();
+    },
+  },
+  {
+    // The builds a roll back holds this scheme's CI packages at (ADR 0012, "Feed, no rebuild"): an app's updater hands
+    // a pinned build out in place of the newest, even though its number is older.
+    method: 'GET', path: '/api/projects/:project/ci-files/pins', ...readers,
+    handler({ app, res, project }) {
+      const files = app.store.ciFiles(project.id);
+      const pins = Object.entries(new LastGreen(app.store).pins()).flatMap(([key, p]) => {
+        const target = key.slice(key.indexOf('/') + 1);
+        if (!key.startsWith(`${project.id}/`) || !p.build) return [];
+        return [{ target, workflow: p.build.workflow, run_id: p.build.run, sha: p.build.sha, green: p.sha, from: p.from, by: p.by, at: p.at, files: files.filter((f) => f.run_id === p.build!.run && f.kind !== 'report').map((f) => ciFileView(app, f)) }];
+      });
+      return json(res, 200, { pins });
     },
   },
   {

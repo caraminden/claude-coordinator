@@ -20,14 +20,15 @@ export interface RollbackInfo {
   failed: { sha: string; at: number; why: string } | null;
 }
 
-/** One kind's roll back: start a deploy of `sha` (an older commit of its branch). Throws what it refused with. */
-export type Starter = (t: Omit<TargetView, 'testCopies'>, sha: string, by: string, uid: number | null) => void | Promise<void>;
+/** One kind's roll back: start a deploy of `sha` (an older commit of its branch), or answer the existing build it holds
+ * at (a CI package's). Throws what it refused with. */
+export type Starter = (t: Omit<TargetView, 'testCopies'>, sha: string, by: string, uid: number | null) => void | Pick<Pin, 'build'> | Promise<void | Pick<Pin, 'build'>>;
 
 export interface RollbackDeps {
   lastGreen: LastGreen;
   /** A scheme's clone, where last green and what runs are compared. */
   repoDir: (projectId: number) => string | null;
-  /** By target kind: 'contraption', 'citadel-server'. */
+  /** By target kind: 'contraption', 'citadel-server', 'ci'. */
   starters: Record<string, Starter>;
   /**
    * The target whose roll back this one's is, by id in its scheme, or null for its own (ADR 0012, Q2 "Yes, together"):
@@ -102,7 +103,7 @@ export class Rollback {
     const current = tv.current?.version;
     // Something else deployed over it (a land's deploy of the fix, a person's Deploy): the pin is over.
     let pin = this.d.lastGreen.pinned(projectId, id);
-    if (pin && !running && current && current !== pin.sha && current !== pin.from) {
+    if (pin && !running && current && current !== (pin.build?.sha ?? pin.sha) && current !== pin.from) {
       this.d.lastGreen.unpin(projectId, id);
       pin = null;
     }
@@ -131,7 +132,8 @@ export class Rollback {
     this.d.lastGreen.pin(projectId, id, { sha: green.sha, from, by });
     this.starting.add(key);
     try {
-      await start(tv, green.sha, by, uid);
+      const held = await start(tv, green.sha, by, uid);
+      if (held?.build) this.d.lastGreen.pin(projectId, id, { sha: green.sha, from, by, build: held.build });
     } catch (err) {
       if (had) this.d.lastGreen.pin(projectId, id, had);
       else this.d.lastGreen.unpin(projectId, id);
@@ -146,6 +148,7 @@ export class Rollback {
     }
     const holds = kind === CITADEL_TARGET
       ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
+      : kind === 'ci' ? `Its card shows last green's build as current and Citadel's CI store lists it as pinned (GET /api/projects/${projectId}/ci-files/pins), so an app whose updater reads the pins hands it out. It stays there until main has a newer commit that passes the full suite. Land the fix for what broke.`
       : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's or Taskmaster's deploy of it is refused meanwhile. Land the fix for what broke.`;
     const also = of === tv ? '' : ` (from its ${of.target.name} card: its APK build follows the app, numbered one past the published one)`;
     this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page${also}. ${holds}`);

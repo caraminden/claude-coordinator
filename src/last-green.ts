@@ -29,6 +29,9 @@ export interface Pin {
   from: string;
   at: number;
   by: string;
+  /** A CI package held at last green's existing build (ADR 0012, "Feed, no rebuild"): its run, the commit it built,
+   * and its workflow file. Its card shows it as current and apps read it from the CI store's pins. */
+  build?: { run: number; sha: string; workflow: string };
 }
 
 const PASSED = new Set(['success', 'skipped', 'neutral']);

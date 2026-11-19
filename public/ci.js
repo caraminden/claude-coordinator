@@ -5,6 +5,7 @@
 // The CI chip by the usage meter ("Chip by the usage meter") opens it, its dot the worst of what the page shows.
 import { ago, api, h, view } from './base.js';
 import { pcCard, trouble } from './ci-desktop.js';
+import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 
 const REFRESH_MS = 30_000;
@@ -57,7 +58,57 @@ function runRow(r) {
     h('span', { class: 'ci-run-age muted' }, ago(Date.parse(r.at))));
 }
 
-function overview(s) {
+const GENERIC = /^(self-hosted|windows|linux|macos|x64|arm64)$/i;
+const labelName = (ls) => ls.filter((l) => !GENERIC.test(l)).join(', ') || ls.join(', ');
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/** The queue per set of labels, for Running now's header: "peek-auras-ci: 1 runner, 9 queued". */
+const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.runners, 'runner')}, `
+  : q.runners === 0 && q.labels.some((l) => /^self-hosted$/i.test(l)) ? 'no runner online, ' : ''}${q.jobs} queued`;
+
+/**
+ * Running now (Cara, 2026-11-18: "Could we make this page show what is running on the CI?"): a row per self-hosted runner, busy
+ * with which job for which minion and for how long, idle or offline, then one row for GitHub's own runners that opens to a row per
+ * job. Rows are per runner, not per job, so the section keeps its height as jobs come and go between reads.
+ */
+function runningNow(s, now, ui) {
+  const v = s.view;
+  const running = v.running ?? [];
+  const own = v.runners ?? [];
+  const names = new Set(own.map((r) => r.name));
+  const jobLink = (j) => ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name);
+  const jobCell = (j) => h('span', { class: 'ci-run-who', title: `${j.name} · ${j.who?.label ?? j.branch ?? ''}` }, jobLink(j), ' · ', j.who?.href ? h('a', { href: j.who.href }, j.who.label) : h('span', { class: 'muted' }, j.who?.label ?? j.branch ?? ''));
+  const age = (j) => h('span', { class: 'ci-run-age muted' }, j ? shortSpan(now - Date.parse(j.since)) : '');
+  const rows = own.map((r) => {
+    const j = running.find((x) => x.runner === r.name);
+    const word = r.status === 'offline' ? 'offline' : j || r.busy || r.job ? 'busy' : 'idle';
+    return h('div', { class: 'ci-run ci-now' },
+      h('span', { class: `dot ${{ offline: 'down', busy: 'running', idle: 'ready' }[word]}` }),
+      h('span', { class: 'ci-run-word' }, word),
+      h('span', { class: 'ci-run-name', title: r.name }, r.name),
+      j ? jobCell(j) : h('span', { class: 'ci-run-who muted' }, word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline')
+        : r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work')),
+      age(j));
+  });
+  // GitHub's own runners (and every runner, when the repo's can't be listed): one row, opened by a click to a row per job.
+  const theirs = running.filter((j) => !names.has(j.runner));
+  const where = v.runners === null ? 'Runners' : "GitHub's runners";
+  rows.push(h('button', { type: 'button', class: 'ci-run ci-now ci-now-more', 'aria-expanded': String(ui.hostedOpen), disabled: !theirs.length, onclick: ui.toggleHosted },
+    h('span', { class: `dot ${theirs.length ? 'running' : 'ready'}` }),
+    h('span', { class: 'ci-run-word' }, theirs.length ? `${theirs.length} running` : 'none'),
+    h('span', { class: 'ci-run-name' }, where),
+    h('span', { class: 'ci-run-who muted' }, theirs.length ? (ui.hostedOpen ? 'hide jobs' : theirs.map((j) => j.name).join(', ')) : 'nothing running'),
+    h('span', { class: 'ci-run-age muted' }, theirs.length ? (ui.hostedOpen ? '▴' : '▾') : '')));
+  if (ui.hostedOpen) rows.push(...theirs.map((j) => h('div', { class: 'ci-run ci-now' },
+    h('span', { class: 'dot running' }), h('span', { class: 'ci-run-word' }, 'running'), h('span', { class: 'ci-run-name', title: j.runner }, j.runner), jobCell(j), age(j))));
+  const queues = v.queues ?? [];
+  const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
+  return h('section', { class: 'ci-block' },
+    h('div', { class: 'ci-block-head' }, h('h4', {}, 'Running now'), h('span', { class: 'muted small ci-queues', title: head }, head)),
+    h('div', { class: 'ci-runs' }, ...rows));
+}
+
+function overview(s, now, ui) {
   const v = s.view;
   return [
     h('section', { class: 'ci-block' }, h('h4', {}, 'Open problems'),
@@ -67,6 +118,7 @@ function overview(s) {
         ? h('div', { class: 'ci-verdict-row' }, runRow({ ...w.verdict, name: w.name }),
           w.skipped.length ? h('p', { class: 'muted small ci-skipped' }, `Green, but skipped ${w.skipped.join(', ')}, which ran in the verdict before it.`) : '')
         : h('div', { class: 'ci-run' }, h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word muted' }, 'no verdict'), h('span', { class: 'ci-run-name' }, w.name))))),
+    runningNow(s, now, ui),
     h('section', { class: 'ci-block' }, h('h4', {}, 'Waiting for a runner'),
       v.waiting.length ? h('div', { class: 'ci-runs' }, ...v.waiting.map((j) => h('div', { class: 'ci-run', title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` },
         h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name),
@@ -97,6 +149,7 @@ export function ciPage(projectId) {
   let tab = 'overview';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
+  let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
   const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes with CI' });
   const detail = h('div', { class: 'ci-detail' }, h('p', { class: 'muted' }, 'Reading CI…'));
   const el = h('section', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail));
@@ -128,7 +181,7 @@ export function ciPage(projectId) {
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
       h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); } }, label))),
-      ...(tab === 'overview' ? overview(s)
+      ...(tab === 'overview' ? overview(s, Date.now(), { hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); } })
         : tab === 'runs' ? [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map(runRow)) : h('p', { class: 'muted' }, 'No runs in the last day.'))]
           : runners(s, data.pcs)));
   };

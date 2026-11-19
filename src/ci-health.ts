@@ -136,6 +136,10 @@ export interface CiView {
   /** Null when its runners can't be listed (no repo admin's linked GitHub). */
   runners: { name: string; status: string; busy: boolean; labels: string[]; job: string | null; offlineSince: number | null }[] | null;
   waiting: { name: string; labels: string[]; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];
+  /** Jobs running now, on which runner, since when and for which minion (Cara, 2026-11-18: "show what is running on the CI"); absent in older views. */
+  running?: { name: string; runner: string; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];
+  /** The queue per set of runner labels, with how many online runners serve it (null when they can't be listed). */
+  queues?: { labels: string[]; jobs: number; runners: number | null }[];
   workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[] }[];
   runs: ViewRun[];
 }
@@ -149,6 +153,26 @@ const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null = () =>
 export function runMinion(branch: string, sha: string, tickets: Pick<Ticket, 'number' | 'branch' | 'kind'>[], tips: Map<string, string[]>): number | null {
   const of = (b: string) => tickets.find((t) => t.kind === 'ticket' && t.branch === b)?.number ?? null;
   return of(branch.replace(/^land\//, '')) ?? (tips.get(sha) ?? []).map(of).find((n) => n != null) ?? null;
+}
+
+/** The view's running jobs and its queue per set of labels, so a long queue reads "1 runner, 9 queued". */
+export function runningNow(all: Job[], runs: Run[], runners: Runner[] | null, minion: (r: Run) => number | null): Pick<CiView, 'running' | 'queues'> {
+  const ofRun = (j: Job) => {
+    const r = runs.find((x) => x.id === j.run_id);
+    return r ? { branch: r.head_branch, event: r.event, minion: minion(r) } : {};
+  };
+  const running = all.filter((j) => j.status === 'in_progress' && j.runner_name)
+    .map((j) => ({ name: j.name, runner: j.runner_name!, since: j.started_at ?? j.created_at, run: j.run_id, ...ofRun(j) }));
+  const groups = new Map<string, Job[]>();
+  for (const j of all.filter((x) => x.status === 'queued' || x.status === 'waiting')) {
+    const key = [...j.labels].sort().join(',');
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(j);
+  }
+  const queues = [...groups.values()].map((js) => ({
+    labels: [...js[0].labels].sort(), jobs: js.length,
+    runners: runners && servers(runners, js[0]).filter((r) => r.status === 'online').length,
+  })).sort((a, b) => b.jobs - a.jobs);
+  return { running, queues };
 }
 
 /** What a run with no minion is, for the CI page: a schedule, a run by hand, the default branch itself, or its branch. */
@@ -936,6 +960,7 @@ export class CiHealth {
         const r = runs.find((x) => x.id === j.run_id);
         return { name: j.name, labels: j.labels, since: j.created_at, run: j.run_id, ...(r && { branch: r.head_branch, event: r.event, minion: minion(r) }) };
       }),
+      ...runningNow(all, runs, runners, minion),
       workflows: shown,
       runs: runs.slice(0, 30).map((r) => viewRun(slug, r, minion)),
     });
@@ -959,6 +984,7 @@ export class CiHealth {
       const shown = {
         ...view,
         waiting: view.waiting.map((j) => ({ ...j, who: who(j) })),
+        running: (view.running ?? []).map((j) => ({ ...j, who: who(j) })),
         workflows: view.workflows.map((w) => ({ ...w, verdict: w.verdict && { ...w.verdict, who: who(w.verdict) } })),
         runs: view.runs.map((r) => ({ ...r, who: who(r) })),
       };

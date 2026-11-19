@@ -501,6 +501,14 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 /* The run's name opens it on GitHub, the who cell its minion (#1019), so the row itself isn't one link. */
 .ci-run > span, .ci-run > a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-run-age { text-align: right; font-variant-numeric: tabular-nums; }
+/* Running now (#1019): its header carries the queue per set of labels; GitHub's runners' row is a button that opens a row per job. */
+.ci-block-head { display: flex; align-items: baseline; gap: 0.6rem; min-width: 0; }
+.ci-block-head h4 { flex: none; }
+.ci-queues { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+button.ci-run { width: 100%; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 0.88em; text-align: left; cursor: pointer; }
+button.ci-run:disabled { cursor: default; }
+button.ci-run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+button.ci-run:not(:disabled):hover { background: var(--panel); }
 .ci-skipped { margin: 0; padding: 0 0.7rem 0.4rem 1.9rem; font-size: 0.8em; }
 .ci-desktops { gap: var(--space-2); }
 @media (max-width: 800px) {
@@ -516,4 +524,5 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   .ci-run { grid-template-columns: 0.6rem 4.5rem minmax(0, 1fr) 4rem; }
   .ci-run-branch { display: none; }
   .ci-run-who { grid-column: 3 / -1; grid-row: 2; }
+  .ci-block-head { flex-direction: column; align-items: stretch; gap: 0.15rem; }
 }

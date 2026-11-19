@@ -1142,3 +1142,33 @@ test('each run and queued job on the CI page names the minion whose change it te
   assert.deepEqual(v.waiting.map((j: any) => [j.name, j.who.label]), [['screen', `#${n(sound.id)} Sound tab`]], 'the queued job links its run\'s minion');
   assert.equal(v.workflows[0].verdict.who.label, `#${n(sound.id)} Sound tab`, 'the verdict on main names the land it tested');
 });
+
+test("the CI page's Running now: each running job with its runner, start and minion, and the queue per set of labels with the online runners that serve it (#1019)", async () => {
+  const w = world();
+  const drag = w.store.createTicket({ project_id: w.peek.id, title: 'Panel drag', permission_mode: 'default', created_by: 'cara' });
+  w.store.updateTicket(drag.id, { branch: 'ticket/588-panel-drag' } as any);
+  const n = w.store.getTicket(drag.id)!.number!;
+  w.gh.runners = [{ ...desk('online'), busy: true } as any, desk('offline', 'DESKTOP-G248IJ8-2')];
+  const mine = runOf({ id: 7001, status: 'in_progress', conclusion: null, head_branch: 'land/ticket/588-panel-drag', created_at: iso(20 * MIN) });
+  const queued = runOf({ id: 7002, status: 'queued', conclusion: null, event: 'schedule', created_at: iso(15 * MIN) });
+  w.gh.runs = [mine, queued];
+  const desktopJob = { labels: ['self-hosted', 'peek-auras-ci'], status: 'queued', conclusion: null, runner_name: null, steps: [] };
+  w.gh.jobs.set(7001, [
+    job({ run_id: 7001, name: 'e2e', status: 'in_progress', conclusion: null, runner_name: 'DESKTOP-G248IJ8-desktop', labels: ['self-hosted', 'peek-auras-ci'], created_at: iso(20 * MIN), started_at: iso(12 * MIN) }),
+    job({ run_id: 7001, name: 'lint', status: 'in_progress', conclusion: null, runner_name: 'GitHub Actions 3', labels: ['ubuntu-latest'], created_at: iso(20 * MIN), started_at: iso(19 * MIN) }),
+    job({ run_id: 7001, name: 'screens', ...desktopJob, created_at: iso(20 * MIN) }),
+  ]);
+  w.gh.jobs.set(7002, [job({ run_id: 7002, name: 'drift', ...desktopJob, created_at: iso(15 * MIN) }), job({ run_id: 7002, name: 'build', ...desktopJob, labels: ['peek-auras-ci', 'self-hosted'], created_at: iso(15 * MIN) }),
+    job({ run_id: 7002, name: 'docs', ...desktopJob, labels: ['ubuntu-latest'], created_at: iso(15 * MIN) })]);
+  await w.health.tick(NOW);
+
+  const v = w.health.snapshot(() => true)[0].view as any;
+  assert.deepEqual(v.running.map((j: any) => [j.name, j.runner, j.since, j.who.label]), [
+    ['e2e', 'DESKTOP-G248IJ8-desktop', iso(12 * MIN), `#${n} Panel drag`],
+    ['lint', 'GitHub Actions 3', iso(19 * MIN), `#${n} Panel drag`],
+  ], 'self-hosted and GitHub-hosted jobs alike, each with when it started, not when it queued');
+  assert.deepEqual(v.queues, [
+    { labels: ['peek-auras-ci', 'self-hosted'], jobs: 3, runners: 1 },
+    { labels: ['ubuntu-latest'], jobs: 1, runners: 0 },
+  ], 'labels in any order are one queue; the offline runner is not counted; GitHub\'s own runners are none of the repo\'s');
+});

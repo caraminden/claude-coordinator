@@ -1,6 +1,7 @@
 // The agent instructions: every prompt a turn starts from (a minion's and a Taskmaster's system prompt,
 // onboarding) and the messages the runner (src/runner.ts) sends a turn. Pure builders over Project and
 // Ticket; edit the wording here.
+import { MSG_DEFAULTS } from './msg-settings.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
@@ -22,8 +23,8 @@ export const CHECKOUT = join(import.meta.dirname, '..');
 export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: a few host-wide slots, so it may queue. Give it a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out, and don\'t wrap a script that takes its own lock (tools/land.sh) in it.';
 
 /** Messages between two schemes' Taskmasters (both ways) per TASKMASTER_LOOP_WINDOW_MS before the next waits for a person. */
-export const TASKMASTER_LOOP_LIMIT = 6;
-export const TASKMASTER_LOOP_WINDOW_MS = 10 * 60 * 1000;
+export const TASKMASTER_LOOP_LIMIT = MSG_DEFAULTS.loopLimit;
+export const TASKMASTER_LOOP_WINDOW_MS = MSG_DEFAULTS.loopMin * 60_000;
 
 /** Said beside the role names, and passed on to Grunts, which don't see these prompts. */
 const ROLE_FRAMING = `${APP_NAME}, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.`;

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
+import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, clip, coldKey, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
@@ -120,6 +121,7 @@ export interface QueuedMessage {
   own?: boolean; // a person sent it themselves: typed, or a card's answer; only these carry their own secrets (#838)
   asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
+  cold?: true; // held mail left because its recipient was cold (#413), for the Held list (#1059)
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
   parked?: string; // held for a parked minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
@@ -238,6 +240,8 @@ export interface FreshState { why: string; summary?: string; compact?: true; aut
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
+/** A fresh start's idle time for the chat's divider (#1059): "55 m", "1 h 12 m". */
+export const idleText = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? `${m} m` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} m` : ''}`; };
 /** What a fresh start's notes call the chat's agent. */
 const roleWord = (t: Ticket) => (t.kind === 'coordinator' ? 'Taskmaster' : 'minion');
 /** The slash commands a chat's last turn loaded (its init event, #937), and the scheme's newest, for a chat with no turn yet. */
@@ -322,9 +326,9 @@ const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 /** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
 const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
 /** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
-export const COLD_MS = 55 * 60_000;
+export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
-export const COLD_HOLD_MAX_MS = 3 * 3600_000;
+export const COLD_HOLD_MAX_MS = MSG_DEFAULTS.holdH * 3600_000;
 
 /** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
 export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|invalid api key|run \/login|organization has been disabled/i;
@@ -1792,7 +1796,7 @@ export class Runner {
     const t = this.store.getTicket(ticketId);
     if (!t?.session_id || t.status === 'closed' || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return false;
     const ended = this.store.lastTurnEnd(ticketId);
-    return !!ended && this.now() - ended > COLD_MS;
+    return !!ended && this.now() - ended > this.relays.settings(ticketId).coldMin * 60_000;
   }
 
   /** Parked (#718): on hold on purpose (state parked) or waiting on start_after, and not dismissed. A message to it is held. */
@@ -1834,22 +1838,59 @@ export class Runner {
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         const since = this.store.getSetting<number>(coldKey(t.id));
-        if (!since || (t.session_id && now - since < COLD_HOLD_MAX_MS)) continue;
+        if (!since || (t.session_id && now - since < msgSettings(p).holdH * 3_600_000)) continue;
         // A parked minion's mail waits for its unpark or wake, however long (#718).
         if (this.parked(t)) continue;
         if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
-        const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
-        this.store.deleteSetting(coldKey(t.id));
-        // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
-        if (!mail.length || t.status === 'closed') continue;
-        // Nor while its Claude can't run a turn: the mail waits for the next one that can (#468 S03-6).
-        if (this.refused(t.id, this.turnPerson(t, p, mail))) continue;
-        this.store.deleteSetting(mailKey(t.id));
-        this.emit(t.id, 'note', { text: t.session_id ? `Held mail has waited ${COLD_HOLD_MAX_MS / 3_600_000} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.' });
-        this.queues.set(t.id, [...(this.queues.get(t.id) ?? []), ...mail]);
-        this.next(t.id);
+        this.releaseMail(t, p);
       }
     }
+  }
+
+  /**
+   * Queue a ticket's held mail as a turn: the cold hold's cap ran out, or `by` (a person) asked from the Held list (#1059).
+   * Never a dismissed minion's, nor while its Claude can't run a turn (#468 S03-6). Returns how many messages went.
+   */
+  releaseMail(t: Ticket, p: Project, by = ''): number {
+    const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
+    this.store.deleteSetting(coldKey(t.id));
+    // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
+    if (!mail.length || t.status === 'closed') return 0;
+    if (this.refused(t.id, this.turnPerson(t, p, mail))) return 0;
+    this.store.deleteSetting(mailKey(t.id));
+    const hours = msgSettings(p).holdH;
+    const text = by ? `${by} delivered the held mail, so it runs now.` : t.session_id ? `Held mail has waited ${hours} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.';
+    this.emit(t.id, 'note', { text });
+    this.queues.set(t.id, [...(this.queues.get(t.id) ?? []), ...mail]);
+    this.next(t.id);
+    return mail.length;
+  }
+
+  /**
+   * Everything held in a scheme (#1059), for the Held list: messages a loop guard holds for a person to continue, and mail
+   * waiting for its recipient's next turn (cold, or sent as a fyi). `continueId` is the chat whose Continue releases a loop's.
+   */
+  heldList(project: Project) {
+    const cfg = msgSettings(project);
+    const mine = new Set(this.store.listTickets(project.id).map((t) => t.id));
+    const label = (id: number) => { const t = this.store.getTicket(id); return t ? (t.kind === 'coordinator' ? `the ${AGENT_NAME}` : `#${t.number}`) : `#${id}`; };
+    const items: { kind: 'loop' | 'cold' | 'mail'; ticket: number; from: string; to: string; text: string; why: string; delivers: string; since?: number }[] = [];
+    for (const key of this.store.settingKeys('loop:')) {
+      const loop = this.store.getSetting<LoopState>(key);
+      const ids = key.split(':').slice(1).map(Number).filter((n) => Number.isInteger(n));
+      if (!loop?.held.length || !ids.some((id) => mine.has(id))) continue;
+      for (const m of loop.held) items.push({ kind: 'loop', ticket: ids[0], from: m.from ? label(m.from) : m.author, to: label(m.to), text: clip(m.text), why: `the loop guard (${cfg.loopLimit} messages in ${cfg.loopMin} minutes)`, delivers: 'when a person continues' });
+    }
+    for (const id of mine) {
+      const mail = this.store.getSetting<QueuedMessage[]>(mailKey(id)) ?? [];
+      if (!mail.length) continue;
+      const since = this.store.getSetting<number>(coldKey(id));
+      for (const m of mail) {
+        const cold = !!m.cold && !!since;
+        items.push({ kind: cold ? 'cold' : 'mail', ticket: id, from: m.author.replace(/^Held mail from |, sent .*$/g, ''), to: label(id), text: clip(m.text), since: since ?? undefined, why: cold ? `${label(id)} is cold (idle over ${cfg.coldMin} minutes)` : 'sent as held mail (a fyi, or wake: false)', delivers: cold ? `at its next turn, or by ${pacific(since! + cfg.holdH * 3_600_000)}` : 'at its next turn' });
+      }
+    }
+    return items;
   }
 
   /**
@@ -2175,7 +2216,7 @@ export class Runner {
         const size = this.store.getSetting<number>(contextKey(t.id));
         const ended = this.store.lastTurnEnd(t.id);
         if (!size || size <= FRESH_IDLE_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
-        this.requestFresh(t.id, `idle ${Math.round((now - ended) / 60_000)} minutes with ${Math.round(size / 1000)}k tokens of context`, true);
+        this.requestFresh(t.id, `idle ${idleText(now - ended)} with ${Math.round(size / 1000)}k context`, true);
       }
     }
   }

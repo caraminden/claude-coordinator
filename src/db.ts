@@ -111,6 +111,11 @@ export interface Project {
   go_from: GoFrom;
   /** What waits for a person to try it before it ships: never, ui (front-end changes) or features. */
   try_first: TryFirst;
+  /** Message settings (#1059, src/msg-settings.ts): loop guard count and window (minutes), cold after (minutes), cold hold at most (hours). */
+  msg_loop_limit: number;
+  msg_loop_min: number;
+  msg_cold_min: number;
+  msg_hold_h: number;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -1306,6 +1311,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'shot_widths', "ALTER TABLE projects ADD COLUMN shot_widths TEXT NOT NULL DEFAULT '1440,390'"],
   ['projects', 'shot_themes', "ALTER TABLE projects ADD COLUMN shot_themes TEXT NOT NULL DEFAULT 'light'"],
   ['projects', 'shots_required', 'ALTER TABLE projects ADD COLUMN shots_required INTEGER NOT NULL DEFAULT 1'],
+  ['projects', 'msg_loop_limit', 'ALTER TABLE projects ADD COLUMN msg_loop_limit INTEGER NOT NULL DEFAULT 6'],
+  ['projects', 'msg_loop_min', 'ALTER TABLE projects ADD COLUMN msg_loop_min INTEGER NOT NULL DEFAULT 10'],
+  ['projects', 'msg_cold_min', 'ALTER TABLE projects ADD COLUMN msg_cold_min INTEGER NOT NULL DEFAULT 55'],
+  ['projects', 'msg_hold_h', 'ALTER TABLE projects ADD COLUMN msg_hold_h INTEGER NOT NULL DEFAULT 3'],
   ['projects', 'shot_note', "ALTER TABLE projects ADD COLUMN shot_note TEXT NOT NULL DEFAULT ''"],
   // Today's behaviour by default (#1043): Citadel ships it, a go from high, no try first. shippingFromRules moves the PR schemes.
   ['projects', 'ship_path', "ALTER TABLE projects ADD COLUMN ship_path TEXT NOT NULL DEFAULT 'citadel'"],
@@ -1416,6 +1425,7 @@ export const SCHEMA_HISTORY = [
   [72, 'projects.shot_widths, shot_themes, shots_required, shot_note (#1044)'],
   [73, 'projects.ship_path, go_from, try_first; schemes whose merges wait for a person start on pr-person (#1043)'],
   [74, 'tickets.picked_because (#1061)'],
+  [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1817,7 +1827,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

@@ -550,6 +550,16 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // Deliver now on the Held list (#1059): a ticket's held mail runs as a turn without waiting for the cold hold.
+    method: 'POST', path: '/api/tickets/:ticket/deliver-mail', who: ['person'], refuse: 'Only people deliver held mail',
+    async handler(ctx) {
+      const { res, session, app, ticket } = ctx;
+      if (app.runner.isRunning(ticket.id)) return json(res, 409, { error: 'It is running: its held mail reaches it with its next turn' });
+      const project = app.store.getProject(ticket.project_id)!;
+      return json(res, 200, { delivered: app.runner.releaseMail(ticket, project, session.name) });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/comments', who: ['person'], refuse: 'Only people comment on files',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;

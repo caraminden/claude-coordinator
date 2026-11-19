@@ -1503,6 +1503,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/held": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "PUT /api/projects/:p/hidden": {
   "anon": "401 Not logged in",
   "person": "400 hidden must be true or false",
@@ -2332,6 +2342,16 @@
   "m1": "400 Message is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/deliver-mail": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people deliver held mail",
+  "tmB": "403 Only people deliver held mail",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/deploy": {
   "anon": "401 Not logged in",
   "person": "403 Only the deploying minion can report its deploy",
@@ -3019,6 +3039,16 @@
   "outsider": "403 Only a minion can message its Taskmaster",
   "tmA": "403 Only a minion can message its Taskmaster",
   "tmB": "403 Only a minion can message its Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/deliver-mail": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people deliver held mail",
+  "tmB": "403 Only people deliver held mail",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

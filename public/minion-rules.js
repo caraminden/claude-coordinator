@@ -55,6 +55,9 @@ const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down
  * PATCH of `body` behind an optimistic `mine` (what view.project then holds).
  */
 const SHOT_WIDTHS = [[1440, 'Desktop 1440'], [1024, 'Laptop 1024'], [768, 'Tablet 768'], [390, 'Phone 390']];
+/** src/msg-settings.ts's defaults and bounds; test/held-list.test.ts keeps them equal. */
+export const MSG_DEFAULTS = { msg_loop_limit: 6, msg_loop_min: 10, msg_cold_min: 55, msg_hold_h: 3 };
+export const MSG_BOUNDS = { msg_loop_limit: [3, 20], msg_loop_min: [5, 60], msg_cold_min: [10, 55], msg_hold_h: [1, 12] };
 const shotList = (text) => (text ?? '').split(',').map(Number).filter((w) => w > 0);
 
 export function pickers({ settingsRow, settingsHelp, saveProject }) {
@@ -303,7 +306,40 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       return label(TRY_FIRST, cur);
     });
 
-  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, shots, ship, go, tryFirst, data, refreshAll };
+
+  /**
+   * Messages (#1059): the loop guard's count and window, when a silent recipient counts as cold and how long cold mail waits.
+   * A number box inside MSG_BOUNDS (the server refuses the rest: src/msg-settings.ts), saved when it changes.
+   */
+  const number = (meta, help, field, label, unit) => {
+    const [min, max] = MSG_BOUNDS[field];
+    return live(meta, help, (mount) => {
+      const cur = stored()[field] ?? MSG_DEFAULTS[field];
+      const input = h('input', { type: 'number', class: 'rules-number', min, max, step: 1, value: cur, 'aria-label': label, onchange: () => {
+        const v = Number(input.value);
+        if (!Number.isInteger(v) || v < min || v > max) { input.value = stored()[field] ?? MSG_DEFAULTS[field]; return toast(`${label} is a whole number from ${min} to ${max}`); }
+        save({ [field]: v }, `set ${label.toLowerCase()}`);
+      } });
+      mount.replaceChildren(h('div', { class: 'rules-pick' }, input, h('span', { class: 'muted small' }, `${unit} (${min} to ${max}, default ${MSG_DEFAULTS[field]})`)));
+      return `${cur} ${unit}`;
+    });
+  };
+  const messages = () => [
+    number({ icon: 'spark', hue: 'running', title: 'Loop guard: messages' },
+      settingsHelp('How many messages a minion and its Taskmaster (or two minions) may swap per window before the next is held for a person.', 'Raise it for chatty work; each message wakes a turn, so a runaway exchange costs more before it stops. Lower it to stop loops sooner.'),
+      'msg_loop_limit', 'Loop guard count', 'messages'),
+    number({ icon: 'spark', hue: 'running', title: 'Loop guard: window' },
+      settingsHelp('How long the loop guard counts messages for.', 'A longer window catches slow loops but also holds steady work; a shorter one forgets sooner.'),
+      'msg_loop_min', 'Loop guard window', 'minutes'),
+    number({ icon: 'spark', hue: 'running', title: 'Cold after' },
+      settingsHelp('How long a Taskmaster or minion sits idle before a message to it is held as mail instead of waking it.', 'Lower it to hold more mail and save re-reading context; it stops at 55 because past an hour the prompt cache has lapsed, so holding saves nothing.'),
+      'msg_cold_min', 'Cold after', 'minutes'),
+    number({ icon: 'spark', hue: 'running', title: 'Hold at most' },
+      settingsHelp('The longest cold mail waits before it wakes its recipient anyway.', 'Longer saves wakes but news arrives later; shorter delivers sooner, each wake re-reading the whole context.'),
+      'msg_hold_h', 'Cold hold', 'hours'),
+  ];
+
+  return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, messages, shots, ship, go, tryFirst, data, refreshAll };
 }
 
 /** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */

@@ -499,6 +499,7 @@ export function approvalsEditor() {
     settingsSection('Shipping', rules.ship(), rules.go(), fastModeRow(p), rules.tryFirst(), rules.builds(), rules.ghRunners()),
     // Plugins load code from any folder on the server, so only an admin changes them.
     settingsSection('Minions', rules.listGroups(), rules.effort(), rules.fable(), rules.grill()),
+    settingsSection('Messages', ...rules.messages()),
     settingsSection('Plugins', rules.plugins()),
     settingsSection('Checks', rules.shots()),
     settingsSection('CI', rules.ci()),

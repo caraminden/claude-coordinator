@@ -4,8 +4,8 @@ import { AGENT_NAME } from './auth.ts';
 import type { Approvals } from './approvals.ts';
 import type { Store, Ticket } from './db.ts';
 import { hideTokens } from './hide-tokens.ts';
+import { loopText, msgSettings, MSG_DEFAULTS, type MsgSettings } from './msg-settings.ts';
 import { pacific } from './pacific.ts';
-import { TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from './prompts.ts';
 import { asData } from './quote.ts';
 import type { QueuedMessage } from './runner.ts';
 
@@ -15,8 +15,9 @@ export const mailKey = (ticketId: number) => `mail:${ticketId}`;
 export const coldKey = (ticketId: number) => `cold:${ticketId}`;
 
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
-export const LOOP_LIMIT = 6;
-export const LOOP_WINDOW_MS = 10 * 60 * 1000;
+/** The defaults (#1059): each scheme's own count and window are its message settings. */
+export const LOOP_LIMIT = MSG_DEFAULTS.loopLimit;
+export const LOOP_WINDOW_MS = MSG_DEFAULTS.loopMin * 60_000;
 
 /** A loop guard's count and held messages (a minion's under `loop:<minion id>`, two Taskmasters' under pairKey), in the settings table so they outlive a restart. */
 export interface LoopState {
@@ -66,13 +67,20 @@ export class Relay {
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
    * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
+  /** The message settings of the scheme a ticket belongs to. */
+  settings(ticketId: number): MsgSettings {
+    const t = this.d.store.getTicket(ticketId);
+    return msgSettings(t && this.d.store.getProject(t.project_id));
+  }
+
   relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number): boolean | 'cold' | 'mail' | 'parked' {
     const minion = this.d.store.getTicket(minionId)!;
     const from = to === minionId ? sender ?? this.d.store.ownerCoordinator(minion)?.id : minionId;
-    const { held, cold, parked } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, !wake, urgent, need);
+    const cfg = this.settings(minionId);
+    const { held, cold, parked } = this.guard(loopKey(minionId), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, to === minionId, from, !wake, urgent, need);
     if (!held) return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
-    const note = heldNote(held, `#${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes`, what);
+    const note = heldNote(held, `#${minion.number} and the ${AGENT_NAME} have exchanged ${cfg.loopLimit} messages in the last ${cfg.loopMin} minutes`, what);
     for (const id of this.loopChats(minion)) this.d.emit(id, 'loop_paused', { minion: minionId, text: note });
     return true;
   }
@@ -84,13 +92,14 @@ export class Relay {
    * chat releases it. The caller refuses a dismissed receiver: this would reopen it.
    */
   relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false): boolean | 'cold' | 'mail' | 'parked' {
-    const { held, cold, parked } = this.guard(minionPairKey(from, to), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, false, from, !wake, urgent);
+    const cfg = this.settings(from);
+    const { held, cold, parked } = this.guard(minionPairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, false, from, !wake, urgent);
     if (!held) {
       this.copyToTaskmaster(to, author, text, unparked, from);
       return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
     }
     const [a, b] = [from, to].map((id) => `#${this.d.store.getTicket(id)!.number}`);
-    const note = heldNote(held, `${a} and ${b} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes`, `${a}'s message to ${b} ("${clip(text)}")`);
+    const note = heldNote(held, `${a} and ${b} have exchanged ${cfg.loopLimit} messages in the last ${cfg.loopMin} minutes`, `${a}'s message to ${b} ("${clip(text)}")`);
     for (const id of [from, to]) this.d.emit(id, 'loop_paused', { minion: id, text: note });
     return true;
   }
@@ -114,10 +123,12 @@ export class Relay {
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
   relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false, need?: string): { held: boolean; left: number; cold?: true } {
-    const { held, left, cold } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake, urgent, need);
+    // The sender's scheme sets the pair's count, window and cold time (#1059); the Taskmaster defaults are the same numbers.
+    const cfg = this.settings(from);
+    const { held, left, cold } = this.guard(pairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, asData(author, text) + attached, false, from, !wake, urgent, need);
     if (held) {
       const [a, b] = [from, to].map((id) => this.d.store.getProject(this.d.store.getTicket(id)!.project_id)!.name);
-      const note = heldNote(held, `the ${AGENT_NAME}s of ${a} and ${b} have exchanged ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes`, `${a}'s message to ${b} ("${clip(text)}")`);
+      const note = heldNote(held, `the ${AGENT_NAME}s of ${a} and ${b} have exchanged ${loopText(cfg)}`, `${a}'s message to ${b} ("${clip(text)}")`);
       // Each chat's note names its own Taskmaster, whose Continue releases all its held exchanges.
       for (const id of [from, to]) this.d.emit(id, 'loop_paused', { minion: id, text: note });
     }
@@ -147,7 +158,7 @@ export class Relay {
     const sent = pacific(this.d.now());
     const list = store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    list.push({ author: `Held mail from ${author}, sent ${sent}`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.d.personOf()?.(author, from) ?? null : null });
+    list.push({ author: `Held mail from ${author}, sent ${sent}`, text, images: [], id: row.id, ...(cold ? { cold: true as const } : {}), ...(cold && from ? { from } : {}), asker: cold ? this.d.personOf()?.(author, from) ?? null : null });
     store.setSetting(mailKey(to), list);
     // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
     const ticket = store.getTicket(to);

@@ -1,5 +1,6 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
+import { cleanMsgSettings } from '../msg-settings.ts';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
@@ -652,6 +653,13 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    // What the scheme's messaging is holding (#1059): loop-guard holds and held mail, for the Held list.
+    method: 'GET', path: '/api/projects/:project/held', who: ['person'], everyScheme: true,
+    async handler({ res, app, project }) {
+      return json(res, 200, { items: app.runner.heldList(project) });
+    },
+  },
+  {
     method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
     // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
     // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
@@ -694,10 +702,10 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from and try_first; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -721,6 +729,12 @@ export const projectRoutes: Route[] = [
         if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
         if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
         } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      // Message settings (#1059): whole numbers inside src/msg-settings.ts's bounds.
+      try {
+        Object.assign(settings, cleanMsgSettings(body));
+      } catch (err: any) {
         throw new HttpError(400, err.message);
       }
       if (body.shots_required !== undefined) {

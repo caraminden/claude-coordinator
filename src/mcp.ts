@@ -29,13 +29,16 @@ const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').spli
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
+/** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
+const MSG = msgFromEnv(process.env.COORDINATOR_MSG);
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
-const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
+const COLD = (who: string) => coldToolText(MSG, who);
 import { NEEDS, NEED_LINES } from './needs.ts';
+import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
-const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over 55 minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
+const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over ' + MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
-const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
+const HELD = heldToolText(MSG, 'the minion and the Taskmaster');
 
 const WAKE_DESCRIPTION =
   `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
@@ -507,7 +510,7 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within 3 hours), unless it is urgent. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over ' + MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + MSG.holdH + ' hours), unless it is urgent. After ' + MSG.loopLimit + ' messages either way with one minion in ' + MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -523,7 +526,7 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + MSG.loopLimit + " messages either way between you in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1486,13 +1489,13 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + MSG.holdH + " hours), unless it is urgent. After " + MSG.loopLimit + " messages either way in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over 55 minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After 6 messages either way between two minions in 10 minutes, the next is held until a person continues.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over " + MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + MSG.loopLimit + " messages either way between two minions in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1941,13 +1944,13 @@ async function runTool(name: string, args: any): Promise<string> {
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
       if (t.held === 'parked') return `Held for #${t.number}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken (its deploy wait or chained start). Do not resend it; message_ticket with unpark wakes it now.\n${ticketLine(t)}`;
-      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
       const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
-      if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
+      if (r.held) return `${heldToolText(MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
       const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false || args.need === 'fyi' ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
@@ -2069,7 +2072,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_coordinator': {
       const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
       if (r.armed) return `${r.armed} End your turn with state outside.`;
-      if (r.held) return `Held, not delivered: ${HELD}`;
+      if (r.held) return `${HELD} Finish your turn.`;
       if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';
       return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';
     }
@@ -2079,7 +2082,7 @@ async function runTool(name: string, args: any): Promise<string> {
       sharedFilesExist(args.text ?? args.message, 'Send this');
       const r = await call('POST', `/api/tickets/${TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
-      if (r.held === true) return `Held, not delivered: you and #${r.number} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.`;
+      if (r.held === true) return `${heldToolText(MSG, `you and #${r.number}`)} Finish your turn.`;
       if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it is parked on you, resend with unpark: true.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;

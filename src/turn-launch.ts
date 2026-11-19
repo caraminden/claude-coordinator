@@ -1,6 +1,7 @@
 // What a turn is launched with: the pinned copies of the server files it runs, its hooks, settings,
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
+import { msgEnv, msgSettings } from './msg-settings.ts';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -593,6 +594,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
   // The scheme's screenshot widths and themes (#1044): tools/ui-shot.ts's defaults when a minion passes none.
   if (ticket.kind !== 'coordinator' && project.shot_widths && project.shot_themes) Object.assign(env, { COORDINATOR_SHOT_WIDTHS: project.shot_widths, COORDINATOR_SHOT_THEMES: project.shot_themes });
+  // The scheme's message numbers (#1059) for the tool text; unset at the defaults so the prompt hash stays put.
+  const msg = msgEnv(msgSettings(project));
+  if (msg) env.COORDINATOR_MSG = msg;
   if (facts.deploys) env.COORDINATOR_DEPLOYS = '1';
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
   if (facts.media && ticket.kind !== 'coordinator') env.COORDINATOR_MEDIA = '1';

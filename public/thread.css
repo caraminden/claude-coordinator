@@ -328,6 +328,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .note.detail[open] > summary::after { content: ' ▾'; }
 .note.detail > pre { text-align: left; }
 /* A Taskmaster's fresh session (#406): its handoff reads as a message, not as muted status. */
+.note.detail.fresh > summary { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0; }
+.note.detail.fresh > summary > .rule { flex: 1; border-top: 1px solid var(--line); }
+.note.detail.fresh > summary::after { flex: none; }
+.note.detail.fresh > .fresh-from { color: var(--muted); font-size: 0.85em; }
 .note.detail.fresh > :not(summary) { text-align: left; margin: 0.25rem 0; color: var(--ink); font-size: 1rem; }
 .turn-end { color: var(--muted); font-size: 0.8em; text-align: right; border-top: 1px dashed var(--line); padding-top: 0.2rem; }
 /* One line: the branch on the left gives way, the turn's ✓, time and actions stay whole on the right. */

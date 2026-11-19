@@ -229,7 +229,7 @@ function repoSetupCard() {
   const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
   api(`api/projects/${p.id}/repo-setup`).then((r) => {
     const parts = [];
-    if (!r.facts) parts.push(h('p', {}, 'No Project facts: the kit\'s skills fall back to defaults. ', h('a', { href: `#/p/${p.id}/approvals` }, 'Start a tune-up'), ' (the Tune up button) to write them.'));
+    if (!r.facts) parts.push(h('p', {}, 'No Project facts: the kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
     else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
     parts.push(h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
       r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}`

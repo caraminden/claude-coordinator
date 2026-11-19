@@ -30,3 +30,12 @@ test('rule files: scoped paths, upstream link and pin', () => {
   assert.equal(r.upstream, 'https://github.com/x/y');
   assert.equal(pinFor('| a | b | `96608e0` | `.claude/rules/ponytail.md` (x) | MIT |', '.claude/rules/ponytail.md'), '96608e0');
 });
+
+// Inline copies of the two real shapes, so CI (which has no other schemes' repos) runs them too.
+test('wrapped continuation lines in both shapes', () => {
+  const citadel = '## Project facts\n\nThe kit reads this.\n\n- **Check commands:** `npm test` (`node --test test/` through\n  `tools/citadel-node`), then more.\n- **Front end:** `public/`, plain JS.\n\n## Skills';
+  const peek = '## Project facts\n\n- **Check commands:** `tools/check.sh` is the full check, and **its cargo steps run on Windows CI**:\n  `cargo fmt --check`.\n- **UI rules:** none.\n';
+  assert.deepEqual(parseProjectFacts(citadel)!.map((f) => f.label), ['Check commands', 'Front end']);
+  assert.match(parseProjectFacts(citadel)![0].value, /through `tools\/citadel-node`\)/);
+  assert.match(parseProjectFacts(peek)![0].value, /Windows CI\*\*: `cargo fmt --check`\.$/);
+});

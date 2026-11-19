@@ -740,9 +740,10 @@ mock.boards('#takes', { boards: [
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
       const repo = c.store.getProject(c.project.id)!.repo_dir!;
       const env = { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
-      const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore', env });
+      const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', env });
       const put = (path: string, text: string) => { mkdirSync(join(repo, path, '..'), { recursive: true }); writeFileSync(join(repo, path), text); };
-      rmSync(join(repo, '.git'), { recursive: true, force: true });
+      // A second seed starts the repo over, so ADR 0002 is its own commit again.
+      for (const d of ['.git', 'docs', '.claude']) rmSync(join(repo, d), { recursive: true, force: true });
       execFileSync('git', ['init', '-q', '-b', 'main', repo]);
       put('CLAUDE.md', '# CLAUDE.md\n\n- **Decisions log (ADRs):** `docs/adr/`.\n- Screens are checked at two widths (Josh, 2026-11-12: "desktop and phone, every time").\n');
       put('.claude/rules/words.md', '# Words\n\n- Say land for a change reaching main (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it").\n- Old CI rule (Cara, 2026-11-10: "Keep failing, log it").\n');

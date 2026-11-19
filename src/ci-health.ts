@@ -44,6 +44,7 @@ import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { schemeLabels } from './ci-runner.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
+import type { GreenRun } from './last-green.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
@@ -246,6 +247,7 @@ const short = (sha: string) => sha.slice(0, 7);
 const runUrl = (slug: string, r: Run) => `https://github.com/${slug}/actions/runs/${r.id}`;
 /** A run's workflow file name, as a scheme's ci_quiet lists it. */
 const workflowFile = (r: Run) => (r.path ?? '').split('/').pop() || r.name;
+const quietWorkflow = (p: Project, r: Run) => lines(p.ci_quiet).includes(workflowFile(r));
 /** When dispatched runs started counting (#678), so the deploy that brought them told none from before. */
 const DISPATCH_SINCE = 'ci-health:dispatch-since';
 
@@ -679,6 +681,8 @@ export interface CiHealthDeps {
   tell?: (project: Project, text: string, wake?: boolean) => boolean | number;
   /** The scheme whose Taskmaster hears problems that aren't one scheme's (#983): the live checkout's. */
   home?: () => Project | undefined;
+  /** Each poll's runs of a scheme (all branches, newest first) with its default branch, for its last green (src/last-green.ts, #1016). */
+  green?: (project: Project, runs: GreenRun[], branch: string) => void;
 }
 
 export class CiHealth {
@@ -935,6 +939,7 @@ export class CiHealth {
     out.push(...hungProblems(all, now));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
+    this.deps.green?.(p, runs.filter((r) => !quietWorkflow(p, r)).map((r) => ({ head_sha: r.head_sha, workflow_id: r.workflow_id, status: r.status, conclusion: r.conclusion, created_at: r.created_at, file: workflowFile(r) })), branch);
     const onMain = new Map<number, Run[]>();
     for (const w of workflows) {
       const mainRuns: Run[] = (await this.read(`repos/${slug}/actions/workflows/${w.id}/runs?branch=${encodeURIComponent(branch)}&per_page=${RUNS}`, as))?.workflow_runs ?? [];

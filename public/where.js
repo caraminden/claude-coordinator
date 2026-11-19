@@ -1,7 +1,7 @@
 // "Where it went" (#905): your own spend over the last 7 days against the 7 before, by model, scheme, kind of work,
 // and the 10 costliest minions, from /api/costs/mine (src/costs.ts whereItWent). One series per table, so one hue and no legend.
 import { account, api, costText, h, icon, threadHref, view } from './base.js';
-import { settingsTabs } from './settings.js';
+import { settingsJump, settingsTabs } from './settings.js';
 import { costDetail } from './cost.js';
 import { codexWindowsBlock } from './core.js';
 
@@ -99,9 +99,11 @@ export function usagePage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
+    settingsJump(['usage-claude', 'Claude'], ['usage-codex', 'Codex'], ...(account?.admin ? [['usage-server', 'Server login']] : [])),
+    h('h3', { class: 'settings-section settings-anchor', id: 'usage-claude' }, 'Claude spend'),
     pick, slot,
-    h('h3', {}, 'Codex'), codexWindowsBlock(),
-    account?.admin ? costDetail() : '');
+    h('h3', { class: 'settings-section settings-anchor', id: 'usage-codex' }, 'Codex'), codexWindowsBlock(),
+    account?.admin ? h('div', { id: 'usage-server', class: 'settings-anchor' }, costDetail()) : '');
 }
 
 let pickedRange = 'week';

@@ -386,6 +386,18 @@ export function settingsRow({ icon: ic, hue, title, summary = '', open = false }
 /** A group of rows under an uppercase heading. */
 export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];
 
+/**
+ * A strip of in-page links at the top of a long page (Cara picked "Jump links on long pages"). Plain `#id` links would
+ * hit the hash router, so each scrolls its target (an element with that id, which carries .settings-anchor) into view.
+ */
+export function settingsJump(...links) {
+  return h('nav', { class: 'settings-jump', 'aria-label': 'On this page' }, links.map(([id, label]) =>
+    h('a', { href: `#/p/${view.projectId}/${view.main}`, onclick: (e) => {
+      e.preventDefault();
+      document.getElementById(id)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    } }, label)));
+}
+
 /** Help text cut to its first sentence, the rest behind More (Cara picked "Shorter help text"). */
 export function settingsHelp(first, ...rest) {
   if (!rest.length) return h('p', { class: 'muted small settings-help' }, first);
@@ -524,7 +536,7 @@ export function myInstructionsEditor() {
   const drafts = {};
   let scope = 'everywhere';
   const textarea = h('textarea', {
-    id: 'my-instructions-text', class: 'instructions-text', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
+    id: 'my-instructions-text', class: 'instructions-text settings-anchor', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
     placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before landing, the model and effort they start on…',
   });
   const counter = h('span', { class: 'muted counter' });
@@ -606,12 +618,13 @@ export function myInstructionsEditor() {
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.')),
+    settingsJump(['my-instructions-text', 'Your text'], ['my-instructions-recent', 'Recent changes'], ['my-instructions-order', 'What a minion reads']),
     h('h3', { class: 'settings-label' }, 'Applies to'),
     switcher,
     textarea, hidden,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
-    historySlot,
-    h('div', { class: 'settings-card' },
+    h('div', { id: 'my-instructions-recent', class: 'settings-anchor' }, historySlot),
+    h('div', { class: 'settings-card settings-anchor', id: 'my-instructions-order' },
       h('h3', { class: 'settings-label' }, 'What a minion of yours reads, in order'),
       h('ol', { class: 'my-layers' },
         layer('Citadel-wide', 'everyone, every scheme', 'l-app'),
@@ -721,12 +734,12 @@ export function appInstructionsEditor() {
   };
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'app-instructions-head' }),
-    h('p', { class: 'muted small' },
-      'Rules for how people like to work in every scheme. They reach each minion and Taskmaster from its next turn, right before its scheme instructions. ',
-      'A scheme instruction overrides one of these only where it names the rule it replaces.'),
+    settingsJump(['app-instructions-text', 'Instructions'], ['app-instructions-recent', 'Recent changes'], ['github-owner-section', 'GitHub owner']),
+    settingsHelp('Rules for how people like to work in every scheme, read by each minion and Taskmaster from its next turn.',
+      'They come right before its scheme instructions, and a scheme instruction overrides one of these only where it names the rule it replaces.'),
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
-    history,
+    h('div', { id: 'app-instructions-recent', class: 'settings-anchor' }, history),
     githubOwnerField());
   (async () => {
     try {
@@ -774,9 +787,9 @@ function githubOwnerField() {
   };
   input.addEventListener('input', () => { status.textContent = ''; });
   api('api/app/settings').then(show, (err) => { status.textContent = `Could not load it: ${err.message}`; });
-  return h('div', { class: 'github-owner' },
+  return h('div', { class: 'github-owner settings-anchor', id: 'github-owner-section' },
     h('h3', { class: 'settings-label' }, 'GitHub owner for new schemes'),
-    h('p', { class: 'muted small' }, 'A scheme started with a new repo gets a private GitHub repo under this account or organisation. Blank uses the owner of Citadel\'s own repo.'),
+    settingsHelp('A scheme started with a new repo gets a private GitHub repo under this account or organisation.', 'Blank uses the owner of Citadel\'s own repo.'),
     h('div', { class: 'row' }, input, save, status));
 }
 
@@ -784,7 +797,7 @@ function githubOwnerField() {
 export function instructionsEditor() {
   const p = view.project;
   const textarea = h('textarea', {
-    id: 'instructions-text', class: 'instructions-text', spellcheck: 'false',
+    id: 'instructions-text', class: 'instructions-text settings-anchor', spellcheck: 'false',
     placeholder: 'What the scheme is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
   });
   textarea.value = p.instructions ?? '';
@@ -849,7 +862,8 @@ export function instructionsEditor() {
 
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),
-    h('div', { class: 'instructions-tools' },
+    settingsJump(['instructions-text', 'Instructions'], ['instructions-import', 'Import'], ['instructions-recent', 'Recent changes']),
+    h('div', { class: 'instructions-tools', id: 'instructions-import' },
       importButton,
       h('button', { type: 'button', class: 'secondary', onclick: () => fileInput.click() }, 'Import a file…'),
       fileInput,
@@ -857,7 +871,7 @@ export function instructionsEditor() {
     picker,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
-    history);
+    h('div', { id: 'instructions-recent', class: 'settings-anchor' }, history));
   sync();
   loadHistory();
   setTimeout(() => {

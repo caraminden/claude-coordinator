@@ -52,7 +52,7 @@ before(async () => {
     if (path === '/c/api/me') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"name":"josh"}');
     if (path === '/apps/_citadel/rail.js') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(rail);
     // What the rail imports beside it (#649): drag to reorder and Citadel UI's optimistic save.
-    const beside = path.match(/^\/(?:c|apps\/_citadel)\/(reorder\.js|ui\/(?:optimistic|status)\.js)$/)?.[1];
+    const beside = path.match(/^\/(?:c|apps\/_citadel)\/(reorder\.js|extlinks\.js|ui\/(?:optimistic|status)\.js)$/)?.[1];
     if (beside) return res.writeHead(200, { 'content-type': 'text/javascript' }).end(readFileSync(join(pub, beside)));
     if (path === '/c/api/me/order/apps' && req.method === 'PUT') {
       let body = '';

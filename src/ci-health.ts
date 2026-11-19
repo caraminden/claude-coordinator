@@ -52,6 +52,14 @@ const run = promisify(execFile);
 
 const POLL_MS = 5 * 60_000;
 const RATE_LIMITED_MS = 15 * 60_000;
+/** The soonest a fresh start reads GitHub, so a restart (or a test's short-lived server) doesn't ask at once. */
+export const START_DELAY_MS = 45_000;
+const LAST_TICK = 'ci-health:lastTick';
+const PAUSED_UNTIL = 'ci-health:pausedUntil';
+/** #1005: when a start's first read comes. The last read and the rate-limit pause survive restarts, so lands that restart the server every few minutes can't push reads later than one poll past the previous. */
+export function firstTickDelay(lastTick: number | undefined, pausedUntil: number | undefined, now: number): number {
+  return Math.max(START_DELAY_MS, (lastTick ?? 0) + POLL_MS - now, (pausedUntil ?? 0) - now);
+}
 // Runs looked at for jobs that didn't start or wait for a runner; older ones are history.
 const RUNS = 50;
 const WINDOW_MS = 24 * 3600_000;
@@ -628,7 +636,7 @@ export class CiHealth {
   private reasons = new Map<number, string | null>();
   private pausedUntil = 0;
   private busy = false;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private said = new Set<string>();
   /** Each scheme's jobs of the last day as last read, running and waiting ones too: the CI desktop's load reads them (#534, src/ci-load.ts). */
   recent = new Map<number, Job[]>();
@@ -644,14 +652,22 @@ export class CiHealth {
     }
   }
 
-  /** The first look comes a poll after start, so a restart (or a test's short-lived server) doesn't ask GitHub at once. */
+  /** The first look comes at firstTickDelay (not at once), then every poll. */
   start() {
-    this.timer ??= setInterval(() => void this.tick(), POLL_MS);
-    this.timer.unref?.();
+    if (this.timer) return;
+    this.pausedUntil = Math.max(this.pausedUntil, this.store.getSetting<number>(PAUSED_UNTIL) ?? 0);
+    const arm = (ms: number) => {
+      this.timer = setTimeout(async () => {
+        await this.tick().catch(() => {});
+        if (this.timer) arm(POLL_MS);
+      }, ms);
+      this.timer.unref?.();
+    };
+    arm(firstTickDelay(this.store.getSetting<number>(LAST_TICK), this.pausedUntil, Date.now()));
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
 
@@ -677,6 +693,8 @@ export class CiHealth {
       await this.alert();
     } finally {
       this.busy = false;
+      this.store.setSetting(LAST_TICK, now);
+      this.store.setSetting(PAUSED_UNTIL, this.pausedUntil);
     }
   }
 

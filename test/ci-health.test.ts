@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import {
   CiHealth, addRunnerWaiter, onlineRunners, runnerWaiters, WAIT_MS, HUNG_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, itemText, neverStarted,
   trackOffline, servers, stuckProblems, hungProblems, redProblem, sharedHost, skippedJobs, verdictPair, type GhAnswer, type Job, type Run,
-  clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState,
+  firstTickDelay, START_DELAY_MS, clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { AlertPart } from '../src/alert-wakes.ts';
@@ -1089,4 +1089,20 @@ test('with no wake entry recorded, a problem falls back to the Taskmaster chat w
   await health.tick(t0 + WAIT_MS);
   const x = health.snapshot(() => true).find((s) => s.id === w.peek.id)!.problems[0];
   assert.deepEqual(x.link, { kind: 'taskmaster', href: `#/p/${w.peek.id}`, label: 'the Taskmaster' });
+});
+
+test('#1005: back-to-back restarts still read at least every poll, and keep a rate-limit pause', async () => {
+  const w = world();
+  await w.health.tick(NOW);
+  const last = w.store.getSetting<number>('ci-health:lastTick');
+  assert.equal(last, NOW, 'a finished read is remembered across restarts');
+  // Restarts every 3 min: the read still comes by lastRead + one poll, never a full poll after each restart.
+  assert.equal(firstTickDelay(last, 0, NOW + 3 * MIN), 2 * MIN);
+  assert.equal(firstTickDelay(last, 0, NOW + 4.9 * MIN), START_DELAY_MS, 'a fresh start never reads at once');
+  assert.equal(firstTickDelay(last, 0, NOW + 20 * MIN), START_DELAY_MS, 'an overdue read comes after the short delay');
+  assert.equal(firstTickDelay(undefined, 0, NOW), START_DELAY_MS, 'a first ever start waits the short delay');
+  assert.equal(firstTickDelay(last, NOW + 15 * MIN, NOW + 3 * MIN), 12 * MIN, 'the rate-limit pause holds across a restart');
+  w.gh.rateLimited = true;
+  await w.health.tick(NOW + 6 * MIN);
+  assert.ok((w.store.getSetting<number>('ci-health:pausedUntil') ?? 0) > NOW + 6 * MIN, 'the pause is saved');
 });

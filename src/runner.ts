@@ -1853,10 +1853,10 @@ export class Runner {
    */
   releaseMail(t: Ticket, p: Project, by = ''): number {
     const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
-    this.store.deleteSetting(coldKey(t.id));
     // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
-    if (!mail.length || t.status === 'closed') return 0;
-    if (this.refused(t.id, this.turnPerson(t, p, mail))) return 0;
+    if (!mail.length || t.status === 'closed') { this.store.deleteSetting(coldKey(t.id)); return 0; }
+    if (this.refused(t.id, this.turnPerson(t, p, mail))) return 0; // keeps the cold time, so the cap still fires
+    this.store.deleteSetting(coldKey(t.id));
     this.store.deleteSetting(mailKey(t.id));
     const hours = msgSettings(p).holdH;
     const text = by ? `${by} delivered the held mail, so it runs now.` : t.session_id ? `Held mail has waited ${hours} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.';
@@ -1879,7 +1879,7 @@ export class Runner {
       const loop = this.store.getSetting<LoopState>(key);
       const ids = key.split(':').slice(1).map(Number).filter((n) => Number.isInteger(n));
       if (!loop?.held.length || !ids.some((id) => mine.has(id))) continue;
-      for (const m of loop.held) items.push({ kind: 'loop', ticket: ids[0], from: m.from ? label(m.from) : m.author, to: label(m.to), text: clip(m.text), why: `the loop guard (${cfg.loopLimit} messages in ${cfg.loopMin} minutes)`, delivers: 'when a person continues' });
+      for (const m of loop.held) items.push({ kind: 'loop', ticket: ids.find((id) => mine.has(id))!, from: m.from ? label(m.from) : m.author, to: label(m.to), text: clip(m.text), why: `the loop guard (${cfg.loopLimit} messages in ${cfg.loopMin} minutes)`, delivers: 'when a person continues' });
     }
     for (const id of mine) {
       const mail = this.store.getSetting<QueuedMessage[]>(mailKey(id)) ?? [];

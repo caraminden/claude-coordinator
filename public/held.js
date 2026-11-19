@@ -9,7 +9,8 @@ let items = [], asked = 0, project = null;
 
 const act = (it) => async () => {
   try {
-    await (it.kind === 'loop' ? api(`api/tickets/${it.ticket}/continue`, { method: 'POST' }) : api(`api/tickets/${it.ticket}/deliver-mail`, { method: 'POST' }));
+    const r = await api(`api/tickets/${it.ticket}/${it.kind === 'loop' ? 'continue' : 'deliver-mail'}`, { method: 'POST' });
+    if (it.kind !== 'loop' && r && r.delivered === 0) { toast('Not delivered: its Claude login can’t run a turn right now.'); return; }
     items = items.filter((x) => (it.kind === 'loop' ? x.kind !== 'loop' || x.ticket !== it.ticket : x.ticket !== it.ticket || x.kind === 'loop'));
     paint();
   } catch (err) { toast(err.message); }

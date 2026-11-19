@@ -20,7 +20,7 @@ const A = sha('a'), B = sha('b'), X = sha('e');
 const order = [A, B];
 const contains: Contains = async (_dir, ancestor, commit) => order.includes(ancestor) && order.includes(commit) && order.indexOf(ancestor) <= order.indexOf(commit);
 
-function world(kind = 'contraption') {
+function world(kind = 'contraption', follows?: (t: Omit<TargetView, 'testCopies'>) => string | null) {
   const store = new Store(join(root, `t-${++dbs}.db`));
   const lastGreen = new LastGreen(store, contains);
   const started: string[] = [];
@@ -28,7 +28,7 @@ function world(kind = 'contraption') {
   let changed = 0;
   let refuse: string | null = null;
   const rb = new Rollback({
-    lastGreen, repoDir: () => '/repo', contains,
+    lastGreen, repoDir: () => '/repo', contains, follows,
     starters: {
       [kind]: (t, to, by) => {
         if (refuse) throw new Error(refuse);
@@ -108,4 +108,22 @@ test('an app\'s roll back refused before it picked a commit (its migrations chan
   w.rb.deployEnded(3, 'app:peek', false, null, 'Failed: Its migrations changed since aaaaaaa');
   assert.equal(w.lastGreen.pinned(3, 'app:peek'), null);
   assert.match(w.rb.info(w.tv(B))?.failed?.why ?? '', /migrations changed/);
+});
+
+test("an APK Citadel builds after each deploy rolls back with its app: its card's button is the app's, pin and all", async () => {
+  const w = world('contraption', (t) => (t.target.kind === 'apk' ? 'app:peek' : null));
+  w.store.setSetting('last-green:3', { sha: A, at: 1 });
+  const apk: Omit<TargetView, 'testCopies'> = { ...w.tv(null), target: { id: 'apk:peek', projectId: 3, name: 'Android', kind: 'apk', link: null }, current: { ...w.tv(B).current!, version: '1.0' } };
+  const views = [w.tv(B), apk];
+  assert.equal(w.rb.info(apk), null, 'without its app beside it, no button');
+  w.rb.info(apk, views);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(w.rb.info(apk, views), { sha: A, can: true, pin: null, running: false, failed: null }, 'the app runs B, so it can');
+  await assert.rejects(w.rb.rollBack(apk, 'Cara', 1), /rolls back with its app/);
+  assert.equal(await w.rb.rollBack(apk, 'Cara', 1, views), A);
+  assert.deepEqual(w.started, ['app:peek to a by Cara'], "the app's deploy, nothing of its own");
+  assert.equal(w.lastGreen.pinned(3, 'app:peek')?.sha, A);
+  assert.equal(w.lastGreen.pinned(3, 'apk:peek'), null, 'one pin, the app\'s');
+  assert.match(w.told[0], /rolled Peek back to last green aaaaaaaaa from bbbbbbbbb .*from its Android card: its APK build follows the app/);
+  assert.equal(w.rb.info(apk, [w.tv(A), apk])?.pin?.sha, A, 'its card shows the app\'s pin');
 });

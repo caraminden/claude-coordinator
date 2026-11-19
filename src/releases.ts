@@ -191,7 +191,7 @@ export interface ReleasesDeps {
   /** The app a target's card offers to make a release key for (#837), or null. */
   releaseKey?: (tv: Omit<TargetView, 'testCopies'>) => string | null;
   /** A target's Roll back to last green (src/rollback.ts), or null. */
-  rollback?: (tv: Omit<TargetView, 'testCopies'>) => RollbackInfo | null;
+  rollback?: (tv: Omit<TargetView, 'testCopies'>, views: Omit<TargetView, 'testCopies'>[]) => RollbackInfo | null;
   /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
   inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
 }
@@ -225,7 +225,7 @@ export class Releases {
     for (const t of views) {
       const deploy = this.d.deploy?.(t);
       const releaseKey = this.d.releaseKey?.(t);
-      const rollback = this.d.rollback?.(t);
+      const rollback = this.d.rollback?.(t, views);
       scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}), ...(rollback ? { rollback } : {}) });
     }
     for (const [id, list] of copies) {

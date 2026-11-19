@@ -182,9 +182,10 @@ export const appRoutes: Route[] = [
   // the commit it went to. Citadel's own server restarts on it a minute or two later, so its card says how it went.
   { method: 'POST', path: '/api/releases/rollback', who: ['person'], handler: async ({ req, res, app: { store, rollback, releases }, session }) => {
     const { projectId, target } = releaseTarget(store, session, await readJson(req));
-    const tv = releases.view((id) => id === projectId)[0]?.targets.find((t) => t.target.id === target);
+    const views = releases.view((id) => id === projectId)[0]?.targets ?? [];
+    const tv = views.find((t) => t.target.id === target);
     if (!tv) throw new HttpError(404, `${target} isn't one of this scheme's releases`);
-    const sha = await rollback.rollBack(tv, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null);
+    const sha = await rollback.rollBack(tv, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null, views);
     releases.poll();
     return json(res, 202, { ok: true, sha });
   } },

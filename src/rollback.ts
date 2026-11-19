@@ -29,6 +29,11 @@ export interface RollbackDeps {
   repoDir: (projectId: number) => string | null;
   /** By target kind: 'contraption', 'citadel-server'. */
   starters: Record<string, Starter>;
+  /**
+   * The target whose roll back this one's is, by id in its scheme, or null for its own (ADR 0012, Q2 "Yes, together"):
+   * an APK Citadel builds after each deploy follows its app, so its card's button is the app's.
+   */
+  follows?: (t: Omit<TargetView, 'testCopies'>) => string | null;
   /** Whether a target's roll back still runs (its deploy, its job). */
   running: (t: Omit<TargetView, 'testCopies'>) => boolean;
   /** Tell the target's scheme's Taskmaster. */
@@ -76,8 +81,17 @@ export class Rollback {
     return null;
   }
 
-  /** A target's card's roll back, or null when its kind can't, or its scheme has no last green yet. */
-  info(tv: Omit<TargetView, 'testCopies'>): RollbackInfo | null {
+  /** The target that rolls back for `tv` among `views` (its own, or the one it follows); null when that one isn't there. */
+  private lead(tv: Omit<TargetView, 'testCopies'>, views: Omit<TargetView, 'testCopies'>[]) {
+    const id = this.d.follows?.(tv);
+    return !id ? tv : views.find((v) => v.target.projectId === tv.target.projectId && v.target.id === id) ?? null;
+  }
+
+  /** A target's card's roll back, or null when its kind can't, or its scheme has no last green yet. `views`: the
+   * targets beside it, where one it follows is found. */
+  info(of: Omit<TargetView, 'testCopies'>, views: Omit<TargetView, 'testCopies'>[] = [of]): RollbackInfo | null {
+    const tv = this.lead(of, views);
+    if (!tv) return null;
     const { projectId, id, kind } = tv.target;
     if (!this.d.starters[kind]) return null;
     const green = this.d.lastGreen.get(projectId);
@@ -97,7 +111,9 @@ export class Rollback {
   }
 
   /** The button: deploy last green now and pin the target there. Throws (an HttpError) when it can't. */
-  async rollBack(tv: Omit<TargetView, 'testCopies'>, by: string, uid: number | null): Promise<string> {
+  async rollBack(of: Omit<TargetView, 'testCopies'>, by: string, uid: number | null, views: Omit<TargetView, 'testCopies'>[] = [of]): Promise<string> {
+    const tv = this.lead(of, views);
+    if (!tv) throw new HttpError(404, `${of.target.name} rolls back with its app, which isn't on the Releases page`);
     const { projectId, id, name, kind } = tv.target;
     const start = this.d.starters[kind];
     if (!start) throw new HttpError(404, `${name} can't roll back: only an app and Citadel's server can deploy an older commit`);
@@ -131,7 +147,8 @@ export class Rollback {
     const holds = kind === CITADEL_TARGET
       ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
       : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's or Taskmaster's deploy of it is refused meanwhile. Land the fix for what broke.`;
-    this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page. ${holds}`);
+    const also = of === tv ? '' : ` (from its ${of.target.name} card: its APK build follows the app, numbered one past the published one)`;
+    this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page${also}. ${holds}`);
     return green.sha;
   }
 

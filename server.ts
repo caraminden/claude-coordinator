@@ -728,6 +728,11 @@ function citadelRollingBack(current: string | null): boolean {
 const rollback = new Rollback({
   lastGreen, repoDir: (id) => store.getProject(id)?.repo_dir ?? null, tell: tellHome, changed: () => releases.poll(),
   get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  // An APK Citadel builds after each deploy (#837: a feed, no release workflow) rolls back with its app (ADR 0012).
+  follows: (tv) => {
+    const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
+    return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
+  },
   running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
   starters: {
     contraption: (tv, to, by, uid) => {
@@ -755,7 +760,7 @@ const rollback = new Rollback({
 });
 const releases = new Releases({
   store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
-  rollback: (tv) => rollback.info(tv),
+  rollback: (tv, views) => rollback.info(tv, views),
   // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
   releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
     landsInFlight.attach(views);

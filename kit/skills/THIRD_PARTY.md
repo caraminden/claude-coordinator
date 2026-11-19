@@ -144,7 +144,7 @@ own (`uses.ts`), and writes a report with handoffs instead of offering to delete
 `citadel:upstream-check` runs monthly (a scheduled minion) and says when upstream has something
 worth taking; it never applies an update itself. To take one, copy the files again from the newer
 upstream commit, re-apply the local changes above, set **Pinned commit** and **Checked** to that commit,
-and land it like any kit change (self-review included). Do not also install either pack as a
+and ship it like any kit change (self-review included). Do not also install either pack as a
 plugin: a session would see every skill twice.
 
 ## Ideas from other packs

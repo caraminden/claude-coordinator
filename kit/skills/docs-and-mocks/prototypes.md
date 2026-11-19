@@ -44,5 +44,5 @@ copy are a tweak, not a prototype.
 - **Capture the verdict:** the question, the answer and the person's words in the page's decisions
   log, status `decided`; then the winner gets written properly in the real code.
 - **Out of main:** a logic toy lives in the shared folder's `mockups/` and never enters a repo. An
-  in-app variant's losing takes and switcher come out in a commit before the branch lands, so main
+  in-app variant's losing takes and switcher come out in a commit before the branch ships, so main
   keeps only the winner and the history keeps the rest.

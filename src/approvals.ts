@@ -350,7 +350,7 @@ export class Approvals {
     else if (go) {
       const target = go.named === 'hash' ? minion?.(go.pr!) : null;
       if (target?.branch && target.number !== null) goes.push({ ...said, pr: null, branch: target.branch, to: target.number });
-      else this.emit(where.id, 'note', { text: `${m.author}'s "${said.text}" names no minion with a branch, so it covers nothing: "land #N" names minion N, "land PR N" a PR.` });
+      else this.emit(where.id, 'note', { text: `${m.author}'s "${said.text}" names no minion with a branch, so it covers nothing: "ship #N" names minion N, "ship PR N" a PR.` });
     }
     this.goes.set(scheme, goes.slice(-MAX_GOES));
   }
@@ -373,7 +373,7 @@ export class Approvals {
       this.emit(free.ticket, 'note', { text: `${free.by}'s go "${free.text}" now covers #${where.number}'s PR: the Taskmaster quoted it to #${where.number}.` });
       return this.goes.set(scheme, goes);
     }
-    for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("land #N"), or in its own chat.` });
+    for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("ship #N"), or in its own chat.` });
     this.goes.set(scheme, goes.filter((g) => !quoted.includes(g)));
   }
 

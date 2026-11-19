@@ -133,7 +133,7 @@ test('a merged chain starts once the leader\'s work is on main, live or not', as
   assert.equal(await w.check(), 0, 'committed on its branch only');
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(await w.check(), 1);
-  assert.match(started[0].why, /work has landed$/);
+  assert.match(started[0].why, /work has shipped$/);
 });
 
 // #126: a leader whose branch had no commits of its own started its follower once the branch was
@@ -193,11 +193,11 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1);
   assert.equal(held[0].c.ticket, follower);
-  assert.match(held[0].why, /^#\d+ was dismissed without its work landing$/);
+  assert.match(held[0].why, /^#\d+ was dismissed without its work shipping$/);
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1, 'told once');
   assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
-  assert.match(w.heldFor(follower)!, /^#\d+ T's work has landed, and #\d+ T was dismissed without it, so only Unpark starts you$/);
+  assert.match(w.heldFor(follower)!, /^#\d+ T's work has shipped, and #\d+ T was dismissed without it, so only Unpark starts you$/);
   assert.equal(w.wakesOn(follower), null, 'held: nothing wakes it by itself, so the list shows it under Parked (#718)');
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
@@ -257,7 +257,7 @@ test('a leader whose PR was squash-merged counts as merged, and a held chain sta
   assert.equal(await w.check(), 1);
   assert.equal(held.length, 0, 'no false alarm');
   assert.equal(started[0].c.ticket, follower);
-  assert.match(started[0].why, /work has landed$/);
+  assert.match(started[0].why, /work has shipped$/);
 
   // A chain held before its leader's PR showed as merged (#87's) starts at the next check.
   reset();
@@ -321,7 +321,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
     w.prs = githubPrs((dir) => (dir === scheme ? { GH_TOKEN: 'owner-token' } : undefined));
     store.updateTicket(leader.id, { status: 'closed' });
     assert.equal(await w.check(), 1);
-    assert.equal(held.length, 0, 'no "dismissed without its work landing"');
+    assert.equal(held.length, 0, 'no "dismissed without its work shipping"');
     assert.equal(started[0].c.ticket, follower);
   } finally {
     process.env.PATH = path;
@@ -477,7 +477,7 @@ for (const when of ['merged', 'live'] as const) {
     store.updateTicket(leader.id, { status: 'closed' });
     if (when === 'live') {
       assert.equal(await w.check(), 0, 'on main, but the server still runs the old commit');
-      assert.equal(held.length, 0, 'not dismissed unshipped: its work has landed');
+      assert.equal(held.length, 0, 'not dismissed unshipped: its work has shipped');
     }
     assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
     assert.equal(held.length, 0);
@@ -526,10 +526,10 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 `);
   chmodSync(fake, 0o755);
   const runner = new Runner(store, () => {}, () => ({}), fake);
-  runner.heldFor = (id) => (id === t.id ? "#1 Leader's work has landed" : null);
+  runner.heldFor = (id) => (id === t.id ? "#1 Leader's work has shipped" : null);
   const t = store.createTicket({ project_id: citadel.id, title: 'Parked', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
-  store.updateTicket(t.id, { status: 'idle', state: 'parked', note: 'starts when #1 has landed' });
+  store.updateTicket(t.id, { status: 'idle', state: 'parked', note: 'starts when #1 has shipped' });
   runner.send(t.id, 'Cara', 'what is this?');
   for (let i = 0; store.getTicket(t.id)!.status !== 'running'; i++) {
     assert.ok(i < 250, 'the turn starts');
@@ -543,7 +543,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   }
   const after = store.getTicket(t.id)!;
   assert.equal(after.status, 'idle');
-  assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 has landed']);
+  assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 has shipped']);
 });
 
 test("a chained minion's branch is caught up after the turn running in its worktree ends, never under it, and before its brief's turn (#468 S07-2)", async () => {
@@ -638,7 +638,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   const next = await create('Next', { start_after: leader.number, start_when: 'merged' });
   assert.equal(next.status, 201);
   assert.equal(next.data.state, 'parked');
-  assert.equal(next.data.note, `starts when #${leader.number} has landed`);
+  assert.equal(next.data.note, `starts when #${leader.number} has shipped`);
   assert.ok(next.data.notes.some((n: string) => n.startsWith('Parked: it starts by itself')));
   assert.deepEqual(await said(next.data.id), [], 'its brief is held');
 

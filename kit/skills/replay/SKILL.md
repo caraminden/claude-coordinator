@@ -2,7 +2,7 @@
 name: replay
 description: >
   Rerun kept real app chats against a change to an app agent's prompt or tools, with a blind critic
-  judging each pair. Only when a person asks, or once before landing a big prompt or tool change to
+  judging each pair. Only when a person asks, or once before shipping a big prompt or tool change to
   a contraption agent; never for small edits, per fix round, or from self-review on its own.
 ---
 
@@ -18,7 +18,7 @@ X and Y, blind to which side is new.
 turns. Cara, 2026-11-16: "be judicious about when to leverage this replay". So:
 
 - Run it only when a person asks, or once for a big change to an agent's prompt or tools, after the
-  change is otherwise done. Fix what it finds, then land: don't replay again for each fix round
+  change is otherwise done. Fix what it finds, then ship: don't replay again for each fix round
   unless a person asks.
 - Keep the default 5 chats. The script refuses over 60 Claude turns without `--over-cap`, which
   takes a person's ask.

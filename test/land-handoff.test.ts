@@ -69,7 +69,7 @@ test('a clean land that is live now posts the shipped line and dismisses the min
   await s.handoffs.poll();
   assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Live now.']);
   assert.equal(s.sent.length, 0, 'no model call');
-  assert.ok(s.did.some((d) => d.startsWith('close: Landed and live')), s.did.join('\n'));
+  assert.ok(s.did.some((d) => d.startsWith('close: Shipped and live')), s.did.join('\n'));
   assert.deepEqual(s.landings.handoffs(), [], 'reported once');
   await s.handoffs.poll();
   assert.equal(s.notes.length, 1, 'a second poll reports nothing again');
@@ -277,8 +277,8 @@ test("a feeder's merge into its build dismisses it as folded in; an unreported h
   assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'ended but not reported: refused, not wiped');
   assert.equal(s.landings.start(1, s.cwd, { PATH: process.env.PATH! }).code, 0, 'the land tool reads that one instead of starting afresh');
   await s.handoffs.poll();
-  assert.match(s.notes[0], /^Shipped into build\/3: .* Merged into build\/3, not live until the build lands\.$/);
-  assert.equal(s.ticket.note, 'folded into Build 3');
+  assert.match(s.notes[0], /^Shipped into build\/3: .* Merged into build\/3, not live until the build ships\.$/);
+  assert.equal(s.ticket.note, 'merged into Build 3');
   assert.ok(s.did.some((d) => d.startsWith('close')));
 });
 
@@ -345,9 +345,9 @@ test('a clean land in a scheme with an app deploys it, waits, and says it went l
   await s.land(APP_LAND);
   await s.handoffs.poll();
   assert.deepEqual(d.started, ['peek-auras for 1']);
-  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: aura fix": Usage bar in the top bar. Risk low: front end only. Landed. Deployed peek-auras at abc1234ff, healthy.']);
+  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: aura fix": Usage bar in the top bar. Risk low: front end only. Shipped. Deployed peek-auras at abc1234ff, healthy.']);
   assert.equal(s.sent.length, 0, 'no model call');
-  assert.ok(s.did.some((x) => x.startsWith('close: Landed')), s.did.join('\n'));
+  assert.ok(s.did.some((x) => x.startsWith('close: Shipped')), s.did.join('\n'));
 });
 
 test('deploy: false, a merge into a build, or a scheme with no app deploys nothing', async () => {
@@ -367,9 +367,9 @@ test('a deploy that rolls back after a clean land posts the shipped line, then w
   const s = setup('app-fail', { apps: ['peek-auras'], deployOps: d.ops });
   await s.land(APP_LAND);
   await s.handoffs.poll();
-  assert.match(s.notes[0], /Landed\. peek-auras's deploy rolled back: Not healthy after 60s: \/health not answering$/);
+  assert.match(s.notes[0], /Shipped\. peek-auras's deploy rolled back: Not healthy after 60s: \/health not answering$/);
   assert.equal(s.sent.length, 1);
-  assert.match(s.sent[0], /^Your handed-off land went through \(abc1234 "#9: aura fix", landed\), but the deploy after it didn't go live:/);
+  assert.match(s.sent[0], /^Your handed-off land went through \(abc1234 "#9: aura fix", shipped\), but the deploy after it didn't go live:/);
   assert.match(s.sent[0], /didn't go live:\n\n.*\nLog: \/logs\/peek-auras\.log\nLast lines of the log:\nbuild output\n/, 'the log tail once, not its lines twice');
   assert.equal(s.ticket.state, null, 'open for the minion to fix');
   assert.ok(!s.did.some((x) => x.startsWith('close')), s.did.join('\n'));
@@ -665,5 +665,5 @@ test('every way a handed-off land ends replaces its outside state', async () => 
   const waiting = setup('end-stay-waiting-restart');
   await waiting.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
   await waiting.handoffs.poll();
-  assert.deepEqual([waiting.ticket.state, waiting.ticket.note], ['outside', 'landed, wakes once live; waiting on: the CI run']);
+  assert.deepEqual([waiting.ticket.state, waiting.ticket.note], ['outside', 'shipped, wakes once live; waiting on: the CI run']);
 });

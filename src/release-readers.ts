@@ -793,7 +793,7 @@ export class PrsInFlight {
       const text = 'its checks failed: the minion fixes them';
       return { stage: 'checks', since: this.since(id, 'failed', now), usual: null, waitingOn: text, text };
     }
-    const text = `PR #${pr.number} waits for a go to land`;
+    const text = `PR #${pr.number} waits for a go to ship`;
     return { stage: 'merge', since: this.since(id, 'merge', now), usual: null, waitingOn: text, text };
   }
 
@@ -856,10 +856,10 @@ export function landProgress(output: string, since: number): Progress {
   const last = output.split('\n').filter((l) => l.startsWith('queue: ')).at(-1) ?? '';
   const place = /^queue: (next|\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
   if (place) {
-    const text = `in line to land (${place})`;
+    const text = `in line to ship (${place})`;
     return { stage: 'land', since, usual: null, waitingOn: text, text, brief: place };
   }
-  return { stage: 'land', since, usual: null, waitingOn: null, text: 'landing: tests, then onto main' };
+  return { stage: 'land', since, usual: null, waitingOn: null, text: 'shipping: tests, then onto main' };
 }
 
 /** A scheme's land line: the kit's land template's tickets, in its main checkout's git folder (#1007). */
@@ -868,7 +868,7 @@ export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
 export const schemeLine = (repo: string) => readQueue(landQueue(repo), 7);
 
 /** Why no landing in a scheme's line can move yet (#1007): the land.sh on its main predates reordering. */
-export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its landings go in turn until it copies the kit's newer one";
+export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its changes ship in turn until it copies the kit's newer one";
 
 /**
  * Minions handed off to land (#764), on their way before they reach main: in line for the land lock, then landing.

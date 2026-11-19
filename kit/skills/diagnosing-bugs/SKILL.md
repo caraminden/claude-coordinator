@@ -30,7 +30,7 @@ After the third strike, stop and ask the user (a card, where the session has a c
 instead of trying a fourth. Keep a one-line log of every failed attempt (what you tried,
 what happened, what you changed next) and put it in the question and the PR. This is the
 one turn that may end on a red test: the question says the branch is red and must not
-land until it's answered.
+ship until it's answered.
 
 ## Phase 1: Build a feedback loop
 
@@ -80,13 +80,13 @@ run needs a different tool: an event-loop stall preloaded into the test process 
 #470's run used busy loops on every core and two suites at once, which held the live server for more than
 2 s 27 times in 90 minutes (worst 7.3 s).
 
-**Stress runs don't share the land gate's queue.** A runner that serves landings is theirs first. A run in
-the gate workflow's concurrency group (Citadel's `citadel-tests`) holds it for the whole run, and a land
-that pushes meanwhile waits behind it. land.sh gives up on a runner after 90 s and falls back to the suite
-on the host: Citadel #564's probes, each started only while the group was idle, still sent two lands to
-perigee that way. So loop where landings don't wait (a stress workflow with its own group on a runner
-lands don't use), or ask a person for a quiet window first. Checking for a queued land before each push
-isn't enough, because the land arrives after the check.
+**Stress runs don't share the ship gate's queue.** A runner that serves ships is theirs first. A run in
+the gate workflow's concurrency group (Citadel's `citadel-tests`) holds it for the whole run, and a change
+shipping meanwhile waits behind it. land.sh gives up on a runner after 90 s and falls back to the suite
+on the host: Citadel #564's probes, each started only while the group was idle, still sent two ships to
+perigee that way. So loop where ships don't wait (a stress workflow with its own group on a runner
+ships don't use), or ask a person for a quiet window first. Checking for a queued ship before each push
+isn't enough, because the ship arrives after the check.
 
 ### Flaky tests
 

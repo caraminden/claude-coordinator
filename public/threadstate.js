@@ -52,13 +52,13 @@ export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 
 
 /** The server's work in words, at its landing's stage (t.wait, src/waits.ts): "Server: testing (CI: the full suite)". */
 export function serverLabel(w) {
-  if (!w) return 'Server is landing…';
-  if (w.stage === 'line') return `Server: in the land line${/ · (.+)$/.test(w.chip) ? ` (${w.chip.split(' · ').pop()})` : ''}`;
+  if (!w) return 'Server is shipping…';
+  if (w.stage === 'line') return `Server: in the ship line${/ · (.+)$/.test(w.chip) ? ` (${w.chip.split(' · ').pop()})` : ''}`;
   if (w.stage === 'rebase') return 'Server: rebasing';
   if (['test', 'run', 'jobs', 'queued'].includes(w.stage)) return `Server: testing (${w.brief ?? w.text})`;
   if (w.stage === 'deploy') return 'Server: deploying';
   if (w.stage === 'restart' || w.stage === 'live') return 'Server: waiting for the restart';
-  return 'Server is landing…';
+  return 'Server is shipping…';
 }
 
 function baseState(t, usage, now) {
@@ -74,7 +74,7 @@ function baseState(t, usage, now) {
   // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
   const rel = t.release;
   const relLabel = rel ? `${rel.target} ${rel.name}: ${rel.stage}${rel.text ? `, ${rel.text}` : ''}` : '';
-  if (by === 'server') return { rank: 1, fam: 'work', cell: rel?.name ?? 'landing', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
+  if (by === 'server') return { rank: 1, fam: 'work', cell: rel?.name ?? 'shipping', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
   // Dismissed once landed, its change not live yet (on main waiting for CI, a deploy): still on its way.

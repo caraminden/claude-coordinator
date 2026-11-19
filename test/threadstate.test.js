@@ -37,8 +37,8 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ state: 'parked', pending_card_at: NOW - HOUR }, [4, 'idle', 'parked']],
     [{ status: 'closed', state: 'ready' }, [5, 'idle', 'dismissed']],
     // The server landing it after its turn ended (#727): working, blue, pulsing, whatever the land waits on.
-    [{ server_work: { kind: 'land' } }, [1, 'work', 'landing', 'pulse']],
-    [{ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line', since: NOW, usual: 60 } }, [1, 'work', 'landing', 'pulse']],
+    [{ server_work: { kind: 'land' } }, [1, 'work', 'shipping', 'pulse']],
+    [{ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line', since: NOW, usual: 60 } }, [1, 'work', 'shipping', 'pulse']],
     [{ server_work: { kind: 'land' }, status: 'closed' }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
@@ -110,7 +110,7 @@ test('SHIP: every stage has a colour family, and only a branch has no badge', ()
 // "the x/y should be the top level steps we always had before"; "What does "line 2nd" mean?"): the row's subtitle says the wait.
 test('rowState: a wait colours the chip while working or outside, which keeps the steps; never over a needs-you state', () => {
   const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #513 (testing)', since: NOW - MIN, usual: 160 };
-  const testing = { ...line, stage: 'test', chip: 'land · 152/218', text: 'running the tests: 152 of 218 files', done: 152, total: 218 };
+  const testing = { ...line, stage: 'test', chip: 'ship · 152/218', text: 'running the tests: 152 of 218 files', done: 152, total: 218 };
   const rows = [
     [{ status: 'running', steps: { done: 4, total: 5 }, wait: line }, [1, 'wait', '4/5']],
     [{ status: 'running', steps: { done: 3, total: 5 }, wait: testing }, [1, 'work', '3/5', 'pulse']],
@@ -132,8 +132,8 @@ test('rowState: a wait colours the chip while working or outside, which keeps th
 test("a row's subtitle says the wait in plain words, not the chip's shorthand (#551)", async () => {
   const { waitWords } = await import('../public/wait.js');
   const words = (w) => waitWords({ since: NOW, usual: null, chip: '', ...w });
-  assert.equal(words({ kind: 'land', stage: 'line', text: '2nd in line, behind #552 (testing)' }), 'Waiting to land: 2nd in line, behind #552 (testing)');
-  assert.equal(words({ kind: 'land', stage: 'test', text: 'running the tests: 152 of 218 files' }), 'Landing: running the tests: 152 of 218 files');
+  assert.equal(words({ kind: 'land', stage: 'line', text: '2nd in line, behind #552 (testing)' }), 'Waiting to ship: 2nd in line, behind #552 (testing)');
+  assert.equal(words({ kind: 'land', stage: 'test', text: 'running the tests: 152 of 218 files' }), 'Shipping: running the tests: 152 of 218 files');
   assert.equal(words({ kind: 'land', stage: 'restart', text: 'waiting for 2 turns' }), 'Going live: waiting for 2 turns');
   assert.equal(words({ kind: 'restart', stage: 'restart', text: 'the restart waits for 2 running turns to end' }), 'Going live: the restart waits for 2 running turns to end');
   assert.equal(words({ kind: 'heavy', stage: 'slot', text: '2nd in line for a heavy slot, all held (#544)' }), '2nd in line for a heavy slot, all held (#544)');
@@ -225,10 +225,10 @@ test('rowUnread: an unseen row is unread only when it has something for a person
 });
 
 test('cardChip: names the kind of card, counts one kind, and gives the oldest kind plus how many more when they differ (#575)', () => {
-  const c = (what) => ({ kind: what === 'land' || what === 'tripwire' ? 'approval' : what, what });
-  for (const what of ['question', 'plan', 'land', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
+  const c = (what) => ({ kind: what === 'ship' || what === 'tripwire' ? 'approval' : what, what });
+  for (const what of ['question', 'plan', 'ship', 'approval', 'tripwire']) assert.equal(cardChip([c(what)]), what);
   assert.equal(cardChip([c('question'), c('question')]), '2 questions');
-  assert.equal(cardChip([c('plan'), c('question'), c('land')]), 'plan +2', 'mixed: the oldest, which the chip opens');
+  assert.equal(cardChip([c('plan'), c('question'), c('ship')]), 'plan +2', 'mixed: the oldest, which the chip opens');
   assert.equal(cardChip([{ kind: 'plan' }]), 'plan', 'a card from before `what` falls back to its kind');
 });
 
@@ -272,7 +272,7 @@ test("waitLine: the list row's wait says what the chat's line does, one counter 
   const { waitLine } = await import('../public/wait.js');
   const ci = { kind: 'land', stage: 'test', since: NOW, usual: 90, text: 'waiting for CI: test step 10 of 13: the full suite (DESKTOP-G248IJ8-linux)', brief: 'CI: the full suite', done: 9, total: 13 };
   assert.equal(waitLine(ci), 'Test 3/6 · CI: the full suite', "Cara: 'are the tests on step 3/6 or 10/13?'");
-  assert.equal(waitLine({ kind: 'land', stage: 'line', since: NOW, text: '2nd in line, behind #513' }), 'Land line 1/6 · 2nd in line, behind #513', 'no brief: the text');
+  assert.equal(waitLine({ kind: 'land', stage: 'line', since: NOW, text: '2nd in line, behind #513' }), 'Ship line 1/6 · 2nd in line, behind #513', 'no brief: the text');
 });
 
 test('workingBy: one working rule with two sources, a turn and the server; labels say who (#727)', () => {
@@ -286,13 +286,13 @@ test('workingBy: one working rule with two sources, a turn and the server; label
   // Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working".
   assert.equal(rowState(t({ status: 'running' }), null, NOW).label, 'This Minion is working');
   assert.equal(rowState(t({ status: 'running', kind: 'coordinator' }), null, NOW).label, 'This Taskmaster is working');
-  assert.equal(rowState(t({ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'test', chip: 'land · CI', text: 'waiting for CI', brief: 'CI: the full suite', since: NOW, usual: null } }), null, NOW).label, 'Server: testing (CI: the full suite)');
+  assert.equal(rowState(t({ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'test', chip: 'ship · CI', text: 'waiting for CI', brief: 'CI: the full suite', since: NOW, usual: null } }), null, NOW).label, 'Server: testing (CI: the full suite)');
 });
 
 test('serverLabel: the land phase in words, from the wait the server already records (#727)', () => {
-  const w = (stage, over = {}) => ({ kind: 'land', stage, chip: 'land · x', text: 'detail', since: NOW, usual: null, ...over });
-  assert.equal(serverLabel(null), 'Server is landing…');
-  assert.equal(serverLabel(w('line', { chip: 'line · 2nd' })), 'Server: in the land line (2nd)');
+  const w = (stage, over = {}) => ({ kind: 'land', stage, chip: 'ship · x', text: 'detail', since: NOW, usual: null, ...over });
+  assert.equal(serverLabel(null), 'Server is shipping…');
+  assert.equal(serverLabel(w('line', { chip: 'line · 2nd' })), 'Server: in the ship line (2nd)');
   assert.equal(serverLabel(w('rebase')), 'Server: rebasing');
   assert.equal(serverLabel(w('test')), 'Server: testing (detail)');
   assert.equal(serverLabel(w('jobs', { kind: 'ci', brief: 'CI: the full suite' })), 'Server: testing (CI: the full suite)');
@@ -301,7 +301,7 @@ test('serverLabel: the land phase in words, from the wait the server already rec
 });
 
 test("rowBar: the server's land draws the landing's track as a turn's wait does (#727)", () => {
-  const row = t({ server_work: { kind: 'land' }, steps: { done: 4, total: 4 }, step_track: [[3, 'c'], [2, 'c']], wait: { kind: 'land', stage: 'test', chip: 'land · CI', text: 'x', since: NOW, usual: 120 } });
+  const row = t({ server_work: { kind: 'land' }, steps: { done: 4, total: 4 }, step_track: [[3, 'c'], [2, 'c']], wait: { kind: 'land', stage: 'test', chip: 'ship · CI', text: 'x', since: NOW, usual: 120 } });
   const bar = rowBar(row, rowState(row, null, NOW));
   assert.equal(bar.wait.stage, 'test');
 });
@@ -361,7 +361,7 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
   assert.equal(of({ status: 'closed', release }).link.href, '#/p/2/releases/all');
   // A wait says what and against its usual; a ready minion says since when.
   const landing = of({ state: 'outside', wait });
-  assert.equal(landing.lines[0], 'Waiting to land: 2nd in line, behind #513 (testing).');
+  assert.equal(landing.lines[0], 'Waiting to ship: 2nd in line, behind #513 (testing).');
   assert.equal(landing.more, '4m so far; usually ~9m. Started 3:56 AM PST.');
   assert.equal(of({ state: 'ready' }).lines[0], 'Since 3:55 AM PST, 5m ago.');
   assert.equal(of({ state: 'blocked', note: 'needs Cody' }).lines.at(-1), 'Note: needs Cody');

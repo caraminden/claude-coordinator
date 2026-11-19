@@ -87,7 +87,7 @@ checked again.
   minion open in state complete, its note naming the report.
 - **Then, for take and ignore rows**, set Checked to HEAD's short commit and today's date, so the
   next run diffs only what is newer. Alarm rows keep theirs until a person decides; Pinned only
-  moves when a re-sync lands.
+  moves when a re-sync ships.
 - **Then ship the bumps in this same turn**, like any kit or repo change: `citadel:self-review`,
   then CLAUDE.md "Project facts", "How a change ships". A bump committed on your branch is not
   shipped. With only ignores, file the run away quietly after, with a note like "2 rows bumped,

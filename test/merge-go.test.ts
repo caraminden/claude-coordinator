@@ -26,7 +26,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test('a go is a whole message that only says land (or the older merge or fold), with at most one PR number', () => {
   for (const [text, pr] of [
-    ['Land it', null], ['ok, land it', null], ['land #12', 12], ['you can land 196', 196], ['Land it please.', null],
+    ['Ship it', null], ['ok, ship it', null], ['ship #12', 12], ['you can ship 196', 196], ['Land it', null], ['ok, land it', null], ['land #12', 12], ['you can land 196', 196], ['Land it please.', null],
     ['Merge it', null], ['fold it', null], ['fold', null], ['merge pls', null], ['pls merge 205', 205], ['Fold it plz', null], ['Merge it.', null], ['ok, merge it', null], ['LGTM, merge it!', null],
     ['go ahead and merge', null], ['ship it', null], ['fold it in', null], ['please merge it', null], ['merge it please', null],
     ['yes merge PR #191', 191], ['you can fold 196', 196], ['ok, you can merge it', null], ['merge #188 please', 188], ['merge 42', 42], ['Merge  PR 7 now', 7], ['  squash it  ', null],
@@ -298,9 +298,9 @@ test("a relay counts only as a person's typed go quoted from the Taskmaster's ch
 test('in the Taskmaster chat "#N" names minion N; "PR N" names a PR; a bare number names nothing', () => {
   const { a, results, merge } = gate();
   const toTaskmaster = (text: string, id = 1) => a.said(1, TASKMASTER, typed(text, id), minions);
-  toTaskmaster('land #50', 81);
+  toTaskmaster('ship #50', 81);
   assert.equal(merge(), 'allowed', "#50's own PR, with no relay");
-  assert.deepEqual(results[0].via, { message: 81, text: 'land #50', scheme: 1, ticket: null, to: 50 });
+  assert.deepEqual(results[0].via, { message: 81, text: 'ship #50', scheme: 1, ticket: null, to: 50 });
   a.said(1, CATEGORY, relay('Cara said "land #50"'));
   assert.equal(merge(BUILD.id, { number: 199, head: CATEGORY.branch, open: true }), 'pending', 'a relay never moves a go that names its minion');
   assert.equal(merge(), 'allowed');

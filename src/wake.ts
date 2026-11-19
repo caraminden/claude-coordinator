@@ -71,7 +71,7 @@ export interface Waiter {
 }
 
 /** How people read a chain's `when` (Cara, 2026-11-19: "Land"): "#3's work has landed", "... is merged into Build 4" for a feeder (whose merged means in its build), or "... is live". */
-export const chainIs = (when: Chain['when'], build?: number | null) => (when !== 'merged' ? 'is live' : build ? `is merged into Build ${build}` : 'has landed');
+export const chainIs = (when: Chain['when'], build?: number | null) => (when !== 'merged' ? 'is live' : build ? `is merged into Build ${build}` : 'has shipped');
 
 /** A minion created parked, whose brief is held until minion `after`'s work is live or merged. */
 export interface Chain {
@@ -412,7 +412,7 @@ export class LiveWaiters {
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
     for (const c of go) this.starting.add(c.ticket);
     for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}`);
-    for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work landing`);
+    for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work shipping`);
     return go.length;
   }
 

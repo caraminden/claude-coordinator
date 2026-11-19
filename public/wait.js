@@ -3,7 +3,7 @@
 import { h } from './base.js';
 
 /** A landing's stages in order (src/waits.ts TRACK): a wait at one of these shows the track. */
-export const TRACK = [['line', 'Land line', 'Line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
+export const TRACK = [['line', 'Ship line', 'Line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
 const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
 export const LATE = 1.15;
@@ -111,7 +111,7 @@ function stageOf(w) {
 
 /** The wait in plain words, for a list row's subtitle (#551): what is happening, with the server's detail. */
 export function waitWords(w) {
-  const lead = w.kind === 'ci' ? 'CI' : ['restart', 'live'].includes(w.stage) ? 'Going live' : w.stage === 'line' ? 'Waiting to land' : w.kind === 'land' ? 'Landing' : '';
+  const lead = w.kind === 'ci' ? 'CI' : ['restart', 'live'].includes(w.stage) ? 'Going live' : w.stage === 'line' ? 'Waiting to ship' : w.kind === 'land' ? 'Shipping' : '';
   return lead ? `${lead}: ${w.text}` : w.text.charAt(0).toUpperCase() + w.text.slice(1);
 }
 

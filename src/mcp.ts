@@ -38,7 +38,7 @@ const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idl
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =
-  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as landed: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
+  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
 const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
@@ -61,17 +61,17 @@ const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, abo
 const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
   enum: ['ready', 'complete', 'try', 'parked', 'blocked', 'outside', ...(deploys ? ['pending-deploy'] : []), null],
-  description: `Where the turn leaves things, for the minions list: ready (a person has to act: land, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
+  description: `Where the turn leaves things, for the minions list: ready (a person has to act: ship, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
 });
 const STATE = stateSchema(true);
-const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "landed, live after restart". No names or prefixes.' };
+const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "shipped, live after restart". No names or prefixes.' };
 
 const REPLIES = {
   type: ['array', 'null'],
   items: { type: 'string', maxLength: 40 },
   maxItems: 3,
   description:
-    'Up to 3 one-tap replies, e.g. ["Land it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
+    'Up to 3 one-tap replies, e.g. ["Ship it"], that send that text as the person\'s own message, for when the next step only needs their go (a choice between options is ask_question). They go away once anyone writes or the next turn starts; [] or null clears them.',
 };
 
 const BUILD = {
@@ -171,7 +171,7 @@ const DIRECT_TO = {
 const WHEN_CI_PASSES = {
   type: 'boolean',
   description:
-    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a land card, "ready to land" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme lands with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
+    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a ship card, "ready to ship" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme ships with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
 };
 
 const ASK_QUESTION = {
@@ -215,7 +215,7 @@ const ASK_QUESTION = {
           required: ['question', 'options'],
         },
       },
-      kind: { type: 'string', enum: ['merge', 'land'], description: '"merge" (or "land", the same) when the card asks people for the go to land a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "land". Leave out otherwise.' },
+      kind: { type: 'string', enum: ['merge', 'ship', 'land'], description: '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "ship". Leave out otherwise.' },
       to: DIRECT_TO,
       doc: {
         type: 'string', maxLength: 1000,
@@ -350,7 +350,7 @@ const STRIKE_TEXT = {
     type: 'object',
     properties: {
       text: { type: 'string', maxLength: 10000, description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim (at most 10,000 characters)' },
-      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 has landed."' },
+      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 has shipped."' },
     },
     required: ['text', 'reason'],
   },
@@ -463,7 +463,7 @@ const TOOLS = [
   },
   {
     name: 'read_ticket',
-    description: "Read a minion's details, its worktree, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation. With live: true, read what its turn is doing now instead: the tool call it waits on and for how long, or that it waits on the model, a person's card, the usage limit or the land line, its queued messages, and its last few tool calls with their output trimmed. Use it to tell a hung minion from a busy one; its session transcript isn't readable from here.",
+    description: "Read a minion's details, its worktree, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation. With live: true, read what its turn is doing now instead: the tool call it waits on and for how long, or that it waits on the model, a person's card, the usage limit or the ship line, its queued messages, and its last few tool calls with their output trimmed. Use it to tell a hung minion from a busy one; its session transcript isn't readable from here.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -486,15 +486,15 @@ const TOOLS = [
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or landed, see start_when). If #N is dismissed without landing it stays parked and you are told; message_ticket with unpark starts it early.",
+          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or shipped, see start_when). If #N is dismissed without shipping it stays parked and you are told; message_ticket with unpark starts it early.",
         },
-        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means landed.' },
+        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it has shipped to main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means shipped.' },
         parent: {
           type: ['integer', 'null'],
           description: "The #N this minion is started for: it shows as from #N and inherits its build unless build is given. Default: the minion whose message you are answering; null for none.",
         },
         build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any. A build whose branch build/<n> exists sets its base and target: the minion starts from build/<n> and merges into it, never main.` },
-        build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and lands the build with one go card. Needs build.' },
+        build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and ships the build with one go card. Needs build.' },
         model: MODEL,
         effort: EFFORT,
         workflow: WORKFLOW,
@@ -572,7 +572,7 @@ const TOOLS = [
   },
   {
     name: 'release',
-    description: 'Free a claim, whoever holds it, e.g. once the pipeline lane\'s minion has landed or a fix for a broken land must jump the lane.',
+    description: 'Free a claim, whoever holds it, e.g. once the pipeline lane\'s minion has shipped or a fix for broken shipping must jump the lane.',
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The claim, e.g. pipeline-lane' } }, required: ['name'] },
   },
   {
@@ -611,7 +611,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         template: { type: 'string', enum: [...SCHEDULE_TEMPLATES], description: 'Which audit' },
-        notes: { type: 'string', description: 'What this scheme adds to the template, appended under "For <scheme>:", e.g. "Lands wait for a person\'s go." or "Never push."' },
+        notes: { type: 'string', description: 'What this scheme adds to the template, appended under "For <scheme>:", e.g. "Ships wait for a person\'s go." or "Never push."' },
       },
       required: ['template'],
     },
@@ -1391,8 +1391,8 @@ const LAND_PROPS = {
   into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's merge into its build, or the build minion's merge of main: the build branch, build/<n> (land.sh --into build/<n>). With files, or with full: true" },
   files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched, as paths in your worktree (e.g. test/land-tool.test.ts); only these run. None only for a docs-only change' },
   full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs (land.sh --into build/<n> --full)' },
-  build: { type: 'boolean', description: "The build minion's land of its build on main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
-  fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: lands it anyway (LAND_FIX=1 for land.sh)' },
+  build: { type: 'boolean', description: "The build minion shipping its build to main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
+  fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: ships it anyway (LAND_FIX=1 for land.sh)' },
 };
 
 const MARK_IMAGE = {
@@ -1546,14 +1546,14 @@ const THREAD_TOOLS = [
   {
     name: 'hand_off_land',
     description:
-      `Hand your land to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the land\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A land on main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as landing (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
+      `Hand shipping to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the ship\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A ship to main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as shipping (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
     inputSchema: {
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to land and when, e.g. "Cara, 3:05 PM PST"' },
+        go: { type: 'string', maxLength: 200, description: 'With risk high, required: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
         ...LAND_PROPS,
@@ -1574,17 +1574,17 @@ const THREAD_TOOLS = [
     ? [{
       name: 'start_preview',
       description:
-        "Start (or restart) a preview of this minion's worktree for people to try before it lands: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
+        "Start (or restart) a preview of this minion's worktree for people to try before it ships: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
       inputSchema: { type: 'object', properties: {} },
     }]
     : []),
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the turn ends, once its work has landed and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
+      `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Landed abc1234; live after the restart"' } },
+      properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Shipped abc1234; live after the restart"' } },
     },
   },
   ...ARTIFACT_TOOLS,
@@ -2102,7 +2102,7 @@ async function runTool(name: string, args: any): Promise<string> {
           r = await call('GET', `/api/tickets/${TICKET}/land`);
         } catch (err: any) {
           // A landing's folder outlives restarts (src/land.ts); this is a server from before that, or one whose folder went.
-          if (!/No landing has started/.test(err.message)) throw err;
+          if (!/No landing has started|Nothing has started shipping/.test(err.message)) throw err;
           return "tools/land.sh ended, then Citadel restarted (most likely the deploy it ran) before its result was read, so its exit code and output are lost. Check `git log main` for your commits.";
         }
       }

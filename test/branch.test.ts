@@ -151,7 +151,7 @@ test('the ship line says where the change is, and why it is not moving', () => {
   const line = (s: Partial<BranchStatus>, turns = 0, failure: string | null = null) => shipLine({ ...base, ...s }, turns, failure);
   assert.equal(line({ empty: true }), null, 'nothing committed yet');
   assert.deepEqual(line({ merged: false, ahead: 2, deploy: null }), { stage: 'branch', text: 'On its branch: 2 commits not on main', commit: 'abcdef0' });
-  assert.deepEqual(line({ deploy: null }), { stage: 'main', text: 'Landed on main', commit: 'abcdef0' }, "another scheme's work");
+  assert.deepEqual(line({ deploy: null }), { stage: 'main', text: 'Shipped to main', commit: 'abcdef0' }, "another scheme's work");
   assert.equal(line({})?.text, 'On main, not deployed');
   assert.deepEqual(line({ deploy: { pulled: true, live: false } }, 2), { stage: 'deploying', text: 'Deploying: waiting on the idle restart, 2 turns running', commit: 'abcdef0' });
   assert.equal(line({ deploy: { pulled: true, live: false } })?.text, 'Deploying');
@@ -176,7 +176,7 @@ test('a feeder merged into its build reads as in its build, then live once the b
   assert.deepEqual(shipLine(await inBuild(), 0, null), { stage: 'branch', text: 'On its branch: 1 commit not in build/7', commit: mine.slice(0, 7) }, 'not merged in yet');
   git(repo, 'update-ref', 'refs/heads/build/7', mine); // tools/land.sh --into build/7
   const folded = shipLine(await inBuild(), 0, null);
-  assert.deepEqual([folded?.stage, folded?.text], ['build', 'Merged into Build 7, not live until the build lands']);
+  assert.deepEqual([folded?.stage, folded?.text], ['build', 'Merged into Build 7, not live until the build ships']);
   assert.equal(shipLine(await status('feeder'), 0, null)?.stage, 'branch', 'without its build, just a branch');
 
   // main moves on; the build minion merges it in, and the build lands by merge and fast-forward.

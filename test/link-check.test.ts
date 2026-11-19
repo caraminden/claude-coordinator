@@ -177,29 +177,29 @@ test('a reply that asks a choice in prose with no card this turn is sent back; a
   assert.equal((await ask('Should a follow-up retry it once Claude is back?'))?.decision, 'block');
   assert.equal((await ask('Fixed.\n\nIf you want it, say the word.'))?.decision, 'block');
   // A card posted this turn, even before the last tool result, covers the question.
-  assert.equal(await ask('Should I land it?', tool('mcp__thread__ask_question'), result), null);
-  assert.equal(await ask('Should I land it?', tool('mcp__thread__propose_plan'), result), null);
+  assert.equal(await ask('Should I ship it?', tool('mcp__thread__ask_question'), result), null);
+  assert.equal(await ask('Should I ship it?', tool('mcp__thread__propose_plan'), result), null);
   const meta = line({ type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill' } });
-  assert.equal(await ask('Should I land it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
+  assert.equal(await ask('Should I ship it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
   // A card from an earlier turn does not.
   const earlier = [tool('mcp__thread__ask_question'), result, user];
-  assert.equal((await ask('Should I land it?', ...earlier))?.decision, 'block');
-  assert.equal(await ask('Should I land it?\n\nSee [the card below](#/p/2/t/9?e=4).'), null);
-  assert.equal(await ask('Should I land it?\n<!-- status: {"state":"ready","note":"x","replies":["Land it"]} -->'), null);
+  assert.equal((await ask('Should I ship it?', ...earlier))?.decision, 'block');
+  assert.equal(await ask('Should I ship it?\n\nSee [the card below](#/p/2/t/9?e=4).'), null);
+  assert.equal(await ask('Should I ship it?\n<!-- status: {"state":"ready","note":"x","replies":["Ship it"]} -->'), null);
   assert.equal(await ask('Picked Ctrl+`; nothing needed from you.'), null);
-  assert.equal(await ask('Cara asked "should I land it?" and I did.'), null);
-  assert.equal(await ask('Notes:\n\n```\nshould I land it?\n```'), null);
+  assert.equal(await ask('Cara asked "should I ship it?" and I did.'), null);
+  assert.equal(await ask('Notes:\n\n```\nshould I ship it?\n```'), null);
   // Only the last two paragraphs are read.
-  assert.equal(await ask('Should I land it?\n\nOne.\n\nTwo.\n\nThree.'), null);
+  assert.equal(await ask('Should I ship it?\n\nOne.\n\nTwo.\n\nThree.'), null);
   // KEEP and the once-per-prompt marker work as for the other findings.
   const marker = join(root, 'nudged-card');
   const p = join(root, 'tp.jsonl');
   writeFileSync(p, user);
-  const input = { last_assistant_message: 'Should I land it?', transcript_path: p, prompt_id: 'a' };
+  const input = { last_assistant_message: 'Should I ship it?', transcript_path: p, prompt_id: 'a' };
   assert.equal((await check(input, { ...cfg, nudged: marker }))?.decision, 'block');
   assert.equal(await check(input, { ...cfg, nudged: marker }), null);
   // No readable transcript: say nothing rather than guess.
-  assert.equal(await check({ last_assistant_message: 'Should I land it?' }, cfg), null);
+  assert.equal(await check({ last_assistant_message: 'Should I ship it?' }, cfg), null);
 });
 
 test('a reply that says the minion is closing is sent back unless close_self was called and the status line keeps nothing open', async () => {
@@ -214,15 +214,15 @@ test('a reply that says the minion is closing is sent back unless close_self was
     return check({ last_assistant_message: text, transcript_path }, cfg);
   };
   const ok = [use('mcp__thread__close_self', 'c1'), res('c1')];
-  const v = await ask('Landed.\n\nClosing this minion.');
+  const v = await ask('Shipped.\n\nClosing this minion.');
   assert.equal(v?.decision, 'block');
   assert.match(v.reason, /says this minion is closing/);
   assert.match(v.reason, /close_self/);
   assert.equal((await ask('Merged.\n\nI\'ll close myself now.', use('mcp__thread__close_self', 'c1'), res('c1', true)))?.decision, 'block', 'a refused close_self');
-  assert.equal(await ask('Landed.\n\nClosing this minion.', ...ok), null);
-  assert.equal(await ask('Landed. Closing this minion.\n<!-- status: {"state":null,"note":"merged"} -->', ...ok), null);
+  assert.equal(await ask('Shipped.\n\nClosing this minion.', ...ok), null);
+  assert.equal(await ask('Shipped. Closing this minion.\n<!-- status: {"state":null,"note":"merged"} -->', ...ok), null);
   // The status line applied after close_self cancels it (#18): the reply's words are false.
-  const w = await ask('Landed. Closing this minion.\n<!-- status: {"state":"complete","note":"nothing left"} -->', ...ok);
+  const w = await ask('Shipped. Closing this minion.\n<!-- status: {"state":"complete","note":"nothing left"} -->', ...ok);
   assert.equal(w?.decision, 'block');
   assert.match(w.reason, /state complete/);
   assert.equal(await ask('Staying open in state complete for you to read the report.'), null);

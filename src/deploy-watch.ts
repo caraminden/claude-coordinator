@@ -263,7 +263,7 @@ export class DeployWatch {
         ...(tops.length ? ['Commonest:', ...tops] : []),
         `Your commits in that deploy: ${s.commits.map((c) => `${c.sha.slice(0, 8)} ${c.subject}`).join('; ')}.`,
         ...(others.length || unowned.length ? [`Also in it: ${[...others, ...(unowned.length ? [`${unowned.length} commit${unowned.length > 1 ? 's' : ''} with no minion`] : [])].join(', ')}.`] : []),
-        `Nothing was reverted or blocked. Check whether your change caused it: if it did, fix it and land the fix; if not, say why in one line and close. The readings: ${sql} (turn failures come from the turns table and error events). This is the watch's only message to you about this deploy.`,
+        `Nothing was reverted or blocked. Check whether your change caused it: if it did, fix it and ship the fix; if not, say why in one line and close. The readings: ${sql} (turn failures come from the turns table and error events). This is the watch's only message to you about this deploy.`,
       ].join('\n');
       try {
         this.d.wake(s.ticketId, text);

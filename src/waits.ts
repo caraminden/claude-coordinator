@@ -133,7 +133,7 @@ export const behindOld = (line: LandTicket[], t: LandTicket) => line.some((o) =>
 export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
   const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
   const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
-  if (!order.length) throw new Error('No landing waiting in line to reorder');
+  if (!order.length) throw new Error('Nothing is waiting in line to reorder');
   const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
   writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
@@ -179,7 +179,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       const ph = landPhase(t.phase), c = t.tests;
       out.set(t.label, {
         kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
-        chip: `land · ${c ? `${c.done}/${c.total}` : ph.word}`, text: c ? `${ph.text}: ${countsText(c)}` : ph.text,
+        chip: `ship · ${c ? `${c.done}/${c.total}` : ph.word}`, text: c ? `${ph.text}: ${countsText(c)}` : ph.text,
         ...(BRIEF[ph.key] && { brief: BRIEF[ph.key] }), ...(c && { done: c.done, total: c.total }),
       });
       return;
@@ -188,7 +188,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     const place = ordinal(ahead.length + 1);
     let text: string, usualS: number | null = null;
     if (!ahead.length) {
-      text = 'next in line, waiting for a queued restart or an older landing to let go of the lock';
+      text = 'next in line, waiting for a queued restart or an older ship to let go of the lock';
     } else {
       const head = ahead[0], word = head.got > 0 ? HEAD_WORD[landPhase(head.phase).key] : 'waiting';
       text = `${place} in line, behind ${name(head.label)} (${word})${ahead.length > 1 ? ` and ${ahead.length - 1} more` : ''}`;
@@ -270,7 +270,7 @@ export function landCi(w: Wait, ci: CiView): Wait {
   const short = `CI ${ci.short.replace(/^step /, '')}`;
   const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
   // The line keeps one counter, the landing's stage (Cara: "are the tests on step 3/6 or 10/13?"): CI's steps fill its piece.
-  return { ...w, chip: `land · ${short}`, text, brief: `CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
+  return { ...w, chip: `ship · ${short}`, text, brief: `CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
 }
 
 /** A minion's PR waiting on its CI run. */
@@ -378,7 +378,7 @@ export class Waits {
    * is left out. `note` says who moved what, for the waiters' output. Returns the order written.
    */
   setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
-    if (!this.d.deployState) throw new Error('This server has no land line');
+    if (!this.d.deployState) throw new Error('This server has no ship line');
     this.poll();
     const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved);
     this.poll();

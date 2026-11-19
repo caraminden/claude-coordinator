@@ -164,7 +164,7 @@ export function renderProgress() {
   } },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h('span', { class: 'text' },
-      server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), w ? '' : ' · landing…') : step ? h('span', { class: 'stepname' }, step) : '',
+      server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), w ? '' : ' · shipping…') : step ? h('span', { class: 'stepname' }, step) : '',
       (step || server) && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',

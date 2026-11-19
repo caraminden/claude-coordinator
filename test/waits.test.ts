@@ -61,7 +61,7 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   dead.add(ticket(4, d.branch, 0, 'waiting', 5)); // its process is gone
   waits.poll();
 
-  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'land · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
+  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'ship · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
   assert.equal(wb.chip, 'line · 2nd');
   assert.equal(wb.text, `2nd in line, behind #${a.number} (testing)`);
@@ -95,7 +95,7 @@ test('a stage that moves on counts toward its usual; a landing that leaves the l
   waits.poll();
   assert.equal(waits.usual('land:rebase'), 12);
   assert.equal(waits.usual('land:ci'), null);
-  assert.deepEqual({ ...waits.wait(a.id)!, since: 0 }, { kind: 'land', stage: 'deploy', chip: 'land · deploy', text: 'boot check', since: 0, usual: null });
+  assert.deepEqual({ ...waits.wait(a.id)!, since: 0 }, { kind: 'land', stage: 'deploy', chip: 'ship · deploy', text: 'boot check', since: 0, usual: null });
   now += 30_000;
   rmSync(join(state, 'queue', '0000000001'));
   waits.poll();
@@ -184,18 +184,18 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   ticket(1, a.branch, now / 1000 - 40, 'running the tests since 14:02', 30);
   progress(join(state, 'land-test.progress'), '5\n200\ntest/old.test.ts\n', 31);
   waits.poll();
-  assert.equal(waits.wait(a.id)!.chip, 'land · tests', "counts from before this phase are an earlier run's");
+  assert.equal(waits.wait(a.id)!.chip, 'ship · tests', "counts from before this phase are an earlier run's");
   progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
   waits.poll();
   assert.deepEqual(waits.wait(a.id), {
-    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
+    kind: 'land', stage: 'test', chip: 'ship · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
   // deploy.sh's own run logs to test.log, so its counts are in test.progress.
   ticket(1, a.branch, now / 1000 - 40, 'deploying: running the tests since 14:05', 10);
   progress(join(state, 'test.progress'), '212\n212\n\n', 1);
   waits.poll();
-  assert.equal(waits.wait(a.id)!.chip, 'land · 212/212');
+  assert.equal(waits.wait(a.id)!.chip, 'ship · 212/212');
   assert.equal(waits.wait(a.id)!.text, 'running the tests: 212 of 212 files');
 
   writeFileSync(join(heavy, 'slot-0.who'), `Citadel #${b.number} (cara): npm test (since 14:00, pid 4242)\n`);
@@ -262,7 +262,7 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   assert.deepEqual(waits.setOrder([6, 5], 'Josh moved #6 to land next'), [5, 3, 4, 2]);
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 5, 3, 4, 2, 6]);
   for (const seq of [2, 3, 4, 5]) dead.add(`${seq}00 77`);
-  assert.throws(() => waits.setOrder([3], 'Josh'), /no landing waiting/i, 'all landed or gone meanwhile');
+  assert.throws(() => waits.setOrder([3], 'Josh'), /nothing is waiting in line/i, 'all shipped or gone meanwhile');
 });
 
 // The Trans Agenda #76: one from before #1002 that arrived first waits only for the lower tickets, so nobody behind it

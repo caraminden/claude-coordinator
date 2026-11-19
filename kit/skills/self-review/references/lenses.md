@@ -204,7 +204,7 @@ fix:
 - **Denominator:** a pass or a count with no "out of how many": a check that examined nothing
   passes. It should report what it scanned, or fail on zero.
 - **Exit code:** a check that prints a problem and still exits 0 is a check no test run, CI or
-  land script will ever stop on.
+  ship script (`land.sh`) will ever stop on.
 
 The audit line for this lens names the run: `Check claims: ran <command>: it says <its result>;
 the data has <your count>`, or why it wasn't run.

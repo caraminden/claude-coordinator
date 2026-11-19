@@ -1,6 +1,6 @@
 // The wording check: words Citadel says one way, sent back before they reach people (#313). A change going onto
-// main "lands", a feeder going into a major build "merges", and "fold" is retired (Cara, 2026-11-19: picked "Land"
-// and, for fold, "Retire it"). Three places use it: the Stop hook (link-check.ts) checks a turn's final reply, and
+// main "ships", a feeder going into a major build "merges", and "fold" is retired (Cara, 2026-11-19: picked "Ship"
+// on #1020's card over "land", and, for fold, "Retire it"). Three places use it: the Stop hook (link-check.ts) checks a turn's final reply, and
 // this file's PreToolUse hook (wordingHooks in turn-launch.ts) checks the messages and cards a session sends and the
 // .md and .html files it writes into the scheme's shared folders. Each sentence is sent back once; a rewrite that
 // still trips it goes out.
@@ -26,6 +26,7 @@ export interface Reserved {
 
 const MERGE = String.raw`merg(?:e|es|ed|ing)`;
 const INTO = String.raw`(?!\s+(?:in(?:to)?|with)\b)`;
+const LAND = String.raw`land(?:s|ed|ing)?`;
 
 /** The words Citadel says one way. Another one is one more row. */
 export const RESERVED: Reserved[] = [
@@ -34,11 +35,11 @@ export const RESERVED: Reserved[] = [
     why: 'Citadel no longer says "fold" (Cara, 2026-11-19, "Retire it")',
     // Not "case-fold": that's text, not work.
     match: /(?<!\bcase-)\bfold(?:s|ed|ing)?\b(?:[- ]in\b)?/gi,
-    suggest: '"land" for a change going onto main, "merge into the build" for a feeder, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
+    suggest: '"ship" for a change going onto main, "merge into the build" for a feeder, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
   },
   {
     term: 'merge',
-    why: 'A change going onto main "lands" (Cara, 2026-11-19, picked "Land"); "merge" is only for a branch going into a major build, or a raw git step',
+    why: 'A change going onto main "ships" (Cara, 2026-11-19, picked "Ship" on #1020\'s card); "merge" is only for a branch going into a major build, or a raw git step',
     // Only the shapes that can't mean a build: "merge it" / "merge #12" / "PR #12 merged" with no "into" after, "merged
     // to main", "ready to merge", "merged PRs", "the merge card". A bare "merged" or "the merge" is left alone: it's
     // as often git's as ours.
@@ -52,7 +53,22 @@ export const RESERVED: Reserved[] = [
     ].join('|'), 'gi'),
     allow: /^(?:builds?|feeders?|git)$/i,
     always: /\bmain\b/i,
-    suggest: '"land it", "landed on main", "ready to land", "landed PRs" or "the land card"; "merge into Build <n>" for a feeder',
+    suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Build <n>" for a feeder',
+  },
+  {
+    term: 'land',
+    why: 'A change going onto main "ships" now, not "lands" (Cara, 2026-11-19, picked "Ship" on #1020\'s card); code, tool and file names (hand_off_land, tools/land.sh, land/* branches) keep theirs',
+    // The shapes that mean a change going onto main: "land it" / "land #12", "landed on main", "ready to land",
+    // "#12 has landed", "landed PRs", "the land card". A bare "lands" is left alone: findings and files land too.
+    match: new RegExp([
+      String.raw`\b${LAND}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b`,
+      String.raw`\b${LAND}\b(?:\s+\S+){0,4}?\s+(?:on(?:to)?|in(?:to)?|to)\s+main\b`,
+      String.raw`\bready\s+to\s+land\b`,
+      String.raw`(?:\bPR\s*#?\d+|#\d+)\s+(?:(?:was|is|has|had|has\s+been|got)\s+)?landed\b`,
+      String.raw`\blanded\s+PRs?\b`,
+      String.raw`\bland\s+(?:card|chip|go|button|line)s?\b`,
+    ].join('|'), 'gi'),
+    suggest: '"ship it", "shipped to main", "ready to ship", "#12 has shipped", "shipped PRs" or "the ship card"',
   },
 ];
 

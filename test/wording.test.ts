@@ -47,9 +47,24 @@ test('flags merge said of main: gos, "to main", "ready to merge", merged PRs and
 
 test('leaves merge alone for a build, git, and every shape that can\'t be told from git\'s', () => {
   for (const ok of [
-    'Merge it into Build 3.', 'PR #12 merged into the build.', 'Merged into Build 3, not live until the build lands',
+    'Merge it into Build 3.', 'PR #12 merged into the build.', 'Merged into Build 3, not live until the build ships',
     'Merge it, the feeder is green.', 'Merge them with git.', 'There was a merge conflict.', 'merged the branches', 'the merge commit',
-    'Land it.', 'Ready to land.', 'PR #12 landed.', '`merge it`', '"merge it" still counts as a go.',
+    'Ship it.', 'Ready to ship.', 'PR #12 shipped.', '`merge it`', '"merge it" still counts as a go.',
+  ]) assert.deepEqual(flagged(ok), [], ok);
+});
+
+test('flags land said of main: a change going onto main ships (Cara, 2026-11-19, on #1020\'s card)', () => {
+  for (const [text, word] of [
+    ['Land it?', 'Land it'], ['Should I land #12?', 'land #12'], ['land PR 41 now', 'land PR 41'], ['Ready to land.', 'Ready to land'],
+    ['It landed on main an hour ago.', 'landed on main'], ['#12 has landed.', '#12 has landed'], ['PR #40 landed.', 'PR #40 landed'],
+    ['Only landed PRs count.', 'landed PRs'], ['It asks with a land card.', 'land card'], ['It waits in the land line.', 'land line'],
+  ]) assert.deepEqual(flagged(text), [word], text);
+});
+
+test('leaves land alone in code, tool and file names and its other senses', () => {
+  for (const ok of [
+    'Ship it.', '#12 has shipped.', 'Call hand_off_land now.', 'tools/land.sh refused it.', 'Its branch is land/ticket-12.',
+    '`land it`', '"land it" still counts as a go.', 'The findings land in this chat.', 'Retries until the write lands.',
   ]) assert.deepEqual(flagged(ok), [], ok);
 });
 
@@ -78,17 +93,20 @@ test('a message, card or note is refused once per sentence, with the sentence an
   const why = v!.hookSpecificOutput.permissionDecisionReason;
   assert.ok(why.includes('"Please start a fold-in minion for the new data."'), why);
   assert.match(why, /no longer says "fold"/);
-  assert.match(why, /"land" for a change going onto main/);
+  assert.match(why, /"ship" for a change going onto main/);
   assert.match(why, /a collapsed section/);
   // Sent again as it was: through, so a false alarm never loops.
   assert.equal(checkCall(msg, cfg), null);
   // A new sentence in the same turn gets its own refusal; nested card text counts.
   const card = { tool_name: 'mcp__thread__ask_question', tool_input: { questions: [{ question: 'Which?', options: [{ label: 'Fold the legend' }, { label: 'Keep it' }] }] } };
   assert.equal(checkCall(card, cfg)?.hookSpecificOutput.permissionDecision, 'deny');
-  assert.equal(checkCall({ tool_name: 'mcp__coordinator__update_ticket', tool_input: { ticket_id: 3, note: 'landed, land #3 next' } }, cfg), null);
+  assert.equal(checkCall({ tool_name: 'mcp__coordinator__update_ticket', tool_input: { ticket_id: 3, note: 'shipped, ship #3 next' } }, cfg), null);
+  const land = checkCall({ tool_name: 'mcp__thread__set_thread_status', tool_input: { note: 'tested, ready to land' } }, cfg)!.hookSpecificOutput.permissionDecisionReason;
+  assert.match(land, /"ships" now, not "lands"/);
+  assert.match(land, /"ready to ship"/);
   const merge = checkCall({ tool_name: 'mcp__thread__message_coordinator', tool_input: { text: 'PR #40 is ready to merge.' } }, cfg)!.hookSpecificOutput.permissionDecisionReason;
   assert.match(merge, /- "PR #40 is ready to merge\." \(ready to merge\)/);
-  assert.match(merge, /"ready to land"/);
+  assert.match(merge, /"ready to ship"/);
 });
 
 test('only .md and .html writes into a shared folder are checked', () => {
@@ -106,7 +124,7 @@ test('the final reply is sent back in the link check\'s send-back, so the rewrit
   assert.equal(v?.decision, 'block');
   assert.ok(v!.reason.startsWith(SENT_BACK), v!.reason);
   assert.match(v!.reason, /- "The legend now sits in a fold\." \(fold\)/);
-  assert.equal(await check({ last_assistant_message: 'Done, land it when ready.' }, { cwd: root, roots: [root] }), null);
+  assert.equal(await check({ last_assistant_message: 'Done, ship it when ready.' }, { cwd: root, roots: [root] }), null);
 });
 
 test('the hook script prints a deny decision, or nothing', () => {

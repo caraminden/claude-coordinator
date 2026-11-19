@@ -74,7 +74,7 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 ## Delivery
 
-- **A Capacitor contraption publishes itself after every deploy** (every land on main deploys it).
+- **A Capacitor contraption publishes itself after every deploy** (every ship to main deploys it).
   Once the deploy is live, Citadel checks whether `android/`, `capacitor.config.*` or the
   Capacitor `webDir` changed since the published APK. If so, it builds a release APK in its own
   checkout (`~/.cache/citadel-apk/<app>/`, log in `build.log` there), signs it with the app's

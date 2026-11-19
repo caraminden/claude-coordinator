@@ -8,12 +8,12 @@ consider other schemes".
 
 Citadel's audit is [reports/test-audit-citadel-2026-11.md](/home/cara/.local/share/claude-coordinator/projects/2/shared/project/reports/test-audit-citadel-2026-11.md).
 It took one Opus minion plus 12 Sonnet Grunts, about an hour. This file is how to run the same audit on any
-scheme's stack. The minion running it is a research minion: it changes no tests, lands nothing, and ends in a
+scheme's stack. The minion running it is a research minion: it changes no tests, ships nothing, and ends in a
 report, a card and a handoff for each batch picked.
 
 ## 0. Rules
 
-- **One full suite at most, and never while that scheme is landing.** Better still, take timings from a CI log
+- **One full suite at most, and never while that scheme is shipping.** Better still, take timings from a CI log
   that already exists.
 - **Raw output stays in the minion's `$TMPDIR`:** logs, per-Grunt reports and timing tables. Only the report and
   the handoffs go in the shared folder.

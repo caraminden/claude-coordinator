@@ -1,18 +1,18 @@
 ---
 name: scheme-setup
-description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the land. Use when your brief is an approved setup or tune-up plan.
+description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the ship. Use when your brief is an approved setup or tune-up plan.
 ---
 
 # Scheme setup
 
 You are the one setup minion of a new scheme. The Taskmaster has already applied its own part
 of the plan (scheme instructions, settings, properties, `onboarding.md`). Yours is the repo
-files, landed on the scheme's main. The **plan** is your spec: build what it lists, in its
+files, shipped to the scheme's main. The **plan** is your spec: build what it lists, in its
 words, and nothing it doesn't.
 
 ## Your bounds
 
-Every write lands in one of three places: your worktree, your scheme's main (by the route in
+Every write goes to one of three places: your worktree, your scheme's main (by the route in
 step 9), and the `## Copies` section of `$COORDINATOR_SHARED_DIR/onboarding.md`. Other schemes
 are read-only, and you read only the files the plan lists to adapt, plus that source's
 CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the rest are on you:
@@ -31,7 +31,7 @@ CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the re
 
 | Part | Used in |
 |---|---|
-| Shipping answer: PR per change, auto-land after self-review, or straight to main; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
+| Shipping answer: PR per change, auto-ship after self-review, or straight to main; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
 | Project facts draft, or the interview answers behind it (stack, tests, high-risk areas) | step 3 |
 | Adapt list: name, kind (skill, agent, rule), source scheme and path, new name, why | step 5 |
 | Write-new list: name, kind, one-line job | step 6 |
@@ -113,7 +113,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | Retros | Retro folder | retro | `docs/retros/` |
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |
-| Numbered things | What minions number in parallel and could both take the same "next" of: migration files, a version, ledger ids. Entries split by `;`: `files <glob with NNNN>`, `ids <glob> "<regex>"`, `version <glob> "<regex>"` (the format is in `land.sh`'s header). Only with `tools/land.sh`, which refuses a landing that clashes | land.sh | no check |
+| Numbered things | What minions number in parallel and could both take the same "next" of: migration files, a version, ledger ids. Entries split by `;`: `files <glob with NNNN>`, `ids <glob> "<regex>"`, `version <glob> "<regex>"` (the format is in `land.sh`'s header). Only with `tools/land.sh`, which refuses a change that clashes | land.sh | no check |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
 | Rubrics | The critic rubrics the plan names, as `citadel:critique`'s `references/rubric-format.md` says: paths separated by `;`. A starter the plan picks becomes a file in the repo (`docs/rubrics/<name>.md`) that `extends:` it, with empty sections for people's notes | critique, self-review, docs-and-mocks | none: no critic runs |
 | Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
@@ -168,43 +168,43 @@ for byte, and `land.local.sh` to `tools/land.local.sh`. Every setting below goes
 never in `land.sh`: the core stays the kit's, so a kit fix reaches the scheme as one copy, and
 Citadel's deploy lists the schemes whose copy differs. Set `CHECK` there to the check command from
 Project facts, or `true` while there is none (your done note says so); `SMOKE_CMD` to the check's quick part (a lint or a type check that answers in seconds; empty leaves only the conflict check before the line); `PUSH_MAIN=0` keeps main
-local, and `land_after` is the hook for what the scheme does after a landing is pushed (closing a
+local, and `land_after` is the hook for what the scheme does after a ship is pushed (closing a
 PR, say). It rebases, runs the check, fast-forwards the main checkout and
-pushes main; read its header. Landings wait for its lock in a line, oldest first, with no time
+pushes main; read its header. Ships wait for its lock in a line, oldest first, with no time
 limit while the line moves: a minion runs it in the background with a long timeout, since a run
 that is stopped loses its place. Before the check it refuses a branch that takes a migration
 number, version or ledger id main already has, as the Numbered things line names them: look for
 each (`git log --diff-filter=A` on a migrations folder, version lines, numbered ledger entries), and
 check each regex matches what it should (`perl -ne 'print "$1\n" if /<regex>/' <file>`).
 
-When the plan has CI decide what lands (the scheme's checks run on runners, not on the shared
+When the plan has CI decide what ships (the scheme's checks run on runners, not on the shared
 box), turn on `land.sh`'s CI gate: set `CI_WORKFLOWS` to the workflow files that must be green,
 add `'land/**'` to each one's `push: branches:`, and give each a concurrency group per ref. Take
-`pull_request` out of their triggers, and `main` too: the land run is the one that decides, on the exact
-commit that lands, so a PR run only tests a commit that goes stale once main moves, and a main run tests
-a commit that already passed. Each doubles the runners' work per landing (#603: Peek's PR runs were 3,700
+`pull_request` out of their triggers, and `main` too: the ship run is the one that decides, on the exact
+commit that ships, so a PR run only tests a commit that goes stale once main moves, and a main run tests
+a commit that already passed. Each doubles the runners' work per ship (#603: Peek's PR runs were 3,700
 runner-minutes in a week). Keep `workflow_dispatch` for runs by hand; the Windows CI kit's workflows have
 this shape. Citadel's PR watcher expects no checks on a PR when no workflow runs on `pull_request`. Set
 `CHECK` to what should still run on the box before anything is pushed (`true` for nothing). Then
-a landing pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
-only then moves main. The landed commit's runs there are left to finish (a scheme that keeps CI on main can skip
-what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` landings in line (3) run CI at once, each built on the
-one ahead, so a landing doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
+a ship pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
+only then moves main. The shipped commit's runs there are left to finish (a scheme that keeps CI on main can skip
+what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` ships in line (3) run CI at once, each built on the
+one ahead, so a ship doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
 run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4, with `CI_STACK` set to the runs
 the runners carry at once; the header says how a red batch is bisected. A new scheme has no line to measure yet, so
-leave it at 1. In the setup report, name `CI_BATCH` as the knob for a deep line. Raise it once landings come back to back
+leave it at 1. In the setup report, name `CI_BATCH` as the knob for a deep line. Raise it once ships come back to back
 for about a CI run each (a line, not a free runner), as in Citadel's `specs/batched-landings.md`. A high share of red
-land runs (over about 15%) argues for 2, not 4. When much of what lands needs less than the whole check and CI
+ship runs (over about 15%) argues for 2, not 4. When much of what ships needs less than the whole check and CI
 (docs, one app of several), give it lanes: `LANES=tools/lanes` and a map of `<lane> <pattern>...` lines, with
 `CHECK_<LANE>`, `CI_WORKFLOWS_<LANE>` and `CI_SKIPS_<LANE>` in `land.local.sh` (its comments show them). A light
-landing lands in line with no CI and no push; a lane's run goes to `land/<lane>/<branch>`, so `'land/**'` still
+ship goes through the line with no CI and no push; a lane's run goes to `land/<lane>/<branch>`, so `'land/**'` still
 catches every run and `'land/<lane>/**'` routes one lane's. Anything the map doesn't list is full, so a missing
 line costs time, never safety; `tools/land.sh --lane` prints the lane a commit would take. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
 calls `wake_when_runners_back`, parks, and runs it again once Citadel says the runners are back. Say all of this in the "How a
-change ships" line, and that the worktree sits on a detached commit while a landing waits.
+change ships" line, and that the worktree sits on a detached commit while a ship waits.
 
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the
 hook once your merge brings `.githooks/` there. Then prove it:
@@ -246,7 +246,7 @@ Idle (or its failure is in your done note).
 
 **A Windows app's CI** starts from this skill's `templates/windows-ci/` when the plan gives the
 scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check
-commands in Project facts. Its workflows run only as a landing lands, so they need land.sh's CI gate
+commands in Project facts. Its workflows run only as a change ships, so they need land.sh's CI gate
 (above): `windows.yml` in `CI_WORKFLOWS`, `desktop.yml` through `CI_STATUS`. Jobs that open windows need the session runner, which a person adds on
 the PC (`add-runner.ps1 -Session -Visible`, not `ci_runners`): name that step in your done note.
 
@@ -328,24 +328,24 @@ Skip this step when the scheme's app is not a contraption (an app Citadel serves
 CLAUDE.md names how a change goes live ("deploys with `deploy_contraption`") only for a *registered* contraption, so confirm it is one before the setup is done:
 
 1. Call `deploy_contraption` for the app. A refusal that names the app as unknown means it is not registered.
-2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon`, `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: land it before you ask.
+2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon`, `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: ship it before you ask.
 3. In CLAUDE.md, write the deploy line as fact only once a `deploy_contraption` run went live. Until then leave it out and list "contraption registered and first deploy" as open in the done note.
 
 *Done when* the first deploy went live, or the done note lists registration and first deploy as open with the message you sent.
 
-### 9. Commit and land
+### 9. Commit and ship
 
 Commit with each file named in the message. Run `citadel:self-review`: it never skips
 `CLAUDE.md` or `.claude/`. The guard files you just listed as high risk by file make a setup
 rate high by themselves; the approved plan already listed them, so that alone is no reason to
-stop. A high label for any other reason: stop and ask with a card. Then land by the plan's
+stop. A high label for any other reason: stop and ask with a card. Then ship by the plan's
 shipping answer:
 
-- **PR per change:** push your branch, `gh pr create`, and merge it with `gh pr merge` (the
-  scheme's approval rules turn that into a card for a person). Wait for it to land.
-- **Auto-land after self-review** or **straight to main**, pusher `tools/land.sh`: commit it
-  with the rest, then run `tools/land.sh` from your worktree. It lands and pushes your own
-  setup, and every minion after you lands through it.
+- **PR per change:** push your branch, `gh pr create`, and ship it with `gh pr merge` (the
+  scheme's approval rules turn that into a card for a person). Wait for it to ship.
+- **Auto-ship after self-review** or **straight to main**, pusher `tools/land.sh`: commit it
+  with the rest, then run `tools/land.sh` from your worktree. It ships and pushes your own
+  setup, and every minion after you ships through it.
 - **Main stays local:** check the main checkout (the first entry of `git worktree list`) is on
   main and clean, then `git -C <that dir> merge --ff-only <your branch>`.
 
@@ -357,4 +357,4 @@ is pushed or your note says it stays local.
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
 took a default; the copies recorded (and whether the scheme has the standard upstream check, or it was asked for); scrub
 hits kept; the check command and its result; whether main is pushed; a contraption's registration and first deploy, when still open (step 8); and any command Cara must
-run by hand (a unit install). The Taskmaster's first minions start once yours lands, by themselves; nothing for you to start.
+run by hand (a unit install). The Taskmaster's first minions start once yours ships, by themselves; nothing for you to start.

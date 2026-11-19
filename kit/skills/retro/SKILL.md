@@ -1,6 +1,6 @@
 ---
 name: retro
-description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them, landed in the milestone's own PR. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly retro, or when someone asks how the process went.
+description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them, shipped in the milestone's own PR. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly retro, or when someone asks how the process went.
 ---
 
 # Retro
@@ -21,7 +21,7 @@ Create either file when it is first needed.
 - Someone asks how the work went.
 - A major build is ready for its go card (the build minion's step 5). The retro is committed to the build
   branch, in the retro folder CLAUDE.md's Project facts name; there is no milestone PR.
-- A scheduled monthly retro (its brief names the window). It lands by the scheme's usual route for a
+- A scheduled monthly retro (its brief names the window). It ships by the scheme's usual route for a
   doc change; there is no milestone PR.
 
 ## Steps
@@ -32,7 +32,7 @@ Create either file when it is first needed.
    guard.sh refusal, red test, failed push, refused stop and `process` line (what sent a self-review the wrong way) to the scheme's shared folder:
    `grep -l '<your branch>' "$COORDINATOR_SHARED_DIR"/retro-log/*/*.md` finds your sessions'
    logs. land.sh's rebase conflicts (`land conflict` lines naming the files) and its likely
-   flakes (`flake` lines: a test file that failed in the land or deploy run and passed alone,
+   flakes (`flake` lines: a test file that failed in the ship or deploy run and passed alone,
    with the load average), and its `smoke` refusals (what the quick checks before the line caught, in seconds) go in the day's `retro-log/<date>/land.md`, as it has no session id. Each finding cites one of these,
    so it reads "the citadel:check-runner was briefed without the test filter and ran the slow
    suite three times", never "checks felt slow". In the gathering, use a subagent and keep
@@ -49,7 +49,7 @@ Create either file when it is first needed.
    took a copy instead of a table row, a refactor found again. A yes becomes a proposed
    check in step 6 (a test, a hook, a script line that prints), not a note. A skill that
    fired on the wrong turn or failed to fire gets a quick citadel:skill-stocktake for its
-   verdict; the fix stays this retro's to land.
+   verdict; the fix stays this retro's to ship.
 4. **UI audit**, when the milestone touched a screen: check each screen it added or
    changed against the UI rules Project facts names, with a screenshot as the evidence, at the
    screen's fullest state as well as its first, and with the longest names and values a
@@ -70,11 +70,11 @@ Create either file when it is first needed.
 7. **Write the retro** to `<retro folder>/<milestone>.md`, under a page: the fixes first, then the spec
    gaps, then what to keep. Committing the retro file is not the end: the ledger edit (`README.md`
    in the retro folder) goes in the same commit. Update the ledger in the same PR: add this retro to each row it
-   hit again, change a row's guard when a fix lands, and add a row for any finding that is
+   hit again, change a row's guard when a fix ships, and add a row for any finding that is
    now in two retros.
-8. **Land the fixes in the milestone's PR**, while it is still open, so the owner reviews
+8. **Ship the fixes in the milestone's PR**, while it is still open, so the owner reviews
    once, with the retro file in it and each edit citing its finding. Only a milestone PR
-   already landed gets a small follow-up PR instead. A process or design rule the owner
+   already shipped gets a small follow-up PR instead. A process or design rule the owner
    accepts from the retro also goes in the decisions log Project facts names, if any.
 
 Done when every finding has an edit in the PR or a line in the retro saying why not, the

@@ -504,27 +504,27 @@ export class LandHandoffs {
       // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.
       const what = r.commit ? `${r.commit} "${r.subject}"` : `the branch's new tip`;
       const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
-      store.updateTicket(id, { state: null, note: 'landed locally; push to origin failed' });
+      store.updateTicket(id, { state: null, note: 'shipped locally; push to origin failed' });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Landed locally, not pushed to origin: the push failed.` });
+      runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Shipped locally, not pushed to origin: the push failed.` });
       runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`);
       return;
     }
     if (r.kind === 'no-ci') {
-      store.updateTicket(id, { state: 'parked', note: 'land parked: waiting for CI runners' });
+      store.updateTicket(id, { state: 'parked', note: 'ship parked: waiting for CI runners' });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `The land parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` });
+      runner.emit(id, 'note', { text: `Shipping parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` });
       return;
     }
     const into = h.args[0] === '--into' ? h.args[1] : null;
     if (!into && r.commit) this.d.landed?.(id, r.commit);
     const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
-    const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build lands.` : 'Landed.';
+    const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
     // On main, the scheme's apps go out now rather than at auto-deploy's next quiet spell (#712), and the line says how.
     const apps = !into && h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
     if (apps.length) {
-      store.updateTicket(id, { note: `landed: deploying ${apps.join(', ')}` });
+      store.updateTicket(id, { note: `shipped: deploying ${apps.join(', ')}` });
       runner.broadcastTicket(id);
     }
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
@@ -564,14 +564,14 @@ export class LandHandoffs {
       const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then parked.`;
       // true: the waiter wakes it at live; false: live already; undefined: no waiter here, so it hears now.
       const queued = restart ? await this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now')) : undefined;
-      store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'landed, wakes once live' : 'landed'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
+      store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'shipped, wakes once live' : 'shipped'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
       runner.broadcastTicket(id);
       if (!queued) runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true });
       return;
     }
     if (h.stayOpen) {
       // More pieces to do in this minion (#909): the shipped line is out, and it stays open, ready for the next one.
-      store.updateTicket(id, { state: 'ready', note: r.kind === 'restart' ? 'landed, live after the restart; open for the next piece' : 'landed; open for the next piece' });
+      store.updateTicket(id, { state: 'ready', note: r.kind === 'restart' ? 'shipped, live after the restart; open for the next piece' : 'shipped; open for the next piece' });
       runner.broadcastTicket(id);
       return;
     }
@@ -584,17 +584,17 @@ export class LandHandoffs {
     if (kept) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `It landed, but ${kept}, so this minion stays open.` });
+      runner.emit(id, 'note', { text: `It shipped, but ${kept}, so this minion stays open.` });
       return;
     }
-    const why = r.kind === 'live' ? 'Landed and live' : 'Landed';
+    const why = r.kind === 'live' ? 'Shipped and live' : 'Shipped';
     if (runner.isRunning(id) || runner.queued(id)) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
       if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
       return;
     }
-    store.updateTicket(id, { state: null, note: into ? `folded into Build ${into.slice('build/'.length)}` : null });
+    store.updateTicket(id, { state: null, note: into ? `merged into Build ${into.slice('build/'.length)}` : null });
     this.d.landings.settled(id);
     await runner.close(id, `${why}, so the server dismissed this minion.`);
   }

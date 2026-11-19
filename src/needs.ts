@@ -11,7 +11,7 @@ export const NEED_LINES: Record<Need, string> = {
   decision: 'a decision only the Taskmaster or a person can make',
   relay: 'pass something to another scheme',
   ask: 'anything else it must act on now',
-  fyi: 'status, landed, live, tracking, no action',
+  fyi: 'status, shipped, live, tracking, no action',
 };
 
 /** Why this body's `need` is refused (missing, unknown, or urgent on a fyi; the text names the field and the values), or null with the need. */

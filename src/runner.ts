@@ -400,7 +400,7 @@ interface NetResume {
 /** The minion's note while it waits: cleared by the next turn's start. */
 const NET_NOTE = 'Network outage: resumes once it is back';
 const RESUME_NET_PROMPT =
-  `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a land, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
+  `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a ship, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
 
 /** Whether the API answers at all: any HTTP response counts, only a failure to connect (DNS, socket, 10 s timeout) doesn't. */
 export async function apiReachable(): Promise<boolean> {

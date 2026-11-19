@@ -33,7 +33,7 @@ export const STANDARD_AUDITS: Record<string, Partial<Record<string, string>>> = 
   Citadel: {
     'code-health': 'Split the Grunts by server (src/), front end (public/) and tests (test/). The long files are src/runner.ts, src/db.ts, src/mcp.ts and public/thread.js: judge them by what a split would buy, not their length alone.',
     'test-audit': 'Name the report reports/test-audit-citadel-<YYYY-MM>.md.',
-    'monthly-retro': "Kit, tripwire and prompt fixes are Citadel's own: land them here directly, no handoff relay.",
+    'monthly-retro': "Kit, tripwire and prompt fixes are Citadel's own: ship them here directly, no handoff relay.",
     'upstream-check': "Quarterly, on the runs in January, April, July and October: also run citadel:skills-survey as a light, stack-agnostic re-survey of skills.sh's top 50, scoped to entries new since the newest reports/skills-survey-*.md in the shared folder. Only new entries worth using or mining count as something to report; write them up as that skill says.",
   },
   'Peek Auras': {

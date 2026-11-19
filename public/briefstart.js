@@ -109,7 +109,7 @@ async function openSheet(slot, brief, file) {
     h('option', { value: '' }, 'Let the minion pick'),
     values.map((v) => h('option', { value: v.value, selected: v.value === matchType(brief.typeHint, values) }, v.label || v.value)));
   const after = h('input', { name: 'after', inputmode: 'numeric', pattern: '#?\\d+', placeholder: '#N', autocomplete: 'off', 'aria-label': 'Start after minion number' });
-  const when = h('select', { name: 'when', 'aria-label': 'Once that minion' }, h('option', { value: 'live' }, 'is live'), h('option', { value: 'merged' }, 'has landed'));
+  const when = h('select', { name: 'when', 'aria-label': 'Once that minion' }, h('option', { value: 'live' }, 'is live'), h('option', { value: 'merged' }, 'has shipped'));
   const lines = message.split('\n').length;
   const btn = h('button', { type: 'submit' }, 'Start minion');
   const form = h('form', { class: 'start-brief-form' },

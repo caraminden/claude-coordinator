@@ -48,7 +48,7 @@ test('a build branch counts its feeders merged in and open, not its owner, and h
   store.setSetting(buildOwnerKey(p.id, 7), owner.id);
   const a = minion(7, 'build/7', 2);
   fold(a);
-  const d = minion(7, 'build/7', 1, 'closed'); // folded in, then closed as "folded into Build 7"
+  const d = minion(7, 'build/7', 1, 'closed'); // folded in, then closed as "merged into Build 7"
   git(repo, 'checkout', '-q', d.branch);
   git(repo, 'rebase', '-q', 'build/7');
   git(repo, 'checkout', '-q', 'main');

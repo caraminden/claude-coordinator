@@ -157,7 +157,7 @@ test('on main with no deploy coming waits for one; a failed deploy says why; a b
   w.ships.set(c.id, 'branch');
   w.waits.poll();
   const n = w.server.read()[0].next!;
-  assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, not deployed yet: the next land takes it live, or the Taskmaster can run a deploy'], [b.id, 'deploy', 'ship failed']].sort());
+  assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy'], [b.id, 'deploy', 'ship failed']].sort());
   const since = n.since;
   now += 5000;
   assert.equal(w.server.read()[0].next!.since, since, "a stage's start stays put between polls, so the event isn't re-sent every poll");

@@ -395,7 +395,7 @@ function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, 
   if (fix?.closedAt != null && now - fix.closedAt >= RED_FIX_MS) {
     return { key, title: `${what}, and is still red an hour after fix minion #${fix.number} closed`,
       why: `no ${file} run on ${branch} has gone green since #${fix.number} closed at ${clock(fix.closedAt)}`,
-      fix: `reopen #${fix.number} or start another fix minion naming run ${mark.run}; if a fix landed, re-run ${file} on ${branch} to check it` };
+      fix: `reopen #${fix.number} or start another fix minion naming run ${mark.run}; if a fix shipped, re-run ${file} on ${branch} to check it` };
   }
   if (fix) {
     return { key, quiet: true, title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,
@@ -546,10 +546,10 @@ export function landProblems(s: LandState, now: number): Problem[] {
     const whys = [...new Set(s.fellBack.slice(-3).map((f) => f.why))];
     out.push({
       key: 'land:fallback', quiet: n < LAND_RING_STREAK,
-      title: `CI: the land gate fell back to perigee on ${n} lands in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
-      why: `${whys.join('; ')}, so each land ran the full suite on perigee instead of waiting on CI`,
-      fix: whys.some((w) => /runner/.test(w)) ? "check the desktop's Linux runners are online (the CI page's Runners tab); lands go back to CI by themselves"
-        : 'open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this',
+      title: `CI: the ship gate fell back to perigee on ${n} ships in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
+      why: `${whys.join('; ')}, so each ship ran the full suite on perigee instead of waiting on CI`,
+      fix: whys.some((w) => /runner/.test(w)) ? "check the desktop's Linux runners are online (the CI page's Runners tab); shipping goes back to CI by itself"
+        : 'open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
     });
   }
   const slow = Object.values(s.lands).filter((l) => now - l.joined >= LAND_SLOW_MS).sort((a, b) => a.joined - b.joined);
@@ -559,9 +559,9 @@ export function landProblems(s: LandState, now: number): Problem[] {
     const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} have` : `${names[0]} has`;
     out.push({
       key: 'land:slow', quiet: !ring,
-      title: `CI: ${who} been landing since ${clock(slow[0].joined)} (over ${ring ? '1 h' : '30 min'})`,
-      why: 'a land normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
-      fix: "read the landing minion's land output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster the land is jammed",
+      title: `CI: ${who} been shipping since ${clock(slow[0].joined)} (over ${ring ? '1 h' : '30 min'})`,
+      why: 'shipping normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
+      fix: "read the shipping minion's land.sh output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster shipping is jammed",
     });
   }
   return out;

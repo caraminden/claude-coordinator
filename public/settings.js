@@ -394,9 +394,9 @@ export function tuneUpButton() {
 function fastModeRow(p) {
   const on = h('input', { type: 'checkbox', id: 'land-mode', checked: p.land_mode === 'fast' });
   const [row, sum] = settingsRow({ icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
-    h('label', { class: 'toggle', title: 'Land now, test behind' }, on, 'Land now, test behind'),
-    settingsHelp('Low and medium lands go live on the smoke check alone, and the full suite runs on main behind them.',
-      'A red reopens the minion whose land broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other lands up. High-risk lands and changes to the land pipeline keep the full gate, and CI reds on main from lands send no Mandate alerts, except from watched workflows.'));
+    h('label', { class: 'toggle', title: 'Ship now, test behind' }, on, 'Ship now, test behind'),
+    settingsHelp('Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
+      'A red reopens the minion whose change broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other changes up. High-risk changes and changes to the ship pipeline keep the full gate, and CI reds on main from fast ships send no Mandate alerts, except from watched workflows.'));
   const shown = () => {
     on.checked = view.project?.land_mode === 'fast';
     sum.textContent = on.checked ? 'On' : 'Off';
@@ -557,7 +557,7 @@ export function approvalsEditor() {
           'Every other workflow that goes red on the default branch wakes the Taskmaster, puts a quiet item in Mandate and rings if no fix minion starts within an hour. One workflow file per line. A minion that dispatched a run on its own branch still hears its result.')] }),
       setting({ id: 'ci-watch', key: 'ci_watch', placeholder: 'desktop.yml', title: 'Watched CI workflows', ic: 'eye', hue: 'running', unit: 'workflow',
         help: [settingsHelp(['Watched even when it is in the quiet list above, like ', h('code', {}, 'desktop.yml'), '.'],
-          'When a workflow listed here goes red on the default branch (a land\'s push included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] }),
+          'When a workflow listed here goes red on the default branch (the push when a change ships included), the Taskmaster is woken once for that red streak, with the failing jobs, and told when it\'s back to green. One workflow file per line.')] }),
       fastModeRow(p)));
   return section;
 }
@@ -608,7 +608,7 @@ export function myInstructionsEditor() {
   let scope = 'everywhere';
   const textarea = h('textarea', {
     id: 'my-instructions-text', class: 'instructions-text settings-anchor', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
-    placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before landing, the model and effort they start on…',
+    placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before shipping, the model and effort they start on…',
   });
   const counter = h('span', { class: 'muted counter' });
   const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
@@ -707,7 +707,7 @@ export function myInstructionsEditor() {
       h('ul', { class: 'my-limits' },
         h('li', {}, 'secrets, logins, other people\'s files and deleting data'),
         h('li', {}, 'the tripwire'),
-        h('li', {}, 'how a change ships: tests, self-review and risk labels, the land script, the pipeline lane'),
+        h('li', {}, 'how a change ships: tests, self-review and risk labels, the ship script, the pipeline lane'),
         h('li', {}, 'shared names, the shared folder\'s layout and the decisions log'),
         h('li', {}, 'another person\'s pick or decision'))));
   (async () => {

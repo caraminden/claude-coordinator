@@ -234,15 +234,15 @@ export const appRoutes: Route[] = [
     // Citadel's own line is the deploy queue's (#1002); any other scheme's is its copy of the kit's land template (#1007).
     const own = targets.some((t) => t.target.id === CITADEL_TARGET);
     const repo = store.getProject(projectId)?.repo_dir;
-    if ((own ? !waits : !repo) || !line.length) throw new HttpError(404, 'This scheme has no land line here');
+    if ((own ? !waits : !repo) || !line.length) throw new HttpError(404, 'This scheme has no ship line here');
     const moved = line.find((e) => e.seq === body?.moved && !e.holds);
-    if (!moved) throw new HttpError(409, 'That landing is no longer waiting in line');
+    if (!moved) throw new HttpError(409, 'That change is no longer waiting in line to ship');
     if (!moved.movable) throw new HttpError(409, `${moved.name}: ${moved.why ?? 'it can\'t move'}`);
     const who = store.getUser(session.uid as number)?.name ?? 'a member';
     // Its place in the order written: a target shows only part of the line, so where it's dropped there isn't always that.
     const note = (order: number[]) => {
       const place = order.indexOf(moved.seq);
-      return `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;
+      return `${who} moved ${moved.name} ${place === 0 ? 'to ship next' : `to ${ordinal(place + 1)} of the changes waiting to ship`}`;
     };
     let order: number[];
     try {

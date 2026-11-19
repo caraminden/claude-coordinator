@@ -119,7 +119,7 @@ export class FastMode {
     const who = (e: KnownRed) => (e.n ? `#${e.n} is fixing it` : 'the Taskmaster has it');
     return [
       ...s.reds.flatMap((e) => e.ids.map((id) => `${id}\t${who(e)}`)),
-      ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose land broke it`),
+      ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose change broke it`),
     ].join('\n');
   }
 
@@ -246,10 +246,10 @@ export class FastMode {
     }
     if (!fresh.length) return; // red only on known ids: blame nobody
     // The first run since fast mode went on: main was red before any fast land, so no minion's land is to blame.
-    if (!from) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, the first run since fast mode went on, so it was red before any fast land`);
+    if (!from) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, the first run since fast mode went on, so it was red before any fast ship`);
     const range = (await this.git(repo, 'rev-list', '--reverse', '--first-parent', `${from}..${sha}`).catch(() => '')).split('\n').filter(Boolean);
     if (range.length <= 1) return this.open(projectId, repo, s, sha, fresh, output);
-    if (range.length - 1 > PIN_MAX) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, after ${range.length} lands: more than ${PIN_MAX} to pin the culprit`);
+    if (range.length - 1 > PIN_MAX) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, after ${range.length} ships: more than ${PIN_MAX} to pin the culprit`);
     s.verified = from;
     s.pin = { head: sha, shas: range.slice(0, -1), next: 0, ids: fresh, at: this.now(), output: tailOf(output) };
   }
@@ -269,9 +269,9 @@ export class FastMode {
     s.reds.push(entry);
     const list = ids.map((id) => `- ${id}`).join('\n');
     const tail = tailOf(output);
-    const what = `The full suite went red on ${BRANCH} behind fast-mode lands, ${unpinned ?? `on ${sha.slice(0, 12)}, the first commit it fails on`}. New failing ids:\n${list}`;
+    const what = `The full suite went red on ${BRANCH} behind fast-mode ships, ${unpinned ?? `on ${sha.slice(0, 12)}, the first commit it fails on`}. New failing ids:\n${list}`;
     if (ticket != null) {
-      this.d.tell(ticket, `${what}\n\nIt's yours to fix: your land is the culprit. Each id is in the scheme's known-red ledger, so other lands that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`);
+      this.d.tell(ticket, `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`);
       return;
     }
     entry.escalated = true;

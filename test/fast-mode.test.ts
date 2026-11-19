@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ESCALATE_MS, FastMode, verifyResult, type FastState } from '../src/fast-mode.ts';
 
-// src/fast-mode.ts (#1017): the suite behind fast-mode lands. One run per scheme on main's newest head, a red pinned
+// src/fast-mode.ts (#1017): the suite behind fast-mode ships. One run per scheme on main's newest head, a red pinned
 // on the commit that first fails on a new id, that commit's minion told, the known-red ledger kept and cleared, and
 // the Taskmaster told after 30 minutes. Runs are faked (the HostJobs a test answers); git is a real repo. The scheme
 // is Peek's id, not Citadel's (the every-scheme skill).
@@ -217,7 +217,7 @@ test("each id is pinned on the first commit failing it: the run reruns only the 
   await w.finish(red('a', 'b'));
   assert.equal(w.runs.at(-1)!.sha, c2);
   assert.equal(w.runs.at(-1)!.env.LAND_VERIFY_IDS, 'a\nb', 'a pinning run checks only the new ids');
-  assert.equal(w.fm.knownRed(PEEK), 'a\tCitadel is finding whose land broke it\nb\tCitadel is finding whose land broke it');
+  assert.equal(w.fm.knownRed(PEEK), 'a\tCitadel is finding whose change broke it\nb\tCitadel is finding whose change broke it');
   w.wait(ESCALATE_MS / 2);
   await w.finish(red('a'));
   assert.deepEqual(w.told.map((t) => t.ticket), [2], 'a is two\'s, found by its short sha');

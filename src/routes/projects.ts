@@ -778,8 +778,8 @@ export const projectRoutes: Route[] = [
         if (settings.land_mode === 'fast') app.fastMode?.reset(project.id);
         if (coordinator && settings.land_mode !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: settings.land_mode === 'fast'
-            ? `${session.name} turned fast mode on. Low and medium lands now go live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose land broke it, and comes to you if it isn't fixed in 30 minutes. High-risk lands and pipeline changes keep the full gate.`
-            : `${session.name} turned fast mode off. Every land waits for the full check and CI again.` });
+            ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose land broke it, and comes to you if it isn't fixed in 30 minutes. High-risk lands and pipeline changes keep the full gate.`
+            : `${session.name} turned fast mode off. Every change waits for the full check and CI again before it ships.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
@@ -1008,7 +1008,7 @@ export const projectRoutes: Route[] = [
         leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
         if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
         const f = await waiters.follow(leader.id, when);
-        if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work landing, so nothing can start after it`);
+        if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work shipping, so nothing can start after it`);
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }
       // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.

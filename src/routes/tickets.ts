@@ -577,9 +577,9 @@ export const ticketRoutes: Route[] = [
       // A secret card (#838): a masked field whose value goes to the secret store, never the chat.
       const secret = body.secret != null && body.questions == null && !doc && !notice ? secretAsk(body.secret) : null;
       const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);
-      // A card asking for the go to land says so, for the minions list's chip (#575). "land" is the word people read
-      // (Cara, 2026-11-19); it is stored as the older kind "merge".
-      const kind = oneOf(body.kind ?? null, ['merge', 'land'], 'kind') ? 'merge' as const : null;
+      // A card asking for the go to ship says so, for the minions list's chip (#575). "ship" is the word people read
+      // (Cara, 2026-11-19, picked "Ship" on #1020's card); it is stored as the older kind "merge", and "land" still counts.
+      const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? 'merge' as const : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
       const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
@@ -1158,7 +1158,7 @@ export const ticketRoutes: Route[] = [
   },
   {
     // The land tool (src/land.ts): run tools/land.sh in this minion's worktree on the host, for a turn in a container.
-    method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // { fix: true }: LAND_FIX=1, for the fix of a commit whose deploy was rolled back (tools/land.sh's bad_check). No body from older tools.
@@ -1210,7 +1210,7 @@ export const ticketRoutes: Route[] = [
   },
   {
     // hand_off_land (#706): the server runs tools/land.sh and reports it (LandHandoffs in src/land.ts), so the minion ends its turn now.
-    method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const body = (await readJson(req)) ?? {};
@@ -1218,7 +1218,7 @@ export const ticketRoutes: Route[] = [
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       const h: Handoff = { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk || undefined, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
       if (h.risk === 'high') {
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change lands only on a person\'s go: name who gave it and when in go, or ask with a land card (kind merge) first');
+        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, 'A high-risk change ships only on a person\'s go: name who gave it and when in go, or ask with a ship card (kind ship) first');
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
@@ -1259,10 +1259,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    method: 'GET', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
     handler: ({ res, app, ticket }) => {
       const run = app.landings.get(ticket.id);
-      if (!run) throw new HttpError(404, 'No landing has started for this minion');
+      if (!run) throw new HttpError(404, 'Nothing has started shipping for this minion');
       return json(res, 200, run);
     },
   },

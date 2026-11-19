@@ -117,19 +117,22 @@ test("the scheme's list counts an open minion's steps and leaves a dismissed one
   assert.equal(by('Dismissed one').pending_card_at, null);
 });
 
-test('a question card asked with kind merge reads as a land card on the list; an unknown kind is refused (#575)', async () => {
-  const q = [{ question: 'Merge and ship this high-risk change?', header: 'Land', options: [{ label: 'Merge and ship', recommended: true }, { label: 'Hold' }] }];
+test('a question card asked with kind merge reads as a ship card on the list; an unknown kind is refused (#575)', async () => {
+  const q = [{ question: 'Ship this high-risk change?', header: 'Ship', options: [{ label: 'Ship it', recommended: true }, { label: 'Hold' }] }];
   const asked = await tool('ask_question', { questions: q, kind: 'merge' });
   assert.equal(asked.error, false, asked.text);
   const { data: scheme } = await srv.call(`/api/projects/${A.id}`);
   const cards = scheme.tickets.find((t: any) => t.title === 'Asker').open_cards;
-  assert.deepEqual(cards.map((c: any) => [c.kind, c.what]), [['question', 'land']]);
+  assert.deepEqual(cards.map((c: any) => [c.kind, c.what]), [['question', 'ship']]);
   assert.deepEqual(scheme.tickets.find((t: any) => t.title === 'Sibling').open_cards.map((c: any) => c.what), ['question'], 'a plain question stays a question');
   const bad = await fetch(`${srv.base}/api/tickets/${M1.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind: 'deploy' }) });
   assert.equal(bad.status, 400);
-  // "land" is the word people read (Cara, 2026-11-19): asked with it, the card is stored as the older kind merge.
-  const land = await fetch(`${srv.base}/api/tickets/${M1.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind: 'land' }) });
-  assert.equal(land.status, 201, await land.text());
+  // "ship" is the word people read (Cara, 2026-11-19, on #1020's card), and an older "land" still counts: asked with
+  // either, the card is stored as the older kind merge.
+  for (const kind of ['ship', 'land']) {
+    const r = await fetch(`${srv.base}/api/tickets/${M1.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind }) });
+    assert.equal(r.status, 201, await r.text());
+  }
   const { data: after } = await srv.call(`/api/projects/${A.id}`);
-  assert.deepEqual(after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what), ['land', 'land']);
+  assert.deepEqual(after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what), ['ship', 'ship', 'ship']);
 });

@@ -68,8 +68,8 @@ const schemeOf = (id) => view?.projects?.find((p) => p.id === id) ?? (view?.proj
 const schemeName = (id) => schemeOf(id)?.name ?? `Scheme ${id}`;
 /** The scheme's icon as the sidebar shows it, beside its targets' names (Cara, 2026-11-12: "maybe also the scheme icons?"). */
 const iconOf = (id) => (schemeOf(id) ? schemeIcon(schemeOf(id)) : '');
-/** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy, and a PR's wait for its go (Cara, 2026-11-19: "Land"). */
-const STAGE_NAMES = { call: 'Start', merge: 'Land' };
+/** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy, and a PR's wait for its go (Cara, 2026-11-19, picked "Ship" on #1020's card). */
+const STAGE_NAMES = { call: 'Start', merge: 'Ship' };
 /** A stage's name as the land track says it, else the stage itself, capitalised. */
 const stageName = (key) => {
   if (STAGE_NAMES[key]) return STAGE_NAMES[key];
@@ -404,7 +404,7 @@ function rollbackBar(projectId, tv) {
     : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
       // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
       tv.deploy ? 'it stays there until main has a newer commit that passes the full suite. Deploy ships main now.'
-        : `lands wait for a fix to ${pin.from.slice(0, 7)}, whose deploy ships main.`)
+        : `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`)
       : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
   const button = !busy && rb.can
     ? h('button', { type: 'button', class: 'secondary', onclick: press, title: `Deploy ${to}, the newest commit on main that passed the full suite, and hold it there until a newer one passes` }, `Roll back to last green ${to}`)
@@ -517,8 +517,8 @@ function changeList(projectId, tv) {
   function landNext(wait) {
     if (!wait || wait === line.find((e) => !e.holds)) return '';
     const seqs = waiters.map((r) => r.wait.seq);
-    return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the waiting landings: it lands once the one landing now is done',
-      onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Land next');
+    return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the changes waiting to ship: it ships once the one shipping now is done',
+      onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Ship next');
   }
 }
 
@@ -546,7 +546,7 @@ function lineInOrder(projectId, line) {
  */
 function reorderLine(projectId, line, seqs, movedSeq) {
   const drop = ++lineDrops;
-  const name = line.find((e) => e.seq === movedSeq)?.name ?? 'the landing';
+  const name = line.find((e) => e.seq === movedSeq)?.name ?? 'the change';
   let before;
   optimistic({
     sets: `land-order:${projectId}`,
@@ -561,7 +561,7 @@ function reorderLine(projectId, line, seqs, movedSeq) {
       else lineOrders.delete(projectId);
       redraw();
     },
-    label: `move ${name} in the land line`,
+    label: `move ${name} in the ship line`,
   }).then(() => setTimeout(() => {
     // The server's releases event has come by now: from here its line speaks, a move someone else made since included.
     if (drop !== lineDrops) return;

@@ -136,23 +136,23 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
-  'land-card': {
-    about: 'a minion waiting on a land card (kind merge, the self-review\'s high-risk go, its chip reads "land") and a `gh pr merge` card for main (#1021)',
+  'ship-card': {
+    about: 'a minion waiting on a ship card (kind merge, the self-review\'s high-risk go, its chip reads "ship") and a `gh pr merge` card for main (#1021)',
     seed(c) {
-      const t = minion(c, 'Session cookie rotation', { note: 'risk high: needs a go to land', state: 'ready' });
+      const t = minion(c, 'Session cookie rotation', { note: 'risk high: needs a go to ship', state: 'ready' });
       const w = chat(c, t, 10);
       w.asked('Rotate the session cookies every week.');
       w.init();
-      w.said('Done and reviewed: risk high, since it touches sign-in. It lands only on a go.');
-      w.put('approval', { id: hex(), tool: 'Bash', input: { command: 'gh pr merge 41 --squash', description: 'Land PR 41' }, merge: {
+      w.said('Done and reviewed: risk high, since it touches sign-in. It ships only on a go.');
+      w.put('approval', { id: hex(), tool: 'Bash', input: { command: 'gh pr merge 41 --squash', description: 'Ship PR 41' }, merge: {
         target: '41', repo: null, method: 'squash', auto: false, admin: false, moved: false,
         pr: { number: 41, title: 'Rotate session cookies weekly', url: 'https://github.com/example/seeded/pull/41', state: 'OPEN', draft: false, head: 'ticket/41-cookies', base: 'main', checks: 'passed', additions: 48, deletions: 6, files: 3, commits: 2 },
       } });
-      const e = w.put('question', { id: hex(), kind: 'merge', questions: [{ question: 'Land this high-risk change? It changes how sign-in cookies rotate.', header: 'Land', multiSelect: false, options: [
-        { label: 'Land it', description: 'It goes onto main and goes live after the restart.', recommended: true },
+      const e = w.put('question', { id: hex(), kind: 'merge', questions: [{ question: 'Ship this high-risk change? It changes how sign-in cookies rotate.', header: 'Ship', multiSelect: false, options: [
+        { label: 'Ship it', description: 'It goes onto main and goes live after the restart.', recommended: true },
         { label: 'Hold', description: 'It waits on its branch.' },
       ] }] });
-      w.done('Asked for the go to land.');
+      w.done('Asked for the go to ship.');
       return route(c, t, e);
     },
   },
@@ -349,7 +349,7 @@ mock.boards('#takes', { boards: [
     },
   },
   landing: {
-    about: 'a minion whose turn ended on hand_off_land while the server lands it: working, by the server (#727)',
+    about: 'a minion whose turn ended on hand_off_land while the server ships it: working, by the server (#727)',
     seed(c) {
       const t = minion(c, 'Show server work as working', {}, 'bug');
       const w = chat(c, t, 24);
@@ -445,7 +445,7 @@ mock.boards('#takes', { boards: [
     about: 'the minions list with a minion in each state, types, notes and a build',
     seed(c) {
       const rows: [string, Parameters<Store['updateTicket']>[1], string][] = [
-        ['Merge the rail icons', { state: 'ready', note: 'tested, risk low; needs a go to land', replies: JSON.stringify(['Land it']) }, 'feature'],
+        ['Merge the rail icons', { state: 'ready', note: 'tested, risk low; needs a go to ship', replies: JSON.stringify(['Ship it']) }, 'feature'],
         ['Phone drawer swipe', { state: 'try', note: 'preview up: try the drawer on a phone' }, 'feature'],
         ['Release notes page', { state: 'parked', note: 'waiting on #12 going live' }, 'feature'],
         ['GitHub token expiry', { state: 'blocked', note: 'needs a new token from Cara' }, 'bug'],

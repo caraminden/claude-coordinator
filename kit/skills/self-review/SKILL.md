@@ -1,12 +1,12 @@
 ---
 name: self-review
 description: >
-  Before landing your own branch: a Grunt reviews the diff against main, real findings get fixed,
+  Before shipping your own branch: a Grunt reviews the diff against main, real findings get fixed,
   and the change gets a risk label (low / medium / high) that decides whether it ships by itself.
   Also for "how risky is this".
 ---
 
-Faster review for the people who land changes, not another gate: they wave low through and look
+Faster review for the people who ship changes, not another gate: they wave low through and look
 properly at high. Decisions behind it: Citadel #107 and #122 (Cara, 2026-10-29).
 
 The repo's CLAUDE.md, "Project facts", names what this skill needs per repo: the front end,
@@ -23,15 +23,15 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 - **Deep** when the change is high in 4, or the diff is over about 300 lines.
 - **Light** for everything else.
 
-**Alongside the land.** A change qualifies when how it ships is `hand_off_land` (the server runs
-the land and the call returns at once), the sizing is Light, and the file list alone says low.
+**Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
+the ship and the call returns at once), the sizing is Light, and the file list alone says low.
 `git diff --name-only main...HEAD` shows only front-end files, `README.md`, docs outside
 `docs/rubrics/` and `docs/design-system/`, and test files that exercise no high-risk file, and it
 shows none of: a file on Project facts' high-risk-by-file or medium-at-least lists, a file under
 its "Agent instructions", `CLAUDE.md`, `.claude/`, the kit, or a file a Project facts rubric's
 `when:` matches. Decide this from the file list before any review; a doubt about one file means it
-doesn't qualify. A qualifying change hands off its land as soon as its tests are green and the
-screenshots are checked, and the review in sections 2 to 4 runs in the same turn while the land
+doesn't qualify. A qualifying change hands off its ship as soon as its tests are green and the
+screenshots are checked, and the review in sections 2 to 4 runs in the same turn while the ship
 runs. Everything else reviews first.
 
 ## 2. Review in a Grunt
@@ -132,7 +132,7 @@ stay high whatever the edit, since a slip there can stop the service or open it 
 | medium | adds a table, or a nullable or defaulted column, leaving existing rows as they are; changes queries; adds a delete a person triggers for one record of their own; other server, engine or tool logic; agent instructions (`CLAUDE.md`, `.claude/`, the kit); anything not in another row |
 | low | front end only (as Project facts names it), docs (`docs/`, `README.md`), tests |
 
-Beside the label, set two words for the people who land changes, taking the Grunt's as a start:
+Beside the label, set two words for the people who ship changes, taking the Grunt's as a start:
 **Door** is one-way when reverting the commit can't undo it (rows rewritten or deleted, a
 message sent, something published or pushed to another repo), two-way otherwise. **Blast
 radius** is a word or two for how far a slip reaches (`page`, `route`, `server`, `scheme`,
@@ -140,12 +140,12 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
-- **Alongside the land:** the steps, in one turn:
+- **Alongside the ship:** the steps, in one turn:
   1. `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`.
-  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check and Codex in one message, `run_in_background: false`. The land runs on the server meanwhile; an open turn can't cut the Grunt off.
-  3. Nothing real found: end the turn with the report line below. The server dismisses you once the land is clean.
-  4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first land if that still runs, so a slow return is the line, not a hang.
-  5. The first land fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
+  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check and Codex in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
+  3. Nothing real found: end the turn with the report line below. The server dismisses you once the ship is clean.
+  4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
+  5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
   A qualifying change that the review shows is medium or high is a defect in the file-list test: say so in the Risk line, and the follow-up takes that label's route.
 - **Low or medium:** carry on with how a change ships, as the scheme instructions say (Project
   facts points at them; with none, open the PR and stop there). The ready note leads
@@ -159,10 +159,10 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
-- **High:** stop before landing. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card with `kind: "merge"` (its chip reads "land"), "Land this high-risk change?" (Land it /
+- **High:** stop before shipping. Post the same line, the findings you fixed in one line each,
+  and an `ask_question` card with `kind: "merge"` (its chip reads "ship"), "Ship this high-risk change?" (Ship it /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
-  and end the turn. Land only on a go.
+  and end the turn. Ship only on a go.
 
 ## UI findings
 

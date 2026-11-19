@@ -522,7 +522,7 @@ Authorization: Bearer <contraption.key>
   number from another scheme counts as none); 409 when #N is dismissed, which stays dismissed until
   a person reopens it. A minion parked on `start_after` answers the ask but keeps its brief held.
   Answers `202 { scheme, minion, member: true, proposal: false, files }`. It shares the bug and
-  feature rate limit, and isn't a go to land: only words a person types in Citadel are.
+  feature rate limit, and isn't a go to ship: only words a person types in Citadel are.
 - **Data** only files: no message, no wake. It writes a `<time>-ask.json` beside the files holding
   `{ contraption, person, item, summary, text, files, at }`. It needs at least one of files, text,
   summary or item (400). Answers `202 { scheme, member, proposal: false, files, sidecar }`.
@@ -859,9 +859,9 @@ The service restarts 5 s after any exit and starts with the box. Citadel never r
 your `DATA_DIR` beyond creating it when missing.
 
 **Deploying.** An admin sets `repo`, `branch` and `folder` and installs the service once. After
-that your home scheme's Taskmaster and minions have `deploy_contraption`. A land handed off
+that your home scheme's Taskmaster and minions have `deploy_contraption`. A ship handed off
 with `hand_off_land` deploys it by itself and reports the outcome, and auto-deploy covers main
-5 minutes after it last moved, so the tool is for redeploys outside a land. It deploys what is on
+5 minutes after it last moved, so the tool is for redeploys outside a ship. It deploys what is on
 GitHub, so push first. A deploy (tested):
 
 1. checks out the branch's new commit in the idle one of two checkouts, `~/apps/.<name>/a` and

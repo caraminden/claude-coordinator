@@ -91,7 +91,7 @@ export interface Next extends Progress {
 /** Why a waiting landing can't be moved (#1002, #1007): its branch's land script predates reordering. */
 export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it lands in its turn";
 /** Why one behind such a landing can't move (#1020): nobody who arrived after that one goes ahead of it. */
-export const BEHIND_OLD = "Can't move yet: a landing ahead of it started from a branch whose land script is older than reordering, and nobody behind that one can pass it";
+export const BEHIND_OLD = "Can't move yet: a change ahead of it started from a branch whose land script is older than reordering, and nobody behind that one can pass it";
 
 export interface LineEntry {
   /** "#620", or the label of a run that isn't a minion's ("tools/deploy.sh"). */
@@ -366,8 +366,8 @@ export class CitadelServer implements Reader {
       const ph = landPhase(loneDeploy.phase);
       return { stage: ph.stage, since: loneDeploy.mtime, usual: this.stageUsual(ph.stage), waitingOn: null, text: ph.text };
     }
-    const text = 'on main, not deployed yet: the next land takes it live, or the Taskmaster can run a deploy';
-    return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: text, text: ship.text, brief: 'on main, waits for the next land' };
+    const text = 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy';
+    return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: text, text: ship.text, brief: 'on main, waits for the next ship' };
   }
 
   /** Note when each change first reached each stage, for the release's stage times; a change that went back starts afresh. */

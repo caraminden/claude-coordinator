@@ -206,11 +206,11 @@ export function shipLine(s: BranchStatus | null, interruptible: number, failure:
   }
   const and = edits ? `, and ${edits}` : '';
   // A feeder merged into its build: done for now, live when the build lands (main takes it by merge, so its hashes stay).
-  if (!s.merged && s.build?.merged) return { stage: 'build', text: `Merged into Build ${s.build.n}, not live until the build lands`, commit };
+  if (!s.merged && s.build?.merged) return { stage: 'build', text: `Merged into Build ${s.build.n}, not live until the build ships`, commit };
   if (!s.merged && s.build) return { stage: 'branch', text: `On its branch: ${plural(s.build.ahead, 'commit')} not in build/${s.build.n}${and}`, commit };
   if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}${and}`, commit };
   // Another scheme's repo: landed is as far as it goes here.
-  if (!s.deploy) return { stage: 'main', text: `Landed on ${s.base ?? 'main'}`, commit };
+  if (!s.deploy) return { stage: 'main', text: `Shipped to ${s.base ?? 'main'}`, commit };
   if (s.deploy.live) return { stage: 'live', text: 'Live', commit };
   if (failure) {
     // Why, from the report: what follows "failed: ", or its first sentence. The bar shows it all on hover.

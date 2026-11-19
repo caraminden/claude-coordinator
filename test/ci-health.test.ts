@@ -633,16 +633,16 @@ test('the land gate falling back to perigee is a quiet item from 2 lands in a ro
   t = through(s, 2, '#555', noJob, t);
   assert.deepEqual(landProblems(s, t), [{
     key: 'land:fallback', quiet: true,
-    title: "CI: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap, run 43082450082), #555 (GitHub never started its run)",
-    why: 'the desktop suite hit the 6-min cap; GitHub never started its run, so each land ran the full suite on perigee instead of waiting on CI',
-    fix: 'open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this',
+    title: "CI: the ship gate fell back to perigee on 2 ships in a row: #544 (the desktop suite hit the 6-min cap, run 43082450082), #555 (GitHub never started its run)",
+    why: 'the desktop suite hit the 6-min cap; GitHub never started its run, so each ship ran the full suite on perigee instead of waiting on CI',
+    fix: 'open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
   }]);
   t = through(s, 3, '#556', capHit, t, 7);
-  assert.match(landProblems(s, t)[0].title, /^CI: the land gate fell back to perigee on 3 lands in a row: #544 .*, #555 .*, #556 \(the desktop suite hit the 6-min cap, run 7\)$/);
+  assert.match(landProblems(s, t)[0].title, /^CI: the ship gate fell back to perigee on 3 ships in a row: #544 .*, #555 .*, #556 \(the desktop suite hit the 6-min cap, run 7\)$/);
   assert.equal(landProblems(s, t)[0].quiet, true);
   t = through(s, LAND_RING_STREAK, '#557', capHit, t);
   assert.equal(landProblems(s, t)[0].quiet, false, `${LAND_RING_STREAK} in a row rings`);
-  assert.match(landProblems(s, t)[0].title, /4 lands in a row: 1 more, then #555 /);
+  assert.match(landProblems(s, t)[0].title, /4 ships in a row: 1 more, then #555 /);
   t = through(s, 5, '#558', green, t);
   assert.deepEqual(landProblems(s, t), [], 'a green gate clears it');
   t = through(s, 6, '#559', capHit, t);
@@ -657,7 +657,7 @@ test("the land gate's alarm: a job no runner took is named as that, not as a cap
   assert.deepEqual(landProblems(s, t), [], "the desktop off isn't the gate failing: the stuck-runner rule covers it");
   // Only what CI said while the land waited on it counts: ci-wait drops the run once the land moves on.
   t = through(s, 3, '#3', [['rebase', null, 5_000], ['ci', 'jobs', 30_000], ['ci', 'failed', 2_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]], t, 10);
-  assert.equal(landProblems(s, t)[0]?.title, 'CI: the land gate fell back to perigee on 2 lands in a row: #1 (no runner started its job, run 9), #3 (its run failed before the tests ran, run 10)');
+  assert.equal(landProblems(s, t)[0]?.title, 'CI: the ship gate fell back to perigee on 2 ships in a row: #1 (no runner started its job, run 9), #3 (its run failed before the tests ran, run 10)');
   assert.match(landProblems(s, t)[0].fix!, /^check the desktop's Linux runners are online/, 'a runner cause says where to look');
   t = through(s, 4, '#4', desktopOff, t);
   assert.equal(landProblems(s, t).length, 1, 'still open: only a green gate clears it');
@@ -676,15 +676,15 @@ test('a land in the line over 30 min is a quiet item, waiting in line included, 
   assert.deepEqual(landProblems(s, t + 29 * MIN), []);
   landStep(s, [land(2, '#551', 'rebase'), land(3, '#552', 'line')], t + 31 * MIN);
   const slow = landProblems(s, t + 31 * MIN);
-  assert.deepEqual(slow.map((x) => [x.key, x.quiet, x.title]), [['land:slow', true, `CI: #551 has been landing since ${clock(t)} (over 30 min)`]]);
+  assert.deepEqual(slow.map((x) => [x.key, x.quiet, x.title]), [['land:slow', true, `CI: #551 has been shipping since ${clock(t)} (over 30 min)`]]);
   assert.match(slow[0].why!, /under 15 min/);
   assert.deepEqual(landProblems(s, t + 40 * MIN), slow, 'the words stay put as the minutes pass, so it is not re-sent');
   const ringing = landProblems(s, t + LAND_RING_MS);
-  assert.deepEqual(ringing.map((x) => [x.quiet, x.title]), [[false, `CI: #551 has been landing since ${clock(t)} (over 1 h)`]]);
+  assert.deepEqual(ringing.map((x) => [x.quiet, x.title]), [[false, `CI: #551 has been shipping since ${clock(t)} (over 1 h)`]]);
   landStep(s, [land(3, '#552', 'rebase')], t + 41 * MIN);
   assert.deepEqual(landProblems(s, t + 41 * MIN), [], 'cleared when #551 left the line');
   landStep(s, [land(3, '#552', 'rebase'), land(4, '#553', 'line')], t + 95 * MIN);
-  assert.match(landProblems(s, t + 95 * MIN)[0].title, /^CI: #552 has been landing since /);
+  assert.match(landProblems(s, t + 95 * MIN)[0].title, /^CI: #552 has been shipping since /);
 });
 
 test("the land gate's items: quiet under the live scheme first, then joining CI health's one alert as it rings, and clearing themselves (#561, #968)", async () => {
@@ -698,11 +698,11 @@ test("the land gate's items: quiet under the live scheme first, then joining CI 
     }
   };
   await lands(1, ['#544', '#555']);
-  assert.deepEqual(w.puts, [['Cara', 'ci.land:fallback', 'CI: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap), #555 (the desktop suite hit the 6-min cap). Why: the desktop suite hit the 6-min cap, so each land ran the full suite on perigee instead of waiting on CI. Fix: open the fallen-back runs on the CI page and fix what stopped them; the next land with a green gate clears this.']]);
+  assert.deepEqual(w.puts, [['Cara', 'ci.land:fallback', 'CI: the ship gate fell back to perigee on 2 ships in a row: #544 (the desktop suite hit the 6-min cap), #555 (the desktop suite hit the 6-min cap). Why: the desktop suite hit the 6-min cap, so each ship ran the full suite on perigee instead of waiting on CI. Fix: open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this.']]);
   assert.deepEqual(w.quiet, ['ci.land:fallback'], 'a quiet item, from the scheme');
   assert.deepEqual(w.from, ['Peek Auras']);
   await lands(3, ['#556', '#557']);
-  assert.deepEqual(w.puts.slice(-2).map(([, k, x]) => [k, x?.slice(0, 84) ?? null]), [['ci.land:fallback', null], ['ci.open', 'CI, Peek Auras: the land gate fell back to perigee on 4 lands in a row: 1 more, then']], 'ringing: the quiet one goes, the alert comes');
+  assert.deepEqual(w.puts.slice(-2).map(([, k, x]) => [k, x?.slice(0, 84) ?? null]), [['ci.land:fallback', null], ['ci.open', 'CI, Peek Auras: the ship gate fell back to perigee on 4 ships in a row: 1 more, then']], 'ringing: the quiet one goes, the alert comes');
   // The 5-min poll keeps it, with GitHub's own problems beside it.
   const before = w.puts.length;
   await w.health.tick(t);
@@ -715,7 +715,7 @@ test("the land gate's items: quiet under the live scheme first, then joining CI 
   const again = new CiHealth(w.store, w.deps);
   for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(7, '#560', phase, ci)], t); t += ms; }
   await again.land(w.peek.id, [], t);
-  assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #559 .*#560/);
+  assert.match(w.puts.at(-1)![2]!, /2 ships in a row: #559 .*#560/);
 });
 
 test("the land alarm wakes its Taskmaster once, with each run's link, failed step and runner (#869, #983)", async () => {
@@ -731,7 +731,7 @@ test("the land alarm wakes its Taskmaster once, with each run's link, failed ste
   }
   assert.equal(told.length, 1, 'once');
   assert.deepEqual([told[0][0], told[0][2]], ['Peek Auras', true]);
-  assert.match(told[0][1], /^Peek Auras: CI: the land gate fell back to perigee on 4 lands in a row.*\. Why: .*\. Fix: /);
+  assert.match(told[0][1], /^Peek Auras: CI: the ship gate fell back to perigee on 4 ships in a row.*\. Why: .*\. Fix: /);
   assert.match(told[0][1], /https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/7002: tests › the runner's clock failed on DESKTOP-G248IJ8-desktop/);
   assert.match(told[0][1], /runs\/7004: tests › the runner's clock/, 'the run that tipped it over is in the wake');
 });

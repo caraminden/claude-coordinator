@@ -188,7 +188,7 @@ test('a landing waiting for CI finds its run by its commit, as land.sh does', as
   gh.answers.set('repos/o/r/actions/runs/5/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
   await ci.tick();
   assert.ok(gh.calls.includes('repos/o/r/actions/workflows/tests.yml/runs?per_page=5&head_sha=abc123'));
-  assert.equal(waits.wait(m.id)!.chip, 'land · CI 2/3');
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI 2/3');
 });
 
 test("a landing waiting for CI passes over an earlier try's red run of the same commit, which land.sh replaces", async () => {
@@ -204,13 +204,13 @@ test("a landing waiting for CI passes over an earlier try's red run of the same 
   gh.answers.set(runs, { workflow_runs: [old] });
   gh.answers.set('repos/o/r/actions/runs/5/jobs', { jobs: [job('test', { status: 'completed', conclusion: 'failure' })] });
   await ci.tick();
-  assert.equal(waits.wait(m.id)!.chip, 'land · CI', "not the old run's result");
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI', "not the old run's result");
   // The run land.sh starts in its place is the one shown; a red run of this wait's own still counts.
   gh.answers.set(runs, { workflow_runs: [{ id: 9, status: 'completed', conclusion: 'failure', created_at: iso(40) }, old] });
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
   at(125);
   await ci.tick();
-  assert.equal(waits.wait(m.id)!.chip, 'land · CI 2/3');
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI 2/3');
 });
 
 test('a landing waiting for CI shows its run on land/<branch>; a fallback says so', async () => {
@@ -223,29 +223,29 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   };
   phase('waiting for CI since 12:01');
   waits.poll();
-  assert.equal(waits.wait(m.id)!.chip, 'land · CI', 'no run yet');
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI', 'no run yet');
   // An old run of the branch from an earlier landing doesn't count; the new one does.
   const runs = `repos/o/r/actions/workflows/tests.yml/runs`;
   gh.answers.set(runs, { workflow_runs: [{ id: 5, workflow_id: 3, status: 'completed', created_at: iso(-3600) }] });
   await ci.tick();
-  assert.equal(waits.wait(m.id)!.chip, 'land · CI');
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI');
   gh.answers.set(runs, { workflow_runs: [{ id: 9, workflow_id: 3, status: 'queued', created_at: iso(61) }] });
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test')] });
   at(65);
   await ci.tick();
   assert.ok(gh.calls.includes(`${runs}?per_page=5&branch=land%2F${encodeURIComponent(m.branch)}`));
   const w = waits.wait(m.id)!;
-  assert.deepEqual([w.kind, w.stage, w.chip, w.text], ['land', 'test', 'land · CI queued', 'waiting for CI: queued for a runner (citadel-ci-linux); if none starts it soon, the suite runs on perigee']);
+  assert.deepEqual([w.kind, w.stage, w.chip, w.text], ['land', 'test', 'ship · CI queued', 'waiting for CI: queued for a runner (citadel-ci-linux); if none starts it soon, the suite runs on perigee']);
   assert.equal(w.brief, 'CI: queued');
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(4, 8) })] });
   at(85);
   await ci.tick();
-  assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['land · CI 5/8', 'waiting for CI: test step 5 of 8: step 5 (cara-desktop)']);
+  assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['ship · CI 5/8', 'waiting for CI: test step 5 of 8: step 5 (cara-desktop)']);
   assert.equal(waits.wait(m.id)!.brief, 'CI: step 5', "the line's short form: one counter (the landing's stage), the step by name, no runner (#630)");
   // No runner took it in time: land.sh cancels the run and tests on perigee.
   phase('running the tests since 12:03');
   waits.poll();
-  assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['land · tests', 'CI fell back: running the full suite on perigee']);
+  assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['ship · tests', 'CI fell back: running the full suite on perigee']);
   assert.equal(ci.view(m.id), null, 'the cancelled run is let go');
 });
 

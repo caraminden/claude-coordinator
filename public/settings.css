@@ -370,3 +370,4 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .settings-row-body .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
 .settings-row-body .toggle:has(input:disabled) { color: var(--muted); cursor: default; }
 .settings-row-body .hint { color: var(--muted); font-size: 0.9em; }
+.settings-block[hidden] { display: none; }

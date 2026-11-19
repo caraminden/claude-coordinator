@@ -95,15 +95,15 @@ export function notificationsPage() {
   const muteRow = row('belloff', 'danger', `Mute ${project.name}`, `This device · scheme ${project.name}`,
     toggle(mute, `Mute ${project.name} here`, 'Stop notifications from this scheme on this device'),
     settingsHelp(`Stop notifications from ${project.name} on this device. Other schemes keep notifying.`));
-  const deviceRows = [pinnedRow];
-  const schemeRows = [allRow, muteRow];
+  // The scheme's heading goes with its rows, so a device that isn't subscribed shows no empty heading.
+  const schemeBlock = h('div', { class: 'settings-block' }, ...settingsSection(`${project.name} on this device`, allRow, muteRow));
   const show = (state, err) => {
     pushState = state;
     on.checked = state.subscribed;
     mute.checked = state.muted.includes(project.id);
     pinned.checked = !!state.onlyPinned;
     all.checked = !!state.everything?.includes(project.id);
-    for (const r of [...deviceRows, ...schemeRows]) r.hidden = !state.subscribed;
+    pinnedRow.hidden = schemeBlock.hidden = !state.subscribed;
     const denied = Notification.permission === 'denied';
     on.disabled = denied && !state.subscribed;
     hint.textContent = err ?? (denied && !state.subscribed ? 'Blocked for this site in the browser settings' : '');
@@ -154,7 +154,7 @@ export function notificationsPage() {
       settingsTabs(),
       h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.')),
     pushSupported
-      ? [...settingsSection('This device', onRow, pinnedRow), ...settingsSection(`${project.name} on this device`, allRow, muteRow)]
+      ? [...settingsSection('This device', onRow, pinnedRow), schemeBlock]
       : h('p', { class: 'muted' }, 'This browser can\'t show notifications. Install Citadel as an app, or use a browser that supports them.'));
 }
 

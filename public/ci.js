@@ -138,6 +138,15 @@ export function ciPage(projectId) {
 // The chips (the overview's and the top bar's) share one read a minute.
 const chips = new Set();
 let chipTimer = null;
+// What the last read said, drawn on a new chip at once: a chip that waits for its own read pops in beside the usage bar (#989).
+let chipRead = null;
+const paintChip = (c, { hidden, title, worst }) => {
+  c.hidden = hidden;
+  c.dataset.placed = '1';
+  c.title = title;
+  c.setAttribute('aria-label', title || 'CI');
+  c.querySelector('.dot').className = `dot ${worst}`;
+};
 async function readChips() {
   chipTimer = null;
   for (const c of chips) if (c.dataset.placed && !c.isConnected) chips.delete(c);
@@ -148,13 +157,8 @@ async function readChips() {
     const ringing = schemes.reduce((n, s) => n + s.problems.filter((x) => !x.quiet).length, 0);
     const quiet = schemes.reduce((n, s) => n + s.problems.filter((x) => x.quiet).length, 0);
     const title = schemes.length ? `CI: ${ringing ? `${ringing} need${ringing === 1 ? 's' : ''} a person` : 'nothing needs a person'}${quiet ? `, ${quiet} being handled` : ''}${pcs.some(trouble) ? `; ${pcs.filter(trouble).map(trouble).join('; ')}` : ''}` : '';
-    for (const c of chips) {
-      c.hidden = !schemes.length;
-      c.dataset.placed = '1';
-      c.title = title;
-      c.setAttribute('aria-label', title || 'CI');
-      c.querySelector('.dot').className = `dot ${worst}`;
-    }
+    chipRead = { hidden: !schemes.length, title, worst };
+    for (const c of chips) paintChip(c, chipRead);
   } catch {
     // The last colour stays: the next minute asks again.
   }
@@ -167,6 +171,7 @@ export function ciChip(projectId = null) {
     onclick: () => { const id = projectId ?? view?.projectId ?? localStorage.getItem(LAST_SCHEME); c.href = id ? `#/p/${id}/ci` : '#/'; } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'CI'));
   chips.add(c);
+  if (chipRead) paintChip(c, chipRead);
   if (projectId === null) c.dataset.placed = '1';
   if (chipTimer) clearTimeout(chipTimer);
   chipTimer = setTimeout(readChips, 0);

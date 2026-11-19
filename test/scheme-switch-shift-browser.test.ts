@@ -47,21 +47,24 @@ after(async () => {
 });
 
 // Where the minions list's pieces sit below the panel's own top, every frame for a while after the switch.
-const WATCH = `new Promise((resolve) => {
+const watch = (to: string, name: string) => `new Promise((resolve) => {
   const top = () => document.querySelector('.sidebar > summary').getBoundingClientRect().top;
   const at = (sel) => { const e = document.querySelector(sel); return e ? Math.round(e.getBoundingClientRect().top - top()) : null; };
   const seen = []; const t0 = performance.now();
   (function f() {
-    if (document.getElementById('coordinator-row')?.textContent.includes('Beta')) seen.push(JSON.stringify([at('#coordinator-row'), at('#threads')]));
+    if (document.getElementById('coordinator-row')?.textContent.includes('${name}')) seen.push(JSON.stringify([at('#coordinator-row'), at('#threads')]));
     if (performance.now() - t0 < 800) requestAnimationFrame(f); else resolve([...new Set(seen)]);
   })();
-  location.hash = '#/p/2';
+  location.hash = '${to}';
 })`;
 
-test('switching to a scheme with no waiting minions and no filters keeps the minions list where it first drew', { skip }, async () => {
+test('switching schemes, there and back, keeps the minions list where it first drew', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'Alpha to draw its strip and filters', `!!document.querySelector('.inbox-strip:not([hidden]) .inbox-toggle') && !!document.querySelector('#prop-filter .pf-toggle')`);
-  const positions = (await page.eval(WATCH)) as string[];
-  assert.ok(positions.length > 0, 'Beta drew');
-  assert.equal(positions.length, 1, `the list moved after Beta drew: ${positions.join(' then ')}`);
+  // First visit to Beta (everything fetched, late), then back to Alpha (drawn from what the page kept).
+  for (const [to, name] of [['#/p/2', 'Beta'], ['#/p/1', 'Alpha']]) {
+    const positions = (await page.eval(watch(to, name))) as string[];
+    assert.ok(positions.length > 0, `${name} drew`);
+    assert.equal(positions.length, 1, `the list moved after ${name} drew: ${positions.join(' then ')}`);
+  }
 });

@@ -247,4 +247,5 @@ test("Citadel's page may frame its contraptions' hosts and be framed by them, an
   const csp = got.headers['content-security-policy']!;
   assert.match(csp, new RegExp(`frame-src 'self' \\*\\.${DOMAIN.replace('.', '\\.')}`));
   assert.match(csp, new RegExp(`frame-ancestors 'self' \\*\\.${DOMAIN.replace('.', '\\.')}`));
+  assert.match(csp, /frame-src [^;]*citadel-firefox:/, '"Open links in Firefox" launches its scheme through a hidden frame (#988)');
 });

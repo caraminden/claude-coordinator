@@ -30,6 +30,7 @@ import type { Previews } from './previews.ts';
 import type { Releases } from './releases.ts';
 import type { ApkBuilds } from './apk-build.ts';
 import type { AutoDeploy } from './auto-deploy.ts';
+import type { Rollback } from './rollback.ts';
 import type { Waits } from './waits.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -235,6 +236,7 @@ export interface App {
   releases: Releases;
   /** Auto-deploy and the release cards' Deploy button (src/auto-deploy.ts, #629). */
   autoDeploy: AutoDeploy;
+  rollback: Rollback;
   /** What each minion waits on, the land line among them (src/waits.ts): the Releases page reorders the line through it (#1002). Absent in tests that build no server. */
   waits?: Waits;
   apkBuilds: ApkBuilds;

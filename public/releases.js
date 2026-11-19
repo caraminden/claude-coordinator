@@ -285,6 +285,7 @@ function targetCard(projectId, tv, alone) {
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
+    rollbackBar(projectId, tv),
     keyBar(projectId, tv),
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
     n ? [
@@ -329,7 +330,10 @@ const deploying = new Set();
 
 /** A deploy pressed here shows as one until the server's own view stops offering it (it's running, or done). */
 function settleDeploys(s) {
-  for (const tv of s.targets) if (!tv.deploy?.can) deploying.delete(`${s.projectId}/${tv.target.id}`);
+  for (const tv of s.targets) {
+    if (!tv.deploy?.can) deploying.delete(`${s.projectId}/${tv.target.id}`);
+    if (!tv.rollback?.can) rollingBack.delete(`${s.projectId}/${tv.target.id}`);
+  }
 }
 
 /** A target's deploy as last drawn: events replace the objects, so actions look it up again rather than keep one. */
@@ -371,6 +375,39 @@ function deployBar(projectId, tv) {
     h('label', { class: 'rel-auto', title: 'Deploys by itself about 5 minutes after main last moved' },
       h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
     d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
+}
+
+/** Targets whose Roll back to last green was pressed here, until the server's view stops offering it: "projectId/target". */
+const rollingBack = new Set();
+
+/**
+ * Roll back to last green (#1016, docs/adr/0010-roll-back-to-last-green.md): offered while what runs is newer than the
+ * scheme's last green (Cara, 2026-11-18: "Last green only"). Pressing it shows "Rolling back…" at once and deploys last
+ * green behind it; a refusal puts the button back with a toast and Retry. Once there, the target stays pinned until main
+ * has a newer green commit ("Hold until the fix"), and the line says so; a roll back that didn't go live says why.
+ */
+function rollbackBar(projectId, tv) {
+  const rb = tv.rollback;
+  if (!rb) return '';
+  const key = `${projectId}/${tv.target.id}`;
+  const to = rb.sha.slice(0, 7);
+  const press = () => optimistic({
+    key: `rollback:${key}`,
+    apply: () => { rollingBack.add(key); redraw(); },
+    send: () => api('api/releases/rollback', { method: 'POST', body: { projectId, target: tv.target.id } }),
+    undo: () => { rollingBack.delete(key); redraw(); },
+    label: `roll ${schemeName(projectId)} ${tv.target.name} back to last green`,
+  });
+  const busy = rb.running || (rollingBack.has(key) && rb.can);
+  const pin = rb.pin;
+  const line = busy ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
+    : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: it stays there until main has a newer commit that passes the full suite. Deploy ships main now.`)
+      : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
+  const button = !busy && rb.can
+    ? h('button', { type: 'button', class: 'secondary', onclick: press, title: `Deploy ${to}, the newest commit on main that passed the full suite, and hold it there until a newer one passes` }, `Roll back to last green ${to}`)
+    : '';
+  if (!line && !button) return '';
+  return h('div', { class: 'rel-deploy rel-rollback' }, button, line);
 }
 
 /** Apps whose Make release key was pressed here, until the server's view stops offering it: "projectId/app". */

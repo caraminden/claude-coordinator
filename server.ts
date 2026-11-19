@@ -2,6 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createConnection, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -55,7 +56,7 @@ import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
-import { AppServices, serviceOptions } from './src/app-services.ts';
+import { AppServices, serviceOptions, ServiceError } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
@@ -78,8 +79,11 @@ import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits, readHeavy } from './src/waits.ts';
-import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
+import { LastGreen } from './src/last-green.ts';
+import { Rollback } from './src/rollback.ts';
+import { HostJobs } from './src/host-job.ts';
 import { dispatch, OldApk, OtherKey, publish } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
@@ -643,6 +647,8 @@ services.onDeploy = (view) => {
   const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
   if (live) void apkBuilds.schedule(live, view.by);
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
+  const home = view.state !== 'deployed' && view.to ? store.getContraption(view.name)?.home_scheme : null;
+  if (home != null) rollback.failed(home, `app:${view.name}`, view.to!, view.said.at(-1) ?? view.state);
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
   if (row?.home_scheme != null) tellHome(row.home_scheme, `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`);
@@ -698,8 +704,56 @@ const testCopyReader = new TestCopyReader({
     s.on('error', () => done(false)).on('timeout', () => (s.destroy(), done(false)));
   }),
 });
+// Roll back to last green (#1016, src/rollback.ts): each scheme's last green from CI health's reads, and the button on
+// a Releases card that can deploy a given commit: an app's two-slot deploy, or Citadel's own tools/deploy.sh --to.
+const lastGreen = new LastGreen(store);
+const rollbackJobs = new HostJobs(() => runner.units);
+const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
+// deploy.sh's paths, only where this server was given them (a dev copy rolling back a scratch checkout): the live
+// server's defaults otherwise. A dev copy without them can't roll back, so it never touches the live checkout.
+const deployEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
+/** Citadel's own roll back's job, once it ended: went live, or say why not, and clear it for the next one. */
+function citadelRollbackEnded(current: string | null): boolean {
+  const job = rollbackJobs.state(ROLLBACK_DIR, 2000);
+  if (!job) return false;
+  if (job.code === null) return true;
+  const p = ownScheme();
+  const pin = p && lastGreen.pinned(p.id, CITADEL_TARGET);
+  if (p && pin && job.code !== 0 && current !== pin.sha) rollback.failed(p.id, CITADEL_TARGET, pin.sha, `tools/deploy.sh --to said: ${job.output.trim().split('\n').slice(-3).join(' ') || `exit ${job.code}`}`);
+  rmSync(ROLLBACK_DIR, { recursive: true, force: true });
+  return false;
+}
+const rollback = new Rollback({
+  lastGreen, repoDir: (id) => store.getProject(id)?.repo_dir ?? null, tell: tellHome, changed: () => releases.poll(),
+  get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollbackEnded(tv.current?.version ?? null) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
+  starters: {
+    contraption: (tv, to, by, uid) => {
+      const row = store.getContraption(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '');
+      if (!row || row.home_scheme !== tv.target.projectId) throw new HttpError(404, `${tv.target.name} isn't one of this scheme's apps`);
+      try {
+        startDeploy(app, row, by, null, uid, false, to);
+      } catch (err) {
+        if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+    },
+    // Citadel's server (the every-scheme skill's §1: only the scheme whose repo this server runs has it): deploy.sh
+    // --to in a unit of its own, as a landing runs, since its restart ends this server. The next one reads how it went.
+    [CITADEL_TARGET]: (tv, to) => {
+      const p = store.getProject(tv.target.projectId);
+      if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
+      if (services.opts.off && !process.env.DEPLOY_LIVE) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
+      rollbackJobs.start({
+        dir: ROLLBACK_DIR, cwd: p.repo_dir, argv: ['bash', 'tools/deploy.sh', '--to', to], env: { ...turnEnv(process.env), ...deployEnv() },
+        unit: `citadel-rollback-${Date.now()}`, description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`, ticketId: 0,
+      });
+    },
+  },
+});
 const releases = new Releases({
   store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  rollback: (tv) => rollback.info(tv),
   // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
   releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
     landsInFlight.attach(views);
@@ -717,7 +771,7 @@ const releases = new Releases({
 });
 // Auto-deploy and the release cards' Deploy button (#629, src/auto-deploy.ts): each kind's release step.
 const autoDeploy = new AutoDeploy({
-  store, targets: () => targetFinder.list(), view: () => releases.view(() => true),
+  store, targets: () => targetFinder.list(), view: () => releases.view(() => true), held: lastGreen,
   failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
   enabled: () => !services.opts.off,
   deployers: {
@@ -915,6 +969,10 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
+  // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
+  green: (p, runs, branch) => {
+    if (p.repo_dir) lastGreen.note(p.id, p.repo_dir, `refs/heads/${branch}`, runs).then(() => releases.poll(), (err) => console.error(`Last green of ${p.name} failed:`, err));
+  },
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
   home: () => store.getProject(alertScheme(0)),
@@ -1135,7 +1193,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1280,7 +1338,7 @@ server.on('listening', () => void services.interrupted().then((cut) => {
       continue;
     }
     try {
-      startDeploy(app, row, d.by, null, d.uid, true);
+      startDeploy(app, row, d.by, null, d.uid, true, d.to);
       console.log(`${d.name}'s deploy, cut short by the restart, starts again.`);
     } catch (err: any) {
       console.error(`Couldn't start ${d.name}'s deploy again:`, err.message);

@@ -6,6 +6,7 @@
 // Served at GET /api/releases and sent as a `releases` event per scheme when its part changes. Importing it
 // starts nothing: server.ts calls poll() and live().
 import type { DeployInfo } from './auto-deploy.ts';
+import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { gitOut } from './git.ts';
@@ -145,6 +146,8 @@ export interface TargetView {
   deploy?: DeployInfo;
   /** A Capacitor app with no release key yet (#837): its contraption's name, for the card's Make release key button. */
   releaseKey?: string;
+  /** Its Roll back to last green button and pin (src/rollback.ts, #1016); absent when its kind can't or there's no last green. */
+  rollback?: RollbackInfo;
 }
 
 export interface SchemeReleases {
@@ -185,6 +188,8 @@ export interface ReleasesDeps {
   deploy?: (tv: Omit<TargetView, 'testCopies'>) => DeployInfo | null;
   /** The app a target's card offers to make a release key for (#837), or null. */
   releaseKey?: (tv: Omit<TargetView, 'testCopies'>) => string | null;
+  /** A target's Roll back to last green (src/rollback.ts), or null. */
+  rollback?: (tv: Omit<TargetView, 'testCopies'>) => RollbackInfo | null;
   /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
   inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
 }
@@ -218,7 +223,8 @@ export class Releases {
     for (const t of views) {
       const deploy = this.d.deploy?.(t);
       const releaseKey = this.d.releaseKey?.(t);
-      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}) });
+      const rollback = this.d.rollback?.(t);
+      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}), ...(rollback ? { rollback } : {}) });
     }
     for (const [id, list] of copies) {
       for (const c of list) {

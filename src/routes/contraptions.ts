@@ -182,7 +182,8 @@ function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionR
  * install check reads the app's page as person `uid` (none: only the registry's icon is checked), and its to-dos go to
  * its home Taskmaster. Throws a ServiceError when it can't start (no repo, a deploy already running, services off).
  */
-export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx['caller'], uid: number | null, resumed = false) {
+/** `to`: an older commit of its branch, for Roll back to last green (#1016). */
+export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx['caller'], uid: number | null, resumed = false, to?: string) {
   const person = uid != null ? app.store.getUser(uid) : undefined;
   const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
   const hooks = {
@@ -195,6 +196,7 @@ export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx
     setStatics: (paths: string[]) => app.store.updateContraption(c.name, { static_paths: JSON.stringify(paths) }),
     uid,
     resumed,
+    to,
     todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
   };
   return app.services.deploy(c, by, app.store.listContraptions(), identity, hooks);

@@ -178,6 +178,16 @@ export const appRoutes: Route[] = [
     releases.poll();
     return json(res, 202, { ok: true });
   } },
+  // A release card's Roll back to last green (#1016, src/rollback.ts): any member of the target's scheme; it answers
+  // the commit it went to. Citadel's own server restarts on it a minute or two later, so its card says how it went.
+  { method: 'POST', path: '/api/releases/rollback', who: ['person'], handler: async ({ req, res, app: { store, rollback, releases }, session }) => {
+    const { projectId, target } = releaseTarget(store, session, await readJson(req));
+    const tv = releases.view((id) => id === projectId)[0]?.targets.find((t) => t.target.id === target);
+    if (!tv) throw new HttpError(404, `${target} isn't one of this scheme's releases`);
+    const sha = await rollback.rollBack(tv, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null);
+    releases.poll();
+    return json(res, 202, { ok: true, sha });
+  } },
   // publish_release (#663; Josh, 2026-11-13: "We should fix things so that any scheme member can publish"): a scheme's
   // Taskmaster or minion releases the Android app of a contraption its scheme owns, on the server, so a container turn can
   // too. The same step as the card's Deploy button (src/auto-deploy.ts), signing-key check and record included.

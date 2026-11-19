@@ -57,9 +57,9 @@ test('Deploying sits on top; Waiting (something wakes it by itself) sits above P
     m(7, 'design', { state: 'pending-deploy', status: 'idle' }),
     // CI and other outside waits stay in their type or build: only deploying moved.
     m(8, 'bug', { state: 'outside', status: 'idle' }),
-    // The server landing it again (#727): working, so in its own section, not resting in Deploying.
+    // The server landing it again (#727, #1003): still handed off to land, so in Deploying.
     m(9, 'chore', { state: 'pending-deploy', status: 'idle', server_work: { kind: 'land' } }),
-  ]), [['deploying', false, [3, 7]], ['build-7', true, [4]], ['bug', false, [8]], ['chore', false, [6, 9]], ['waiting', false, [2, 5]], ['parked', false, [1]]]);
+  ]), [['deploying', false, [3, 7, 9]], ['build-7', true, [4]], ['bug', false, [8]], ['chore', false, [6]], ['waiting', false, [2, 5]], ['parked', false, [1]]]);
 });
 
 test("promoted groups come after the current build, in the scheme's order, the first match winning", () => {
@@ -109,9 +109,10 @@ test('a dismissed minion whose change is still on its way stays under Deploying 
     [['deploying', false, [1]], ['feature', false, [3]], ['bug', false, [2]]]);
 });
 
-test('a minion on main whose apps the server is deploying sits in Deploying; one still in the land line does not (#776)', () => {
+test('a minion the server is landing (line, rebase, tests, deploy) sits in Deploying; a failed land or a running turn sends it back (#1003)', () => {
   const land = { kind: 'land' };
   assert.deepEqual(shape([m(1, 'feature', { status: 'idle', server_work: land, ship: { stage: 'main' } }), m(2, 'feature', { status: 'idle', server_work: land, ship: { stage: 'branch' } }),
-    m(3, 'feature', { status: 'idle', server_work: land }), m(4, 'feature', { status: 'running', server_work: land, ship: { stage: 'main' } }), m(5, 'bug', { status: 'idle', server_work: land, ship: { stage: 'live' } })]),
-    [['deploying', false, [1]], ['feature', false, [2, 3, 4]], ['bug', false, [5]]]);
+    m(3, 'feature', { status: 'idle', server_work: land }), m(4, 'feature', { status: 'running', server_work: land, ship: { stage: 'main' } }), m(5, 'bug', { status: 'idle', server_work: land, ship: { stage: 'live' } }),
+    m(6, 'bug', { status: 'idle', server_work: land, ship: { stage: 'failed' } }), m(7, 'bug', { status: 'idle', server_work: land, approvals: 1 }), m(8, 'bug', { status: 'idle', ship: { stage: 'branch' } })]),
+    [['deploying', false, [1, 2, 3]], ['feature', false, [4]], ['bug', false, [5, 6, 7, 8]]]);
 });

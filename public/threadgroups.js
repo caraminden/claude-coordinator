@@ -9,14 +9,19 @@
 // Newer word, parked only (Cara, 2026-11-17: "I think parked minions that are part of a major build should show in the
 // build group as well"): a parked minion with a build sits in its Build N section (its row keeps the parked look, after the
 // active rows); parked ones outside a build stay in Waiting/Parked. Deploying still leaves its build.
+// Wider Deploying (Cara, 2026-11-18: "I think "Deploying" should be anything that is done with its code, I have given merge
+// approval to (if needed) and will hit live without any more human input (assuming nothing goes wrong)"): a minion that
+// handed its change to land (server_work: in the line, rebasing, in tests, deploying, restarting) is Deploying. A failed land,
+// a running or stuck turn or a waiting approval sends it back to its type. Open question cards that don't hold the land up keep
+// it here; its row's question chip still puts it in the Needs-you strip.
 
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
 const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t) || onMainDeploying(t);
-/** Landed on main with the server still deploying its apps (server_work): in Deploying, unlike one still in the land line or testing (#776). */
-const onMainDeploying = (t) => !!t.server_work && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && ['main', 'deploying'].includes(t.ship?.stage);
+/** The server is landing its change (server_work: line, rebase, tests, deploy, restart), nothing of its own is stuck: a failed land, a running turn or a waiting approval keeps it in its type (#1003). */
+const onMainDeploying = (t) => !!t.server_work && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && !['live', 'failed'].includes(t.ship?.stage);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
 const wakesItself = (t) => !!t.wakes_on;
 

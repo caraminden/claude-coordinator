@@ -702,10 +702,10 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from and try_first; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -743,6 +743,10 @@ export const projectRoutes: Route[] = [
       }
       if (body.ship_path !== undefined) settings.ship_path = required(body.ship_path, values(SHIP_PATHS), 'ship_path') as Project['ship_path'];
       if (body.go_from !== undefined) settings.go_from = required(body.go_from, values(GO_FROM), 'go_from') as Project['go_from'];
+      if (body.rules_review !== undefined) {
+        if (typeof body.rules_review !== 'boolean') throw new HttpError(400, 'rules_review must be true or false');
+        settings.rules_review = body.rules_review ? 1 : 0;
+      }
       if (body.try_first !== undefined) settings.try_first = required(body.try_first, values(TRY_FIRST), 'try_first') as Project['try_first'];
       if ((settings.ship_path ?? project.ship_path) === 'pr-person' && settings.go_from !== undefined && settings.go_from !== 'all') {
         throw new HttpError(400, 'When a person merges every pull request, every change waits for their go: pick another way to ship first');

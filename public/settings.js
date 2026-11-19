@@ -7,6 +7,7 @@ import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
 import { elsewhereRows, pickers } from './minion-rules.js';
+import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping.js';
 
 // ---------- push notifications ----------
 
@@ -484,6 +485,37 @@ function loadRulesData(rules, elsewhere) {
   });
 }
 
+/**
+ * The pass on Minion rules after setup (#1046; Cara, 2026-11-19: "lets the user do a pass on it once it is set up").
+ * Shown while projects.rules_review is on: what setup filled in and what is still the default, and "Looks right".
+ * The flag is the scheme's, so one click clears it for every member.
+ */
+function rulesReviewBanner() {
+  const p = view.project;
+  if (!p.rules_review) return null;
+  const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
+  // [what, value, the default it starts at]: a value equal to its default is the scheme's, unasked.
+  const rows = [
+    ['How changes ship', optionLabel(SHIP_PATHS, p.ship_path), p.ship_path === 'citadel'],
+    ["A person's go", optionLabel(GO_FROM, p.go_from), p.go_from === 'high'],
+    ['Try it first', optionLabel(TRY_FIRST, p.try_first), p.try_first === 'never'],
+    ['Approval rules', `${lines(p.approval_rules)} rule${lines(p.approval_rules) === 1 ? '' : 's'}`, lines(p.approval_rules) === 0],
+    ['Default effort', p.default_effort || "Claude Code's default", p.default_effort === 'high'],
+    ['Plugin folders', `${lines(p.plugin_dirs)} folder${lines(p.plugin_dirs) === 1 ? '' : 's'}`, lines(p.plugin_dirs) === 0],
+  ];
+  const ok = h('button', { type: 'button' }, 'Looks right');
+  const box = h('section', { class: 'rules-review', 'aria-label': 'Check the rules setup filled in' },
+    h('h3', {}, 'Setup filled these in: check them'),
+    h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. A value marked default is one setup never asked about.'),
+    h('ul', {}, ...rows.map(([what, value, dflt]) => h('li', {}, h('span', { class: 'rr-what' }, what), h('span', { class: 'rr-value' }, value), h('span', { class: `rr-tag${dflt ? '' : ' set'}` }, dflt ? 'default' : 'from setup')))),
+    h('div', { class: 'row' }, ok));
+  ok.onclick = () => {
+    ok.disabled = true;
+    saveProject(p, { rules_review: 0 }, { rules_review: false }, 'Marking the rules as checked', (done) => { if (done) box.remove(); else ok.disabled = false; });
+  };
+  return box;
+}
+
 /** Main panel: Minion rules, each setting a row of pickers (public/minion-rules.js) with typed entry as the fallback. */
 export function approvalsEditor() {
   const p = view.project;
@@ -494,7 +526,8 @@ export function approvalsEditor() {
       h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster reads Shipping too.')),
+      h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster reads Shipping too.'),
+      rulesReviewBanner()),
     settingsSection('Approvals', rules.approvals()),
     settingsSection('Shipping', rules.ship(), rules.go(), fastModeRow(p), rules.tryFirst(), rules.builds(), rules.ghRunners()),
     // Plugins load code from any folder on the server, so only an admin changes them.

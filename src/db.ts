@@ -116,6 +116,8 @@ export interface Project {
   msg_loop_min: number;
   msg_cold_min: number;
   msg_hold_h: number;
+  /** 1 while the members' pass on Minion rules after setup is open (#1046): onboarding done sets it, "Looks right" clears it. */
+  rules_review: number;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -1320,6 +1322,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'ship_path', "ALTER TABLE projects ADD COLUMN ship_path TEXT NOT NULL DEFAULT 'citadel'"],
   ['projects', 'go_from', "ALTER TABLE projects ADD COLUMN go_from TEXT NOT NULL DEFAULT 'high'"],
   ['projects', 'try_first', "ALTER TABLE projects ADD COLUMN try_first TEXT NOT NULL DEFAULT 'never'"],
+  ['projects', 'rules_review', 'ALTER TABLE projects ADD COLUMN rules_review INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1426,6 +1429,7 @@ export const SCHEMA_HISTORY = [
   [73, 'projects.ship_path, go_from, try_first; schemes whose merges wait for a person start on pr-person (#1043)'],
   [74, 'tickets.picked_because (#1061)'],
   [75, 'projects.msg_loop_limit, msg_loop_min, msg_cold_min, msg_hold_h (#1059)'],
+  [76, 'projects.rules_review (#1046)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1827,7 +1831,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -1835,7 +1839,10 @@ export class Store {
     if (fields.onboarding && onboardingOpen(fields as Pick<Project, 'onboarding'>) && (fields.onboarding === 'interview' || (was && !onboardingOpen(was)))) {
       this.setSetting(`onboarding_opened:${id}`, Date.now());
     }
-    this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);
+    // Setup finishing opens the pass on Minion rules, whoever or whatever set it (#1046).
+    if (fields.onboarding === 'done' && was && was.onboarding !== 'done' && fields.rules_review === undefined) fields = { ...fields, rules_review: 1 };
+    const keys2 = Object.keys(fields) as (keyof typeof fields)[];
+    this.db.prepare(`UPDATE projects SET ${keys2.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys2.map((k) => fields[k] ?? ''), id);
   }
 
   /** When this scheme's current setup or tune-up round opened, or 0 for one opened before that was recorded. */

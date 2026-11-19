@@ -10,7 +10,7 @@ import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
-import { claudeConfigDir, projectSlug } from '../src/sessions.ts';
+import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
@@ -682,7 +682,8 @@ mock.boards('#takes', { boards: [
       mkdirSync(repo, { recursive: true });
       c.store.setProjectRepoDir(c.project.id, repo);
       const closed = minion(c, 'Old export fix', { status: 'closed' }, 'bug');
-      const dir = join(claudeConfigDir(process.env), 'projects', projectSlug(repo), 'memory');
+      // The copy's own config dir (previews.ts), so a test or a stray run never writes into the real one.
+      const dir = join(c.dataDir, 'claude', 'projects', projectSlug(repo), 'memory');
       mkdirSync(dir, { recursive: true });
       const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
       const notes: [string, string, string, string][] = [
@@ -695,7 +696,7 @@ mock.boards('#takes', { boards: [
       ];
       for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
       writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
-      return `Settings → Memory in "${c.project.name}": #/p/${c.project.id}/memory`;
+      return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
     },
   },
   ci: {

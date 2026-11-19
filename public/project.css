@@ -506,9 +506,10 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-queues { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Running now: a runner's name is what people read, so it gets a fixed column wide enough for a PC's runner name. */
 .ci-run.ci-now { grid-template-columns: 0.6rem 4.5rem 12rem minmax(0, 1fr) 3.5rem; }
-.ci-run.ci-load-line { grid-template-columns: 0.6rem 12rem minmax(0, 1fr) 1.5rem; }
-.ci-load-bars { display: flex; gap: var(--space-3, 1rem); align-items: center; min-width: 0; }
-.ci-load-bar { display: grid; grid-template-columns: 3.6rem 6rem; gap: var(--space-2, 0.5rem); align-items: center; }
+.ci-run.ci-load-line { grid-template-columns: 0.6rem minmax(0, 1fr) auto 1.5rem; }
+.ci-load-bars { display: flex; gap: var(--space-2, 0.5rem); align-items: center; }
+.ci-load-bar .muted { font-size: 0.85em; }
+.ci-load-bar { display: grid; grid-template-columns: 2.3rem 3.5rem; gap: var(--space-1, 0.25rem); align-items: center; }
 .ci-load-bar .ci-meter-bar { min-width: 0; }
 .ci-quiet { color: var(--muted); }
 .ci-queue-group > .ci-run { cursor: pointer; }

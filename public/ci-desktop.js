@@ -123,7 +123,7 @@ export function pcLine(pc) {
   const now = pc.now;
   return [h('span', { class: `dot ${DOT[pc.verdict.kind] ?? 'asleep'}` }), h('span', { class: 'ci-run-name' }, pc.host),
     now ? h('span', { class: 'ci-load-bars' },
-      ...[['CPU', now.cpu], ['Memory', (1 - now.mem_free / now.mem_total) * 100]].map(([label, pct]) => h('span', { class: 'ci-load-bar', title: `${label} ${Math.round(pct)}%` }, h('span', { class: 'muted' }, label), barOf(label, pct))))
+      ...[['CPU', now.cpu], ['Memory', (1 - now.mem_free / now.mem_total) * 100]].map(([label, pct]) => h('span', { class: 'ci-load-bar', title: `${label} ${Math.round(pct)}%` }, h('span', { class: 'muted' }, label === 'Memory' ? 'Mem' : label), barOf(label, pct))))
       : h('span', { class: 'muted' }, 'no sample in the last day')];
 }
 

@@ -72,7 +72,7 @@ test('the app view only takes a path inside its own app on Citadel\'s origin', (
   for (const to of ['//evil.com/apps/voice/', '/\\evil.com/apps/voice/', 'https://evil.com/apps/voice/', '/apps/voice2/', '/apps/_citadel/x', '/apps/mandate/', '/apps/voice/../mandate/']) assert.equal(appSrc('voice', to, o), null, to);
 });
 
-test('a click on an app link opens the app view with the switch off or on; a middle click stays with the browser', () => {
+test('a click on an app link opens the app view with the switch off or on; a middle click opens the app view too', () => {
   const handlers = [];
   globalThis.addEventListener = (type, fn) => handlers.push([type, fn]);
   let on = false;
@@ -85,16 +85,16 @@ test('a click on an app link opens the app view with the switch off or on; a mid
   };
   const voice = 'https://voice.citadel.zip/apps/voice/rate/';
   assert.equal(fire('click', voice), true);
-  assert.equal(fire('auxclick', voice), false, 'switch off: nothing else exists, the browser keeps it');
+  assert.equal(fire('auxclick', voice), true, 'switch off too: a middle click opens the app view, never a Chrome tab');
   assert.equal(fire('click', voice, { ctrlKey: true }), false);
   assert.equal(fire('click', 'https://example.com/'), false, 'switch off: outside links stay');
-  assert.deepEqual(seen, [['app', 'voice', '/apps/voice/rate/']]);
+  assert.deepEqual(seen, [['app', 'voice', '/apps/voice/rate/'], ['app', 'voice', '/apps/voice/rate/']]);
   on = true;
-  assert.equal(fire('auxclick', voice), false, 'a middle click on an app link stays with the browser, switch on or off');
+  assert.equal(fire('auxclick', voice), true, 'a middle click on an app link opens the app view too: never a Chrome tab');
   assert.equal(fire('click', 'https://voice.citadel.zip/other/'), true, 'an app host path the view cannot show goes to Firefox');
   assert.equal(fire('click', 'https://example.com/'), true);
   assert.equal(fire('click', '/c/#/x'), false, 'Citadel itself stays');
-  assert.deepEqual(seen.slice(1), [['ff', 'https://voice.citadel.zip/other/'], ['ff', 'https://example.com/']]);
+  assert.deepEqual(seen.slice(3), [['ff', 'https://voice.citadel.zip/other/'], ['ff', 'https://example.com/']]);
 });
 
 // #988 regression: a framed app's own links went to Firefox. One table decides, switch on and off.

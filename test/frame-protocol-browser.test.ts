@@ -222,9 +222,12 @@ test("with Open links in Firefox on, a framed app's own links stay in it; anothe
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
   // What Citadel's state message says with the switch on (the test box isn't Windows, so it says it itself).
+  // Citadel's own state messages (after its app list loads) say firefox false: wait for them, and say it again before each click.
+  await waitFor(page, "Citadel's rail with its app list", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
   const frame = `document.querySelector('#frames iframe').contentWindow`;
-  await page.eval(`${frame}.postMessage({ protocol: 'citadel-frame-1', type: 'state', hasRail: true, narrow: false, firefox: true, own: ['127.0.0.1'], apps: { 'voice.test': 'voice' }, domain: 'citadel.zip' }, '*')`);
+  const state = `${frame}.postMessage({ protocol: 'citadel-frame-1', type: 'state', hasRail: true, narrow: false, firefox: true, own: ['127.0.0.1'], apps: { 'voice.test': 'voice' }, domain: 'citadel.zip' }, '*')`;
   const click = async (id: string) => {
+    await page.eval(state);
     await page.eval(`${frame}.postMessage({ clickLink: '${id}' }, '*')`);
     await waitFor(page, `click ${id}`, `'click:${id}' in window.echo`);
     return page.eval(`window.echo['click:${id}']`);

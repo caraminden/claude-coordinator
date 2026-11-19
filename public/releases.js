@@ -13,6 +13,7 @@ import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan } from '
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
+import { dragReorder, inOrder, moved } from './reorder.js';
 
 /** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
 let schemes = new Map();
@@ -50,6 +51,8 @@ export function onReleases(msg) {
 }
 
 function redraw() {
+  // Not under a row being dragged in the land line: it would drop the row from the finger. Again once it's let go.
+  if (pageEl?.querySelector('.rel-changes.reorder-active')) return void setTimeout(redraw, 250);
   for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
   if (pageEl?.isConnected) fillPage();
   const slot = view?.branchEl?.querySelector('.rel-chip-slot');
@@ -421,29 +424,101 @@ export function releaseOrder() {
  */
 function changeList(projectId, tv) {
   const n = tv.next, hl = page?.hl;
-  const rows = changeRows(tv);
+  const line = lineInOrder(projectId, tv.line);
+  const rows = changeRows({ ...tv, line })
+    .map((r) => ({ ...r, wait: r.i >= 0 && !line[r.i].holds ? line[r.i] : null }));
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
   const firstLater = rows.findIndex((r) => r.c?.later);
   const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) ? ': in line' : '';
   const after = firstLater > 0 ? `After ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
-  return h('ol', { class: 'rel-changes' }, rows.flatMap(({ c, e }, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row({ c, e }, i)]));
-  function row({ c, e }, i) {
-    const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}`;
+  const waiters = rows.filter((r) => r.wait);
+  const list = h('ol', { class: 'rel-changes' }, rows.flatMap((r, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]));
+  // The landings waiting in line move (#1002): dragged, or sent to the front of the waiters with Land next. The holder
+  // and the changes past the line stay put.
+  if (waiters.length > 1) {
+    dragReorder(list, {
+      items: () => [...list.querySelectorAll(':scope > li[data-seq]')],
+      onDrop: (from, to) => {
+        const seqs = [...list.querySelectorAll(':scope > li[data-seq]')].map((li) => Number(li.dataset.seq));
+        reorderLine(projectId, line, moved(seqs, from, to), seqs[from]);
+      },
+    });
+  }
+  return list;
+  function row({ c, e, wait }, i) {
+    const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}${wait && waiters.length > 1 ? ' movable' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
+    const seq = wait ? { 'data-seq': wait.seq } : {};
     if (c) {
-      return h('li', { class: cls }, pos, h('div', { class: 'body' },
+      return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
         h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? [waiting()] : changeNow(n, c))),
-        tryIt(projectId, tv, c)));
+        landNext(wait), tryIt(projectId, tv, c)));
     }
-    return h('li', { class: cls }, pos, h('div', { class: 'body' },
+    return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
       h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
         e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
-          : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)])));
+          : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)]),
+      landNext(wait)));
   }
+  /** Land next: the waiter goes to the front of the waiting landings (for a phone or a keyboard, where dragging is clumsy). */
+  function landNext(wait) {
+    if (!wait || wait === waiters[0].wait) return '';
+    const seqs = waiters.map((r) => r.wait.seq);
+    return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the waiting landings: it lands once the one landing now is done',
+      onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Land next');
+  }
+}
+
+/** projectId → the waiting landings' line tickets in the order last set here, shown until the server's line says it (#1002). */
+const lineOrders = new Map();
+let lineDrops = 0;
+
+/** The line with its waiters in the order set here, if that's still on its way; the holder stays in front. */
+function lineInOrder(projectId, line) {
+  const order = lineOrders.get(projectId);
+  if (!order) return line;
+  const waiting = line.filter((e) => !e.holds);
+  // Once the server's line has the waiters in this order (or none of them wait any more), it speaks for itself.
+  const keys = order.filter((s) => waiting.some((e) => e.seq === s));
+  if (keys.every((s, i) => waiting[i]?.seq === s)) {
+    lineOrders.delete(projectId);
+    return line;
+  }
+  return [...line.filter((e) => e.holds), ...inOrder(waiting, (e) => e.seq, keys)];
+}
+
+/**
+ * Set the waiting landings' order (#1002): the rows move at once, and the server's land line (tools/deploy-queue.sh's
+ * queue/.order) follows; a refusal puts the rows back with a toast and Retry. `moved` is the row dragged or sent next.
+ */
+function reorderLine(projectId, line, seqs, movedSeq) {
+  const drop = ++lineDrops;
+  const name = line.find((e) => e.seq === movedSeq)?.name ?? 'the landing';
+  let before;
+  optimistic({
+    sets: `land-order:${projectId}`,
+    apply: () => {
+      before = lineOrders.get(projectId);
+      lineOrders.set(projectId, seqs);
+      redraw();
+    },
+    send: () => api('api/releases/land-order', { method: 'POST', body: { projectId, order: seqs, moved: movedSeq } }),
+    undo: () => {
+      if (before) lineOrders.set(projectId, before);
+      else lineOrders.delete(projectId);
+      redraw();
+    },
+    label: `move ${name} in the land line`,
+  }).then(() => setTimeout(() => {
+    // The server's releases event has come by now: from here its line speaks, a move someone else made since included.
+    if (drop !== lineDrops) return;
+    lineOrders.delete(projectId);
+    redraw();
+  }, 3000), () => {});
 }
 
 /** Citadel changes whose preview was requested here and isn't in the server's test copies yet: their ticket ids. */

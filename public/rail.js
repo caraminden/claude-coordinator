@@ -13,7 +13,7 @@
 
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { optimistic } from './ui/optimistic.js';
-import { appHash, appLink, classifyLink, firefoxLink, firefoxOn, launchFirefox, mountLinkHandler, onFirefoxChange } from './extlinks.js';
+import { appHash, appLink, classifyLink, firefoxLink, firefoxOn, launchFirefox, mirrorFirefox, mirroredOn, mountLinkHandler, onFirefoxChange } from './extlinks.js';
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -638,6 +638,7 @@ if (typeof document !== 'undefined') {
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.
+      mirrorFirefox(d.firefox === true);
       hostState = { hasRail: !!d.hasRail, firefox: d.firefox === true, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null };
       if (narrow.matches !== !!d.narrow) {
         narrow.matches = !!d.narrow;
@@ -803,6 +804,20 @@ if (typeof document !== 'undefined' && host) {
     openWindow: (url) => post(framedIn, 'go-url', { url }),
     open: (url) => post(framedIn, 'ext', { url }),
     openApp: (_link, url) => post(framedIn, 'app', { url }),
+  });
+}
+
+// An app's own window, no Citadel around it: the same rule, with the switch from the cookie a framed visit left (or Citadel's own storage on its origin).
+if (typeof document !== 'undefined' && inContraption && !framedIn) {
+  mountLinkHandler({
+    on: () => firefoxOn() || mirroredOn(),
+    own: ownHosts,
+    apps: appHosts,
+    domain: appsDomain,
+    self: showing,
+    open: launchFirefox,
+    openWindow: (url) => location.assign(url),
+    openApp: (link) => openLayer({ name: link.name, href: new URL(appHash(link), root).href }),
   });
 }
 

@@ -67,6 +67,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   document.body.insertAdjacentHTML('beforeend', '<a id="same" href="/apps/peek/ingest">a</a><a id="other" href="http://voice.test/apps/voice/rate/">b</a><a id="out" href="https://example.com/x">c</a><a id="zip" target="_blank" href="https://docs.citadel.zip/">d</a>');
   // A handled click is stopped before it reaches the document: that, or a prevented default, is what the test reads.
   addEventListener('message', (e) => {
+    if (e.data?.getCookie) tell('cookie', document.cookie);
     const id = e.data?.clickLink;
     if (!id) return;
     let seen = null;
@@ -237,4 +238,42 @@ test("with Open links in Firefox on, a framed app's own links stay in it; anothe
   assert.equal(await click('out'), true);
   assert.equal(await click('zip'), true);
   assert.deepEqual(await page.eval(`window.upward`), ['app http://voice.test/apps/voice/rate/', 'ext https://example.com/x', 'go-url https://docs.citadel.zip/']);
+});
+
+const WINDOWS = { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0', userAgentMetadata: { platform: 'Windows', platformVersion: '10.0.0', architecture: 'x86', model: '', mobile: false } };
+
+test("in an app's own window (no Citadel around it), the switch comes from its cookie: outside links go to Firefox, its own stay (#988)", { skip }, async () => {
+  const page = await browser.page(`${contraption()}/apps/peek/`, { width: 1000, height: 600 });
+  await page.send('Emulation.setUserAgentOverride', WINDOWS);
+  await page.send('Page.reload'); // the page reads the platform as it loads
+  await waitFor(page, "the reloaded contraption page", `navigator.userAgent.includes('Windows') && !!document.getElementById('out')`);
+  // A handled click never reaches the document's bubble phase; a hidden frame holds the launch.
+  await page.eval(`window.violations = []; document.addEventListener('securitypolicyviolation', (e) => violations.push(e.violatedDirective))`);
+  const handled = (id: string) => page.eval(`(() => { let reached = false; const f = (e) => { reached = true; e.preventDefault(); }; document.addEventListener('click', f, { once: true }); document.getElementById('${id}').click(); document.removeEventListener('click', f); return !reached; })()`);
+  const launched = () => page.eval(`[...document.querySelectorAll('iframe[hidden]')].map((f) => f.src).join()`);
+  assert.equal(await handled('out'), false, 'cookie missing: the browser keeps it');
+  await page.eval(`document.cookie = 'citadel-open-in-firefox=1; path=/'`);
+  assert.equal(await handled('same'), false, 'its own link stays');
+  assert.equal(await handled('out'), true, 'cookie set: an outside link is handled');
+  assert.equal(await launched(), 'citadel-firefox:https://example.com/x');
+  assert.deepEqual(await page.eval(`violations`), [], 'the page\'s policy lets the launch frame through');
+});
+
+test("a framed app copies Citadel's switch into a cookie on its own host, and clears it when the switch goes off (#988)", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 });
+  await waitFor(page, "Citadel's rail with its app list", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  // The cookie is read by the frame's own page (it posts document.cookie back), so third-party cookie blocking would show.
+  const say = (on: boolean) => page.eval(`document.querySelector('#frames iframe').contentWindow.postMessage({ protocol: 'citadel-frame-1', type: 'state', hasRail: true, narrow: false, firefox: ${on}, own: [], apps: {}, domain: null }, '*')`);
+  const cookie = async () => {
+    await page.eval(`window.echo.cookie = null; document.querySelector('#frames iframe').contentWindow.postMessage({ getCookie: 1 }, '*')`);
+    await waitFor(page, 'the frame\'s cookie', `window.echo.cookie !== null`);
+    return String(await page.eval(`window.echo.cookie`));
+  };
+  await say(true);
+  await waitFor(page, 'the cookie written', `true`);
+  for (const end = Date.now() + 5000; Date.now() < end && !(await cookie()).includes('citadel-open-in-firefox=1'); await new Promise((r) => setTimeout(r, 100)));
+  assert.match(await cookie(), /citadel-open-in-firefox=1/);
+  await say(false);
+  for (const end = Date.now() + 5000; Date.now() < end && (await cookie()).includes('citadel-open-in-firefox'); await new Promise((r) => setTimeout(r, 100)));
+  assert.doesNotMatch(await cookie(), /citadel-open-in-firefox/);
 });

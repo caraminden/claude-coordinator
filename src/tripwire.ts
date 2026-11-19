@@ -27,7 +27,7 @@
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, opendirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -169,39 +169,54 @@ function searchesEnv(name: string, args: Word[]): boolean {
 }
 /** Whether a recursive search follows symlinks it meets below its root: grep -R, rg -L, ag -f. */
 const follows = (name: string, args: Word[]) => args.some((w) => name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$/.test(w.text) : /^-[a-zA-Z]*R|^--dereference-recursive$/.test(w.text));
-/** Where a recursive search over root meets a folder whose .env files stay closed, or null. */
-const envRootMet = (root: string, cfg: TripwireConfig) => cfg.envFiles?.find((r) => under(root, r) || under(r, root)) ?? null;
 
-/** How many folder entries the .env walk reads before it gives up and counts the search as unsafe. */
+/** How many folder entries the .env walk reads, across every root of one search, before it gives up and counts the search as unsafe. */
 export const ENV_WALK_LIMIT = 10_000;
-const ENV_WALK_SKIP = new Set(['node_modules', '.git']);
+
+/** Folders grep's `--exclude-dir` leaves out of a search, for the .env walk to skip as well. */
+const excludedDirs = (name: string, args: Word[]) => SEARCHERS.has(name) && name !== 'rg' && name !== 'ag'
+  ? args.flatMap((w, k) => (/^--exclude-dir=/.test(w.text) ? [w.text.slice(14)] : w.text === '--exclude-dir' && args[k + 1] ? [args[k + 1].text] : [])).map((g) => g.replace(/^['"]|['"]$/g, ''))
+  : [];
 
 /**
- * What a recursive search over root could reach of a closed .env file (#1030), or null when it can't: walks the part of root inside each
- * closed folder, skipping node_modules and .git, and answers on finding one, on a symlink the search would follow (`follow`), on a glob
- * it can't settle, or once it has read `limit` entries. A search of a scheme's src with no .env below then passes without an --exclude.
+ * What a recursive search over roots could reach of a closed .env file (#1030), or null when it can't: walks the part of each root
+ * inside a closed folder, and answers on finding one, on a symlink the search would follow (`follow`), on a folder it can't read or a
+ * glob it can't settle, or once it has read `limit` entries in all. It skips .git (git never keeps a file by its own name there) and
+ * the folders the search itself excludes (`skip`, globs). So a search of a scheme's src with no .env below passes without an --exclude.
  */
-export function envBelow(root: string, cfg: TripwireConfig, follow: boolean, limit = ENV_WALK_LIMIT): string | null {
+export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, skip: string[] = [], limit = ENV_WALK_LIMIT): string | null {
   const todo: string[] = [];
-  for (const r of cfg.envFiles ?? []) {
-    const start = under(root, r) ? root : under(r, root) ? r : null;
-    if (!start) continue;
-    let st;
-    try { st = statSync(start); } catch { if (/[*?[]/.test(start)) return 'a pattern it could not check'; continue; }
-    if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
-    todo.push(start);
+  for (const root of roots) {
+    for (const r of cfg.envFiles ?? []) {
+      const start = under(root, r) ? root : under(r, root) ? r : null;
+      if (!start) continue;
+      let st;
+      try { st = statSync(start); } catch (e) {
+        // Nothing there: grep finds nothing either, unless the shell expands it as a glob.
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT' && !/[*?[]/.test(start)) continue;
+        return `${start}, which it could not check`;
+      }
+      if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
+      todo.push(start);
+    }
   }
   let seen = 0;
   while (todo.length) {
     const dir = todo.pop()!;
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      if (++seen > limit) return `more than ${limit} files to check for them`;
-      if (ENV_FILE.test(e.name)) return join(dir, e.name);
-      if (e.isSymbolicLink()) { if (follow) return `a symlink it would follow, ${join(dir, e.name)}`; continue; }
-      if (e.isDirectory() && !ENV_WALK_SKIP.has(e.name)) todo.push(join(dir, e.name));
+    let d;
+    try { d = opendirSync(dir); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      return `${dir}, which it could not read`;
     }
+    try {
+      for (let e = d.readSync(); e; e = d.readSync()) {
+        if (++seen > limit) return `more than ${limit} files to check for them`;
+        const path = join(dir, e.name);
+        if (ENV_FILE.test(e.name)) return path;
+        if (e.isSymbolicLink()) { if (follow) return `a symlink it would follow, ${path}`; continue; }
+        if (e.isDirectory() && e.name !== '.git' && !globCovers(skip, e.name)) todo.push(path);
+      }
+    } finally { d.closeSync(); }
   }
   return null;
 }
@@ -1322,11 +1337,15 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const recursive = name === 'rg' || name === 'ag' || args.some((w) => /^-[a-zA-Z]*[rR]|^--recursive$|^--dereference-recursive$|^--directories=recurse$/.test(w.text));
   if (SEARCHERS.has(name) && recursive) {
     const roots = searchRoots(args);
-    for (const p of roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : []) {
+    const paths = roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : [];
+    for (const p of paths) {
       const secret = secretInside(p, cfg);
       if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
-      const env = searchesEnv(name, args) ? envBelow(p, cfg, follows(name, args)) : null;
-      if (env) return hard(`Searching ${p} could print .env files (${env}). ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);
+    }
+    const env = cfg.envFiles && searchesEnv(name, args) ? envBelow(paths, cfg, follows(name, args), excludedDirs(name, args)) : null;
+    if (env) {
+      const p = paths.length === 1 ? paths[0] : 'there';
+      return hard(`Searching ${p} could print .env files (${env}). ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);
     }
   }
   const text = textOperands(name, args);
@@ -1687,7 +1706,7 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   const secret = tool === 'Grep' ? secretInside(p, cfg) : null;
   if (secret) return hard(`Grep of ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
   // The Grep tool searches hidden files; a `glob` that can't match .env keeps them out.
-  const env = tool === 'Grep' && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local')) ? envBelow(p, cfg, false) : null;
+  const env = tool === 'Grep' && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local')) ? envBelow([p], cfg, false) : null;
   if (env) return hard(`Grep of ${p} could print .env files (${env}). ${ENV_FILE_WHY} Give it a \`glob\` such as "*.ts", or use grep with \`--exclude='.env*'\`.`);
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
     const why = writeReason(p, cfg);

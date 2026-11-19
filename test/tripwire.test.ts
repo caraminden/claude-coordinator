@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -1131,29 +1131,46 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
   try {
     const d = join(tmp, 'data');
     const repo = join(d, 'projects/3/repo');
-    for (const dir of ['src/lib', 'app', 'node_modules/pkg', '.git']) mkdirSync(join(repo, dir), { recursive: true });
+    for (const dir of ['src/lib', 'app', 'web/node_modules/pkg', 'web/src', 'tool/.git']) mkdirSync(join(repo, dir), { recursive: true });
     writeFileSync(join(repo, 'src/lib/a.ts'), 'SECRET');
     writeFileSync(join(repo, 'app/.env.local'), 'SECRET=x');
-    // A package's own .env and git's insides are skipped, as the brief says: a search there isn't a scheme's secret.
-    writeFileSync(join(repo, 'node_modules/pkg/.env'), 'x');
+    writeFileSync(join(repo, 'tool/.git/.env'), 'x');
     const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live'), envFiles: [d] };
     const run = (command: string) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read another scheme' }, cwd: join(d, 'projects/2/coordinator') }, c)?.reason ?? null;
     const grepTool = (path: string) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', path }, cwd: d }, c)?.reason ?? null;
-    for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET --exclude='.env*' ${repo}`, `rg --hidden SECRET ${repo}/src`, `cd ${repo}/src && grep -r SECRET .`]) assert.equal(run(cmd), null, cmd);
+    for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET --exclude='.env*' ${repo}`, `rg --hidden SECRET ${repo}/src`, `cd ${repo}/src && grep -r SECRET .`, `grep -rn SECRET ${repo}/src ${repo}/web`]) assert.equal(run(cmd), null, cmd);
     assert.equal(grepTool(join(repo, 'src')), null);
-    for (const cmd of [`grep -rn SECRET ${repo}`, `grep -rn SECRET ${repo}/app`, `grep -rn SECRET ${d}/projects`, `rg -uu SECRET ${repo}`]) assert.match(run(cmd) ?? '', /could print \.env files \(.*\.env\.local\)/, cmd);
+    assert.equal(run(`grep -rn SECRET ${repo}/tool`), null, 'git keeps no file by its own name, so a .git below the root is skipped');
+    assert.match(run(`grep -rn SECRET ${repo}/tool/.git`) ?? '', /\.env/, 'one named as the root is walked');
+    for (const cmd of [`grep -rn SECRET ${repo}`, `grep -rn SECRET ${repo}/app`, `grep -rn SECRET ${d}/projects`, `rg -uu SECRET ${repo}`, `grep -rn SECRET ${repo}/src ${repo}/app`]) assert.match(run(cmd) ?? '', /could print \.env files \(.*app\/\.env\.local\)/, cmd);
     assert.match(grepTool(repo) ?? '', /\.env\.local/);
-    // A search that follows symlinks can't be walked safely, so a link below it refuses; plain -r doesn't follow them.
+    // grep -r searches node_modules, so the walk does too, unless the search leaves it out.
+    writeFileSync(join(repo, 'web/node_modules/pkg/.env'), 'SECRET=x');
+    assert.match(run(`grep -rn SECRET ${repo}/web`) ?? '', /node_modules\/pkg\/\.env/);
+    assert.equal(run(`grep -rn SECRET --exclude-dir=node_modules ${repo}/web`), null);
+    assert.equal(run(`grep -rn SECRET --exclude-dir 'node_*' ${repo}/web`), null);
+    // A glob the walk can't settle refuses: the shell may expand it to a folder with a .env.
+    assert.match(run(`grep -rn SECRET ${repo}/a*`) ?? '', /\.env|could not check/);
+    assert.match(run(`grep -rn SECRET '${repo}/a*'`) ?? '', /could not check/);
+    // A folder it can't read refuses rather than passes.
+    mkdirSync(join(repo, 'src/locked'));
+    chmodSync(join(repo, 'src/locked'), 0o000);
+    try { if (process.getuid?.() !== 0) assert.match(run(`grep -rn SECRET ${repo}/src`) ?? '', /could not read/); } finally { chmodSync(join(repo, 'src/locked'), 0o755); }
+    // A search that follows symlinks can't be walked safely, so a link below it refuses (a pnpm workspace link in node_modules too); plain -r doesn't follow them.
     symlinkSync(join(repo, 'app'), join(repo, 'src/linked'));
     assert.equal(run(`grep -rn SECRET ${repo}/src`), null);
     assert.match(run(`grep -Rn SECRET ${repo}/src`) ?? '', /symlink it would follow/);
     assert.match(run(`rg -L --hidden SECRET ${repo}/src`) ?? '', /symlink it would follow/);
-    // The walk stops at its bound and counts the search as unsafe.
-    assert.equal(envBelow(join(repo, 'src'), c, false), null);
-    assert.match(envBelow(join(repo, 'src'), c, false, 1) ?? '', /more than 1 files/);
-    for (let i = 0; i < 5; i++) writeFileSync(join(repo, `src/f${i}.ts`), '');
-    assert.match(envBelow(join(repo, 'src'), c, false, 4) ?? '', /more than 4/);
-    assert.equal(envBelow(join(tmp, 'elsewhere'), c, false, 1), null, 'outside the closed folders nothing is walked');
+    symlinkSync(join(repo, 'app'), join(repo, 'web/node_modules/app'));
+    assert.match(run(`grep -Rn SECRET --exclude='.env' ${repo}/web`) ?? '', /\.env/);
+    // The walk stops at its bound, across every root of one search, and counts the search as unsafe.
+    const src = join(repo, 'src');
+    assert.equal(envBelow([src], c, false), null);
+    assert.match(envBelow([src], c, false, [], 1) ?? '', /more than 1 files/);
+    for (let i = 0; i < 5; i++) writeFileSync(join(src, `f${i}.ts`), '');
+    assert.equal(envBelow([src], c, false, [], 9), null);
+    assert.match(envBelow([src, src], c, false, [], 9) ?? '', /more than 9/, 'one budget for the whole search');
+    assert.equal(envBelow([join(tmp, 'elsewhere')], c, false, [], 1), null, 'outside the closed folders nothing is walked');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 

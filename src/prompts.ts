@@ -375,7 +375,7 @@ function everySchemeLine(view: EverySchemeView | null): string {
     `You can read every scheme, read-only, since a ${APP_NAME} member or admin asked for this turn (#656). Each scheme's folders are under ${projects}/<number>/: repo (its main checkout), tickets/<id> (its minions' worktrees) and shared/project (its shared folder). The schemes: ${view.schemes.map((p) => `${p.id} ${p.name}`).join(', ')}.`,
     view.apps.length ? `The contraptions' folders: ${view.apps.map((a) => `${a.name} ${a.folder}`).join(', ')}.` : '',
     "Read them with Read, grep, ls and `git -C <folder> log|status|diff|show` (git in each scheme's repo, its open minions' worktrees and the contraptions' folders, never fetch there). list_tickets and read_ticket take `scheme` (its number) to show another scheme's minions; write one as \"<scheme name> #N\", since a bare #N links to this scheme's.",
-    `Never write there, and message, start, stop or close nothing there: work in another scheme still goes to its ${AGENT_NAME} with message_taskmaster. .env files and contraption keys stay unreadable: a recursive grep there needs \`--exclude='.env*'\`.`,
+    `Never write there, and message, start, stop or close nothing there: work in another scheme still goes to its ${AGENT_NAME} with message_taskmaster. .env files and contraption keys stay unreadable.`,
   ].filter(Boolean).join(' ');
 }
 
@@ -429,7 +429,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short, end on what you did, and put what you need in a card (or the link of the one waiting), not a closing prose question.',
     ...CHAT_FACTS,
     // Not the list (#760): a Taskmaster writes only in the shared folder, and a block says why. The .env habit is a Taskmaster's alone (#1030: only its turns close .env files).
-    'A tripwire hook checks every tool call and stops known accidents; when it blocks one, it says why: don\'t get around it. A recursive grep over a folder holding a .env file needs `--exclude=\'.env*\'`; rg is fine without `--hidden`.',
+    'A tripwire hook checks every tool call and stops known accidents; when it blocks one, it says why: don\'t get around it. A recursive grep over a folder holding a .env file needs `--exclude=\'.env*\'`; rg is fine without `--hidden` or `-uu`.',
   ].join('\n');
 }
 

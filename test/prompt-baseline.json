@@ -82,7 +82,7 @@
   "The chat keeps only a turn's last text whole (earlier remark": 147,
   "Write minions as #N and pull requests as PR #N, outside back": 217,
   "Every mention of a question, plan or approval card in your r": 542,
-  "A tripwire hook checks every tool call and stops known accid": 229,
+  "A tripwire hook checks every tool call and stops known accid": 238,
   "": 5,
   "You can show people files (documents, images, GIFs, videos, ": 310,
   "- Link files by absolute path: a `../` link resolves against": 115,

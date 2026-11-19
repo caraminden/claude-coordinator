@@ -1,4 +1,4 @@
-// The land gate's alarm (#561; split out of ci-health.ts, behaviour unchanged). Pure: read from the land line, no GitHub calls.
+// The land gate's alarm (#561). Pure: read from the land line, no GitHub calls.
 import { clock, type Problem } from './ci-problems.ts';
 
 // ---------- the land gate (#561) ----------

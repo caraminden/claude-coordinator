@@ -1,4 +1,4 @@
-// GitHub through the gh CLI (split out of ci-health.ts, behaviour unchanged).
+// GitHub through the gh CLI.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';

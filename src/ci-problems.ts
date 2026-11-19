@@ -1,4 +1,4 @@
-// The CI problems: what is wrong now, in words (split out of ci-health.ts; behaviour unchanged). Pure: no GitHub, no store.
+// The CI problems: what is wrong now, in words. Pure: no GitHub, no store.
 import { lines } from './approvals.ts';
 import type { Project } from './db.ts';
 import { pacific } from './pacific.ts';

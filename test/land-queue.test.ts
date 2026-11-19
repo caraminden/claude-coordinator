@@ -483,3 +483,31 @@ test('a landing from a branch before .order keeps its arrival order, and nobody 
     for (const w of ws) w.child.kill('SIGKILL');
   }
 });
+
+// deploy_unchecked_back: the next holder after a deploy killed outright between its reset and its checks.
+test('a killed deploy is put back, a pull or a roll back alike, unless its restart came up healthy on it (#1016)', () => {
+  const live = join(root, `unchecked-${++n}`);
+  mkdirSync(live);
+  git(live, 'init', '-q', '-b', 'main');
+  const commit = (name: string) => {
+    writeFileSync(join(live, name), name);
+    git(live, 'add', name);
+    git(live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', name);
+    return git(live, 'rev-parse', 'HEAD');
+  };
+  const [green, from, next] = ['green', 'from', 'next'].map(commit);
+  const state = queueState();
+  const recover = (head: string, lastGood: string) => {
+    git(live, 'reset', '-q', '--hard', head);
+    git(live, 'tag', '-f', 'last-good', lastGood);
+    writeFileSync(join(state, 'unchecked'), `${from}\n`);
+    const r = spawnSync('bash', ['-c', '. "$0"; deploy_unchecked_back "$1" "$2"', queueLib, state, live], { encoding: 'utf8', env });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(state, 'unchecked')), false);
+    return git(live, 'rev-parse', 'HEAD');
+  };
+  assert.equal(recover(next, from), from, 'a pull killed before its restart');
+  assert.equal(recover(next, next), next, 'a pull whose restart came up on it');
+  assert.equal(recover(green, from), from, 'a roll back killed before its restart');
+  assert.equal(recover(green, green), green, 'a roll back whose restart came up on it');
+});

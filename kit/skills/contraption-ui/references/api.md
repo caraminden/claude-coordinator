@@ -902,7 +902,7 @@ when that Taskmaster deployed it itself). It never fails the deploy, so a first 
 the same two checkouts), refusing one off the branch or past a change to a `migrations` path, since
 code that old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations").
 Once it is live, auto-deploy leaves the app there until main has a newer green commit, and a
-minion's `deploy_contraption` is refused meanwhile; a person's Deploy on the card ships main at
+minion's or Taskmaster's `deploy_contraption` is refused meanwhile; a person's Deploy on the card ships main at
 once. Your home scheme's Taskmaster is told either way. With no CI, there is no last green and no
 button.
 

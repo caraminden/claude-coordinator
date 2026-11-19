@@ -98,3 +98,14 @@ test('a deploy of anything else (the fix, a person\'s Deploy) ends the pin', asy
   assert.equal(w.rb.info(w.tv(X))?.pin, null, 'it runs a third commit');
   assert.equal(w.lastGreen.pinned(3, 'app:peek'), null);
 });
+
+test('an app\'s roll back refused before it picked a commit (its migrations changed) lets go of its pin too', async () => {
+  const w = world();
+  w.store.setSetting('last-green:3', { sha: A, at: 1 });
+  await w.rb.rollBack(w.tv(B), 'Cara', 1);
+  w.rb.deployEnded(3, 'app:peek', true, A, 'Deployed');
+  assert.ok(w.lastGreen.pinned(3, 'app:peek'), 'it went live: pinned');
+  w.rb.deployEnded(3, 'app:peek', false, null, 'Failed: Its migrations changed since aaaaaaa');
+  assert.equal(w.lastGreen.pinned(3, 'app:peek'), null);
+  assert.match(w.rb.info(w.tv(B))?.failed?.why ?? '', /migrations changed/);
+});

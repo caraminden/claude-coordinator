@@ -647,8 +647,8 @@ services.onDeploy = (view) => {
   const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
   if (live) void apkBuilds.schedule(live, view.by);
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
-  const home = view.state !== 'deployed' && view.to ? store.getContraption(view.name)?.home_scheme : null;
-  if (home != null) rollback.failed(home, `app:${view.name}`, view.to!, view.said.at(-1) ?? view.state);
+  const home = store.getContraption(view.name)?.home_scheme;
+  if (home != null) rollback.deployEnded(home, `app:${view.name}`, view.state === 'deployed', view.to, view.said.at(-1) ?? view.state);
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
   if (row?.home_scheme != null) tellHome(row.home_scheme, `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`);
@@ -710,7 +710,8 @@ const lastGreen = new LastGreen(store);
 const rollbackJobs = new HostJobs(() => runner.units);
 const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
 // deploy.sh's paths, only where this server was given them (a dev copy rolling back a scratch checkout): the live
-// server's defaults otherwise. A dev copy without them can't roll back, so it never touches the live checkout.
+// server's defaults otherwise. Any other copy (another DATA_DIR, or one that doesn't deploy) without them can't roll
+// back, so it never touches the live checkout.
 const deployEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
 /** Whether Citadel's own roll back still runs; once its job ended, say why if it didn't go live, and clear it for the next one. */
 function citadelRollingBack(current: string | null): boolean {
@@ -743,7 +744,7 @@ const rollback = new Rollback({
     [CITADEL_TARGET]: (tv, to) => {
       const p = store.getProject(tv.target.projectId);
       if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
-      if (services.opts.off && !process.env.DEPLOY_LIVE) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
+      if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !process.env.DEPLOY_LIVE) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
       rollbackJobs.start({
         dir: ROLLBACK_DIR, cwd: p.repo_dir, argv: ['bash', 'tools/deploy.sh', '--to', to], env: { ...turnEnv(process.env), ...deployEnv() },
         unit: `citadel-rollback-${Date.now()}`, description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`, ticketId: 0,

@@ -130,9 +130,19 @@ export class Rollback {
     }
     const holds = kind === CITADEL_TARGET
       ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
-      : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's deploy of it is refused meanwhile. Land the fix for what broke.`;
+      : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's or Taskmaster's deploy of it is refused meanwhile. Land the fix for what broke.`;
     this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page. ${holds}`);
     return green.sha;
+  }
+
+  /**
+   * An app's deploy ended. While a target is pinned only its roll back's deploy runs (the rest are refused, or let go
+   * of the pin first), so one that didn't go live is the roll back's, refused before it picked a commit too
+   * (migrations changed, never deployed: `to` still null).
+   */
+  deployEnded(projectId: number, target: string, live: boolean, to: string | null, why: string) {
+    const pin = this.d.lastGreen.pinned(projectId, target);
+    if (!live && pin && (to ?? pin.sha) === pin.sha) this.failed(projectId, target, pin.sha, why);
   }
 
   /** A roll back's deploy of `sha` ended without going live: it went back to what ran, so let go of the pin and say why. */

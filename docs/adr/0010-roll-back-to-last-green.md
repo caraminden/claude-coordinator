@@ -14,7 +14,7 @@ turns on for no scheme until it is live (Cara, 2026-11-18: "No build, rollback f
   boot check, restart, health check). It pins the deploy; it doesn't rewrite main. Any member of the scheme presses it.
 - **Hold until the fix** (Cara's pick on Q1, 2026-11-18: "Hold until the fix"): lands keep going onto main, so the fix
   can land, but the rolled-back target stays where it is until main has a newer commit that passed the full suite,
-  then auto-deploy ships it. A person's Deploy overrides and clears the hold; a minion's deploy call is refused while it
+  then auto-deploy ships it. A person's Deploy overrides and clears the hold; a minion's or Taskmaster's deploy call is refused while it
   holds. Citadel's server, whose fast mode is still off: a land that touches none of the files the rolled-back commits
   changed is refused until the fix lands (as after a failed restart's own rollback; LAND_FIX=1 for a fix that doesn't);
   the fix's healthy deploy clears it.

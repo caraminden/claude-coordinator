@@ -270,12 +270,19 @@ queue_lock() {
 #   taken-back  "<tip> <branch>" of each landing whose commit came off main again, newest last (tools/land.sh reads it before it rebases)
 
 # <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back. Not when a
-# restart queued before it has since come up healthy on that commit (last-good holds it): the server runs it.
+# restart queued before it has since come up healthy on that commit (last-good holds it): the server runs it. A roll
+# back (deploy.sh --to, #1016) went to a commit last-good already holds, so only last-good being that very commit counts.
 deploy_unchecked_back() {
-  local prev
+  local prev head ran
   [ -s "$1/unchecked" ] || return 0
   prev=$(cat "$1/unchecked")
-  if git -C "$2" cat-file -e "$prev^{commit}" 2>/dev/null && [ "$(git -C "$2" rev-parse HEAD)" != "$prev" ] && ! git -C "$2" merge-base --is-ancestor HEAD last-good 2>/dev/null; then
+  head=$(git -C "$2" rev-parse HEAD)
+  if git -C "$2" merge-base --is-ancestor "$head" "$prev" 2>/dev/null; then
+    [ "$(git -C "$2" rev-parse -q --verify 'last-good^{commit}' 2>/dev/null)" = "$head" ] && ran=1 || ran=''
+  else
+    git -C "$2" merge-base --is-ancestor "$head" last-good 2>/dev/null && ran=1 || ran=''
+  fi
+  if git -C "$2" cat-file -e "$prev^{commit}" 2>/dev/null && [ "$head" != "$prev" ] && [ -z "$ran" ]; then
     echo "queue: an earlier deploy was killed before its checks ended; putting the live checkout back to $(git -C "$2" log -1 --format='%h "%s"' "$prev")" >&2
     git -C "$2" reset -q --hard "$prev"
   fi

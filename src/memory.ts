@@ -236,17 +236,22 @@ export class Memory {
   async search(projectId: number, query: string, embed: Embed, model: string, opts: { limit?: number; ticketId?: number; personId?: number; openMinions?: boolean } = {}): Promise<MemoryHit[]> {
     const [q] = await embed([query], true);
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 5), 1), 20);
-    const page = this.db.prepare(`SELECT m.id, m.vec FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id
-      WHERE m.project_id = ?1 AND t.project_id = ?1 AND m.model = ?2 AND m.ts >= t.created_at AND m.id > ?4
+    // Every row of the project index comes back, matching or not (vec null when not), so a page is 256 rows scanned and a
+    // selective filter can't walk the whole scheme in one call (it held the loop up to 2.8 s, #1034).
+    const page = this.db.prepare(`SELECT m.id, CASE WHEN t.project_id = ?1 AND m.ts >= t.created_at
         ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
         ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}
+        THEN m.vec END AS vec
+      FROM memory_chunks m LEFT JOIN tickets t ON t.id = m.ticket_id
+      WHERE m.project_id = ?1 AND m.model = ?2 AND m.id > ?4
       ORDER BY m.id LIMIT ${SEARCH_PAGE}`);
     const top: { id: number; score: number }[] = [];
     // In pages with a yield between them: read cold, Citadel's 3.5k vectors (14 MB) held the server 1.0 s in one go (#614).
     let after = 0;
     for (;;) {
-      const rows = page.all(projectId, model, opts.ticketId ?? opts.personId ?? null, after) as { id: number; vec: Uint8Array }[];
+      const rows = page.all(projectId, model, opts.ticketId ?? opts.personId ?? null, after) as { id: number; vec: Uint8Array | null }[];
       for (const r of rows) {
+        if (!r.vec) continue;
         const v = new Float32Array(r.vec.slice().buffer); // a copy: the blob's offset needn't be 4-aligned
         if (v.length !== q.length) continue;
         let s = 0;

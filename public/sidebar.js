@@ -306,6 +306,8 @@ export function threadRow(t, href = threadHref(t)) {
   ].filter(Boolean).join('\n');
   const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
   const wait = !coord && t.status !== 'closed' && t.wait;
+  // Landed and on its way (#1019): the row says where its release is ("Windows: desktop waiting for a CI runner · 22m"), not the minion's last note.
+  const rel = !coord && !wait && (t.status === 'closed' || t.state === 'pending-deploy') && t.release;
   // A wait says more than the ship badge ("restart · 2 turns" over "deploying"), so the row shows one.
   const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
   // The chat head's bar (#573), only while it works or waits on a land, CI or a deploy (threadstate.js rowBar).
@@ -328,6 +330,7 @@ export function threadRow(t, href = threadHref(t)) {
     presenceChip(t),
     ownerChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
+      : rel ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
       : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost && !(share && share.startsWith('<')) ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',

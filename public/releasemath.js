@@ -44,8 +44,8 @@ export const releaseName = (r, short = false) => (r.number != null ? (short ? `#
 
 /** How long a change may wait on something outside the pipeline (a CI runner, a fix) before it reads as stuck (#1019). */
 export const STUCK_MS = 30 * 60_000;
-/** How long change or release `p` has been stuck (ms), or 0: a wait past STUCK_MS. A place in the land line is a queue, not stuck. */
+/** How long change or release `p` has been stuck (ms), or 0: a wait past STUCK_MS. A place in a line (the land line, "waits for the next land": a `brief`) is a queue, not stuck. */
 export const stuckFor = (p, now = Date.now()) => {
-  const ms = p?.waitingOn && !['line', 'land'].includes(p.stage) ? now - p.since : 0;
+  const ms = p?.waitingOn && !p.brief && !['line', 'land'].includes(p.stage) ? now - p.since : 0;
   return ms > STUCK_MS ? ms : 0;
 };

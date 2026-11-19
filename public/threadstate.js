@@ -78,6 +78,8 @@ function baseState(t, usage, now) {
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
   // Dismissed once landed, its change not live yet (on main waiting for CI, a deploy): still on its way.
+  // A wait outside the pipeline past releasemath.js STUCK_MS (a CI runner that never came, a failed build) reads as stuck (#1019).
+  if ((t.status === 'closed' || t.state === 'pending-deploy') && rel?.stuck) return { rank: 2, fam: 'broken', cell: 'stuck', label: `Stuck: ${relLabel}` };
   if (t.status === 'closed' && rel) return { rank: 2, fam: 'wait', cell: rel.name, label: `On its way: ${relLabel}` };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
   const state = STATES[t.state];

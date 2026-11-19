@@ -125,6 +125,8 @@ export interface ViewRun {
   conclusion: string | null;
   at: string;
   url: string;
+  /** The minion whose change it tests (#1019, runMinion), when one is. */
+  minion?: number | null;
 }
 /** A scheme's CI as the last poll read it, for the CI page (#968): runners, the queue, each workflow's verdict on main, recent runs. */
 export interface CiView {
@@ -133,11 +135,39 @@ export interface CiView {
   branch: string;
   /** Null when its runners can't be listed (no repo admin's linked GitHub). */
   runners: { name: string; status: string; busy: boolean; labels: string[]; job: string | null; offlineSince: number | null }[] | null;
-  waiting: { name: string; labels: string[]; since: string; run: number }[];
+  waiting: { name: string; labels: string[]; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];
   workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[] }[];
   runs: ViewRun[];
 }
-const viewRun = (slug: string, r: Run): ViewRun => ({ id: r.id, name: r.name, branch: r.head_branch, event: r.event, status: r.status, conclusion: r.conclusion, at: r.created_at, url: r.html_url ?? runUrl(slug, r) });
+const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null = () => null): ViewRun => ({ id: r.id, name: r.name, branch: r.head_branch, event: r.event, status: r.status, conclusion: r.conclusion, at: r.created_at, url: r.html_url ?? runUrl(slug, r), minion: minion(r) });
+
+/**
+ * The minion a run tests (#1019, Cara 2026-11-18: "These lines in CI should link to the minions whose tests they are for"): the one whose
+ * branch it ran on (a land's CI copy runs on land/<branch>), else the one whose branch tip is its commit (a land's push to the default branch).
+ * shortcut: a branch that moved on after its land no longer tops the commit, so that push reads as the default branch's own; upgrade if lands start recording their commit.
+ */
+export function runMinion(branch: string, sha: string, tickets: Pick<Ticket, 'number' | 'branch' | 'kind'>[], tips: Map<string, string[]>): number | null {
+  const of = (b: string) => tickets.find((t) => t.kind === 'ticket' && t.branch === b)?.number ?? null;
+  return of(branch.replace(/^land\//, '')) ?? (tips.get(sha) ?? []).map(of).find((n) => n != null) ?? null;
+}
+
+/** What a run with no minion is, for the CI page: a schedule, a run by hand, the default branch itself, or its branch. */
+export function runKind(r: { branch?: string; event?: string }, main: string): string {
+  if (r.event === 'schedule') return 'scheduled run';
+  if (r.event === 'workflow_dispatch') return `run by hand on ${r.branch ?? main}`;
+  return r.branch === main ? `${main} itself` : r.branch ?? '';
+}
+
+/** A repo's branch tips, commit → branch names; empty with no repo on this box or when git fails. */
+async function branchTips(dir: string | null | undefined): Promise<Map<string, string[]>> {
+  const tips = new Map<string, string[]>();
+  if (!dir) return tips;
+  try {
+    const { stdout } = await run('git', ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], { cwd: dir });
+    for (const [sha, ref] of stdout.split('\n').filter(Boolean).map((l) => l.split(' '))) (tips.get(sha) ?? tips.set(sha, []).get(sha)!).push(ref);
+  } catch { /* no tips: runs on minion branches still link */ }
+  return tips;
+}
 /** Something wrong now: what the alert says, keyed so the same trouble keeps one item. */
 export interface Problem {
   key: string;
@@ -886,13 +916,15 @@ export class CiHealth {
       onMain.set(w.id, mainRuns);
     }
     out.push(...(await this.outsideRuns(p, slug, branch, onMain, as, now)));
+    const [tickets, tips] = [this.store.listTickets(p.id), await branchTips(p.repo_dir)];
+    const minion = (r: Run) => runMinion(r.head_branch, r.head_sha, tickets, tips);
     const shown: CiView['workflows'] = [];
     for (const w of workflows) {
       const mainRuns = onMain.get(w.id) ?? [];
       const verdict = mainRuns.find((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
       const pair = verdictPair(mainRuns);
       const skipped = pair ? skippedJobs(await this.jobs(slug, pair[0], as), await this.jobs(slug, pair[1], as)) : [];
-      shown.push({ name: w.name, file: String(w.path ?? '').split('/').pop() ?? '', verdict: verdict ? viewRun(slug, verdict) : null, skipped });
+      shown.push({ name: w.name, file: String(w.path ?? '').split('/').pop() ?? '', verdict: verdict ? viewRun(slug, verdict, minion) : null, skipped });
     }
     this.store.setSetting<CiView>(`ci-health:view:${p.id}`, {
       at: now, slug, branch,
@@ -900,9 +932,12 @@ export class CiHealth {
         name: r.name, status: r.status, busy: !!r.busy, labels: (r.labels ?? []).map((l) => l.name),
         job: all.find((j) => j.status === 'in_progress' && j.runner_name === r.name)?.name ?? null, offlineSince: saved.offline[r.name] ?? null,
       })),
-      waiting: all.filter((j) => j.status === 'queued' || j.status === 'waiting').map((j) => ({ name: j.name, labels: j.labels, since: j.created_at, run: j.run_id })),
+      waiting: all.filter((j) => j.status === 'queued' || j.status === 'waiting').map((j) => {
+        const r = runs.find((x) => x.id === j.run_id);
+        return { name: j.name, labels: j.labels, since: j.created_at, run: j.run_id, ...(r && { branch: r.head_branch, event: r.event, minion: minion(r) }) };
+      }),
       workflows: shown,
-      runs: runs.slice(0, 30).map((r) => viewRun(slug, r)),
+      runs: runs.slice(0, 30).map((r) => viewRun(slug, r, minion)),
     });
     return out;
   }
@@ -917,7 +952,17 @@ export class CiHealth {
       const wakes = this.store.getSetting<WakeAt>(WAKE_AT) ?? {};
       const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])]
         .map((x) => ({ ...x, link: problemLink(x, p.id, wakes, (n) => this.store.getTicketByNumber(p.id, n)?.title) }));
-      return [{ id: p.id, name: p.name, view, problems }];
+      // Each run's and queued job's minion (#1019), its title read now so a renamed minion reads right: a link, else what the run is.
+      const who = (r: { minion?: number | null; branch?: string; event?: string }) => r.minion
+        ? { href: `#/p/${p.id}/t/${r.minion}`, label: `#${r.minion} ${this.store.getTicketByNumber(p.id, r.minion)?.title ?? ''}`.trim() }
+        : { label: runKind(r, view.branch) };
+      const shown = {
+        ...view,
+        waiting: view.waiting.map((j) => ({ ...j, who: who(j) })),
+        workflows: view.workflows.map((w) => ({ ...w, verdict: w.verdict && { ...w.verdict, who: who(w.verdict) } })),
+        runs: view.runs.map((r) => ({ ...r, who: who(r) })),
+      };
+      return [{ id: p.id, name: p.name, view: shown, problems }];
     });
   }
 

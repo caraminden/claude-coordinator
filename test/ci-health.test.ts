@@ -1,6 +1,7 @@
 // CI health (src/ci-health.ts, #368): the four rules on GitHub answers shaped like Peek Auras' real ones, and the
 // poller putting and clearing admins' Mandate alerts.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1105,4 +1106,39 @@ test('#1005: back-to-back restarts still read at least every poll, and keep a ra
   w.gh.rateLimited = true;
   await w.health.tick(NOW + 6 * MIN);
   assert.ok((w.store.getSetting<number>('ci-health:pausedUntil') ?? 0) > NOW + 6 * MIN, 'the pause is saved');
+});
+
+test('each run and queued job on the CI page names the minion whose change it tests: its branch, its land copy, or its land on main; else what it is (#1019)', async () => {
+  const w = world();
+  const repo = mkdtempSync(join(root, 'repo-'));
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'landed #584');
+  git('branch', 'ticket/584-sound-tab');
+  const landed = git('rev-parse', 'HEAD');
+  w.store.setProjectRepoDir(w.peek.id, repo);
+  const sound = w.store.createTicket({ project_id: w.peek.id, title: 'Sound tab', permission_mode: 'default', created_by: 'cara' });
+  const drag = w.store.createTicket({ project_id: w.peek.id, title: 'Panel drag', permission_mode: 'default', created_by: 'cara' });
+  w.store.updateTicket(sound.id, { branch: 'ticket/584-sound-tab' } as any);
+  w.store.updateTicket(drag.id, { branch: 'ticket/587-panel-drag' } as any);
+  const n = (id: number) => w.store.getTicket(id)!.number!;
+  const onMain = runOf({ id: 6001, status: 'queued', conclusion: null, head_sha: landed, created_at: iso(22 * MIN) });
+  const onLand = runOf({ id: 6002, head_branch: 'land/ticket/587-panel-drag', created_at: iso(30 * MIN) });
+  const onTicket = runOf({ id: 6003, head_branch: 'ticket/587-panel-drag', event: 'workflow_dispatch', created_at: iso(40 * MIN) });
+  const scheduled = runOf({ id: 6004, event: 'schedule', created_at: iso(50 * MIN) });
+  const plain = runOf({ id: 6005, event: 'push', created_at: iso(55 * MIN) });
+  w.gh.runs = [onMain, onLand, onTicket, scheduled, plain];
+  w.gh.mainRuns = [runOf({ id: 6006, head_sha: landed, created_at: iso(HOUR) })];
+  w.gh.jobs.set(6001, [job({ run_id: 6001, name: 'screen', status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['peek-auras-desktop'], created_at: iso(22 * MIN) })]);
+  await w.health.tick(NOW);
+
+  const v = w.health.snapshot(() => true)[0].view as any;
+  const who = (id: number) => v.runs.find((r: any) => r.id === id).who;
+  assert.deepEqual(who(6001), { href: `#/p/${w.peek.id}/t/${n(sound.id)}`, label: `#${n(sound.id)} Sound tab` }, "a land's push to main: the minion whose branch tops the commit");
+  assert.deepEqual(who(6002), { href: `#/p/${w.peek.id}/t/${n(drag.id)}`, label: `#${n(drag.id)} Panel drag` }, "a land's CI copy on land/<branch>");
+  assert.equal(who(6003).href, `#/p/${w.peek.id}/t/${n(drag.id)}`, 'a run by hand on the minion branch is the minion\'s');
+  assert.deepEqual(who(6004), { label: 'scheduled run' });
+  assert.deepEqual(who(6005), { label: 'main itself' }, 'a push to main no land tops');
+  assert.deepEqual(v.waiting.map((j: any) => [j.name, j.who.label]), [['screen', `#${n(sound.id)} Sound tab`]], 'the queued job links its run\'s minion');
+  assert.equal(v.workflows[0].verdict.who.label, `#${n(sound.id)} Sound tab`, 'the verdict on main names the land it tested');
 });

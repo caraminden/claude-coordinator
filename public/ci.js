@@ -43,13 +43,17 @@ function problemLink(l) {
 
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');
 
+/** The minion a run or queued job tests (#1019): its chat, or what the run is when no minion's change is in it (a schedule, main itself). An older view has no `who`: its branch. */
+const whoCell = (x) => x.who?.href ? h('a', { class: 'ci-run-who', href: x.who.href, title: x.who.label }, x.who.label)
+  : h('span', { class: 'ci-run-who muted' }, x.who?.label ?? x.branch ?? '');
+
 function runRow(r) {
   const word = r.status === 'completed' ? r.conclusion ?? 'done' : r.status.replace('_', ' ');
-  return h('a', { class: 'ci-run', href: r.url, target: '_blank', rel: 'noopener', title: `${r.name} on ${r.branch}: ${word}, ${when(r.at)}` },
+  return h('div', { class: 'ci-run', title: `${r.name} on ${r.branch}: ${word}, ${when(r.at)}` },
     h('span', { class: `dot ${verdictClass(r.status === 'completed' ? r.conclusion : null)}` }),
     h('span', { class: 'ci-run-word' }, word),
-    h('span', { class: 'ci-run-name' }, r.name),
-    h('span', { class: 'ci-run-branch muted' }, r.branch),
+    ext(r.url, r.name),
+    whoCell(r),
     h('span', { class: 'ci-run-age muted' }, ago(Date.parse(r.at))));
 }
 
@@ -64,9 +68,9 @@ function overview(s) {
           w.skipped.length ? h('p', { class: 'muted small ci-skipped' }, `Green, but skipped ${w.skipped.join(', ')}, which ran in the verdict before it.`) : '')
         : h('div', { class: 'ci-run' }, h('span', { class: 'dot asleep' }), h('span', { class: 'ci-run-word muted' }, 'no verdict'), h('span', { class: 'ci-run-name' }, w.name))))),
     h('section', { class: 'ci-block' }, h('h4', {}, 'Waiting for a runner'),
-      v.waiting.length ? h('div', { class: 'ci-runs' }, ...v.waiting.map((j) => h('a', { class: 'ci-run', href: `https://github.com/${v.slug}/actions/runs/${j.run}`, target: '_blank', rel: 'noopener' },
-        h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), h('span', { class: 'ci-run-name' }, j.name),
-        h('span', { class: 'ci-run-branch muted' }, j.labels.join(', ')), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))))))
+      v.waiting.length ? h('div', { class: 'ci-runs' }, ...v.waiting.map((j) => h('div', { class: 'ci-run', title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` },
+        h('span', { class: 'dot fix' }), h('span', { class: 'ci-run-word' }, 'queued'), ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name),
+        whoCell(j), h('span', { class: 'ci-run-age muted' }, ago(Date.parse(j.since))))))
         : h('p', { class: 'muted' }, 'No job is waiting.')),
   ];
 }

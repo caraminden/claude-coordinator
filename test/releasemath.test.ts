@@ -75,4 +75,5 @@ test('stuckFor: a wait outside the pipeline past half an hour is stuck; work in 
   assert.equal(stuckFor({ ...runner, waitingOn: null }, now), 0, 'running, however long, is not a wait');
   assert.equal(stuckFor({ ...runner, stage: 'line', waitingOn: '3rd in line' }, now), 0);
   assert.equal(stuckFor(null, now), 0);
+  assert.equal(stuckFor({ ...runner, stage: 'deploy', brief: 'on main, waits for the next land' }, now), 0);
 });

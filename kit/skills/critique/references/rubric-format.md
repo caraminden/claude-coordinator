@@ -13,8 +13,9 @@ and the turn's "Review set:" line names it. The files have the shape below. Read
 an entry with the `review_set` tool or on the page, never by editing the rendered files, which the
 next turn writes again. A scheme with none on runs no critic.
 
-The page owns `name`, `extends`, `when`, `model` and `effort` as fields, and the on/off and trial
-switches; the entry's own text holds every other key and the sections. An entry on top of a starter
+The page owns `name`, `extends`, `when`, `model` and `effort` as fields, the on/off and trial
+switches, and Block or Advise (written as `gate`) and the last calibration (`calibrated`), which win
+over the same keys in the text; the entry's own text holds every other key and the sections. An entry on top of a starter
 stores only its additions: the kit's starter is read fresh each run, so a kit fix reaches it.
 
 Before the set, a scheme named its rubric files with a `**Rubrics:**` Project facts line. Those files
@@ -40,7 +41,7 @@ moved into the set once (Build 4) and leave the repos; a Rubrics line is obsolet
 | `person` | no | a person's name | Whose taste the rubric holds; the `ask <person>` verdict and the learning step name them. Default: the person who asked for the work. |
 | `playbook` | no | a repo path | Fixes tried per kind of finding and how people judged them, for `citadel:professor`. |
 | `extends` | no | `citadel:critique/rubrics/<name>` | A kit starter whose frontmatter and sections this file builds on (below). |
-| `trial` | no | `true` | Set by Citadel on a new entry (Q12, Build 4): it runs as `gate: advisory` whatever its `gate` says, until a person takes it off trial, which they do once it is calibrated. |
+| `trial` | no | `true` | Set by Citadel on a new entry (Q12, Build 4): it runs as `gate: advisory` whatever its `gate` says, until a calibration passes (more than half the notes hit, no false alarms on controls) or a person marks it good. |
 | `calibrated` | no | `<date>, <model>: <hits>/<flagged> hits, <false>/<controls> false alarms` | The last blind trial's result ([`calibrate.md`](calibrate.md)). |
 
 Unknown keys are ignored. Values are read by an agent, but keep the frontmatter valid YAML: one line

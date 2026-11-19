@@ -230,6 +230,8 @@ test('trial until calibrated: a run that passes takes it off trial, a weak one k
   assert.equal(e.trial, true, 'under half the notes: stays on trial');
   e = set.calibrate(3, 'ui', { hits: 4, notes: 5, false_alarms: 1, controls: 2, model: 'sonnet' }, 'minion #12', Date.UTC(2026, 10, 19));
   assert.equal(e.trial, true, 'a false alarm: stays on trial');
+  e = set.calibrate(3, 'ui', { hits: 5, notes: 5, false_alarms: 0, controls: 0, model: 'sonnet' }, 'minion #12', Date.UTC(2026, 10, 19));
+  assert.equal(e.trial, true, 'no controls: a critic that fails everything would pass, so it stays on trial');
   e = set.calibrate(3, 'ui', { hits: 4, notes: 5, false_alarms: 0, controls: 2, model: 'opus' }, 'minion #12', Date.UTC(2026, 10, 19));
   assert.equal(e.trial, false);
   assert.match(renderEntry(e), /^calibrated: "2026-11-19, opus: 4\/5 hits, 0\/2 false alarms"$/m);
@@ -238,4 +240,29 @@ test('trial until calibrated: a run that passes takes it off trial, a weak one k
   assert.match(renderEntry(e), /^gate: blocks-ready$/m);
   assert.throws(() => set.calibrate(3, 'ui', { hits: 6, notes: 5, false_alarms: 0, controls: 2 }, 'x'), /whole numbers/);
   assert.throws(() => set.calibrate(3, 'ui', { hits: 1, notes: 0, false_alarms: 0, controls: 0 }, 'x'), /whole numbers/);
+  // A person putting a blocker that gives the label back on trial gets an advising entry, not a refusal.
+  set.save(3, 'ui', { gives_label: true }, 'Josh', 'Gives the label');
+  e = set.save(3, 'ui', { trial: true }, 'Josh', 'Put on trial');
+  assert.deepEqual([e.trial, e.gate, e.gives_label], [true, 'advise', false]);
+});
+
+test('a database phase 1 made gets the phase 2 columns', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (3, 'Peek Auras');");
+  db.exec("CREATE TABLE review_entries (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'critic', extends TEXT, body TEXT NOT NULL DEFAULT '', triggers TEXT NOT NULL DEFAULT '{}', context TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, trial INTEGER NOT NULL DEFAULT 0, model TEXT, effort TEXT, stage TEXT NOT NULL DEFAULT 'work', position INTEGER NOT NULL DEFAULT 0, gate TEXT, source TEXT, version INTEGER NOT NULL DEFAULT 1, updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (project_id, slug))");
+  db.exec("INSERT INTO review_entries (project_id, slug, name, updated_by, updated_at) VALUES (3, 'ui', 'UI', 'Josh', 1)");
+  const set = new ReviewSet(db);
+  set.ensureBuiltIns(3);
+  assert.equal(set.get(3, 'ui')?.gives_label, false);
+  assert.equal(set.save(3, 'ui', { body: 'More.' }, 'Josh', 'x').version, 2);
+  assert.equal(new ReviewSet(db).list(3).length, BUILT_INS.length + 1, 'a second open adds nothing');
+});
+
+test('a lens off with the pre-ship review on: the turn hears only the lens', () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3);
+  set.save(3, 'lens-tests', { enabled: false }, 'Josh', 'Turned off');
+  const line = kitLine(set.list(3), join(root, 'lens-only'));
+  assert.doesNotMatch(line, /pre-ship review is off/);
+  assert.match(line, /^Kit reviewers: This scheme switched off: Lens: Tests\. .*an off lens stays out of the reviewer's brief/);
 });

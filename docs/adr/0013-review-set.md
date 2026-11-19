@@ -55,15 +55,15 @@ The spec is the decisions table in the shared folder's `handoffs/handoff-review-
 
 - **The kit's reviewers are entries.** Every scheme's set holds one row per built-in (`source` `kit:<name>`): the
   pre-ship review, each of its lenses, the finding checker and fresh-eyes. Their text stays in the kit; the row holds
-  the scheme's switch and its additions, which a turn reads with the kit's text (`<turn dir>/review-kit/`). Name,
-  triggers, model and the rest are the kit's and can't be changed on a kit row. A turn gets a "Kit reviewers:" line
+  the scheme's switch and its additions, which a turn reads with the kit's text (`<turn dir>/review-kit/`). Only the
+  switch and the additions change on a kit row; its name, triggers, model and the rest are the kit's. A turn gets a "Kit reviewers:" line
   saying what this scheme switched off. The standard audits show on the page too, but stay schedules: their switch is
   the schedule's pause, so there is one source of truth.
 - **Pre-ship review off means every ship waits for a person's go** (Cara: "Fully switchable"). With it off, the
-  ship hand-off refuses a minion's ship without a go, unless another switched-on entry, off trial and set to block,
-  is marked as giving the risk label. The page says so beside the switch before anyone flips it.
+  ship hand-off refuses a minion's ship without a go, unless another switched-on entry, off trial, is marked as
+  giving the risk label. The page says so beside the switch before anyone flips it.
 - **Trial until calibrated.** A new entry advises only. Calibration records its hits and false alarms; one that
-  catches more than half the known findings with no false alarms comes off trial, and a person can mark it good. Only then can it block a ship or give
+  catches more than half the known findings with no false alarms, and was run on controls, comes off trial, and a person can mark it good. Only then can it block a ship or give
   the label. A later calibration that does worse doesn't put it back on trial: a person does that.
 - **Describe a change.** A box on the page sends what a person wants to a one-shot Sonnet call on their own Claude
   login (sender pays), which reads the set and proposes new bodies. The page shows each as before and after; Apply

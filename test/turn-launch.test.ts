@@ -263,7 +263,7 @@ test("a turn gets its scheme's review set as files, named in its turn message, w
   assert.match(ui, /^---\nname: ui\nwhen: "diff: public\/\*\*"\ntrial: true\n---\n\n## Pass/);
   assert.match(message, /Review set: .*review-set/);
   assert.match(message, /Kit reviewers: This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label\. Every ship waits for a person's go/);
-  assert.match(message, /Kit reviewers this scheme switched off: Lens: Tests, Fresh eyes\./);
+  assert.match(message, /This scheme switched off: Lens: Tests, Fresh eyes\./);
   assert.match(message, /review-kit\/finding-checker\.md` \(Finding checker\)/);
   assert.match(added, /Check the migration claims twice\./);
 });

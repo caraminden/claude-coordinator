@@ -23,7 +23,7 @@ const audit = (key) => key?.startsWith('audit:') ? state.audits.find((a) => `aud
 /** Who gives the risk label (as labelGiver in src/review-set.ts): the pre-ship review, else an enabled, calibrated entry marked to. */
 function labelGiver() {
   const pre = entry('pre-ship-review');
-  if (!pre || pre.enabled) return pre ?? { name: 'Pre-ship review' };
+  if (!pre?.kit || pre.enabled) return pre?.kit ? pre : { name: 'Pre-ship review' };
   return state.entries.find((e) => e.enabled && !e.trial && e.gives_label) ?? null;
 }
 
@@ -449,12 +449,14 @@ function proposal(ask, p) {
   const apply = async (ev) => {
     const b = ev.currentTarget;
     b.disabled = true;
+    const s = state; // a scheme switch during the save leaves the new scheme's entries alone
     try {
       const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
-      const i = state.entries.findIndex((x) => x.slug === p.slug);
-      if (i >= 0) state.entries[i] = saved;
+      const i = s.entries?.findIndex((x) => x.slug === p.slug) ?? -1;
+      if (i >= 0) s.entries[i] = saved;
       ask.applied.push(`Applied. Version ${saved.version} of ${saved.name}; History can undo it.`);
-      drop();
+      ask.proposals = ask.proposals.filter((x) => x !== p);
+      if (state === s) draw();
     } catch (err) {
       toast(`Couldn't apply it: ${err.message}`);
       b.disabled = false;

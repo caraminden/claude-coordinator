@@ -1590,7 +1590,7 @@ const THREAD_TOOLS = [
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label. Leave it out when the scheme's pre-ship review is off (your turn's Kit reviewers line says so): a ship with no label is high and needs go" },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label. Leave it out when the scheme's pre-ship review is off and nothing gives the label instead (your turn's Kit reviewers line says which): a ship with no label is high and needs go" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none), and with no risk label: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },

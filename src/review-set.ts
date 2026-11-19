@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS review_entries (
   -- The page's column (work, ship, ask, schedule) and the run order inside it (phase 3 wires the order).
   stage TEXT NOT NULL DEFAULT 'work',
   position INTEGER NOT NULL DEFAULT 0,
-  -- block or advise once phase 3 wires it; NULL: the rubric's own gate key decides, as today.
+  -- block or advise: written into the rendered rubric's gate key (blocks-ready or advisory); NULL: the body's own gate key decides.
   gate TEXT,
   -- Where it came from: "docs/rubrics/ui.md" for an imported file, "kit:<agent or skill>" for a kit built-in (BUILT_INS), NULL for one made on the page.
   source TEXT,
@@ -125,7 +125,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
 ];
 export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
 /** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
-const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration'] as const;
+const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'context', 'model', 'effort', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration'] as const;
 
 export interface ReviewVersion { version: number; by: string; at: number; note: string; snapshot: EntryFields }
 
@@ -303,7 +303,18 @@ export class ReviewSet {
   constructor(db: DatabaseSync) {
     this.db = db;
     // One transaction: every autocommitted statement is an fsync, and a new database's setup is held to a few commits (test/db-setup).
-    db.exec(`BEGIN;${REVIEW_SCHEMA}COMMIT;`);
+    db.exec('BEGIN');
+    try {
+      db.exec(REVIEW_SCHEMA);
+      // A database phase 1 made (build/4 previews and dev copies) has the table without phase 2's columns.
+      const has = new Set((db.prepare('PRAGMA table_info(review_entries)').all() as Row[]).map((c) => c.name));
+      if (!has.has('gives_label')) db.exec('ALTER TABLE review_entries ADD COLUMN gives_label INTEGER NOT NULL DEFAULT 0');
+      if (!has.has('calibration')) db.exec('ALTER TABLE review_entries ADD COLUMN calibration TEXT');
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   /** The scheme's entries in page order: by column, then run order, then name. */
@@ -355,6 +366,8 @@ export class ReviewSet {
     if (expect !== undefined && expect !== was.version) throw new ReviewError(`stale: ${slug} is at version ${was.version} now (${was.updated_by} saved it); reload it and make your change again`);
     if (patch.slug !== undefined && patch.slug !== slug && this.get(projectId, patch.slug)) throw new ReviewError(`This scheme already has an entry named ${patch.slug}`);
     const next = snapshotOf({ ...was, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as EntryFields);
+    // Back on trial, it only advises (Q12): a person putting a blocker back on trial means that, not "switch it to Advise first".
+    if (next.trial && !was.trial && !isKit(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
     if (JSON.stringify(next) === JSON.stringify(snapshotOf(was))) return was;
     if (isKit(was)) {
       const changed = KIT_FIXED.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(was[k]));
@@ -433,7 +446,8 @@ export class ReviewSet {
     if (r.model != null && (typeof r.model !== 'string' || r.model.length > 60)) throw new ReviewError('model names the model the critic ran on');
     const was = this.get(projectId, slug);
     if (!was) throw new ReviewError(`No entry named ${slug}`);
-    const passes = r.hits * 2 > r.notes && r.false_alarms === 0;
+    // Controls catch a critic that fails everything (calibrate.md), so a run with none can't take it off trial.
+    const passes = r.hits * 2 > r.notes && r.false_alarms === 0 && r.controls > 0;
     const calibration: Calibration = { at, by, model: r.model ?? undefined, hits: r.hits, notes: r.notes, false_alarms: r.false_alarms, controls: r.controls };
     const trial = was.trial && !passes;
     return this.save(projectId, slug, { calibration, trial }, by, `Calibrated: ${r.hits}/${r.notes} hits, ${r.false_alarms}/${r.controls} false alarms${was.trial ? (passes ? ', off trial' : ', stays on trial') : ''}`, undefined, at);
@@ -565,11 +579,11 @@ export function kitLine(entries: ReviewEntry[], dir: string): string {
   if (off.some((e) => e.slug === 'pre-ship-review')) {
     const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
     out.push(giver
-      ? `This scheme's pre-ship review is off, and its ${giver.name} (\`${giver.slug}\` in the review set) gives the risk label instead: run it where citadel:self-review would run its reviewer, and label the change from its verdict.`
-      : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, then call hand_off_land with no risk and the go.");
+      ? `This scheme's pre-ship review is off, and its ${giver.name} (\`${giver.slug}\` in the review set) gives the risk label instead: run it where citadel:self-review would run its reviewer, label the change from its verdict, and ship with that label as usual.`
+      : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, and ship only on that go, the way the scheme ships (with hand_off_land: no risk, and name the go).");
   }
   const rest = off.filter((e) => e.slug !== 'pre-ship-review');
-  if (rest.length) out.push(`Kit reviewers this scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, and an off fresh eyes means no citadel:fresh-eyes Grunt.`);
+  if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, and an off fresh eyes means no citadel:fresh-eyes Grunt.`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
     for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${e.body.trim()}\n`);

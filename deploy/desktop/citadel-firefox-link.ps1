@@ -23,7 +23,7 @@ $key = "HKCU:\Software\Classes\$Scheme"
 if ($Remove) {
   Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $handler -Force -ErrorAction SilentlyContinue
-  Write-Output "Removed $Scheme: from this PC."
+  Write-Output "Removed ${Scheme}: from this PC."
   return
 }
 
@@ -46,4 +46,4 @@ Set-ItemProperty -LiteralPath $key -Name '(default)' -Value "URL:$Scheme"
 Set-ItemProperty -LiteralPath $key -Name 'URL Protocol' -Value ''
 New-Item -Path "$key\shell\open\command" -Force | Out-Null
 Set-ItemProperty -LiteralPath "$key\shell\open\command" -Name '(default)' -Value $command
-Write-Output "Set up $Scheme: for this user. Handler: $handler"
+Write-Output "Set up ${Scheme}: for this user. Handler: $handler"

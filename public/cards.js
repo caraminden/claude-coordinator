@@ -372,8 +372,8 @@ export function settleSpend(log, data) {
 
 // ---------- question cards ----------
 
-/** A card's question or option text: plain, unless it holds a fenced block, which draws as in a reply (header, Copy, #898). */
-const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) ? markdown(text, ticketId) : text);
+/** A card's question or option text: plain, unless it holds a fenced block or a link to a Citadel page, which draw as in a reply (header, Copy, #898). */
+const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) || /\]\(#\//.test(text) ? markdown(text, ticketId) : text);
 
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 export function answerSummary(answers) {

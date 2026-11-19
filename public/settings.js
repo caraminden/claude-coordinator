@@ -197,6 +197,7 @@ export function onProjectUpdate(project) {
   view.project = project;
   for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   document.getElementById('land-mode')?.dispatchEvent(new Event('settings-refresh'));
+  for (const el of document.querySelectorAll('[data-rules-review]')) el.dispatchEvent(new Event('settings-refresh'));
   renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
   // Someone else saved: show their text unless this tab has edits of its own.
@@ -492,27 +493,34 @@ function loadRulesData(rules, elsewhere) {
  */
 function rulesReviewBanner() {
   const p = view.project;
-  if (!p.rules_review) return null;
-  const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
-  // [what, value, the default it starts at]: a value equal to its default is the scheme's, unasked.
-  const rows = [
-    ['How changes ship', optionLabel(SHIP_PATHS, p.ship_path), p.ship_path === 'citadel'],
-    ["A person's go", optionLabel(GO_FROM, p.go_from), p.go_from === 'high'],
-    ['Try it first', optionLabel(TRY_FIRST, p.try_first), p.try_first === 'never'],
-    ['Approval rules', `${lines(p.approval_rules)} rule${lines(p.approval_rules) === 1 ? '' : 's'}`, lines(p.approval_rules) === 0],
-    ['Default effort', p.default_effort || "Claude Code's default", p.default_effort === 'high'],
-    ['Plugin folders', `${lines(p.plugin_dirs)} folder${lines(p.plugin_dirs) === 1 ? '' : 's'}`, lines(p.plugin_dirs) === 0],
-  ];
+  const box = h('section', { class: 'rules-review', 'data-rules-review': '', 'aria-label': 'Check the rules after setup' });
   const ok = h('button', { type: 'button' }, 'Looks right');
-  const box = h('section', { class: 'rules-review', 'aria-label': 'Check the rules setup filled in' },
-    h('h3', {}, 'Setup filled these in: check them'),
-    h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. A value marked default is one setup never asked about.'),
-    h('ul', {}, ...rows.map(([what, value, dflt]) => h('li', {}, h('span', { class: 'rr-what' }, what), h('span', { class: 'rr-value' }, value), h('span', { class: `rr-tag${dflt ? '' : ' set'}` }, dflt ? 'default' : 'from setup')))),
-    h('div', { class: 'row' }, ok));
+  const list = h('ul', {});
+  const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
+  const draw = () => {
+    box.hidden = !view.project.rules_review;
+    const q = view.project;
+    // [what, value, whether it is still the starting value]
+    const rows = [
+      ['How changes ship', optionLabel(SHIP_PATHS, q.ship_path), q.ship_path === 'citadel'],
+      ["A person's go", optionLabel(GO_FROM, q.go_from), q.go_from === 'high'],
+      ['Try it first', optionLabel(TRY_FIRST, q.try_first), q.try_first === 'never'],
+      ['Approval rules', `${lines(q.approval_rules)} rule${lines(q.approval_rules) === 1 ? '' : 's'}`, lines(q.approval_rules) === 0],
+      ['Default effort', q.default_effort || "Claude Code's default", q.default_effort === 'high'],
+      ['Plugin folders', `${lines(q.plugin_dirs)} folder${lines(q.plugin_dirs) === 1 ? '' : 's'}`, lines(q.plugin_dirs) === 0],
+    ];
+    list.replaceChildren(...rows.map(([what, value, dflt]) => h('li', {}, h('span', { class: 'rr-what' }, what), h('span', { class: 'rr-value' }, value), h('span', { class: `rr-tag${dflt ? '' : ' set'}` }, dflt ? 'starting value' : 'changed'))));
+  };
+  box.append(
+    h('h3', {}, 'Setup is done: check these rules'),
+    h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. "Starting value" is what a new scheme begins with. "Looks right" clears this for every member.'),
+    list, h('div', { class: 'row' }, ok));
+  box.addEventListener('settings-refresh', draw);
   ok.onclick = () => {
     ok.disabled = true;
-    saveProject(p, { rules_review: 0 }, { rules_review: false }, 'Marking the rules as checked', (done) => { if (done) box.remove(); else ok.disabled = false; });
+    saveProject(p, { rules_review: 0 }, { rules_review: false }, 'Marking the rules as checked', (done) => { if (!done) ok.disabled = false; draw(); });
   };
+  draw();
   return box;
 }
 

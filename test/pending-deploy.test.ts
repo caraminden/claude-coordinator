@@ -156,3 +156,25 @@ test('a message queued behind the turn defers the dismissal to the end of that t
   await endTurn(id, 'ok');
   assert.equal(status(id), 'closed');
 });
+
+test("a red's fix minion isn't dismissed by its deploy or close_self until CI health lets it go; green dismisses it (#1074)", () => {
+  const id = newTicket();
+  let hold: string | null = 'it fixes the red tests run 9201 on main';
+  runner.ciHold = (t) => (t === id ? hold : null);
+  try {
+    assert.equal(runner.deployLive(id), false);
+    assert.equal(status(id), 'idle');
+    assert.equal(store.getTicket(id)!.state, 'outside');
+    assert.match(store.getTicket(id)!.note!, /waiting on the CI re-run/);
+    assert.match(store.listEvents(id).at(-1)!.data, /it fixes the red tests run 9201 on main, so this minion stays open/);
+    assert.equal(runner.keptOpen(id), 'it fixes the red tests run 9201 on main');
+    // Another minion is untouched.
+    assert.equal(runner.deployLive(newTicket()), true);
+    hold = null;
+    runner.ciGreen(id, 'tests.yml is green on main again (run 9203)');
+    assert.equal(status(id), 'closed');
+    assert.equal(store.getTicket(id)!.state, null);
+  } finally {
+    runner.ciHold = undefined;
+  }
+});

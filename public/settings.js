@@ -188,6 +188,62 @@ if ('launchQueue' in window) {
 const MAX_INSTRUCTIONS = 32000;
 const count = (n) => n.toLocaleString('en');
 
+/**
+ * Read-only aids under an instructions editor: a size meter against the cap and an outline of its ## sections
+ * (each with its character count, a click jumps there). Every turn reads the whole text, so size is cost.
+ * Call update() whenever the text may have changed.
+ */
+function instructionAids(textarea, cap) {
+  const bar = h('span', { class: 'aids-fill' });
+  const meterText = h('span', { class: 'muted small' });
+  const meter = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' }, h('span', { class: 'aids-bar' }, bar), meterText);
+  const list = h('ol', { class: 'aids-outline' });
+  const box = h('div', { class: 'aids-box' }, meter, h('details', {}, h('summary', {}, 'Outline of ## sections'), list));
+  const update = () => {
+    const text = textarea.value;
+    const n = text.trim().length;
+    bar.style.width = `${Math.min(100, (n / cap) * 100)}%`;
+    bar.className = `aids-fill${n > cap ? ' over' : n > cap * 0.8 ? ' warn' : ''}`;
+    meter.setAttribute('aria-valuenow', n);
+    meterText.textContent = `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%). Every turn reads all of it.`;
+    const marks = [...text.matchAll(/^##[ \t]+(.+)$/gm)];
+    list.replaceChildren(...(marks.length ? marks.map((m, i) => {
+      const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
+      const jump = h('button', { type: 'button', class: 'linklike' }, m[1].trim());
+      jump.onclick = () => { textarea.focus(); textarea.setSelectionRange(m.index, m.index + m[0].length); };
+      return h('li', {}, jump, h('span', { class: 'muted small' }, ` ${count(end - m.index)}`));
+    }) : [h('li', { class: 'muted small' }, 'No ## sections yet.')]));
+  };
+  textarea.addEventListener('input', update);
+  update();
+  return { el: box, update };
+}
+
+/** A read-only card: how this scheme's repo is set up, read from its files when the page opens. */
+function repoSetupCard() {
+  const p = view.project;
+  const body = h('div', { class: 'repo-setup' }, h('p', { class: 'muted small' }, 'Reading the repo…'));
+  // `code` and **bold** spans as elements; a value past 240 characters shows its start, the rest behind a toggle.
+  const inline = (t) => t.split(/(`[^`]+`|\*\*[^*]+\*\*)/).filter(Boolean).map((x) => (x[0] === '`' ? h('code', {}, x.slice(1, -1)) : x.startsWith('**') ? h('strong', {}, x.slice(2, -2)) : x));
+  const long = (t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
+  const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
+  api(`api/projects/${p.id}/repo-setup`).then((r) => {
+    const parts = [];
+    if (!r.facts) parts.push(h('p', {}, 'No Project facts: the kit\'s skills fall back to defaults. ', h('a', { href: `#/p/${p.id}/approvals` }, 'Start a tune-up'), ' (the Tune up button) to write them.'));
+    else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
+    parts.push(h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
+      r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}`
+        + (x.upstream ? ` · copied from ${x.upstream}${x.pin ? ` at ${x.pin}` : ''}` : '')])) : h('p', { class: 'muted small' }, 'None.'));
+    parts.push(h('h4', {}, `Its own skills (.claude/skills/, ${r.skills.length})`),
+      r.skills.length ? kv(r.skills.map((x) => [x.name, x.description])) : h('p', { class: 'muted small' }, 'None.'));
+    body.replaceChildren(...parts);
+  }, (err) => body.replaceChildren(h('p', { class: 'error' }, `Could not read the repo: ${err.message}`)));
+  return h('div', { class: 'settings-card settings-anchor', id: 'repo-setup' },
+    h('h3', { class: 'settings-label' }, 'How this scheme\'s repo is set up'),
+    h('div', { class: 'muted small' }, 'Read from CLAUDE.md and .claude/ in the repo each time you open this; change it by editing the repo or with a tune-up.'),
+    body);
+}
+
 export function onProjectUpdate(project) {
   for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
   for (const el of document.querySelectorAll(`[data-taskmaster-name="${project.id}"]`)) el.textContent = `${project.name} Taskmaster`;
@@ -599,6 +655,7 @@ export function myInstructionsEditor() {
     placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before shipping, the model and effort they start on…',
   });
   const counter = h('span', { class: 'muted counter' });
+  const aids = instructionAids(textarea, MAX_PERSONAL);
   const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
   const save = h('button', { type: 'button', disabled: true }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
@@ -612,6 +669,7 @@ export function myInstructionsEditor() {
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_PERSONAL)}`;
     counter.classList.toggle('over', n > MAX_PERSONAL);
+    aids.update();
     save.disabled = !dirty || n > MAX_PERSONAL;
     discard.disabled = !dirty;
   };
@@ -680,6 +738,7 @@ export function myInstructionsEditor() {
     settingsJump(['my-instructions-text', 'Your text'], ['my-instructions-recent', 'Recent changes'], ['my-instructions-order', 'What a minion reads']),
     h('h3', { class: 'settings-label' }, 'Applies to'),
     switcher,
+    aids.el,
     textarea, hidden,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     h('div', { id: 'my-instructions-recent', class: 'settings-anchor' }, historySlot),
@@ -744,6 +803,7 @@ export function appInstructionsEditor() {
     placeholder: 'How people like to work in every scheme: tone, when to ask, how to hand work off…',
   });
   const counter = h('span', { class: 'muted counter' });
+  const aids = instructionAids(textarea, MAX_INSTRUCTIONS);
   const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
   const save = h('button', { type: 'button', disabled: true }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
@@ -755,6 +815,7 @@ export function appInstructionsEditor() {
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
     counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
+    aids.update();
     save.disabled = !dirty || n > MAX_INSTRUCTIONS;
     discard.disabled = !dirty;
   };
@@ -796,6 +857,7 @@ export function appInstructionsEditor() {
     settingsJump(['app-instructions-text', 'Instructions'], ['app-instructions-recent', 'Recent changes'], ['github-owner-section', 'GitHub owner']),
     settingsHelp('Rules for how people like to work in every scheme, read by each minion and Taskmaster from its next turn.',
       'They come right before its scheme instructions, and a scheme instruction overrides one of these only where it names the rule it replaces.'),
+    aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     h('div', { id: 'app-instructions-recent', class: 'settings-anchor' }, history),
@@ -861,6 +923,7 @@ export function instructionsEditor() {
   });
   textarea.value = p.instructions ?? '';
   const counter = h('span', { class: 'muted counter' });
+  const aids = instructionAids(textarea, MAX_INSTRUCTIONS);
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button' }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
@@ -871,6 +934,7 @@ export function instructionsEditor() {
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
     counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
+    aids.update();
     save.disabled = !dirty || n > MAX_INSTRUCTIONS;
     discard.disabled = !dirty;
   };
@@ -921,16 +985,18 @@ export function instructionsEditor() {
 
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),
-    settingsJump(['instructions-text', 'Instructions'], ['instructions-import', 'Import'], ['instructions-recent', 'Recent changes']),
+    settingsJump(['instructions-text', 'Instructions'], ['instructions-import', 'Import'], ['instructions-recent', 'Recent changes'], ['repo-setup', 'Repo setup']),
     h('div', { class: 'instructions-tools', id: 'instructions-import' },
       importButton,
       h('button', { type: 'button', class: 'secondary', onclick: () => fileInput.click() }, 'Import a file…'),
       fileInput,
       h('span', { class: 'muted small' }, 'Or paste: from a Claude Code project at claude.ai/code, copy Project settings › Memory › Project instructions.')),
     picker,
+    aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
-    h('div', { id: 'instructions-recent', class: 'settings-anchor' }, history));
+    h('div', { id: 'instructions-recent', class: 'settings-anchor' }, history),
+    repoSetupCard());
   sync();
   loadHistory();
   setTimeout(() => {

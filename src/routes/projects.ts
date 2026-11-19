@@ -17,6 +17,7 @@ import { pickFor, pickReason } from '../../public/model-table.js';
 import { inOrder } from '../../public/reorder.js';
 import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../../public/shipping.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
+import { repoSetup } from '../repo-setup.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
@@ -1013,6 +1014,10 @@ export const projectRoutes: Route[] = [
       }
       return json(res, 200, { saved: where, edits: edits.length, length: text.length });
     },
+  },
+  {
+    method: 'GET', path: '/api/projects/:project/repo-setup', who: ['person'],
+    handler: async ({ res, project }) => json(res, 200, project.repo_dir ? await repoSetup(project.repo_dir) : { facts: null, rules: [], skills: [] }),
   },
   {
     method: 'GET', path: '/api/projects/:project/instructions/sources', who: ['person'],

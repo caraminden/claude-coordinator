@@ -464,3 +464,19 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
 .memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .chip.warn { border-color: var(--warn, #b7791f); background: color-mix(in srgb, var(--warn, #b7791f) 14%, var(--panel)); }
+
+/* Instructions aids: size meter and outline, and the repo setup card (read-only). */
+.aids-box { margin: 0.4rem 0; }
+.aids-meter { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.aids-bar { flex: 0 0 10rem; height: 0.5rem; border-radius: 0.25rem; background: var(--line); overflow: hidden; }
+.aids-fill { display: block; height: 100%; background: var(--accent); }
+.aids-fill.warn { background: var(--warn, #c77700); }
+.aids-fill.over { background: var(--error); }
+.aids-box summary { cursor: pointer; padding: 0.4rem 0; }
+.aids-outline { margin: 0 0 0.4rem; padding-left: 1.4rem; }
+.aids-outline button.linklike { all: unset; cursor: pointer; color: var(--accent); }
+.aids-outline button.linklike:hover { text-decoration: underline; }
+.repo-facts { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0.35rem 1rem; margin: 0.4rem 0 0.8rem; }
+.repo-facts dt { font-weight: 600; overflow-wrap: anywhere; }
+.repo-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .repo-facts { grid-template-columns: 1fr; gap: 0.1rem; } .repo-facts dd { margin-bottom: 0.5rem; } }

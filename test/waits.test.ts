@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
-import { median, procAlive, slotHeld, Waits } from '../src/waits.ts';
+import { median, moveIn, procAlive, slotHeld, Waits } from '../src/waits.ts';
 import { spawn } from 'node:child_process';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
@@ -263,4 +263,13 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 5, 3, 4, 2, 6]);
   for (const seq of [2, 3, 4, 5]) dead.add(`${seq}00 77`);
   assert.throws(() => waits.setOrder([3], 'Josh'), /no landing waiting/i, 'all landed or gone meanwhile');
+});
+
+test('a move on a target that shows part of the line moves only that landing (#1007)', () => {
+  // The line waits 5, 6, 7, 8; a target shows 6, 7 and 8 (5 ships elsewhere).
+  assert.deepEqual(moveIn([5, 6, 7, 8], [8, 6, 7], 8), [8, 5, 6, 7], 'Land next: the front of the whole line');
+  assert.deepEqual(moveIn([5, 6, 7, 8], [6, 8, 7], 8), [5, 6, 8, 7], 'dragged up one: just ahead of the one it now goes before');
+  assert.deepEqual(moveIn([5, 6, 7, 8], [7, 8, 6], 6), [5, 7, 8, 6], 'dragged to the back: just behind the one it goes after');
+  assert.deepEqual(moveIn([5, 6, 7, 8], [6, 7, 8], 7), [5, 6, 7, 8], 'dropped where it was');
+  assert.deepEqual(moveIn([5, 6], [9, 6], 6), [5, 6], 'the rest of what it names is gone: it keeps its place');
 });

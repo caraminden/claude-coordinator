@@ -87,6 +87,9 @@ export interface Next extends Progress {
   changes: Change[];
 }
 
+/** Why a waiting landing can't be moved (#1002, #1007): its branch's land script predates reordering. */
+export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it lands in its turn";
+
 export interface LineEntry {
   /** "#620", or the label of a run that isn't a minion's ("tools/deploy.sh"). */
   name: string;
@@ -99,6 +102,8 @@ export interface LineEntry {
   seq: number;
   /** Waiting, and its landing follows the order set on the Releases page (one from an older branch doesn't). */
   movable: boolean;
+  /** Why a waiting one can't move (#1007), shown on its row. */
+  why?: string;
   stage: string;
   since: number;
 }
@@ -401,6 +406,7 @@ export class CitadelServer implements Reader {
       return {
         name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
         holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !!t.orders, stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+        ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : {}),
       };
     });
     // A deploy run alone holding the lock carries whatever is on main.

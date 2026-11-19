@@ -1,5 +1,6 @@
 // A reader per kind of found target (#627, src/release-targets.ts finds them), each filling src/releases.ts's shape.
 // read() answers from what refresh() last read (git, files, GitHub), so the 2-second poll costs nothing.
+import { readFileSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DeployView } from './app-services.ts';
@@ -8,10 +9,10 @@ import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { CITADEL_TARGET, git, landedIn, releaseOf, type Change, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
-import { median, readHeavy } from './waits.ts';
+import { median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
 
 const RECENT = 5;
 /** How many earlier releases a card lists under Previous releases (Cara, 2026-11-12: "Previous releases could have links to old builds"). */
@@ -801,6 +802,12 @@ export function landProgress(output: string, since: number): Progress {
  * Each goes on the targets its branch's files ship on, ahead of their own stages, from the hand-off until main has it
  * (then a reader has it as on main). Not for Citadel's own scheme (its land line has them) or Main (it ships at merge).
  */
+/** A scheme's land line: the kit's land template's tickets, in its main checkout's git folder (#1007). */
+export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
+
+/** Why no landing in a scheme's line can move yet (#1007): the land.sh on its main predates reordering. */
+export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its landings go in turn until it copies the kit's newer one";
+
 export class LandsInFlight {
   private d: LandDeps;
   /** When each was first seen landing (ms), so a poll doesn't move it. */
@@ -825,17 +832,35 @@ export class LandsInFlight {
 
   attach(views: Omit<TargetView, 'testCopies'>[]) {
     const now = (this.d.now ?? Date.now)();
-    const landing = this.d.landings.handoffs().map((id) => ({ id, run: this.d.landings.get(id) })).filter((x) => x.run?.code === null);
-    // Rows go the way the line does (the ones landing first, then each place in turn), whatever order the hand-offs came in.
-    const rank = new Map(landing.map((x) => [x.id, placeRank(landProgress(x.run!.output, 0).brief)]));
+    const { store } = this.d;
+    // Each scheme's land line (the kit's land template's <.git>/land-queue, #1007), read once: a landing's ticket in it
+    // (by its branch) gives its place, and each target's part of the line is what the Releases page reorders.
+    const lines = new Map<number, { line: LandTicket[]; current: boolean }>();
+    const lineOf = (p: Project) => {
+      if (!lines.has(p.id)) {
+        // Whether the scheme's own land.sh follows .order yet: until it does, no landing in its line can move.
+        let script = '';
+        try { script = readFileSync(join(p.repo_dir!, 'tools', 'land.sh'), 'utf8'); } catch { /* none: no line to read either */ }
+        lines.set(p.id, { line: readQueue(landQueue(p.repo_dir!), 7), current: /^queue_order\(\)/m.test(script) });
+      }
+      return lines.get(p.id)!;
+    };
+    const landing = this.d.landings.handoffs().map((id) => ({ id, run: this.d.landings.get(id) })).filter((x) => x.run?.code === null).map((x) => {
+      const t = store.getTicket(x.id);
+      const p = t?.branch ? store.getProject(t.project_id) : null;
+      const q = p?.repo_dir ? lineOf(p) : null;
+      const at = q ? q.line.findIndex((l) => l.label === t!.branch) : -1;
+      return { ...x, t, p, q, at };
+    });
+    // Rows go the way the line does (the one landing first, then each place in turn), whatever order the hand-offs came
+    // in: by the line itself where the landing is in it, else by the place its output last said.
+    const rank = new Map(landing.map((x) => [x.id, x.at >= 0 ? x.at : placeRank(landProgress(x.run!.output, 0).brief)]));
     landing.sort((a, b) => rank.get(a.id)! - rank.get(b.id)! || a.id - b.id);
     const ids = new Set(landing.map((x) => x.id));
     for (const id of this.seen.keys()) if (!ids.has(id)) this.seen.delete(id);
     for (const id of this.files.keys()) if (!ids.has(id)) this.files.delete(id);
     const all = this.d.finder.list();
-    for (const { id, run } of landing) {
-      const t = this.d.store.getTicket(id);
-      const p = t?.branch ? this.d.store.getProject(t.project_id) : null;
+    for (const { id, run, t, p, q, at } of landing) {
       const mine = views.filter((v) => v.target.projectId === t?.project_id);
       if (!t || !p?.repo_dir || !mine.length || mine.some((v) => v.target.kind === 'main' || v.target.id === CITADEL_TARGET)) continue;
       const targets = all.filter((x) => x.projectId === t.project_id);
@@ -843,8 +868,15 @@ export class LandsInFlight {
       if (!this.seen.has(id)) this.seen.set(id, now);
       const lead = landProgress(run!.output, this.seen.get(id)!);
       const change: Change = { ...asChange(t), ...lead };
+      const l = q && at >= 0 ? q.line[at] : null;
+      const waits = l?.got === 0;
+      const entry: LineEntry | null = l && {
+        name: `#${t.number ?? t.id}`, ticketId: t.id, holds: !waits, place: ordinal(at + 1), seq: l.seq, movable: waits && !!l.orders && q!.current,
+        stage: waits ? 'line' : 'land', since: l.mtime, ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && !l.orders ? { why: OLD_LAND } : {}),
+      };
       for (const tv of mine.filter((v) => on.has(v.target.id))) {
         if (tv.next?.changes.some((c) => c.ticketId === id)) continue;
+        if (entry) tv.line = [...tv.line, entry];
         if (tv.next) {
           // Its own release leads: what is on main is further along than a land. A release already building can't take it.
           const stages = tv.next.stages.some((s) => s.name === 'land') ? tv.next.stages : [{ name: 'land', usual: null }, ...tv.next.stages];

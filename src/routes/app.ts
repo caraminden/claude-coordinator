@@ -11,7 +11,9 @@ import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
-import { ordinal } from '../waits.ts';
+import { ordinal, readQueue, writeOrder } from '../waits.ts';
+import { CITADEL_TARGET } from '../releases.ts';
+import { landQueue } from '../release-readers.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -217,17 +219,21 @@ export const appRoutes: Route[] = [
     if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
     const seqs = body?.order;
     if (!Array.isArray(seqs) || seqs.length > 200 || !seqs.every((n) => Number.isInteger(n) && n > 0)) throw new HttpError(400, 'order must be a list of line tickets');
-    const line = releases.view((id) => id === projectId)[0]?.targets.flatMap((t) => t.line) ?? [];
-    if (!waits || !line.length) throw new HttpError(404, 'This scheme has no land line here');
+    const targets = releases.view((id) => id === projectId)[0]?.targets ?? [];
+    const line = targets.flatMap((t) => t.line);
+    // Citadel's own line is the deploy queue's (#1002); any other scheme's is its copy of the kit's land template (#1007).
+    const own = targets.some((t) => t.target.id === CITADEL_TARGET);
+    const repo = store.getProject(projectId)?.repo_dir;
+    if ((own ? !waits : !repo) || !line.length) throw new HttpError(404, 'This scheme has no land line here');
     const moved = line.find((e) => e.seq === body?.moved && !e.holds);
     if (!moved) throw new HttpError(409, 'That landing is no longer waiting in line');
-    if (!moved.movable) throw new HttpError(409, `${moved.name} started from a branch older than reordering, so it lands in its turn`);
+    if (!moved.movable) throw new HttpError(409, `${moved.name}: ${moved.why ?? 'it can\'t move'}`);
     const who = store.getUser(session.uid as number)?.name ?? 'a member';
     const place = seqs.indexOf(moved.seq);
     const note = `${who} moved ${moved.name} ${place === 0 ? 'to land next' : `to ${ordinal(place + 1)} of the waiting landings`}`;
     let order: number[];
     try {
-      order = waits.setOrder(seqs, note);
+      order = own ? waits!.setOrder(seqs, note, moved.seq) : writeOrder(landQueue(repo!), readQueue(landQueue(repo!), 7), seqs, note, moved.seq);
     } catch (err) {
       throw new HttpError(409, (err as Error).message);
     }

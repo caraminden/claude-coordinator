@@ -113,19 +113,33 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
 }
 
 /**
- * Write a queue's .order (#1002, #1007): `seqs` first, the waiters it leaves out behind them in the line's order; a
+ * Write a queue's .order (#1002, #1007): `seqs` first, the waiters it leaves out behind them in the line's order (or,
+ * given `moved`, only that one moves, to where `seqs` puts it: moveIn); a
  * holder, a ticket no longer waiting or one from an older branch is left out (an older one waits for every lower
  * ticket, so ranking it ahead of one could deadlock). `note` says who moved what, for the waiters' output. Returns the order written.
  */
-export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string): number[] {
+export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string, moved?: number): number[] {
   const waiting = line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
-  const order = [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
+  const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
   if (!order.length) throw new Error('No landing waiting in line to reorder');
   const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
   writeFileSync(tmp, `# ${note.replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
   renameSync(tmp, f);
   return order;
+}
+
+/**
+ * `moved` placed in the whole line as `seqs` (a target's part of it, #1007) places it, the rest kept where they were:
+ * at the front when it's first there, else just ahead of the one it now goes before (or behind the one it goes after,
+ * or where it was when neither still waits).
+ */
+export function moveIn(line: number[], seqs: number[], moved: number): number[] {
+  const rest = line.filter((n) => n !== moved), at = seqs.indexOf(moved);
+  const after = seqs.slice(at + 1).find((n) => rest.includes(n));
+  const before = seqs.slice(0, Math.max(at, 0)).reverse().find((n) => rest.includes(n));
+  const i = at <= 0 ? 0 : after != null ? rest.indexOf(after) : before != null ? rest.indexOf(before) + 1 : line.indexOf(moved);
+  return [...rest.slice(0, i), moved, ...rest.slice(i)];
 }
 
 /** A landing's phase (queue_phase's words in land.sh and deploy.sh) as its stage, badge word and detail. */
@@ -348,13 +362,13 @@ export class Waits {
 
   /**
    * Put the waiting landings in this order (#1002, the Releases page): `seqs` first, the ones it leaves out behind them in
-   * the line's order; a holder, a ticket no longer waiting or one from an older branch is left out. `note` says who moved what, for the waiters' output.
-   * Returns the order written.
+   * the line's order (given `moved`, only it moves: moveIn); a holder, a ticket no longer waiting or one from an older branch
+   * is left out. `note` says who moved what, for the waiters' output. Returns the order written.
    */
-  setOrder(seqs: number[], note: string): number[] {
+  setOrder(seqs: number[], note: string, moved?: number): number[] {
     if (!this.d.deployState) throw new Error('This server has no land line');
     this.poll();
-    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note);
+    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved);
     this.poll();
     return order;
   }

@@ -8,6 +8,7 @@ import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
 import { elsewhereRows, pickers } from './minion-rules.js';
+import { HOME_SCHEME } from './schemes.js';
 import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping.js';
 
 // ---------- push notifications ----------
@@ -444,13 +445,17 @@ export function tuneUpButton() {
  * main behind it; the server refuses it while the scheme's land.sh is older than the kit's, and the toast says so.
  */
 function fastModeRow(p) {
-  const on = h('input', { type: 'checkbox', id: 'land-mode', checked: p.land_mode === 'fast' });
+  // Citadel itself stays off (Cara, 2026-11-18, "Later"; Josh, 2026-11-19: lock it with a note). The server still accepts
+  // the setting. If #1017's Nov 26 decision turns it on for Citadel, change this line to `const locked = false;` (or delete it).
+  const locked = p.id === HOME_SCHEME;
+  const on = h('input', { type: 'checkbox', id: 'land-mode', checked: !locked && p.land_mode === 'fast', disabled: locked });
   const [row, sum] = settingsRow({ icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
-    h('label', { class: 'toggle', title: 'Ship now, test behind' }, on, 'Ship now, test behind'),
+    h('label', { class: 'toggle', title: locked ? 'Off for Citadel itself' : 'Ship now, test behind' }, on, 'Ship now, test behind'),
+    locked && h('p', { class: 'muted small settings-help' }, 'Off for Citadel itself: every scheme runs on it. Cara picked "Later" (Nov 18); it\'s decided around Nov 26 from the other schemes\' numbers.'),
     settingsHelp('Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
       'A red reopens the minion whose change broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other changes up. High-risk changes and changes to the ship pipeline keep the full gate, and CI reds on main from fast ships send no Mandate alerts, except from watched workflows.'));
   const shown = () => {
-    on.checked = view.project?.land_mode === 'fast';
+    on.checked = !locked && view.project?.land_mode === 'fast';
     sum.textContent = on.checked ? 'On' : 'Off';
   };
   on.addEventListener('settings-refresh', shown);

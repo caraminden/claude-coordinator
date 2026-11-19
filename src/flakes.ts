@@ -5,7 +5,7 @@
 export const FLAKE_WINDOW_MS = 14 * 24 * 60 * 60_000;
 const FILE = /^[\w./-]+\.test\.ts$/;
 
-/** One flake per file in `output`, with where it was seen and the failing lines kept as the detail (the first 5, 400 chars). */
+/** One flake per file in `output`, with where it was seen and the output's other lines naming the file kept as the detail (the first 5, 400 chars: run-tests' "passed alone" line with its load; land.sh's own output has no failing lines). */
 export function parseFlakes(output: string): { file: string; source: string; detail: string }[] {
   const seen = new Map<string, string>();
   for (const m of output.matchAll(/^(?:land: flake: (\S+) · (.+)|run-tests: (\S+): failed in the full run, passed alone.*)$/gm)) {
@@ -13,7 +13,7 @@ export function parseFlakes(output: string): { file: string; source: string; det
     if (FILE.test(file) && !seen.has(file)) seen.set(file, m[2] ?? 'run-tests');
   }
   return [...seen].map(([file, source]) => {
-    const lines = output.split('\n').filter((l) => l.includes(`✖ ${file}`)).slice(0, 5);
+    const lines = output.split('\n').filter((l) => l.includes(file) && !l.startsWith('land: flake:')).slice(0, 5);
     return { file, source: source.replace(/\s+/g, ' ').slice(0, 40), detail: lines.join('\n').slice(0, 400) };
   });
 }

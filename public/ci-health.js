@@ -73,11 +73,12 @@ function flakeBlock(s, flakes, refresh) {
     h('span', { class: 'ci-run-act' }, f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} is on it`)
       : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it')));
   return h('section', { class: 'ci-block' }, h('h4', {}, 'Flaky tests, last 14 days'),
-    flakes.length ? h('div', { class: 'ci-runs' }, ...flakes.map(row)) : h('p', { class: 'muted' }, 'No test file failed and then passed alone in the last 14 days.'));
+    flakes.length ? h('div', { class: 'ci-runs' }, ...flakes.map(row)) : h('p', { class: 'muted' }, 'No flaky test file reported in the last 14 days. Only schemes whose land script prints flake lines report them.'));
 }
 
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */
 export function testHealth(s, data, refresh) {
+  if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. Pick the tab again to retry.")];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
   return [fastBlock(s, data.fast, data.now), flakeBlock(s, data.flakes, refresh)];
 }

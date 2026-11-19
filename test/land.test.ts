@@ -325,6 +325,9 @@ test('a red of flakes only gets one fresh CI run, and lands when that run is gre
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  // src/flakes.ts parses these lines (a pipeline test can't import it; test/flakes.test.ts pins the same format).
+  assert.match(res.stderr, /^land: flake: test\/busy\.test\.ts · in CI$/m);
+  assert.match(res.stderr, /^land: flake: test\/slow\.test\.ts · in CI$/m);
   assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'a second push, so a new run');
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · green$/m);
   assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/m);
@@ -727,6 +730,7 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   assert.equal(flake.status, 0, flake.stderr);
   assert.match(flake.stderr, /smoke: test\/always\.test\.ts failed, then passed alone: likely load, not your change/);
   assert.match(landLog(flaky.shared), /· flake · test\/always\.test\.ts · smoke · ticket\/1-x$/m);
+  assert.match(flake.stderr, /^land: flake: test\/always\.test\.ts · smoke$/m);
   assert.doesNotMatch(landLog(flaky.shared), /^- \S+ · smoke · /m, 'no smoke refusal');
 
   const off = smokeSetup();

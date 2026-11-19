@@ -189,7 +189,7 @@ export function ciPage(projectId, startTab = 'overview') {
   // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
   let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' ? 'health' : 'overview';
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
-  const readTab = async (id) => { try { health.set(id, await readHealth(id)); draw(); } catch { /* the next read tries again */ } };
+  const readTab = async (id) => { try { health.set(id, await readHealth(id)); draw(); } catch { health.set(id, { error: true }); draw(); } };
   let loadOpen = localStorage.getItem(LOAD_OPEN) === '1';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
@@ -211,7 +211,7 @@ export function ciPage(projectId, startTab = 'overview') {
     const rows = schemes.map((x) => {
       const st = stateOf(x, now);
       const n = x.problems.length;
-      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); } },
+      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); if (tab === 'health') readTab(x.id); } },
         h('span', { class: `dot ${st}` }), h('span', { class: 'ci-li-name' }, x.name),
         h('span', { class: 'ci-li-state muted' }, n ? `${n} problem${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]));
     });

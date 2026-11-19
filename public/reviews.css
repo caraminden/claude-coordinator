@@ -1,0 +1,64 @@
+/* The Reviewers and critics page (public/reviews.js, #1051): columns by when each one runs, the picked one's
+   detail beside them; on a phone the columns stack and the detail follows them. */
+.reviews-main { min-width: 0; padding-bottom: 2rem; }
+@media (min-width: 801px) { .rv-head .close-view.narrow-only, .rv-detail .close-view.narrow-only { display: none; } }
+.rv-head h2 { margin: 0; }
+.rv-head .row { align-items: center; gap: 0.5rem; flex-wrap: nowrap; }
+.rv-head .row > h2 { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The phone's controls rule (style.css) gives every button a 44px min-height; the switch keeps its own size. */
+.reviews-main .rules-switch { min-height: 0; }
+.rv-head .rv-new { flex: none; }
+.rv-scheme { font-weight: normal; }
+.rv-body { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 1rem; align-items: start; }
+.rv-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: 0.75rem; align-items: start; min-width: 0; }
+.rv-board.rv-empty { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 1rem; }
+.rv-col { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.rv-col > h3, .rv-sec > h4 { margin: 0; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.rv-none { margin: 0; font-size: 0.9em; }
+.rv-card { display: flex; flex-direction: column; gap: 0.35rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.7rem; cursor: pointer; }
+.rv-card:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.rv-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rv-card.off .rv-card-name, .rv-card.off .rv-card-when { opacity: 0.6; }
+.rv-card-top { display: flex; align-items: center; gap: 0.5rem; }
+.rv-card-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.rv-card-when { font-size: 0.88em; color: var(--muted); overflow-wrap: anywhere; }
+.rv-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.rv-chips:empty { display: none; }
+.rv-detail { position: sticky; top: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 0.9rem; min-width: 0; }
+.rv-detail-empty { background: none; border-style: dashed; }
+.rv-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+/* The detail's back button, quiet like the head's (thread.css styles .close-view only inside a .ticket-head). */
+.rv-detail .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--head-btn); height: var(--head-btn); min-height: 0; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+.rv-detail .close-view:is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
+.rv-detail-head h3 { margin: 0; flex: 1 1 auto; font-size: 1.05em; }
+.rv-switch-row { display: flex; align-items: center; gap: 0.6rem; }
+.rv-trial { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; font-size: 0.92em; }
+.rv-sec { display: flex; flex-direction: column; gap: 0.25rem; }
+.rv-sec p, .rv-ctx { margin: 0; }
+.rv-ctx { padding-left: 1.1rem; }
+.rv-when code { font-size: 0.85em; overflow-wrap: anywhere; }
+.rv-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.rv-ver { margin: 0; font-size: 0.85em; }
+.rv-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 0.9em; }
+.rv-history li { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.3rem 0.4rem; border-radius: 6px; }
+.rv-history li:nth-child(even) { background: color-mix(in srgb, var(--ink) 5%, var(--panel)); }
+.rv-hv { font-variant-numeric: tabular-nums; color: var(--muted); }
+.rv-hnote { overflow-wrap: anywhere; }
+.rv-form { display: flex; flex-direction: column; gap: 0.6rem; margin: 0; }
+.rv-form h3 { margin: 0; font-size: 1.05em; }
+.rv-form p { margin: 0; }
+.rv-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.rv-label { font-size: 0.85em; font-weight: 600; }
+.rv-hint { font-size: 0.82em; }
+.rv-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.rv-bodytext { font-family: var(--mono, ui-monospace, monospace); font-size: 0.85em; resize: vertical; }
+/* With an edit open the detail takes the wider share, so the body reads at a useful width. */
+.rv-body:has(.rv-form) { grid-template-columns: minmax(0, 1fr) minmax(20rem, 32rem); }
+
+@media (max-width: 800px) {
+  .rv-scheme, .rv-head .close-view.wide-only { display: none; }
+  .rv-body, .rv-body:has(.rv-form) { grid-template-columns: minmax(0, 1fr); }
+  .rv-board { grid-template-columns: minmax(0, 1fr); }
+  .rv-detail { position: static; }
+  .rv-detail-empty { display: none; }
+}

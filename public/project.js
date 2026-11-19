@@ -19,6 +19,7 @@ import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
 import { releasesPage, setReleasesPage } from './releases.js';
+import { reviewsPage } from './reviews.js';
 import { toast } from './ui/status.js';
 
 /**
@@ -76,6 +77,7 @@ function renderCrumbs(main) {
       : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
+      : main.kind === 'reviews' ? [projectLink, ' / ', settingsLink, ' / ', 'Reviewers and critics']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
@@ -214,6 +216,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'notifications' ? notificationsPage()
     : main.kind === 'usage' ? usagePage()
     : main.kind === 'releases' ? releasesPage()
+    : main.kind === 'reviews' ? reviewsPage()
     : main.kind === 'ci' ? ciPage(projectId, main.tab)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)

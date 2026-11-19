@@ -126,6 +126,10 @@ test('answer hook: logs each hit as a would-refuse line and refuses nothing; the
   const plain = script({});
   assert.equal(plain.stdout, '');
   assert.equal(lines().length, before + 2);
+  // #1031: a stop with a Grunt still running goes through, but the Grunt's result wakes the turn: not its end yet.
+  const grunt = script({ prompt_id: 'p9', background_tasks: [{ id: 'a7', status: 'running', type: 'subagent', description: 'review' }] });
+  assert.equal(grunt.stdout, '', 'a Grunt never blocks the stop');
+  assert.equal(lines().length, before + 2, 'and its interim reply is not judged');
   assert.equal(script({ transcript_path: '/nonexistent/t.jsonl', last_assistant_message: undefined }).status, 0, 'fails open');
 });
 

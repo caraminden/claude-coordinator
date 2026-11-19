@@ -69,9 +69,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const input = JSON.parse(readFileSync(0, 'utf8'));
     const out = stopHook(input);
-    // The answer check's trial (answer-check.ts) judges only a stop that ends the turn.
+    // The answer check's trial (answer-check.ts) judges only a stop that ends the turn: not a refused one, nor one
+    // with a Grunt still running, whose result wakes the turn again.
     if (out) process.stdout.write(out);
-    else answerHook(input);
+    else if (!runningTasks(input).some((t) => t.grunt)) answerHook(input);
   } catch (err: any) {
     process.stderr.write(`[citadel job check] skipped: ${err.message}\n`);
   }

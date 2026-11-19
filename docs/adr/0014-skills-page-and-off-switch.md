@@ -29,4 +29,4 @@ The grilling round with Josh, the same day:
 Cara's Q10 for Build 4's review set (2026-11-19) decides what happens with self-review off: nothing labels a change's risk,
 so every ship in that scheme waits for a person's go. The minion prompt says so.
 
-Codex turns read the kit from their own folder and aren't pruned yet.
+Codex turns aren't pruned: a Codex turn installs its kit into the person's shared Codex home, so pruning one scheme's copy would cut the skill from their other schemes too. The go rule is enforced by the server: with self-review off, `hand_off_land` refuses a ship with no go.

@@ -73,8 +73,7 @@ function list() {
   if (tab === 'scheme' && !items.length) {
     return [h('p', { class: 'muted sk-empty' }, `${view.project?.name ?? 'This scheme'} has no skills or Grunt types of its own yet (its repo's .claude/skills and .claude/agents). `, h('button', { type: 'button', class: 'cui-btn', onclick: newSkill }, '+ New skill'))];
   }
-  const intro = tab === 'kit' ? h('p', { class: 'muted small sk-intro' }, 'Every scheme gets these by default, and they are recommended. A scheme can turn any of them off; its minions stop seeing it from their next turn. Critics and reviewers have their own page, ',
-    h('a', { href: `#/p/${view.projectId}/reviews` }, 'Reviewers and critics'), '.')
+  const intro = tab === 'kit' ? h('p', { class: 'muted small sk-intro' }, 'Every scheme gets these by default, and they are recommended. A scheme can turn any of them off; its minions stop seeing it from their next turn.')
     : tab === 'agents' ? h('p', { class: 'muted small sk-intro' }, 'Grunts are the helpers a minion starts for a side job. These types come with the kit; they have no switch.') : null;
   const off = tab === 'kit' ? items.filter((i) => data.off.includes(i.slug)).sort(byRuns) : [];
   const on = items.filter((i) => !off.includes(i)).sort(byRuns);
@@ -120,7 +119,7 @@ function detail(item, u) {
     line(item.kind === 'skill' ? 'Grunts it started: ' : 'Started after: ', withs),
     h('p', {}, h('b', {}, 'Last runs: ')),
     h('ul', { class: 'sk-last' }, u.last.map((r) => h('li', {},
-      h('a', { href: threadHref({ kind: 'ticket', project_id: r.project_id, number: r.number, id: 0 }) }, r.number == null ? 'Taskmaster' : `#${r.number} ${r.title}`),
+      h('a', { href: threadHref({ kind: r.number == null ? 'coordinator' : 'ticket', project_id: r.project_id, number: r.number, id: 0 }) }, r.number == null ? 'Taskmaster' : `#${r.number} ${r.title}`),
       h('span', { class: 'muted' }, ` · ${pacific(r.at)}`)))));
 }
 

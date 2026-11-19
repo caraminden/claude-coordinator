@@ -2706,8 +2706,9 @@ export class Runner {
     try {
       const pins = turnPins();
       cpSync(pins.MCP_DIR, pin, { recursive: true });
-      // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all.
-      pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
+      // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
+      // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
+      if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
       // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
       const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
       // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.

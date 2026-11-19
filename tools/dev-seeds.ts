@@ -2,7 +2,8 @@
 // the running dev copy and prints the route that shows it; a test may call them on its own Store. A feature that
 // needs a state no scenario has adds one here rather than in a scratch seed.ts. Each adds a fresh minion (or a few)
 // to a scheme named "Seeded", so they work on --data empty and on a copy of the live data alike.
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
@@ -692,6 +693,51 @@ mock.boards('#takes', { boards: [
         ],
       });
       return `#/p/${c.project.id}/ci`;
+    },
+  },
+  'land-line': {
+    about: "a scheme that lands with the kit's land template, on its Releases page (#1007): one landing, three waiting in an order set by hand, one from an old branch that can't move; on two targets",
+    seed(c) {
+      const repo = join(projectDir(c.dataDir, c.project.id), 'repo');
+      const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' } });
+      const put = (path: string, text: string) => {
+        mkdirSync(join(repo, path, '..'), { recursive: true });
+        writeFileSync(join(repo, path), text);
+      };
+      mkdirSync(repo, { recursive: true });
+      execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+      // Two targets: a Windows and a Linux build, each a release job; the land script follows .order (the template's queue_order).
+      const job = (os: string) => `  ${os}-release:\n    runs-on: ${os === 'windows' ? 'windows-latest' : 'ubuntu-latest'}\n    steps:\n      - run: gh release upload v1 out.zip\n`;
+      put('.github/workflows/release.yml', `name: release\non: push\njobs:\n${job('windows')}${job('linux')}`);
+      put('tools/land.sh', '#!/usr/bin/env bash\nqueue_order() {\n  :\n}\n');
+      sh('add', '-A');
+      sh('commit', '-qm', 'seed');
+      c.store.setProjectRepoDir(c.project.id, repo);
+      // The queue's tickets name pid 1 with its start time, so they read as alive with nothing left running.
+      const stat = readFileSync('/proc/1/stat', 'utf8');
+      const one = `1 ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
+      const q = join(repo, '.git', 'land-queue');
+      mkdirSync(q, { recursive: true });
+      const lands: [string, boolean][] = [['Tell the agent a rule was taken out', true], ['Windows installer icon', true], ['Overlay fades on focus loss', true], ['Companion log rotation', true], ['Old branch: tray menu', false]];
+      lands.forEach(([title, orders], i) => {
+        const t = minion(c, title, { note: 'landing' });
+        // Each branch changes a file both builds ship, so its land is on both targets.
+        sh('checkout', '-q', '-b', t.branch!);
+        put(`src/change-${i}.txt`, `${title}\n`);
+        sh('add', '-A');
+        sh('commit', '-qm', title);
+        sh('checkout', '-q', 'main');
+        const holds = i === 0;
+        writeFileSync(join(q, String(i + 1).padStart(10, '0')), [one, holds ? String(Math.floor(Date.now() / 1000) - 240) : '0', t.branch, holds ? 'waiting for CI on 63df22a8 since 21:52' : 'waiting', '-', '-', '-', ...(orders ? ['order'] : [])].join('\n') + '\n');
+        // A handed-off land the server reads as still running: its started time ahead, so no pid is needed (HostJobs' start grace).
+        const dir = join(c.dataDir, 'run', 'landings', String(t.id));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: title, risk: 'low', reason: 'seeded', args: [] }));
+        writeFileSync(join(dir, 'started'), String(Date.now() + 365 * 86400e3));
+        writeFileSync(join(dir, 'output.log'), holds ? 'queue: got the land lock\n' : `queue: ${['2nd', '3rd', 'next', '4th'][i - 1]} in line for the land lock\n`); // as .order has them
+      });
+      writeFileSync(join(q, '.order'), `# ${c.who} moved #4 to land next\n0000000004\n0000000002\n0000000003\n`);
+      return `#/p/${c.project.id}/releases/${c.project.id}`;
     },
   },
   'inbox-full': {

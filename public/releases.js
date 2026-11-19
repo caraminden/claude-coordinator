@@ -426,8 +426,8 @@ function changeList(projectId, tv) {
   const n = tv.next, hl = page?.hl;
   const line = lineInOrder(projectId, tv.line);
   const rows = changeRows({ ...tv, line })
-    // a landing from a branch older than #1002 can't move
-    .map((r) => ({ ...r, wait: r.i >= 0 && line[r.i].movable ? line[r.i] : null }));
+    // a landing from a branch (or a scheme's land script) older than reordering can't move
+    .map((r) => ({ ...r, wait: r.i >= 0 && line[r.i].movable ? line[r.i] : null, why: r.i >= 0 && !line[r.i].holds ? line[r.i].why : null }));
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
@@ -448,7 +448,11 @@ function changeList(projectId, tv) {
     });
   }
   return list;
-  function row({ c, e, wait }, i) {
+  /** A waiter that can't move says why in its row (#1007), when there is a line to move in. */
+  function stuck(why) {
+    return why && line.filter((x) => !x.holds).length > 1 ? h('span', { class: 'stuck muted' }, why) : '';
+  }
+  function row({ c, e, wait, why }, i) {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}${wait && waiters.length > 1 ? ' movable' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     const seq = wait ? { 'data-seq': wait.seq } : {};
@@ -456,14 +460,14 @@ function changeList(projectId, tv) {
       return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
         h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? [waiting()] : changeNow(n, c))),
-        landNext(wait), tryIt(projectId, tv, c)));
+        landNext(wait), stuck(why), tryIt(projectId, tv, c)));
     }
     return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
       h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
         e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
           : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)]),
-      landNext(wait)));
+      landNext(wait), stuck(why)));
   }
   /** Land next: the waiter goes to the front of the waiting landings (for a phone or a keyboard, where dragging is clumsy). */
   function landNext(wait) {

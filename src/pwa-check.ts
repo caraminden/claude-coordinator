@@ -4,6 +4,10 @@
 // (Citadel's are "/" and "/c/"). A deploy runs this and logs what it finds as warnings.
 // Rules for authors: kit/skills/contraption-ui/references/installing.md.
 
+/** A web manifest's file name, and the image files an icon may be: all a contraption's open static paths (#987) are. */
+export const MANIFEST_FILE = /\.(webmanifest|json)$/i;
+export const IMAGE_FILE = /\.(png|svg|ico|webp|jpe?g|gif|avif)$/i;
+
 /** What's wrong with how contraption `name` installs as its own app: [] when nothing. */
 export async function installProblems(name: string, get: (path: string) => Promise<Response>): Promise<string[]> {
   return (await installCheck(name, get)).problems;
@@ -13,9 +17,12 @@ export async function installProblems(name: string, get: (path: string) => Promi
  * installProblems, plus `icon`: the first of its manifest's PNG icons that it serves and that answered,
  * as a path from its base like /icon-192.png (what the registry's icon field takes), or null. `get`
  * fetches a path from the contraption (as a signed-in person, since its page is behind Citadel's login).
+ * `statics` is what an installer may fetch with no login (#987): the manifest the page links and every image its
+ * manifest lists, as paths under /apps/<name> (staticOpen in src/apps.ts), whether or not they answered.
  */
-export async function installCheck(name: string, get: (path: string) => Promise<Response>): Promise<{ problems: string[]; icon: string | null }> {
-  const found = (problems: string[], icon: string | null = null) => ({ problems, icon });
+export async function installCheck(name: string, get: (path: string) => Promise<Response>): Promise<{ problems: string[]; icon: string | null; statics: string[] }> {
+  const statics: string[] = [];
+  const found = (problems: string[], icon: string | null = null) => ({ problems, icon, statics });
   const home = `/apps/${name}/`;
   const page = await get(home);
   if (!page.ok) return found([`Couldn't check how it installs: ${home} answered ${page.status}.`]);
@@ -33,6 +40,8 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   const under = (u: URL) => u.origin === base.origin && u.pathname.startsWith(home);
   if (!under(murl)) return found([`Its manifest link "${href}" points outside ${home} (a root-absolute link loads Citadel's manifest): make it relative, like href="manifest.webmanifest".`]);
   const res = await get(murl.pathname + murl.search);
+  const rest = (u: URL) => u.pathname.slice(home.length - 1);
+  if (MANIFEST_FILE.test(murl.pathname)) statics.push(rest(murl));
   if (!res.ok) return found([`Its manifest ${murl.pathname} answered ${res.status}.`]);
   let m: Record<string, unknown>;
   try {
@@ -58,6 +67,10 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   if (![m.name, m.short_name].some((v) => typeof v === 'string' && v.trim())) problems.push(`Its manifest has no name or short_name.`);
   if (!['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].includes(m.display as string)) problems.push(`Its manifest's display is ${JSON.stringify(m.display ?? null)}: browsers install only standalone, fullscreen or minimal-ui apps. Set "display": "standalone".`);
   const icons = (Array.isArray(m.icons) ? m.icons : []) as { src?: unknown; sizes?: unknown; type?: unknown; purpose?: unknown }[];
+  for (const i of icons) {
+    const u = typeof i?.src === 'string' ? resolve(i.src, murl) : null;
+    if (u && under(u) && IMAGE_FILE.test(u.pathname)) statics.push(rest(u));
+  }
   for (const px of [192, 512]) {
     // A PNG, since Android won't make an installed app from an SVG alone; "any" purpose, at least px wide.
     const icon = icons.find((i) => typeof i?.src === 'string' && (i.type === 'image/png' || /\.png(\?|$)/i.test(i.src))

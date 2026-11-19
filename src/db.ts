@@ -470,6 +470,8 @@ export interface ContraptionRow {
   port: number;
   home_scheme: number | null;
   open_paths: string;
+  /** JSON array of the manifest and icon files an installer may fetch with no login (#987), read from its page at deploy; null: not read yet. */
+  static_paths: string | null;
   /** Path prefixes other contraptions may call for a person through the relay (src/relay.ts). */
   relay_paths: string;
   /** Where Citadel deploys it from (#266): a GitHub owner/name, the branch (null: main) and its folder (null: ~/apps/<name>). */
@@ -1218,6 +1220,7 @@ export class StateDb {
 
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
+  ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
   // shortcut: tag is retired (#254) and nothing writes it; the column stays so a rollback still boots, drop it in a later release.

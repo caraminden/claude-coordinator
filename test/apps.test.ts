@@ -26,6 +26,11 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   const identity = verifyIdentity(req.headers['x-citadel-identity'] as string | undefined, pub, 'stub');
   seen.push({ path: req.url!, headers: req.headers, identity });
   const path = req.url!.split('?')[0];
+  // Its install files (#987): the page and the manifest answer the check as a person; icons and the standard manifest need no one.
+  const manifest = { name: 'Stub', display: 'standalone', start_url: '/apps/stub/', scope: '/apps/stub/', id: '/apps/stub/', icons: [{ src: 'i192.png', sizes: '192x192', type: 'image/png' }, { src: 'i512.png', sizes: '512x512', type: 'image/png' }, { src: '/apps/stub/api/not-an-image', sizes: '1x1' }] };
+  if (identity && path === '/apps/stub/') return void res.writeHead(200, { 'Content-Type': 'text/html' }).end('<link rel="manifest" href="web/m.json">');
+  if (path === '/apps/stub/web/m.json' || path === '/apps/stub/manifest.webmanifest') return void res.writeHead(200).end(JSON.stringify(manifest));
+  if (path.startsWith('/apps/stub/web/i')) return void res.writeHead(200, { 'Content-Type': 'image/png' }).end('png');
   // A contraption refuses gated paths without a valid header.
   if (path !== '/apps/stub/link' && !identity) return void res.writeHead(401).end('no identity');
   if (path === '/apps/stub/events') {
@@ -73,7 +78,7 @@ const citadelHeaders = (h: IncomingHttpHeaders) => Object.keys(h).filter((k) => 
 before(async () => {
   stubPort = await freePort();
   await new Promise<void>((r) => stub.listen(stubPort, '127.0.0.1', r));
-  srv = await bootServer();
+  srv = await bootServer({ env: { STATIC_BACKFILL_MS: '300' } });
   const made = await srv.call('/api/contraptions', { name: 'stub', title: 'Stub & Co', port: stubPort, open_paths: ['/link'] });
   assert.equal(made.status, 201, JSON.stringify(made.data));
   pub = readFileSync(join(made.data.keys_dir, 'identity.pub'), 'utf8');
@@ -379,4 +384,22 @@ test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings
   const api = await get('/apps/locked/x', asCara());
   assert.equal(api.status, 503);
   assert.match(await api.text(), /keys don't open/);
+});
+
+test('an installer with no login gets the manifest and its icons, and nothing else (#987)', async () => {
+  // The standard manifest names are open from the start; the page's own manifest and its images once its files are read (backfill).
+  assert.equal((await get('/apps/stub/manifest.webmanifest')).status, 200);
+  assert.equal((await get('/apps/stub/manifest.json')).status, 401, 'a standard name is open, and the stub has none there: the stub says so');
+  await until('its files are read', async () => (await get('/apps/stub/web/m.json')).status === 200);
+  for (const p of ['/apps/stub/web/m.json', '/apps/stub/web/i192.png', '/apps/stub/web/i512.png']) {
+    const r = await get(p);
+    assert.equal(r.status, 200, p);
+    assert.equal(r.headers.get('x-citadel-identity'), null);
+  }
+  assert.equal((await get('/apps/stub/web/i512.png', {}, { method: 'HEAD' })).status, 200);
+  // Static files only: no other route, no sibling file, no listed non-image, no write, no encoded way round.
+  for (const p of ['/apps/stub/', '/apps/stub/web/i999.png', '/apps/stub/api/not-an-image', '/apps/stub/web/', '/apps/stub/web/i192.png/x', '/apps/stub/web/..%2Fapi/x.png', '/apps/stub/web%2fi192.png']) {
+    assert.equal((await get(p)).status, 401, p);
+  }
+  assert.equal((await get('/apps/stub/web/i192.png', {}, { method: 'POST' })).status, 401);
 });

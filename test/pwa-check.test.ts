@@ -70,7 +70,9 @@ test("what else Chrome needs to offer Install: a name, an installable display, a
 
 test('the check also names the icon to register: its first PNG icon that loads, as a path from its base (#418)', async () => {
   const check = (m: object, files = {}) => installCheck('toc', app({ '/apps/toc/': page('<link rel="manifest" href="m.json">'), '/apps/toc/m.json': m, ...files }));
-  assert.deepEqual(await check(good), { problems: [], icon: '/i192.png' });
+  assert.deepEqual(await check(good), { problems: [], icon: '/i192.png', statics: ['/m.json', '/i192.png', '/i512.png'] });
+  // Only the manifest and image files under the app: not an icon that's a route, nor one served from elsewhere.
+  assert.deepEqual((await check({ ...good, icons: [{ src: '/apps/toc/api/x', sizes: '192x192' }, { src: '/apps/other/i.png', sizes: '192x192' }, { src: 'i.svg' }] })).statics, ['/m.json', '/i.svg']);
   // The 192 doesn't load: the 512 serves, and the 192's problem stays.
   const gone = await check({ ...good, icons: [{ src: 'gone.png', sizes: '192x192' }, { src: 'i512.png', sizes: '512x512' }] });
   assert.equal(gone.icon, '/i512.png');

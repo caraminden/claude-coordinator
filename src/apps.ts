@@ -19,6 +19,7 @@ import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerRes
 import type { Duplex } from 'node:stream';
 import { APP_NAME } from './appname.ts';
 import { APP_COOKIE, COOKIE, type Auth, type Session } from './auth.ts';
+import { IMAGE_FILE, MANIFEST_FILE, installCheck } from './pwa-check.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { HttpError, isSecure, readJson, requestUrl } from './http.ts';
@@ -39,6 +40,23 @@ export function isOpenPath(openPaths: string[], rest: string): boolean {
   // An encoded dot, slash or backslash could read as another path once the contraption decodes it.
   if (/%2e|%2f|%5c|\\/i.test(rest)) return false;
   return openPaths.some((p) => rest === p || rest.startsWith(p.endsWith('/') ? p : `${p}/`));
+}
+
+/** The manifest names installers try without reading the page. */
+const STANDARD_MANIFESTS = ['/manifest.webmanifest', '/manifest.json', '/site.webmanifest'];
+
+/**
+ * Whether a GET or HEAD of `rest` (after /apps/<name>) is one of the static files an installer fetches with no login
+ * (#987): a standard manifest name, the rail icon, or what a deploy read from its page (manifest and its icons, see
+ * installCheck). Exact files only, never a prefix, and images or manifests by extension: start_url, share_target and
+ * every other route stay behind the login.
+ */
+export function staticOpen(row: Pick<ContraptionRow, 'icon' | 'static_paths'>, method: string | undefined, rest: string): boolean {
+  if ((method !== 'GET' && method !== 'HEAD') || /%2e|%2f|%5c|\\/i.test(rest)) return false;
+  if (STANDARD_MANIFESTS.includes(rest)) return true;
+  if (!IMAGE_FILE.test(rest) && !MANIFEST_FILE.test(rest)) return false;
+  if (row.icon === rest) return true;
+  try { return (JSON.parse(row.static_paths ?? '[]') as string[]).includes(rest); } catch { return false; }
 }
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -121,6 +139,23 @@ export class AppProxy {
     this.domain = domain;
     this.uploads = uploads;
     setInterval(() => this.sweep(), SWEEP_MS).unref();
+  }
+
+  /**
+   * Read the manifest and icon paths of every contraption that has none recorded yet (#987), as its first enabled
+   * person, so apps deployed before this need no redeploy. One that isn't up is left for the next start.
+   */
+  async backfillStatics() {
+    for (const row of this.store.listContraptions()) {
+      if (row.static_paths !== null) continue;
+      const user = this.store.contraptionUsers(row.id).map((id) => this.store.getUser(id)).find((u) => u && this.contraptions.enabled(row.name, u.id));
+      const header = user && this.contraptions.signIdentity(row.name, user);
+      if (!header) continue;
+      try {
+        const found = await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) }));
+        if (found.statics.length) this.store.updateContraption(row.name, { static_paths: JSON.stringify(found.statics) });
+      } catch { /* not up: next start */ }
+    }
   }
 
   /** Whether a request is for a contraption's own host (everything on it is the proxy's). */
@@ -257,7 +292,7 @@ export class AppProxy {
     }
     if (!m[2]) return redirect(`/apps/${row.name}/${url.search}`, {});
     const path = url.pathname + url.search;
-    const open = isOpenPath(JSON.parse(row.open_paths) as string[], m[2]);
+    const open = isOpenPath(JSON.parse(row.open_paths) as string[], m[2]) || staticOpen(row, req.method, m[2]);
     // Citadel's host still passes an open path's websockets and fetches (Peek Auras' PC link dials /apps/peek-auras/link
     // there): they carry no login or identity, and no page of the contraption's opens on Citadel's origin.
     if (host === null && this.domain && !(open && !isPage(req))) return this.moved(req, row, path, open);

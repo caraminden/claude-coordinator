@@ -249,6 +249,8 @@ export interface DeployView {
 export interface DeployHooks {
   /** Set the registry's icon, if it's still empty; true when it took. */
   setIcon?: (icon: string) => boolean;
+  /** Record the manifest and icon files an installer may fetch with no login (#987). */
+  setStatics?: (paths: string[]) => void;
   /** What the deployed app still lacks: no rail icon, or a web manifest that won't install. Empty when it was checked and lacks nothing. */
   todo?: (todo: string[]) => void;
   /** Whom the install check reads the page as: kept in the deploy's marker, for starting it again after a restart (#847). */
@@ -965,8 +967,9 @@ export class AppServices {
     // Without a person to read its page as, only the registry's icon is checked.
     const found = header
       ? await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) }))
-        .catch((err) => ({ problems: [`Couldn't check how it installs: ${err.message}`], icon: null }))
-      : { problems: [], icon: null };
+        .catch((err) => ({ problems: [`Couldn't check how it installs: ${err.message}`], icon: null, statics: [] as string[] }))
+      : { problems: [], icon: null, statics: [] as string[] };
+    if (found.statics.length) hooks.setStatics?.(found.statics);
     const todo = found.problems;
     if (!row.icon && found.icon && hooks.setIcon?.(found.icon)) await say(`Rail icon set to ${found.icon}, the first icon in its manifest.`);
     else if (!row.icon) todo.unshift(`It has no rail icon, so the rail shows its first letter. Serve one and register it (update_contraption's icon, or Settings → Contraptions), or list 192 and 512 px PNG icons in its web manifest and deploy again: an empty icon is filled from there.`);

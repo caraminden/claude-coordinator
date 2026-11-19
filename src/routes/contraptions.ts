@@ -192,6 +192,7 @@ export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx
       app.store.updateContraption(c.name, { icon });
       return true;
     },
+    setStatics: (paths: string[]) => app.store.updateContraption(c.name, { static_paths: JSON.stringify(paths) }),
     uid,
     resumed,
     todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),

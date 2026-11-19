@@ -36,9 +36,9 @@ runs. Everything else reviews first.
 
 ## 2. Review in a Grunt
 
-Start a `citadel:reviewer` Grunt with `run_in_background: false` on the Agent call. The Agent tool
-runs Grunts in the background unless told otherwise, and a turn can't end while one runs: a
-backgrounded reviewer was the commonest refused stop in the hook logs. It runs read-only on its
+Start a `citadel:reviewer` Grunt with `run_in_background: false` on the Agent call (the kit's
+grunt-model hook fills that in when a call leaves it out), so its findings come back before you
+reply. It runs read-only on its
 pinned Sonnet at medium; on a high-risk change set `model: opus`, `effort: high` on the call
 (the `citadel:subagents` job table). Its
 definition holds the rules and the return format. Write its brief to `$TMPDIR/review-brief.md`: the Grunt line ("Citadel, Scheme,

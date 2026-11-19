@@ -794,6 +794,8 @@ const rollback = new Rollback({
       const slug = p && repoSlug(p.repo_url);
       const cur = tv.current?.number;
       if (!t?.workflow || !t.contraption || !p?.repo_dir || !slug || !Number.isInteger(cur)) throw new HttpError(409, `${tv.target.name} has no release workflow, published build or GitHub repo to roll back with`);
+      // A copy (a dev copy, a preview) shares the live feed's folder and the scheme's GitHub: it never releases.
+      if (services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) throw new HttpError(409, "This copy of Citadel doesn't release, so it can't roll an APK back");
       const as = githubOf(p.repo_dir);
       const code = cur! + 1;
       await pointBranch(slug, ROLLBACK_BRANCH, to, as);

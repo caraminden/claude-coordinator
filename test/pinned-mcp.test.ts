@@ -40,6 +40,8 @@ test('every local import of a pinned server is pinned beside it', () => {
     for (const [, file] of readFileSync(server, 'utf8').matchAll(/from '\.\/([^']+)'/g)) {
       assert.ok(pinned.has(file), `${server} imports ./${file}, which runner.ts doesn't pin`);
     }
+    // The pins sit flat in one folder, so an import up and out of src/ (../public/x.js) can't be pinned (#1043).
+    for (const [, file] of readFileSync(server, 'utf8').matchAll(/from '(\.\.\/[^']+)'/g)) assert.fail(`${server} imports ${file}, outside the pinned folder`);
   }
 });
 

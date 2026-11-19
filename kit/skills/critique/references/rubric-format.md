@@ -1,22 +1,24 @@
 # The rubric format
 
-A rubric is one markdown file in the scheme's repo: frontmatter that tells `citadel:critique` when
-and how to run, and a body the critic judges by and people's verdicts grow. It lives where the
-scheme's people can read and edit it, never in the kit; the kit's `rubrics/` holds starters a
-scheme rubric `extends:`. The worked example is [`../rubrics/example.md`](../rubrics/example.md).
+A rubric is one entry in the scheme's review set: frontmatter that tells `citadel:critique` when and
+how to run, and a body the critic judges by and people's verdicts grow. Citadel stores the set (Cara,
+2026-11-19, "Citadel stores them"), with a version for every save, on the scheme's Reviewers and
+critics page; never in the kit or the repo. The kit's `rubrics/` holds starters an entry `extends:`.
+The worked example is [`../rubrics/example.md`](../rubrics/example.md).
 
-## Opting in
+## Where a turn finds them
 
-A scheme opts in with one line in its CLAUDE.md's Project facts:
+Each turn, Citadel renders the scheme's entries that are on as one `<name>.md` file each in a folder,
+and the turn's "Review set:" line names it. The files have the shape below. Read them there; change
+an entry with the `review_set` tool or on the page, never by editing the rendered files, which the
+next turn writes again. A scheme with none on runs no critic.
 
-```
-- **Rubrics:** docs/rubrics/; docs/design/art-style/taste.md
-```
+The page owns `name`, `extends`, `when`, `model` and `effort` as fields, and the on/off and trial
+switches; the entry's own text holds every other key and the sections. An entry on top of a starter
+stores only its additions: the kit's starter is read fresh each run, so a kit fix reaches it.
 
-Paths to rubric files or folders of them, separated by `;`, relative to the repo root. A folder
-means every `.md` in it with rubric frontmatter. No line, or `none`, means no critic runs in that
-scheme. Every rubric the line names is a file in the repo, even one that only `extends:` a starter,
-because people's verdicts are written into it (the skill's step 9).
+Before the set, a scheme named its rubric files with a `**Rubrics:**` Project facts line. Those files
+moved into the set once (Build 4) and leave the repos; a Rubrics line is obsolete and not read.
 
 ## Frontmatter
 
@@ -24,7 +26,7 @@ because people's verdicts are written into it (the skill's step 9).
 |---|---|---|---|
 | `name` | yes | kebab-case | Names the rubric in result lines: `ui-screenshots critic: pass (round 1)`. |
 | `judges` | yes | one line | What it judges, from what: "front-end changes, from desktop and phone screenshots". |
-| `when` | yes | one or more of `diff: <glob>, <glob>` · `creative: <what>` · `schedule: <cadence>` · `in-app: <the app's step>`, joined with ` \| ` | When it runs. `diff:` matches the changed paths of the branch (self-review). `creative:` a new piece, take or rework that makes creative choices (docs-and-mocks, or the scheme's own creative loop); a small change to a design a person already saw skips it. `schedule:` a scheduled minion runs it. `in-app:` a contraption runs it on its own agent's output ([`in-app.md`](in-app.md)); minions use it only to calibrate. A starter says `set by the extending rubric`. |
+| `when` | yes | one or more of `diff: <glob>, <glob>` · `creative: <what>` · `schedule: <cadence>` · `in-app: <the app's step>` · `type: <types>` · `ask`, joined with ` \| ` | When it runs. `diff:` matches the changed paths of the branch (self-review). `creative:` a new piece, take or rework that makes creative choices (docs-and-mocks, or the scheme's own creative loop); a small change to a design a person already saw skips it. `schedule:` a scheduled minion runs it. `in-app:` a contraption runs it on its own agent's output ([`in-app.md`](in-app.md)); minions use it only to calibrate. `type: <minion type>, <type>` a minion of that type runs it. `ask` only when a person asks for it by name. A starter says `set by the extending rubric`. |
 | `input` | yes | one line | The artifacts the critic gets and how to make them: "screenshots at 1440 and 390 wide", "the diff", "each claim with its source rows". |
 | `checks` | no | `[<command>, ...]` | Scripts run before any model looks, from the repo root. A non-zero exit is fixed first. Mechanical rules (sizes, lint, link resolution) belong here, not in Blockers. |
 | `mode` | no | `blind` (default) · `informed` | Blind: the critic sees the artifacts, the brief and the rubric only. Informed: it may also read the source the brief names (a rule critic over a diff). Taste rubrics stay blind. |
@@ -38,6 +40,7 @@ because people's verdicts are written into it (the skill's step 9).
 | `person` | no | a person's name | Whose taste the rubric holds; the `ask <person>` verdict and the learning step name them. Default: the person who asked for the work. |
 | `playbook` | no | a repo path | Fixes tried per kind of finding and how people judged them, for `citadel:professor`. |
 | `extends` | no | `citadel:critique/rubrics/<name>` | A kit starter whose frontmatter and sections this file builds on (below). |
+| `trial` | no | `true` | Set by Citadel on a new entry (Q12, Build 4): it runs as `gate: advisory` whatever its `gate` says, until a person takes it off trial, which they do once it is calibrated. |
 | `calibrated` | no | `<date>, <model>: <hits>/<flagged> hits, <false>/<controls> false alarms` | The last blind trial's result ([`calibrate.md`](calibrate.md)). |
 
 Unknown keys are ignored. Values are read by an agent, but keep the frontmatter valid YAML: one line
@@ -57,6 +60,9 @@ These headings, in this order. Leave out a section that has nothing yet, except 
   look at before it judges (an artifact path where there is one).
 - `## Known blind spots`: where the critic passed something a person then flagged, and what to look
   for there.
+- `## Context`: last, written by Citadel from the entry's Context on the page: the guides and rules
+  it links (read each before judging), and the code and docs paths it may read. It isn't in the
+  entry's own text, so a save never carries it.
 
 A rubric with its own headings (Delve's taste.md) keeps them: the critic reads the whole body, and
 the learning step writes under the heading that serves each job.

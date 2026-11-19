@@ -33,7 +33,7 @@ was made. In `mode: informed` you may also read the source files the brief names
 
 A missing brief: judge what the artifact shows, and say the brief was missing.
 
-A missing rubric: say the brief named none. If the repo's rubrics folder holds one whose `when:`
+A missing rubric: say the brief named none. If the turn's review set folder (its "Review set:" line) holds one whose `when:`
 covers the artifact, name it and judge by it. If none does, stop there: without a person's
 rubric your verdict is your own taste in the critic's format.
 

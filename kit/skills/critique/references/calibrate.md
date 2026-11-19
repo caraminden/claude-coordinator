@@ -39,7 +39,7 @@ worth a Watch-list line, noise counts nowhere.
 
 Write the result in the rubric's `calibrated:` key, `"<date>, <model>: <hits>/<notes> hits,
 <false alarms>/<controls> false alarms"`, and each miss as a Known blind spots line in the real
-rubric.
+rubric: its entry in the review set, saved with the `review_set` tool.
 
 ## 5. Read it
 

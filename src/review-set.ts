@@ -407,3 +407,10 @@ export function importAllRubrics(store: { getSetting<T>(k: string): T | null; se
   store.setSetting(IMPORT_KEY, now);
   return done;
 }
+
+/** The turn's line naming its review set (Build 4): the folder renderSet wrote, or that the scheme has none on. */
+export function reviewSetLine(dir: string, on: number): string {
+  return on
+    ? `Review set: this scheme's reviewers and critics are on its Reviewers and critics page, and the ${on} that are on are rendered for this turn as rubric files in \`${dir}/\`: that folder is the scheme's rubric set wherever a skill says rubrics (citadel:critique). Read them there; change one only with the \`review_set\` tool, never by editing those files or adding rubric files to the repo.`
+    : "Review set: this scheme has no reviewers or critics on (its Reviewers and critics page), so no rubric's `when:` matches; a person adds one there, or a Taskmaster with `review_set`.";
+}

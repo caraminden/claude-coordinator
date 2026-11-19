@@ -19,7 +19,7 @@ calibrated: "2026-11-08, opus: 7/9 hits, 0/3 false alarms"
 
 **Example only.** This file shows the rubric format ([`../references/rubric-format.md`](../references/rubric-format.md));
 it is not a starter, and its notes, minion numbers and paths are made up to show the shape. Copy the
-shape into your scheme's rubric folder, not the content.
+shape into a new entry in your scheme's review set, not the content.
 
 ## Blockers
 

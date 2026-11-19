@@ -64,8 +64,8 @@ folder. Don't open it until the verdicts are in.
 ## 3. The blind critic
 
 One `citadel:critic` Grunt reads all the chats (`citadel:subagents` for its model; the rubric says
-sonnet). The rubric is the scheme's own replay rubric if its Project facts' Rubrics line names one
-that `extends: citadel:critique/rubrics/replay`. Otherwise use the starter itself,
+sonnet). The rubric is the scheme's own replay rubric if its review set (the turn's "Review set:" folder)
+has one that `extends: citadel:critique/rubrics/replay`. Otherwise use the starter itself,
 `<kit>/skills/critique/rubrics/replay.md` (`<kit>` is two folders up from this skill's base
 directory). The brief holds:
 

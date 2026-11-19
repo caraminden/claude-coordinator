@@ -109,7 +109,7 @@ change draws data (names, counts, lists), take those screenshots again with wors
 a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
 new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).
 
-When Project facts names **Rubrics**, run `citadel:critique` for each one whose `when:` matches
+When the turn's "Review set:" line names rubrics, run `citadel:critique` for each one whose `when:` matches
 this diff, after the reviewer's fixes. Its blockers are findings like the reviewer's: fixed, or in
 "Not fixed" with a reason; a `gate: blocks-ready` rubric holds the change until it passes or a
 person decides. The critic doesn't set the label: you do, in 4.

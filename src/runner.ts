@@ -47,6 +47,7 @@ import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
+import { renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacific, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -2654,6 +2655,9 @@ export class Runner {
       const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines);
       const system = promptText(parts.system);
       writeFileSync(join(dir, 'system-prompt.md'), system);
+      // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
+      const reviewDir = join(dir, 'review-set');
+      parts.turn.reviewSet = [reviewSetLine(reviewDir, renderSet(this.store.reviews.list(project.id), reviewDir))];
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.

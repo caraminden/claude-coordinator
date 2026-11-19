@@ -13,8 +13,10 @@ person accepts (Transdata's rows); it never accepts or refuses on the verdict's 
 ## 1. The rubric file
 
 A file in the app's repo, in the [rubric format](rubric-format.md), with `when: "in-app: <the step
-that grades>"` (`"in-app: each proposal the source reader saves"`), named in the scheme's Rubrics
-line so minions find it. The app reads it at start and sends it as the system prompt.
+that grades>"` (`"in-app: each proposal the source reader saves"`), listed in the scheme's
+review set as an entry whose Context names the file's path, so minions and the page find it. It stays
+a repo file, the one place outside the set: the app reads it at start and sends it as the system
+prompt, and calibrating it means editing that file.
 
 The app's server can't count on the kit's path, and a kit edit must not change a calibrated grader
 under it. So a rubric that `extends:` a starter copies the starter's sections it uses into itself,

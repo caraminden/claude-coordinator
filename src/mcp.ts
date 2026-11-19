@@ -934,7 +934,7 @@ const DEPLOY_CONTRAPTION = {
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 const REVIEW_SET = {
   name: 'review_set',
-  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. A minion saves only the body; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial.",
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. A minion saves only the body; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -944,6 +944,9 @@ const REVIEW_SET = {
       note: { type: 'string', description: 'What changed, a few words for History, e.g. "Calibration board: Josh passed long labels"' },
       enabled: { type: 'boolean', description: 'Taskmaster only: turn it on or off' },
       trial: { type: 'boolean', description: 'Taskmaster only: put it on trial or take it off' },
+      add: { type: 'boolean', description: 'Taskmaster only: add a new entry (with extends, or a new slug)' },
+      extends: { type: 'string', description: 'With add: the kit starter it builds on, e.g. ui-screenshots' },
+      when: { type: 'string', description: 'With add: when it runs, as the rubric format writes it, e.g. "diff: app/web/**"' },
     },
   },
 };
@@ -1854,6 +1857,10 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
     case 'review_set': {
+      if (args.add) {
+        const e = await call('POST', `/api/projects/${PROJECT}/reviews`, { slug: args.slug, extends: args.extends, when: args.when, body: args.body });
+        return `Added ${e.slug} (on trial): ${e.when}.`;
+      }
       if (!args.slug) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
         return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.trial ? ', trial' : ''}${e.extends ? `, on kit ${e.extends}` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';

@@ -17,8 +17,11 @@ notes. This skill is that loop for any scheme, any kind of work. Delve's art-rev
 came from (Cara, 2026-10-24, Delve thread 168; lifted into the kit 2026-11-08, Citadel #390 and
 #393).
 
-The repo's CLAUDE.md, Project facts, names the rubrics: `**Rubrics:** <path>; <path>`. No line, or
-`none`, and this skill does nothing. The rubric format, with what every key means:
+The scheme's rubrics are its review set: Citadel stores them (the scheme's Reviewers and critics
+page, Cara, 2026-11-19) and renders the ones that are on into a folder each turn, named in the turn's
+"Review set:" line. That folder is "the rubrics" everywhere below; a set with none on and this skill
+does nothing. A repo's old `**Rubrics:**` Project facts line or `docs/rubrics/` files are not read:
+they moved into the set. The rubric format, with what every key means:
 [`references/rubric-format.md`](references/rubric-format.md).
 
 `<kit>` below is the absolute path two folders up from this skill's base directory (shown when it
@@ -26,13 +29,15 @@ loaded). Every Grunt brief starts with the Grunt line from your system prompt, q
 
 ## 1. Pick the rubrics
 
-Read each rubric the Rubrics line names (frontmatter first) and keep those whose `when:` matches:
+Read each rubric in the review set's folder (frontmatter first) and keep those whose `when:` matches:
 
 - `diff:` a changed path of `git diff --name-only main...HEAD` matches a glob;
 - `creative:` the work is a new piece, take or rework that makes creative choices. A small change to
   a design a person already saw (a size, a colour, one detail they named) skips it, and what you show
   them says the critic didn't judge it;
-- `schedule:` your brief is that schedule's run.
+- `schedule:` your brief is that schedule's run;
+- `type:` your minion's `type` property is one of those listed;
+- `ask`: a person asked for this critic by name.
 
 `in-app:` never matches here: the app runs that part itself ([`references/in-app.md`](references/in-app.md)).
 The rubric's other `when:` parts still match as above.
@@ -159,7 +164,9 @@ result line is written.
 
 The step that makes the critic better each week. Whenever a person gives a verdict on work a critic
 judged (a note, an approval, a pick on a review page read with `artifact_data`, a sent-back item),
-check `critic.md` and write the rubric that turn, in the minion's open PR (or the next one):
+check `critic.md` and write the rubric that turn with the `review_set` tool: read the entry by its
+slug, edit its own body, and save it whole with the version you read (a save is a version people see
+in History; it never goes in the repo):
 
 - **Their words:** a row in Notes, dated, with the minion and what it was about. A pick between
   takes ("B for this") is a pick, not taste: leave it out.
@@ -176,7 +183,9 @@ Never reword or drop a person's past words in a rubric. Tell them in one line wh
 
 ## Writing and calibrating a rubric
 
-A new rubric starts from the format and, where one fits, `extends:` a starter in `<kit>/skills/critique/rubrics/`.
+A new rubric is a new entry on the scheme's Reviewers and critics page (people, or a Taskmaster with
+`review_set`), blank or on top of a starter in `<kit>/skills/critique/rubrics/`; it starts on trial,
+so it only advises until it is calibrated.
 Before a scheme relies on it, and again when the rubric or the critic's model changes, run the blind
 trial in [`references/calibrate.md`](references/calibrate.md) and record the result in `calibrated:`.
 

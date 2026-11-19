@@ -146,7 +146,7 @@ export function mountLinkHandler({ on, own, open, apps = () => ({}), domain = ()
     if (!a || a.hasAttribute('download')) return;
     const href = a.getAttribute('href');
     const c = classifyLink(href, base(), { own: own(), apps: apps(), domain: domain(), self: self(), firefox: on() });
-    // A click shows an app in the app view; a middle click can't, so it's Firefox's (switch on) or the browser's.
+    // A click shows an app in the app view; a middle click can't, so it's the browser's.
     if (c.kind === 'app' && e.type === 'click' && openApp) {
       e.preventDefault();
       e.stopPropagation();
@@ -158,7 +158,7 @@ export function mountLinkHandler({ on, own, open, apps = () => ({}), domain = ()
       e.stopPropagation();
       return openWindow(new URL(href, base()).href);
     }
-    const address = c.kind === 'firefox' ? c.address : c.kind === 'app' && on() ? new URL(href, base()).href : null;
+    const address = c.kind === 'firefox' ? c.address : null; // a middle click on Citadel's own address stays with the browser
     if (!address) return;
     e.preventDefault();
     e.stopPropagation();

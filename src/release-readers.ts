@@ -9,10 +9,10 @@ import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
-import { median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
+import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
 
 const RECENT = 5;
 /** How many earlier releases a card lists under Previous releases (Cara, 2026-11-12: "Previous releases could have links to old builds"). */
@@ -938,8 +938,9 @@ export class LandsInFlight {
       const l = q && at >= 0 ? q.line[at] : null;
       const waits = l?.got === 0;
       const entry: LineEntry | null = l && {
-        name: `#${t.number ?? t.id}`, ticketId: t.id, holds: !waits, place: ordinal(at + 1), seq: l.seq, movable: waits && !!l.orders && q!.current,
-        stage: waits ? 'line' : 'land', since: l.mtime, ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && !l.orders ? { why: OLD_LAND } : {}),
+        name: `#${t.number ?? t.id}`, ticketId: t.id, holds: !waits, place: ordinal(at + 1), seq: l.seq, movable: waits && !!l.orders && q!.current && !behindOld(q!.line, l),
+        stage: waits ? 'line' : 'land', since: l.mtime,
+        ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && !l.orders ? { why: OLD_LAND } : waits && behindOld(q!.line, l) ? { why: BEHIND_OLD } : {}),
       };
       for (const tv of mine.filter((v) => on.has(v.target.id))) {
         if (tv.next?.changes.some((c) => c.ticketId === id)) continue;

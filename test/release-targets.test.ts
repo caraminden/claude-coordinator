@@ -10,7 +10,7 @@ import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
 import { ApkReader, buildWait, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
-import { CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
+import { BEHIND_OLD, CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
 import { writeOrder } from '../src/waits.ts';
@@ -1072,16 +1072,18 @@ test("each target's part of a scheme's land line, in the line's order, with why 
   const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
   const me = `${process.pid} ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
   const ids: number[] = [];
-  const tickets: [string, string, boolean][] = [['1', '1795067420', true], ['2', '0', true], ['3', '0', false], ['4', '0', true]];
+  // #4 is from an older branch: nobody who arrived after one of those goes ahead of it (The Trans Agenda #76), so #5,
+  // behind it, can't move either.
+  const tickets: [string, string, boolean][] = [['1', '1795067420', true], ['2', '0', true], ['3', '0', true], ['4', '0', false], ['5', '0', true]];
   for (const [i, got, orders] of tickets) {
     const x = store.createTicket({ project_id: p.id, title: `Change ${i}`, permission_mode: 'default', created_by: 'Cara' });
     store.setTicketDir(x.id, root, `ticket/${i}-c`);
     ids.push(x.id);
     writeFileSync(join(q, i.padStart(10, '0')), [me, got, `ticket/${i}-c`, got === '0' ? 'waiting' : 'waiting for CI', '-', '-', '-', ...(orders ? ['order'] : [])].join('\n') + '\n');
   }
-  writeFileSync(join(q, '.order'), '# Cara moved #4 to land next\n0000000004\n0000000002\n');
+  writeFileSync(join(q, '.order'), '# Cara moved #3 to land next\n0000000003\n0000000002\n');
   // Their outputs lag the line (a move since): the line itself says the order.
-  const outs = ['queue: got the land lock\n', 'queue: next in line for the land lock\n', 'queue: 2nd in line for the land lock\n', 'queue: 3rd in line for the land lock\n'];
+  const outs = ['queue: got the land lock\n', 'queue: next in line for the land lock\n', 'queue: 2nd in line for the land lock\n', 'queue: 3rd in line for the land lock\n', 'queue: 4th in line for the land lock\n'];
   const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
   const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, get: (id) => ({ output: outs[ids.indexOf(id)], code: null }) }, now: () => 1000 });
   const views = () => [{ target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[];
@@ -1092,20 +1094,21 @@ test("each target's part of a scheme's land line, in the line's order, with why 
   };
   // The scheme's own land.sh is older than reordering: none of its landings can move, and each says why.
   const old = look();
-  assert.deepEqual(old.titles, ['Change 1', 'Change 4', 'Change 2', 'Change 3']);
-  assert.deepEqual(old.line.map(([name, holds, movable]) => [name, holds, movable]), [['#1', true, false], ['#4', false, false], ['#2', false, false], ['#3', false, false]]);
+  assert.deepEqual(old.titles, ['Change 1', 'Change 3', 'Change 2', 'Change 4', 'Change 5']);
+  assert.deepEqual(old.line.map(([name, holds, movable]) => [name, holds, movable]), [['#1', true, false], ['#3', false, false], ['#2', false, false], ['#4', false, false], ['#5', false, false]]);
   assert.match(String(old.line[1][3]), /this scheme's land script is older/);
   assert.equal(old.line[0][3], '', 'the one landing just lands');
   // Its copy of the template follows .order: the marked waiters move; one from an older branch says why it can't.
   mkdirSync(join(repo, 'tools'));
   writeFileSync(join(repo, 'tools', 'land.sh'), '#!/usr/bin/env bash\nqueue_order() {\n  :\n}\n');
   const now = look();
-  assert.deepEqual(now.line, [['#1', true, false, ''], ['#4', false, true, ''], ['#2', false, true, ''], ['#3', false, false, OLD_LAND]]);
+  assert.deepEqual(now.line, [['#1', true, false, ''], ['#3', false, true, ''], ['#2', false, true, ''], ['#4', false, false, OLD_LAND], ['#5', false, false, BEHIND_OLD]]);
   // The route's write, as the route makes it: Land next on #2 puts it first in the scheme's .order, and the line follows.
-  const order = writeOrder(landQueue(repo), schemeLine(repo), [2, 4], (o) => `Cara moved #2 to ${o.indexOf(2) ? 'later' : 'land next'}`, 2);
-  assert.deepEqual(order, [2, 4]);
-  assert.equal(readFileSync(join(q, '.order'), 'utf8'), '# Cara moved #2 to land next\n0000000002\n0000000004\n');
-  assert.deepEqual(look().line.map(([name]) => name), ['#1', '#2', '#4', '#3']);
+  // #5 stays out of it: a land.sh from before #1020 ranks .order's waiters ahead of #4, which waits only for 1 to 3.
+  const order = writeOrder(landQueue(repo), schemeLine(repo), [5, 2, 3], (o) => `Cara moved #2 to ${o.indexOf(2) ? 'later' : 'land next'}`, 2);
+  assert.deepEqual(order, [2, 3]);
+  assert.equal(readFileSync(join(q, '.order'), 'utf8'), '# Cara moved #2 to land next\n0000000002\n0000000003\n');
+  assert.deepEqual(look().line.map(([name]) => name), ['#1', '#2', '#3', '#4', '#5']);
 });
 
 test('a CI package with release.needs: a build that passed its own job is not live until every workflow it needs ran every job green on its commit (#1019)', async () => {

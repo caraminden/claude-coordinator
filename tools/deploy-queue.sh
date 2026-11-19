@@ -15,7 +15,9 @@
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
 # The order of the waiters is the tickets' numbers, unless <state>/queue/.order (written by the Releases page, #1002)
 # names some: a "# " line saying who set it, then ticket numbers, front first. Those go first in that order, and the
-# rest (a landing that joined since) behind them in arrival order. Whoever holds the lock counts as ahead of every waiter.
+# rest (a landing that joined since) behind them in arrival order, except that nobody goes ahead of a waiter from
+# before .order that arrived first (queue_key; the Releases page never ranks one behind it, src/waits.ts behindOld).
+# Whoever holds the lock counts as ahead of every waiter.
 # Outside the line, a queued restart from before the restart lock (below) and a land.sh from a branch older than
 # the line take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
 # is doing in <state>/restart ("<pid> <the pid's start time>", then its phase), which counts as progress like a ticket's phase (#553).
@@ -115,17 +117,29 @@ queue_done() {
   rm -f "$t"
 }
 
-# <queue dir> <ticket>: its sort key in the line, "0<place in .order>" or "1<ticket>". queue_order loads .order first.
+# <queue dir> <ticket>: its sort key in the line, "<the waiters from before .order ahead of it>" then "0<place in
+# .order>", "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
+# those waits for every lower ticket, so nobody who arrived after it goes ahead of it: .order ranks the waiters between
+# two of them only among themselves (had a later one counted itself ahead, both would take the lock: The Trans Agenda #76).
 queue_order() {
-  local t i=0
-  QUEUE_RANK=() QUEUE_ORDER_BY=""
+  local t i=0 l
+  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY=""
+  for t in "$1"/[0-9]*; do
+    [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || QUEUE_OLD+=("${t##*/}")
+  done
   [ -f "$1/.order" ] || return 0
   while read -r t; do
     if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; fi
   done <"$1/.order" 2>/dev/null || true
 }
 queue_key() {
-  if [ -n "${QUEUE_RANK[$1]:-}" ]; then printf '0%010d' "${QUEUE_RANK[$1]}"; else echo "1$1"; fi
+  local o seg=0
+  for o in "${QUEUE_OLD[@]}"; do
+    [ "$o" != "$1" ] || { printf '%05d2' "$seg"; return; }
+    [[ $o > $1 ]] || seg=$((seg + 1))
+  done
+  if [ -n "${QUEUE_RANK[$1]:-}" ]; then printf '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf '%05d1%s' "$seg" "$1"; fi
 }
 
 queue_ordinal() {
@@ -136,6 +150,7 @@ queue_lock() {
   # The stall is timed in microseconds: $SECONDS ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last change (#790).
   local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by=""
   local -A QUEUE_RANK=()
+  local QUEUE_OLD=()
   local QUEUE_ORDER_BY=""
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).

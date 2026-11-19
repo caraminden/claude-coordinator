@@ -24,7 +24,13 @@
 # CI_WORKFLOWS: the workflow files that must all be green on the exact commit that lands, split by spaces.
 # CI_WORKFLOWS=''
 # CI_STATUS: the scheme's own verdict command, when "every workflow green" is not the rule (exit 0 green,
-#   1 red, 2 running, 3 not started, 4 no verdict).
+#   1 red, 2 running, 3 not started, 4 no verdict). Its output names each workflow one a line, the way the core
+#   prints them: "<workflow>: completed failure" (or timed_out; "completed, failure" too) for a red one, its id
+#   "ci:<workflow>" (a known red matches on it), and "<workflow>: in_progress" (or queued, waiting, pending,
+#   requested, not started) for one still
+#   going, which keeps a red waiting for it. The name may hold spaces but no colon, and the line may be indented.
+#   In another shape a known CI red never matches unless land_failures (below) reads it, and a workflow still going
+#   doesn't hold a red back.
 # CI_STATUS=''
 
 # How many landings at the front of the line run CI at once. Runners that can't carry three runs at once: 2.

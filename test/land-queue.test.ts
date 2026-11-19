@@ -484,6 +484,35 @@ test('a landing from a branch before .order keeps its arrival order, and nobody 
   }
 });
 
+// The other way round (The Trans Agenda #76): the old one arrived first. It waits only for the lower tickets, so a
+// later one ranked by .order must not count itself ahead of it too: both would take the lock when the holder left.
+test('a landing that .order ranks stays behind a waiter from a branch before .order that arrived first', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const ws = [a];
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    for (const [i, label] of ['b', 'c'].entries()) {
+      ws.push(waiter(state, label, 'true', {}, label === 'b'));
+      await until(`${label}'s ticket`, () => issued(state) === i + 2);
+    }
+    await until('c to see its place', () => /3rd in line/.test(ws[2].stderr()));
+    const [, , tc] = tickets(state);
+    writeFileSync(join(state, 'queue', '.order'), `# Cara moved #3 to land next\n${tc}\n`);
+    await until('c to see the order', () => /queue: Cara moved #3 to land next/.test(ws[2].stderr()));
+    // A second note: by the time c prints it, the look that read the first one (and any new place) is done.
+    writeFileSync(join(state, 'queue', '.order'), `# Cara moved #3 again\n${tc}\n`);
+    await until('c to see the second note', () => /queue: Cara moved #3 again/.test(ws[2].stderr()));
+    assert.doesNotMatch(ws[2].stderr().split('Cara moved #3 to land next')[1], /in line/, 'c still has a and b ahead of it');
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) assert.equal(await w.exit, 0, w.stderr());
+    assert.deepEqual(order(state), ['a', 'b', 'c']);
+  } finally {
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) w.child.kill('SIGKILL');
+  }
+});
+
 // deploy_unchecked_back: the next holder after a deploy killed outright between its reset and its checks.
 test('a killed deploy is put back, a pull or a roll back alike, unless its restart came up healthy on it (#1016)', () => {
   const live = join(root, `unchecked-${++n}`);

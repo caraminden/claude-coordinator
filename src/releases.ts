@@ -11,7 +11,7 @@ import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
-import { landPhase, ordinal, TRACK, type LandTicket, type Wait } from './waits.ts';
+import { behindOld, landPhase, ordinal, TRACK, type LandTicket, type Wait } from './waits.ts';
 
 export interface Target {
   /** Unique within its scheme: "citadel-server". */
@@ -90,6 +90,8 @@ export interface Next extends Progress {
 
 /** Why a waiting landing can't be moved (#1002, #1007): its branch's land script predates reordering. */
 export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it lands in its turn";
+/** Why one behind such a landing can't move (#1020): nobody who arrived after that one goes ahead of it. */
+export const BEHIND_OLD = "Can't move yet: a landing ahead of it started from a branch whose land script is older than reordering, and nobody behind that one can pass it";
 
 export interface LineEntry {
   /** "#620", or the label of a run that isn't a minion's ("tools/deploy.sh"). */
@@ -411,8 +413,8 @@ export class CitadelServer implements Reader {
       const ticket = id != null ? store.getTicket(id) : undefined;
       return {
         name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
-        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !!t.orders, stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
-        ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : {}),
+        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+        ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };
     });
     // A deploy run alone holding the lock carries whatever is on main.

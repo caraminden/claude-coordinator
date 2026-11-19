@@ -104,6 +104,7 @@ test("SMOKE_CMD, the scheme's quick check, runs in the worktree before the line:
 
   const slow = r.run({ SMOKE_LOG: log, SMOKE_RED: '1', SMOKE_SLEEP: '5' });
   assert.match(slow.stderr, /smoke: SMOKE_CMD ran past 2 s, so it doesn't decide: getting in line/);
+  assert.doesNotMatch(slow.stderr, /smoke: passed/, 'a smoke check that ran out did not pass');
   assert.equal(slow.status, 0, slow.stderr);
   assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'it landed');
 });
@@ -414,6 +415,40 @@ test('the waiters follow land-queue/.order (#1007): the ones it names first, the
   codes.forEach((code, i) => assert.equal(code, 0, `landing ${i + 1}: ${lands[i].stderr()}`));
   assert.deepEqual(q.landed(), ['f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3']);
   assert.doesNotMatch(lands[0].stderr(), /Cara moved/, 'the holder is not told: it stays where it is');
+});
+
+// A land.sh from a branch before #1007: its tickets have no "order" line and it waits for every lower ticket, .order or
+// not. One that arrived first is a barrier (The Trans Agenda #76): had the 3rd, ranked by .order, counted itself ahead
+// of it, both would take the lock when the holder left.
+const before1007 = `queue_order() { local t l keys=(); Q_ORDER=() Q_ORDER_BY=''; for t in "$Q_DIR"/[0-9]*; do t=\${t##*/}; [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue; if [ "\${l[1]:-0}" != 0 ]; then keys+=("0 $t"); else keys+=("2 $t"); fi; done; [ \${#keys[@]} = 0 ] || mapfile -t Q_ORDER < <(printf '%s\\n' "\${keys[@]}" | LC_ALL=C sort | cut -d' ' -f2); }
+queue_write() { printf '%s\\n' "$2" "$3" "$4" "$5" "$6" "$7" "$8" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"; }
+`;
+test('a waiter .order ranks stays behind one from a land.sh before .order that arrived first', async () => {
+  const q = queueSetup(3);
+  const old = join(q.dir, 'old-land.sh');
+  writeFileSync(old, readFileSync(join(q.wts[1], 'tools', 'land.sh'), 'utf8').replace(/^queue_ordinal\(\) \{/m, () => `${before1007}queue_ordinal() {`));
+  const lands: { child: ReturnType<typeof spawn>; exit: Promise<number | null>; stderr: () => string }[] = [];
+  try {
+    lands.push(q.land(1));
+    await until("landing 1's ticket", () => q.issued() === 1);
+    const child = spawn('bash', [old], { cwd: q.wts[1], stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, GATE: join(q.dir, 'gate'), LAND_QUEUE_POLL: '0.05' } });
+    let said = '';
+    child.stderr!.on('data', (d) => (said += d));
+    lands.push({ child, exit: new Promise((ok) => child.on('close', ok)), stderr: () => said });
+    await until("landing 2's ticket", () => q.issued() === 2);
+    lands.push(q.land(3));
+    await until('the 3rd to see its place', () => /3rd in line/.test(lands[2].stderr()));
+    const [t1, t2, t3] = q.tickets();
+    assert.notEqual(readFileSync(join(q.state, 'land-queue', t2), 'utf8').split('\n')[7], 'order', "the old one's ticket has no order line");
+    writeFileSync(join(q.state, 'land-queue', '.order'), `# Cara moved ticket/3-x to land next\n${t3}\n${t1}\n`);
+    await until('the 3rd to say its place again', () => /queue: Cara moved ticket\/3-x to land next\nqueue: \d\w+ in line/.test(lands[2].stderr()));
+    assert.match(lands[2].stderr(), /queue: Cara moved ticket\/3-x to land next\nqueue: 3rd in line/, 'the old one is still ahead of it');
+  } finally {
+    q.open();
+  }
+  const codes = await Promise.all(lands.map((l) => l.exit));
+  codes.forEach((code, i) => assert.equal(code, 0, `landing ${i + 1}: ${lands[i].stderr()}`));
+  assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
 });
 
 test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {

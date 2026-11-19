@@ -137,7 +137,8 @@ park() { say "$*"; exit 75; }
 #   land_failures                 reads a check's or CI's output on stdin and prints the ids of what failed, one a
 #                                 line (known reds and fast mode's ledger match on them): "<file>::<test>" where
 #                                 the output names the test, else "<file>". The one below reads node's test runner
-#                                 (spec and TAP), pytest and jest (files only) output, and red workflows in CI's.
+#                                 (spec and TAP), pytest and jest (files only) output, and red workflows in CI's:
+#                                 a line "<workflow>: completed failure" (or timed_out, or "completed, failure"), its id "ci:<workflow>".
 #                                 A scheme on another runner (cargo test) defines its own in land.local.sh.
 land_failures() {
   awk '
@@ -150,7 +151,7 @@ land_failures() {
     /^(ok|# Subtest)/ { tap = 0 }
     /^FAILED [^ ]+::/ { print $2; next }
     /^FAIL [^ ]+/ { print $2; next }
-    /^[^ :]+: completed (failure|timed_out)/ { p = $1; sub(/:$/, "", p); print "ci:" p }
+    /^[[:space:]]*[^:[:space:]][^:]*: completed,? (failure|timed_out)/ { p = $0; sub(/^[[:space:]]+/, "", p); sub(/: completed.*$/, "", p); print "ci:" p }
     END { flush() }
   '
 }
@@ -236,7 +237,11 @@ fi
 # The line's order (#1007) is the holder, then the waiters <.git>/land-queue/.order names (written by Citadel's
 # Releases page: a "# " line saying who set it, then ticket numbers, front first), then the rest in arrival order.
 # Citadel lists only tickets with the "order" line in it: a landing from an older branch runs a land.sh that waits for
-# every lower ticket, so ranking it could leave two waiting on each other.
+# every lower ticket, so ranking it could leave two waiting on each other. For the same reason a waiting one is a
+# barrier: nobody who arrived after it goes ahead of it, so .order ranks the waiters between two such ones only among
+# themselves (had a later one counted itself ahead, both would take the lock as the holder left: The Trans Agenda #76).
+# Citadel never ranks a waiter behind such a one either, so a land.sh from before that rule, which ranks .order's
+# waiters ahead of every other, sees the same line as this one.
 # A land.sh from a branch older than the line takes the flock directly; the head of the line waits
 # for it like for anyone else.
 # The same line as Citadel's own tools/deploy-queue.sh, kept inline so a scheme copies one file: a
@@ -357,7 +362,7 @@ queue_done() {
 
 # The tickets in line order (the header at "The line's order"), as Q_ORDER, and who set .order, as Q_ORDER_BY.
 queue_order() {
-  local t l i=0 keys=()
+  local t l i=0 old=0 seg keys=()
   local -A rank=()
   Q_ORDER=() Q_ORDER_BY=''
   [ ! -f "$Q_DIR/.order" ] || while read -r t; do
@@ -366,7 +371,11 @@ queue_order() {
   for t in "$Q_DIR"/[0-9]*; do
     t=${t##*/}
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
-    if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t"); elif [ -n "${rank[$t]:-}" ]; then keys+=("1$(printf '%010d' "${rank[$t]}") $t"); else keys+=("2 $t"); fi
+    seg=$(printf '1%05d' "$old") # the waiters from before .order (no "order" line) ahead of it, in arrival order
+    if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t")
+    elif [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
+    elif [ -n "${rank[$t]:-}" ]; then keys+=("${seg}1$(printf '%010d' "${rank[$t]}") $t")
+    else keys+=("${seg}2 $t"); fi
   done
   [ ${#keys[@]} = 0 ] || mapfile -t Q_ORDER < <(printf '%s\n' "${keys[@]}" | LC_ALL=C sort | cut -d' ' -f2)
 }
@@ -710,13 +719,13 @@ rm -f "$gitdir/land-branch"
 fast_full() {
   local fork f p
   fork=$(git merge-base "refs/heads/$BRANCH" HEAD 2>/dev/null) || { echo "(couldn't find where it forked from $BRANCH)"; return; }
-  while IFS= read -r f; do
+  while IFS= read -r -d '' f; do
     case $f in tools/land.sh | tools/land.local.sh | .github/*) echo "$f"; return ;; esac
     [ -z "$LANES" ] || [ "$f" != "$LANES" ] || { echo "$f"; return; }
     for p in $FAST_FULL; do
       case $f in $p) echo "$f"; return ;; esac
     done
-  done < <(git diff --no-renames --name-only "$fork" HEAD)
+  done < <(git diff --no-renames --name-only -z "$fork" HEAD) # -z: a non-ASCII path as it is, not quoted (Mandate #152)
 }
 FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
 if [ "${LAND_FAST:-}" = 1 ]; then
@@ -798,7 +807,7 @@ ci_runs() {
   if [ -n "$CI_STATUS" ]; then
     timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&- || rc=$?
     # Its lines for workflows still going ("<file>: in_progress …", "<file>: not started …") keep a red from deciding.
-    [ "$rc" != 1 ] || ! grep -Eq '^[^ :]+: (in_progress|queued|waiting|pending|requested|not started)' "$cilog" || ci_open=2
+    [ "$rc" != 1 ] || ! grep -Eq '^[[:space:]]*[^:[:space:]][^:]*: (in_progress|queued|waiting|pending|requested|not started)' "$cilog" || ci_open=2
     return "$rc"
   fi
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
@@ -1218,7 +1227,9 @@ smoke() {
       refuse "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, and a fast land goes live on it alone, so nothing landed. Find what hangs; a land labelled high takes the full gate"
     elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
       say "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, so it doesn't decide: getting in line"
-    elif [ "$rc" != 0 ] && ! known_red "smoke: SMOKE_CMD" <<<"$out"; then
+      return 0 # it did not pass: no "passed" line (The Trans Agenda #76)
+    elif [ "$rc" != 0 ]; then
+      ! known_red "smoke: SMOKE_CMD" <<<"$out" || return 0 # it said so, and it did not pass either
       tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
       refuse "smoke: SMOKE_CMD failed (exit $rc), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
     fi

@@ -79,7 +79,8 @@ const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').fil
 
 /**
  * The land line in order, its gone processes left out, and the last landings' lengths in s: the holder first, then the
- * waiters .order names in its order, then the rest in arrival order (tools/deploy-queue.sh's queue_lock). The holder running
+ * waiters .order names in its order, then the rest in arrival order, a waiter from before .order keeping everyone who
+ * arrived after it behind it (tools/deploy-queue.sh's queue_lock). The holder running
  * the tests gets tools/run-tests.sh's counts: land.sh's run logs to land-test.log, deploy.sh's to test.log.
  */
 export function readLandLine(stateDir: string, alive = procAlive): { line: LandTicket[]; took: number[] } {
@@ -100,7 +101,8 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
 export function readQueue(q: string, orderAt: number, alive = procAlive): LandTicket[] {
   const line: LandTicket[] = [];
   const order = readOrder(q);
-  const rank = (t: LandTicket) => (t.got > 0 ? -1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
+  // A waiter from before .order waits for every lower ticket, so nobody who arrived after it goes ahead (The Trans Agenda #76).
+  const rank = (t: LandTicket) => (t.got > 0 ? -1 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
   for (const name of files(q).filter((n) => /^\d+$/.test(n)).sort()) {
     const f = join(q, name), text = read(f), at = mtime(f);
     if (text == null || at == null) continue;
@@ -109,17 +111,27 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
     if (!alive(proc)) continue;
     line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' });
   }
-  return line.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
+  const old = line.filter((t) => t.got === 0 && !t.orders).map((t) => t.seq);
+  const before = (t: LandTicket) => (t.got > 0 ? -1 : old.filter((s) => s < t.seq).length);
+  return line.sort((a, b) => before(a) - before(b) || rank(a) - rank(b) || a.seq - b.seq);
 }
+
+/**
+ * A waiter that arrived after one from before .order, which waits for every lower ticket. It stays unranked: a land
+ * script that ranks .order's waiters ahead of the rest (each copy from before #1020) would count it ahead of that one,
+ * while one from after #1020 counts it behind, and the two would take the lock together or wait on each other.
+ */
+export const behindOld = (line: LandTicket[], t: LandTicket) => line.some((o) => o.got === 0 && !o.orders && o.seq < t.seq);
 
 /**
  * Write a queue's .order (#1002, #1007): `seqs` first, the waiters it leaves out behind them in the line's order (or,
  * given `moved`, only that one moves, to where `seqs` puts it: moveIn); a
  * holder, a ticket no longer waiting or one from an older branch is left out (an older one waits for every lower
- * ticket, so ranking it ahead of one could deadlock). `note` says who moved what, for the waiters' output. Returns the order written.
+ * ticket, so ranking it ahead of one could deadlock), and so is one behind such a one (behindOld). `note` says who moved
+ * what, for the waiters' output. Returns the order written.
  */
 export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
-  const waiting = line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
+  const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
   const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
   if (!order.length) throw new Error('No landing waiting in line to reorder');
   const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;

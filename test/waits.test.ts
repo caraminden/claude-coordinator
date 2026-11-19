@@ -265,6 +265,23 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   assert.throws(() => waits.setOrder([3], 'Josh'), /no landing waiting/i, 'all landed or gone meanwhile');
 });
 
+// The Trans Agenda #76: one from before #1002 that arrived first waits only for the lower tickets, so nobody behind it
+// goes ahead of it, whatever .order says: the line shows it where it lands.
+test('the land line keeps a landing from before .order ahead of the ones behind it that .order names', () => {
+  const { state, waits, ticket } = setup();
+  const [a, b, c, d] = [minion(), minion(), minion(), minion()];
+  ticket(1, a.branch, now / 1000 - 40, 'checking', 30);
+  ticket(2, b.branch, 0, 'waiting', 60);
+  ticket(3, c.branch, 0, 'waiting', 50, false);
+  ticket(4, d.branch, 0, 'waiting', 40);
+  writeFileSync(join(state, 'queue', '.order'), '# Cara moved #4 to land next\n0000000004\n0000000002\n');
+  waits.poll();
+  assert.deepEqual(waits.line.map((t) => t.seq), [1, 2, 3, 4]);
+  // A move leaves #4 unranked: a deploy-queue.sh from before #1020 would put a ranked #4 ahead of #3.
+  assert.deepEqual(waits.setOrder([4, 2], 'Cara moved #4 to land next', 4), [2]);
+  assert.equal(readFileSync(join(state, 'queue', '.order'), 'utf8'), '# Cara moved #4 to land next\n0000000002\n');
+});
+
 test('a move on a target that shows part of the line moves only that landing (#1007)', () => {
   // The line waits 5, 6, 7, 8; a target shows 6, 7 and 8 (5 ships elsewhere).
   assert.deepEqual(moveIn([5, 6, 7, 8], [8, 6, 7], 8), [8, 5, 6, 7], 'Land next: the front of the whole line');

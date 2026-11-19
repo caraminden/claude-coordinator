@@ -69,6 +69,7 @@ test('known reds: a smoke, check or CI red only on known reds goes through and s
   const sm = s.run(known);
   assert.equal(sm.status, 0, sm.stderr);
   assert.match(sm.stderr, /smoke: SMOKE_CMD failed only on known reds, so it goes on: test\/x\.test\.ts: known red, #41 is fixing it/);
+  assert.doesNotMatch(sm.stderr, /smoke: passed/, 'a smoke check red on known reds did not pass');
   const s2 = setup('true', { SMOKE_CMD: red('test/x.test.ts', 'test/y.test.ts') });
   s2.commit(s2.wt, 'b.txt', 'b\n');
   assert.equal(s2.run(known).status, 1, 'a new failing file refuses');
@@ -187,6 +188,53 @@ test('known reds: a per-test id covers only that test, a file id covers its test
   const h = hung.run({ LAND_KNOWN_RED: 'test/x.test.ts\t#41 is fixing it', LAND_CHECK_TIMEOUT: '1' });
   assert.equal(h.status, 1, h.stderr);
   assert.doesNotMatch(h.stderr, /only on known reds/);
+});
+
+// git quotes a non-ASCII path in --name-only ("\"db/m\\303\\251.sql\""), which matched none of the patterns (Mandate #152).
+test('fast mode: a non-ASCII path in a FAST_FULL pattern or under .github still takes the full gate', () => {
+  const r = setup('false', { FAST_FULL: 'db/*', SMOKE_CMD: 'true' });
+  r.commit(r.wt, 'db/m\u00e9.sql', 'one\n');
+  const db = r.run({ LAND_FAST: '1' });
+  assert.equal(db.status, 1, db.stderr);
+  assert.match(db.stderr, /fast mode is on, but db\/m\u00e9\.sql takes the full gate/);
+  const g = setup('false', { SMOKE_CMD: 'true' });
+  g.commit(g.wt, '.github/workflows/t\u00e9sts.yml', 'on: push\n');
+  const gh = g.run({ LAND_FAST: '1' });
+  assert.equal(gh.status, 1, gh.stderr);
+  assert.match(gh.stderr, /fast mode is on, but \.github\/workflows\/t\u00e9sts\.yml takes the full gate/);
+  // A newline in a name: split into lines, neither half would match the pattern.
+  const nl = setup('false', { FAST_FULL: 'db/*.sql', SMOKE_CMD: 'true' });
+  nl.commit(nl.wt, 'db/a\nb.sql', 'one\n');
+  const nr = nl.run({ LAND_FAST: '1' });
+  assert.equal(nr.status, 1, nr.stderr);
+  assert.match(nr.stderr, /fast mode is on, but db\/a\nb\.sql takes the full gate/);
+});
+
+// A scheme's CI_STATUS may name its workflows with spaces and indent its lines: still a CI red's id, and still running.
+test('known reds: a CI_STATUS line indented or naming a workflow with spaces is read like a plain one', () => {
+  const known = { LAND_KNOWN_RED: 'ci:Tests (linux)\t#42 is fixing it', LAND_CI_TIMEOUT: '2' };
+  const g = setup('true', CI);
+  const ci = fakeCi(g.dir);
+  g.commit(g.wt, 'b.txt', 'b\n');
+  ci.answer(git(g.wt, 'rev-parse', 'HEAD'), 1, '  Tests (linux): completed failure https://x\n');
+  const cr = g.run({ ...ci.env, ...known });
+  assert.equal(cr.status, 0, cr.stderr);
+  assert.match(cr.stderr, /failed only on known reds, so it goes on: ci:Tests \(linux\): known red, #42 is fixing it/);
+  const w = setup('true', CI);
+  const wci = fakeCi(w.dir);
+  w.commit(w.wt, 'b.txt', 'b\n');
+  wci.answer(git(w.wt, 'rev-parse', 'HEAD'), 1, '  Tests (linux): completed failure https://x\n  Lint, mac: in_progress https://y\n');
+  const wr = w.run({ ...wci.env, ...known });
+  assert.notEqual(wr.status, 0, wr.stderr);
+  assert.doesNotMatch(wr.stderr, /failed only on known reds, so it goes on/, 'it waits for Lint, mac, which never finishes');
+  // A comma after "completed", as one scheme's CI_STATUS prints it.
+  const c = setup('true', CI);
+  const cci = fakeCi(c.dir);
+  c.commit(c.wt, 'b.txt', 'b\n');
+  cci.answer(git(c.wt, 'rev-parse', 'HEAD'), 1, '  android.yml: completed, failure (made 3 min ago, run 5)\n');
+  const comma = c.run({ ...cci.env, LAND_KNOWN_RED: 'ci:android.yml\t#42 is fixing it', LAND_CI_TIMEOUT: '2' });
+  assert.equal(comma.status, 0, comma.stderr);
+  assert.match(comma.stderr, /failed only on known reds, so it goes on: ci:android\.yml: known red, #42 is fixing it/);
 });
 
 test('known reds: a known CI red waits for the workflows still running before it goes on', () => {

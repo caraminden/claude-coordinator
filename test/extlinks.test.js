@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { firefoxLink, firefoxAvailable, appLink, appSrc, mountLinkHandler, SCHEME } from '../public/extlinks.js';
+import { firefoxLink, firefoxAvailable, appLink, appSrc, classifyLink, mountLinkHandler, SCHEME } from '../public/extlinks.js';
 
 // #988: "Open links in Firefox". An external web link becomes citadel-firefox:<address>; anything else stays alone.
 const base = 'https://cara.apps.example.net/c/';
@@ -95,4 +95,46 @@ test('a click on an app link opens the app view with the switch off or on; a mid
   assert.equal(fire('click', 'https://example.com/'), true);
   assert.equal(fire('click', '/c/#/x'), false, 'Citadel itself stays');
   assert.deepEqual(seen.slice(1), [['ff', voice], ['ff', 'https://voice.citadel.zip/other/'], ['ff', 'https://example.com/']]);
+});
+
+// #988 regression: a framed app's own links went to Firefox. One table decides, switch on and off.
+const ctxOf = (self, firefox) => ({ own: ['cara.apps.example.net'], domain: 'citadel.zip', apps: { 'transdata.citadel.zip': 'transdata', 'voice.citadel.zip': 'voice' }, self, firefox });
+const kindOf = (href, at, self, firefox) => { const c = classifyLink(href, at, ctxOf(self, firefox)); return c.kind === 'app' ? `app:${c.app.name}${c.app.to}` : c.kind; };
+
+test('classifyLink: one table for a page in transdata (its own host), switch on and off', () => {
+  const at = 'https://transdata.citadel.zip/apps/transdata/';
+  for (const firefox of [true, false]) {
+    assert.equal(kindOf('/apps/transdata/ingest', at, 'transdata', firefox), 'page', 'relative, same app');
+    assert.equal(kindOf('https://transdata.citadel.zip/apps/transdata/ingest', at, 'transdata', firefox), 'page', 'absolute, same app');
+    assert.equal(kindOf('https://transdata.citadel.zip/', at, 'transdata', firefox), 'page');
+    assert.equal(kindOf('https://transdata.citadel.zip/anything', at, 'transdata', firefox), 'page', 'same origin stays with the page');
+    assert.equal(kindOf('https://voice.citadel.zip/apps/voice/rate/', at, 'transdata', firefox), 'app:voice/apps/voice/rate/', 'another app\'s host');
+    assert.equal(kindOf('https://cara.apps.example.net/apps/voice/rate/', at, 'transdata', firefox), 'app:voice/apps/voice/rate/', 'another app on Citadel\'s host');
+    assert.equal(kindOf('https://cara.apps.example.net/c/#/p/2', at, 'transdata', firefox), 'window', 'Citadel\'s own page');
+    assert.equal(kindOf('https://citadel.zip/', at, 'transdata', firefox), 'window', 'the bare apps domain');
+    assert.equal(kindOf('https://docs.citadel.zip/x', at, 'transdata', firefox), 'window', 'a citadel.zip host that is no app');
+    assert.equal(kindOf('https://notcitadel.zip/', at, 'transdata', firefox), firefox ? 'firefox' : 'browser', 'only the domain and its subdomains');
+    assert.equal(kindOf('https://example.com/x', at, 'transdata', firefox), firefox ? 'firefox' : 'browser', 'outside');
+    assert.equal(kindOf('https://voice.citadel.zip/other/', at, 'transdata', firefox), 'window', 'an app host path the view can\'t show: still Citadel\'s, this window goes there');
+    assert.equal(kindOf('mailto:a@b.c', at, 'transdata', firefox), 'page');
+  }
+});
+
+test('classifyLink: a page in transdata on Citadel\'s host (no apps domain), and Citadel\'s own page', () => {
+  const frameAt = 'https://cara.apps.example.net/apps/transdata/';
+  for (const firefox of [true, false]) {
+    assert.equal(kindOf('/apps/transdata/ingest', frameAt, 'transdata', firefox), 'page');
+    assert.equal(kindOf('https://cara.apps.example.net/apps/transdata/ingest', frameAt, 'transdata', firefox), 'page');
+    assert.equal(kindOf('/apps/voice/', frameAt, 'transdata', firefox), 'app:voice/apps/voice/');
+    assert.equal(kindOf('https://example.com/', frameAt, 'transdata', firefox), firefox ? 'firefox' : 'browser');
+    // Citadel's own page: no app of its own, so its /apps/<y>/ links open the app view
+    const top = 'https://cara.apps.example.net/c/';
+    assert.equal(kindOf('/apps/transdata/ingest', top, null, firefox), 'app:transdata/apps/transdata/ingest');
+    assert.equal(kindOf('https://transdata.citadel.zip/apps/transdata/x', top, null, firefox), 'app:transdata/apps/transdata/x');
+    assert.equal(kindOf('#/p/2/t/9', top, null, firefox), 'page');
+    assert.equal(kindOf('/api/x', top, null, firefox), 'page');
+    assert.equal(kindOf('https://example.com/', top, null, firefox), firefox ? 'firefox' : 'browser');
+  }
+  assert.equal(kindOf('/apps/transdata/ingest', frameAt, 'transdata', true), 'page', 'before Citadel\'s lists arrive nothing same-origin leaves the page');
+  assert.equal(classifyLink('/apps/transdata/ingest', frameAt, { self: 'transdata', firefox: true }).kind, 'page');
 });

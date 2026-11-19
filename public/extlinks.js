@@ -107,29 +107,62 @@ export function launchFirefox(address) {
 }
 
 /**
+ * What a click on `href` (at `base`) should do, the one rule every handler uses. `ctx`: `own` Citadel's hosts, `apps`
+ * app host -> name, `domain` the apps domain (APPS_DOMAIN: every host on it is Citadel's), `self` the app this page is (null on Citadel's own pages), `firefox` the switch. Answers
+ *   { kind: 'app', app: { name, to } }  Citadel's app view (a registered app, by its host or /apps/<name>/…)
+ *   { kind: 'firefox', address }        Firefox (outside the above, or an app path the view can't show, switch on)
+ *   { kind: 'page' }                    nothing to do: not a web link, or the page's own (same origin, same app)
+ *   { kind: 'window' }                  Citadel's, but not an app's or this page's: this window goes there, never a new tab
+ *   { kind: 'browser' }                 outside, switch off: the browser's default
+ * Order: another app's link first (even same-origin: Citadel's host serves every app's /apps/<y>/), then same origin
+ * stays with the page, then Citadel's own hosts and anything on the apps domain, then outside. Never edit `own` or `apps` to steer one case.
+ */
+export function classifyLink(href, base, { own = [], apps = {}, domain = null, self = null, firefox = false } = {}) {
+  let url;
+  try {
+    url = new URL(href, base);
+  } catch {
+    return { kind: 'page' };
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return { kind: 'page' };
+  const app = appLink(url.href, base, own, apps);
+  if (app && app.name !== self) return { kind: 'app', app };
+  if (url.origin === new URL(base).origin) return { kind: 'page' };
+  const d = domain?.toLowerCase();
+  if (own.some((h) => h.toLowerCase() === url.hostname) || (d && (url.hostname === d || url.hostname.endsWith(`.${d}`)))) return { kind: 'window' };
+  return firefox ? { kind: 'firefox', address: url.href } : { kind: 'browser' };
+}
+
+/**
  * Catch clicks (and middle clicks) on external links before anything else sees them. `on()` says whether the switch is
- * on, `own()` lists Citadel's own hosts, `apps()` maps each app's own host to its name, `openApp({ name, to }, address)` shows an app, `open(address)` takes the address. A modifier key, a
+ * on, `own()` lists Citadel's own hosts, `apps()` maps each app's own host to its name, `domain()` the apps domain, `openWindow(address)` goes there in this window, `openApp({ name, to }, address)` shows an app, `open(address)` takes the address. A modifier key, a
  * `download` link or a click something already handled is left to the browser.
  */
-export function mountLinkHandler({ on, own, open, apps = () => ({}), openApp, base = () => location.href }) {
+export function mountLinkHandler({ on, own, open, apps = () => ({}), domain = () => null, self = () => null, openApp, openWindow, base = () => location.href }) {
   const handle = (e) => {
     if (e.defaultPrevented || (e.type === 'click' ? e.button !== 0 : e.button !== 1)) return;
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     const a = e.target?.closest?.('a[href]');
     if (!a || a.hasAttribute('download')) return;
     const href = a.getAttribute('href');
-    // A link to one of our apps opens in Citadel's app view, switch on or off; a middle click can't, so it's Firefox's.
-    const app = openApp && e.type === 'click' ? appLink(href, base(), own(), apps()) : null;
-    if (app) {
+    const c = classifyLink(href, base(), { own: own(), apps: apps(), domain: domain(), self: self(), firefox: on() });
+    // A click shows an app in the app view; a middle click can't, so it's Firefox's (switch on) or the browser's.
+    if (c.kind === 'app' && e.type === 'click' && openApp) {
       e.preventDefault();
       e.stopPropagation();
-      return openApp(app, new URL(href, base()).href);
+      return openApp(c.app, new URL(href, base()).href);
     }
-    const link = on() && firefoxLink(href, base(), own());
-    if (!link) return;
+    // Citadel's own: a plain link already goes there in this window; one meant for a new tab comes here instead.
+    if (c.kind === 'window' && e.type === 'click' && openWindow && a.target && a.target !== '_self') {
+      e.preventDefault();
+      e.stopPropagation();
+      return openWindow(new URL(href, base()).href);
+    }
+    const address = c.kind === 'firefox' ? c.address : c.kind === 'app' && on() ? new URL(href, base()).href : null;
+    if (!address) return;
     e.preventDefault();
     e.stopPropagation();
-    open(link.slice(SCHEME.length));
+    open(address);
   };
   addEventListener('click', handle, true);
   addEventListener('auxclick', handle, true);

@@ -23,7 +23,8 @@ const FRAMER = `<!doctype html><meta charset="utf-8"><meta name="viewport" conte
   import { showFrame } from '/c/frames.js';
   import { initAppSwitch } from '/c/appswitch.js';
   window.echo = {};
-  addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.test] = e.data.value; });
+  window.upward = [];
+  addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.test] = e.data.value; if (['ext', 'app', 'go-url'].includes(e.data?.type)) window.upward.push(e.data.type + ' ' + e.data.url); });
   showRail();
   initAppSwitch('josh');
   showFrame('peek', new URLSearchParams(location.search).get('src'));
@@ -62,6 +63,19 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
     const r = h && !h.hidden && h.getBoundingClientRect();
     tell('handle', r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null);
   }, 50);
+  // Links to click from the test (a clickLink message): what the page's handler did with each, reported back.
+  document.body.insertAdjacentHTML('beforeend', '<a id="same" href="/apps/peek/ingest">a</a><a id="other" href="http://voice.test/apps/voice/rate/">b</a><a id="out" href="https://example.com/x">c</a><a id="zip" target="_blank" href="https://docs.citadel.zip/">d</a>');
+  // A handled click is stopped before it reaches the document: that, or a prevented default, is what the test reads.
+  addEventListener('message', (e) => {
+    const id = e.data?.clickLink;
+    if (!id) return;
+    let seen = null;
+    const onClick = (ev) => { seen = ev.defaultPrevented; ev.preventDefault(); };
+    document.addEventListener('click', onClick, { once: true });
+    document.getElementById(id).click();
+    document.removeEventListener('click', onClick);
+    tell('click:' + id, seen === null ? true : seen);
+  });
   window.ready = true;
 </script>`;
 
@@ -202,4 +216,22 @@ test("in a contraption's installed window, Citadel's layer on Citadel's host ope
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: peek.x, y: peek.y, button: 'left', buttons: 0, clickCount: 1 });
   }
   assert.equal(await layer(page), 'hidden', 'this app picked in the layer: back to its own page');
+});
+
+test("with Open links in Firefox on, a framed app's own links stay in it; another app, Citadel's domain and outside links go up (#988)", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 });
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
+  // What Citadel's state message says with the switch on (the test box isn't Windows, so it says it itself).
+  const frame = `document.querySelector('#frames iframe').contentWindow`;
+  await page.eval(`${frame}.postMessage({ protocol: 'citadel-frame-1', type: 'state', hasRail: true, narrow: false, firefox: true, own: ['127.0.0.1'], apps: { 'voice.test': 'voice' }, domain: 'citadel.zip' }, '*')`);
+  const click = async (id: string) => {
+    await page.eval(`${frame}.postMessage({ clickLink: '${id}' }, '*')`);
+    await waitFor(page, `click ${id}`, `'click:${id}' in window.echo`);
+    return page.eval(`window.echo['click:${id}']`);
+  };
+  assert.equal(await click('same'), false, "its own link is left to the page");
+  assert.equal(await click('other'), true);
+  assert.equal(await click('out'), true);
+  assert.equal(await click('zip'), true);
+  assert.deepEqual(await page.eval(`window.upward`), ['app http://voice.test/apps/voice/rate/', 'ext https://example.com/x', 'go-url https://docs.citadel.zip/']);
 });

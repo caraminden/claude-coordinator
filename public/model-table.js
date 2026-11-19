@@ -83,11 +83,11 @@ export function tierLabel(model, effort) {
 
 /**
  * The "Picked because" line on a minion (#1061). `by` says who chose: 'table' (the table's pick for its type, from the Taskmaster's
- * call or a start with none), a person's name (they set it by hand), or 'step-up' (the Taskmaster moved it after a stall).
+ * call or a start with none), a person's name (they set it by hand), or 'step-up' (the Taskmaster changed it later).
  */
 export function pickReason(by, type, model, effort) {
   const tier = tierLabel(model, effort);
-  if (by === 'step-up') return `stepped up after a stall: ${tier}`;
+  if (by === 'step-up') return `changed by the Taskmaster (a stall step-up or someone's ask): ${tier}`;
   if (by !== 'table') return `set by ${by}: ${tier}`;
   return type ? `${type} → ${tier}` : tier;
 }

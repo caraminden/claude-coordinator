@@ -1,7 +1,7 @@
 // The Models section of Settings → Usage (#1061): which model a minion starts on and why (rendered from model-table.js itself),
 // and the weekly Fable cap with its meter. Josh, 2026-11-19: the cap is a share of each person's weekly plan (you), or API
 // dollars for the whole Citadel; past it, Fable tiers start on Opus high.
-import { api, costText, h } from './base.js';
+import { account, api, costText, h } from './base.js';
 import { advisorTrialEnd, BY_TYPE, FALLBACK, tierLabel, tierRows } from './model-table.js';
 
 /** A bar `pct` wide (capped at 100); through the CSSOM, since the page's CSP refuses style attributes. */
@@ -69,7 +69,7 @@ export function fableMeterView(w) {
   } }, 'Save');
   draw();
   return h('div', { class: 'fable-meter' }, pick, slot,
-    h('div', { class: 'fable-cap-row' }, h('label', {}, 'Weekly cap ', input, ' % of the plan'), save, status),
+    account?.admin ? h('div', { class: 'fable-cap-row' }, h('label', {}, 'Weekly cap ', input, ' % of the plan'), save, status) : h('p', { class: 'key' }, `Weekly cap: ${f.capPct}% of the plan (an admin sets it).`),
     h('p', { class: 'foot' }, f.over
       ? 'Over the cap: Taskmasters start Fable-tier minions on Opus high until the last 7 days drop back under it.'
       : 'Past the cap, Taskmasters start Fable-tier minions on Opus high on their own until the last 7 days drop back under it. The cap counts everyone together, in dollars at API prices (the cap % of every weekly plan added up).'));

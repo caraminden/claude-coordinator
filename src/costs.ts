@@ -234,7 +234,9 @@ export function fableMeter(store: Store, now = Date.now()): FableMeter {
   const capPct = fableCapPct(store);
   const usd = store.fableSpend(now - COST_DAYS * 86400_000);
   // Each account's estimated weekly limit is kept as week_usd:<payer or host>[:account:N] (weekLimit).
-  const limits = store.settingsWithPrefix<number>('week_usd:').map((r) => r.value).filter((v) => typeof v === 'number' && v > 0);
+  // Only the server login's and the signed-up people's own: a removed person's old estimate stays in settings and must not inflate the cap.
+  const live = new Set(['host', ...store.listUsers().map((u) => String(u.id))]);
+  const limits = store.settingsWithPrefix<number>('week_usd:').filter((r) => live.has(r.key.split(':')[1])).map((r) => r.value).filter((v) => typeof v === 'number' && v > 0);
   const weekUsd = limits.length ? limits.reduce((a, b) => a + b, 0) : null;
   const capUsd = weekUsd === null ? null : (weekUsd * capPct) / 100;
   return { capPct, usd, weekUsd, capUsd, over: capUsd !== null && usd >= capUsd };

@@ -55,7 +55,7 @@ test('the Models section rows are the table itself, and the picked-because line 
   assert.equal(advisorTrialEnd(), '2026-11-30');
   assert.equal(pickReason('table', 'bug', 'claude-sonnet-5-5', 'medium'), 'bug → Sonnet 5.5 medium');
   assert.equal(pickReason('Josh', null, 'claude-opus-5-5', 'high'), 'set by Josh: Opus 5.5 high');
-  assert.match(pickReason('step-up', null, 'claude-opus-5-5', 'medium'), /^stepped up after a stall/);
+  assert.match(pickReason('step-up', null, 'claude-opus-5-5', 'medium'), /^changed by the Taskmaster/);
 });
 
 test('the Taskmaster prompt switches to Opus high on its own once Fable is over its cap (#1061)', () => {

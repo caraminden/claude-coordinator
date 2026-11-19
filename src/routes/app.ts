@@ -138,8 +138,8 @@ export const appRoutes: Route[] = [
   } },
   // Every scheme's spend on the server's Claude login, so only for admins.
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), week: hostWeek(store, runner.usageOf(store.serverLoginOwner())), split: spendSplit(store) }) },
-  // The weekly Fable cap, a percent of the weekly plan (#1061; Josh, 2026-11-19). Any member may change it (everyone shares the budget).
-  { method: 'PUT', path: '/api/costs/fable-cap', who: ['person'], handler: async ({ req, res, app: { store } }) => {
+  // The weekly Fable cap, a percent of the weekly plan (#1061; Josh, 2026-11-19). Admins only, as the cost page's other server-wide numbers are.
+  { method: 'PUT', path: '/api/costs/fable-cap', who: ['person'], access: 'admin', handler: async ({ req, res, app: { store } }) => {
     const pct = (await readJson(req))?.pct;
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw new HttpError(400, 'pct is the cap as a percent of the weekly plan, 0 to 100');
     store.setSetting(FABLE_CAP_KEY, pct);

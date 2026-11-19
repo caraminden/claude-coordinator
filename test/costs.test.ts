@@ -265,8 +265,8 @@ test('the Fable meter counts every payer\'s Fable dollars against a share of the
   const now = Date.now();
   assert.equal(fableMeter(store, now).capPct, 20);
   assert.equal(fableMeter(store, now).over, false, 'no plan priced: no cap in dollars, never over');
-  store.setSetting('week_usd:host', 100);
-  store.setSetting('week_usd:3', 100);
+  store.setSetting('week_usd:host', 200);
+  store.setSetting('week_usd:999', 5000); // nobody has this id: a removed person's old estimate doesn't count
   store.recordTurn(t.id, { session_id: 'f', ended_at: now - 1000, session_cost_usd: 30, modelUsage: usage({ 'claude-fable-5-2': 30 }) });
   store.recordTurn(t.id, { session_id: 'g', ended_at: now - 1000, session_cost_usd: 69, modelUsage: usage({ 'claude-sonnet-5-5': 69 }) });
   let m = fableMeter(store, now);

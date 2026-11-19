@@ -12,6 +12,6 @@ budget", and no number existed. Josh, 2026-11-19, on #1061's card:
   over the cap, every Taskmaster's prompt says to start Fable-tier minions on Opus high. It switches back by itself.
 - **The number** (Josh: "Should be a function of their weekly plan, lets say the starting cap would be like 20%"): one setting,
   `fable_cap_pct` (default 20), a percent of the weekly plan. The Citadel-wide cap in dollars is that percent of every
-  priced account's weekly limit added up (`src/costs.ts`, `fableMeter`). Any person can change it on the page.
+  priced account's weekly limit added up (`src/costs.ts`, `fableMeter`). Admins change it on the page.
 
 Until a weekly meter has priced a plan there is no dollar cap, so nothing counts as over. Schemes with Fable off are unaffected.

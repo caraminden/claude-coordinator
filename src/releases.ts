@@ -89,7 +89,7 @@ export interface Next extends Progress {
 }
 
 /** Why a waiting landing can't be moved (#1002, #1007): its branch's land script predates reordering. */
-export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it lands in its turn";
+export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it ships in its turn";
 /** Why one behind such a landing can't move (#1020): nobody who arrived after that one goes ahead of it. */
 export const BEHIND_OLD = "Can't move yet: a change ahead of it started from a branch whose land script is older than reordering, and nobody behind that one can pass it";
 

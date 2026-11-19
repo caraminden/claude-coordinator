@@ -529,7 +529,7 @@ export class LandHandoffs {
     }
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
     const failed = deploys.filter((d) => !d.ok);
-    runner.emit(id, 'note', { text: `Shipped ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
+    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

@@ -778,7 +778,7 @@ export const projectRoutes: Route[] = [
         if (settings.land_mode === 'fast') app.fastMode?.reset(project.id);
         if (coordinator && settings.land_mode !== undefined) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: settings.land_mode === 'fast'
-            ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose land broke it, and comes to you if it isn't fixed in 30 minutes. High-risk lands and pipeline changes keep the full gate.`
+            ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose change broke it, and comes to you if it isn't fixed in 30 minutes. High-risk changes and pipeline changes keep the full gate.`
             : `${session.name} turned fast mode off. Every change waits for the full check and CI again before it ships.` });
         }
         if (coordinator && settings.default_effort !== undefined) {

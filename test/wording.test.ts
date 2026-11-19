@@ -39,7 +39,7 @@ test('leaves fold alone in words that only contain it, quoted, or as code', () =
 test('flags merge said of main: gos, "to main", "ready to merge", merged PRs and the merge card', () => {
   for (const [text, word] of [
     ['Merge it?', 'Merge it'], ['So merge this.', 'merge this'], ['Merge #196 when ready.', 'Merge #196'], ['merge PR 12 now', 'merge PR 12'],
-    ['Ready to merge.', 'Ready to merge'], ['PR #12 merged.', 'PR #12 merged'], ['PR 12 was merged an hour ago.', 'PR 12 was merged'],
+    ['Ready to merge.', 'Ready to merge'], ['Merge 196.', 'Merge 196'], ['PR #12 merged.', 'PR #12 merged'], ['PR 12 was merged an hour ago.', 'PR 12 was merged'],
     ['It was merged to main yesterday.', 'merged to main'], ['I merged the fix into main.', 'merged the fix into main'],
     ['Review this, then merge it into main.', 'merge it into main'], ['Only merged PRs count.', 'merged PRs'], ['It asks with a merge card.', 'merge card'],
   ]) assert.deepEqual(flagged(text), [word], text);
@@ -57,14 +57,14 @@ test('flags land said of main: a change going onto main ships (Cara, 2026-11-19,
   for (const [text, word] of [
     ['Land it?', 'Land it'], ['Should I land #12?', 'land #12'], ['land PR 41 now', 'land PR 41'], ['Ready to land.', 'Ready to land'],
     ['It landed on main an hour ago.', 'landed on main'], ['#12 has landed.', '#12 has landed'], ['PR #40 landed.', 'PR #40 landed'],
-    ['Only landed PRs count.', 'landed PRs'], ['It asks with a land card.', 'land card'], ['It waits in the land line.', 'land line'],
+    ['Only landed PRs count.', 'landed PRs'], ['Land 196 now.', 'Land 196'], ['It asks with a land card.', 'land card'], ['It waits in the land line.', 'land line'],
   ]) assert.deepEqual(flagged(text), [word], text);
 });
 
 test('leaves land alone in code, tool and file names and its other senses', () => {
   for (const ok of [
     'Ship it.', '#12 has shipped.', 'Call hand_off_land now.', 'tools/land.sh refused it.', 'Its branch is land/ticket-12.',
-    '`land it`', '"land it" still counts as a go.', 'The findings land in this chat.', 'Retries until the write lands.',
+    '`land it`', '"land it" still counts as a go.', 'The findings land in this chat.', 'Retries until the write lands.', 'The fix lands in main.py.',
   ]) assert.deepEqual(flagged(ok), [], ok);
 });
 

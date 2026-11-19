@@ -45,6 +45,7 @@ export const RESERVED: Reserved[] = [
     // as often git's as ours.
     match: new RegExp([
       String.raw`\b${MERGE}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b${INTO}`,
+      String.raw`\bmerge\s+\d+\b${INTO}`,
       String.raw`\b${MERGE}\b(?:\s+\S+){0,4}?\s+(?:in)?to\s+main\b`,
       String.raw`\bready\s+to\s+merge\b${INTO}`,
       String.raw`\bPR\s*#?\d+\s+(?:(?:was|is|has\s+been|got)\s+)?merged\b${INTO}`,
@@ -62,7 +63,9 @@ export const RESERVED: Reserved[] = [
     // "#12 has landed", "landed PRs", "the land card". A bare "lands" is left alone: findings and files land too.
     match: new RegExp([
       String.raw`\b${LAND}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b`,
-      String.raw`\b${LAND}\b(?:\s+\S+){0,4}?\s+(?:on(?:to)?|in(?:to)?|to)\s+main\b`,
+      // "land 196": the go parser reads a bare number as a PR.
+      String.raw`\bland\s+\d+\b`,
+      String.raw`\b${LAND}\b(?:\s+\S+){0,4}?\s+(?:on(?:to)?|in(?:to)?|to)\s+main\b(?!\.\w)`,
       String.raw`\bready\s+to\s+land\b`,
       String.raw`(?:\bPR\s*#?\d+|#\d+)\s+(?:(?:was|is|has|had|has\s+been|got)\s+)?landed\b`,
       String.raw`\blanded\s+PRs?\b`,

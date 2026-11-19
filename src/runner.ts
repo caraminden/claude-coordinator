@@ -568,7 +568,7 @@ export class Runner {
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
   heldFor: (ticketId: number) => string | null = () => null;
   /** The brief a chained minion holds, shown read-only in its chat (LiveWaiters.heldBrief, set by the server). */
-  heldBrief: (ticketId: number) => { text: string; from: string; leader: number; when: 'live' | 'merged' } | null = () => null;
+  heldBrief: (ticketId: number) => { text: string; from: string; leader: number; when: 'live' | 'merged'; is: string } | null = () => null;
   /** What wakes a parked minion by itself (an unheld start_after, wake_when_live, wake_when_runners_back), or null (set by the server). */
   wakesOn: (ticketId: number) => string | null = () => null;
   /** Approve / Deny cards waiting on people, for projects with approval rules. */

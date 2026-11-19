@@ -1267,7 +1267,7 @@ function syncHeldBrief() {
   old?.remove();
   const body = markdown(b.text, view.ticket.id);
   const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key },
-    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.when === 'live' ? 'is live' : 'has shipped'}`))),
+    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.is ?? (b.when === 'live' ? 'is live' : 'has shipped')}`))),
     body);
   if (b.text.length > 500 || b.text.split('\n').length > 8) {
     el.classList.add('clamped');

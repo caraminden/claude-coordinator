@@ -680,6 +680,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.equal(parked.held_brief.text, 'brief for Later');
   assert.equal(parked.held_brief.leader, next.data.number);
   assert.equal(parked.held_brief.when, 'live');
+  assert.equal(parked.held_brief.is, 'is live', 'the chat says the wait in the server\'s words');
   const started = await call(`/api/tickets/${later.id}/unpark`, {});
   assert.equal(started.status, 200);
   assert.equal(started.data.held_brief, null, 'sent: no longer shown as held');

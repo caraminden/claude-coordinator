@@ -277,7 +277,7 @@ test("a feeder's merge into its build dismisses it as folded in; an unreported h
   assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'ended but not reported: refused, not wiped');
   assert.equal(s.landings.start(1, s.cwd, { PATH: process.env.PATH! }).code, 0, 'the land tool reads that one instead of starting afresh');
   await s.handoffs.poll();
-  assert.match(s.notes[0], /^Shipped into build\/3: .* Merged into build\/3, not live until the build ships\.$/);
+  assert.match(s.notes[0], /^Merged into build\/3: .* Merged into build\/3, not live until the build ships\.$/);
   assert.equal(s.ticket.note, 'merged into Build 3');
   assert.ok(s.did.some((d) => d.startsWith('close')));
 });

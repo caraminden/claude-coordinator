@@ -69,7 +69,7 @@ const schemeName = (id) => schemeOf(id)?.name ?? `Scheme ${id}`;
 /** The scheme's icon as the sidebar shows it, beside its targets' names (Cara, 2026-11-12: "maybe also the scheme icons?"). */
 const iconOf = (id) => (schemeOf(id) ? schemeIcon(schemeOf(id)) : '');
 /** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy, and a PR's wait for its go (Cara, 2026-11-19, picked "Ship" on #1020's card). */
-const STAGE_NAMES = { call: 'Start', merge: 'Ship' };
+const STAGE_NAMES = { call: 'Start', merge: 'Ship', land: 'Ship' };
 /** A stage's name as the land track says it, else the stage itself, capitalised. */
 const stageName = (key) => {
   if (STAGE_NAMES[key]) return STAGE_NAMES[key];
@@ -403,7 +403,7 @@ function rollbackBar(projectId, tv) {
   const line = busy ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
     : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
       // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
-      tv.deploy ? 'it stays there until main has a newer commit that passes the full suite. Deploy ships main now.'
+      tv.deploy ? 'it stays there until main has a newer commit that passes the full suite. Deploy takes main live now.'
         : `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`)
       : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
   const button = !busy && rb.can

@@ -898,6 +898,26 @@ when that Taskmaster deployed it itself). It never fails the deploy, so a first 
 Service status, start, stop, restart, its journal and installing over a hand-made unit are
 admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_service`).
 
+### Release targets: `targets`
+
+Any scheme's `citadel-app.json` on the default branch, not only a contraption's, may tune the
+release targets Citadel finds on its own (the Releases page and each minion's Deploying row). Each
+entry names a found target by its `id` (the Releases page shows it, e.g. `ci:windows:release`):
+
+```json
+{ "targets": [
+  { "id": "main", "hidden": true },
+  { "id": "ci:windows:release", "name": "Windows", "paths": ["companion/"],
+    "release": { "name": "Build {n}", "number": "run", "needs": ["desktop.yml"] } }
+] }
+```
+
+`name`, `link` and `hidden` rename, relink or hide it; `paths` names the folders it ships, so only
+changes there count. `release.name` (with `{n}`) and `release.number` (`run` or `count`) set how its
+releases are named. `release.needs` lists workflow files that must also be green on the same commit
+before a build counts as reaching people (#1019): a CI target whose installer only goes out once
+another workflow passes lists that workflow here, or its minions leave Deploying too early.
+
 ## Limits at a glance
 
 | What | Limit |
@@ -934,6 +954,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-18:** A release target can wait on other workflows: `targets[].release.needs` in
+  `citadel-app.json` ("Release targets").
 - **2026-11-18:** Downloads from your server load in the frame: a plain `<a href>` with no
   `download` or `target`, answered with `Content-Disposition: attachment`. `<a download>` into your
   host fails in Chrome when Citadel is opened at its other hostname ("Downloads", contraption-ui rule 25).

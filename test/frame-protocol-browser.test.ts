@@ -262,6 +262,7 @@ test("in an app's own window (no Citadel around it), the switch comes from its c
 test("a framed app copies Citadel's switch into a cookie on its own host, and clears it when the switch goes off (#988)", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, "Citadel's rail with its app list", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
   // The cookie is read by the frame's own page (it posts document.cookie back), so third-party cookie blocking would show.
   const say = (on: boolean) => page.eval(`document.querySelector('#frames iframe').contentWindow.postMessage({ protocol: 'citadel-frame-1', type: 'state', hasRail: true, narrow: false, firefox: ${on}, own: [], apps: {}, domain: null }, '*')`);
   const cookie = async () => {

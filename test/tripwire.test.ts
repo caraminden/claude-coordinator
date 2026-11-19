@@ -1156,3 +1156,14 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     assert.equal(envBelow(join(tmp, 'elsewhere'), c, false, 1), null, 'outside the closed folders nothing is walked');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
+
+test('the path-in-a-variable and piped-SQL refusals name a command that passes (#1030)', () => {
+  const blind = bash('rm -rf $DIR/build') ?? '';
+  assert.match(blind, /set the variable in this same command \(`d=\/abs\/path; rm -rf "\$d\/out"`/);
+  assert.doesNotMatch(blind, /VACUUM INTO/, 'the database-copy advice is only for a copy or a sqlite3 call');
+  assert.match(bash('cp $DB $OUT/') ?? '', /VACUUM INTO/);
+  assert.equal(bash(`d=${worktree}/x; rm -rf "$d/out"`), null);
+  const piped = bash(`sqlite3 -readonly ${data}/coordinator.db <<'SQL'\nselect 1;\nSQL`) ?? '';
+  assert.match(piped, /Pass it as an argument/);
+  assert.equal(bash(`sqlite3 -readonly ${data}/coordinator.db "select 1; select 2"`), null);
+});

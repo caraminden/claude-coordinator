@@ -880,7 +880,8 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
   const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : lit || oneName ? here : [];
   const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? varShown(m[1]) : '$(…)')))].join(' and ');
   if (!dirs.length || dirs.some((d) => under(cfg.data, d))) {
-    return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Spell the path out in the command, or keep scratch files under $TMPDIR. ${SCRATCH}`);
+    // #1030: lead with what passes. Shell variables don't carry between Bash calls, so one set in an earlier call is empty here.
+    return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Write the path out in full, or set the variable in this same command (\`d=/abs/path; rm -rf "$d/out"\`: a variable from an earlier call is empty here), or keep scratch under $TMPDIR, which the tripwire knows.${/db\b|sqlite/i.test(w.text) || /^(cp|rsync|sqlite3)$/.test(name) ? ` ${SCRATCH}` : ''}`);
   }
   for (const d of dirs) {
     const p = join(d, '…');
@@ -927,9 +928,9 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   if (!p) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
-  if (!sqlShown(args)) return "SQL piped in or read from a file can't be checked for the credentials table. Put it in the command: `sqlite3 -readonly <db> 'select …'`.";
+  if (!sqlShown(args)) return "SQL piped in, from a heredoc or read from a file can't be checked for the credentials table. Pass it as an argument instead, several statements in one quoted string or one argument each: `sqlite3 -readonly <db> \"select …; select …\"`.";
   const shown = [...sql, ...args.filter((_, k) => /^--?cmd$/.test(a[k - 1] ?? ''))].map((w) => w.text);
-  if (shown.some((t) => /\b(credentials|stored_secrets)\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials and stored_secrets tables hold people's linked accounts and saved secrets; nothing here needs to read them. Name the tables you need (`.dump tickets`).";
+  if (shown.some((t) => /\b(credentials|stored_secrets)\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials and stored_secrets tables hold people's linked accounts and saved secrets; nothing here needs to read them. Name the tables you need (`.dump tickets`, or `.schema` for every table's columns).";
   return null;
 }
 

@@ -14,6 +14,7 @@ directly; there are no dependencies and no build step.
 - A land that refuses or fails is not a jammed lock. Read land.sh's `queue:` lines (they name the holder) and
   `git log main` first: if lands are landing, yours failed for its own reason, so fix that and run it again. Only
   `queue: nothing has moved for 15 min` means the holder is stuck; then message the Taskmaster and don't retry.
+- A feature, rule, setting or page about running or managing a scheme is built for every scheme, not Citadel's alone: open `.claude/skills/every-scheme/SKILL.md` first, and a review asks whether it ran in another scheme.
 - Never put `effort` on a skill (Grunts: the `citadel:subagents` skill).
 - `src/backup.html` and `src/backup.ts` (the /backup chat with the Taskmaster, for when the front end breaks) are
   frozen on purpose: leave them out of restyles and refactors; `test/backup.test.ts` pins the page's hash.
@@ -71,8 +72,8 @@ skill step is skipped or uses its default.
 The shared skills and agents live in the Citadel kit (`kit/`, see its `README.md`), which every
 turn of every scheme loads; they show up namespaced, as `citadel:<name>` skills and
 `citadel:<name>` subagent types. Some are copies of open-source packs, listed with their sources
-in `kit/skills/THIRD_PARTY.md`. A fix to one lands here and reaches every scheme. This repo has
-no skills or agents of its own. `.claude/rules/ponytail.md` loads whenever a session reads a code
+in `kit/skills/THIRD_PARTY.md`. A fix to one lands here and reaches every scheme. This repo's one
+own skill is `.claude/skills/every-scheme` (Citadel's minions only); it has no agents of its own. `.claude/rules/ponytail.md` loads whenever a session reads a code
 file (plugins can't carry rules).
 
 Rules for one area of the repo are path-scoped in `.claude/rules/` and load only when a session reads

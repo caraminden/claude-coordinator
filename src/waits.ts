@@ -84,22 +84,48 @@ const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').fil
  */
 export function readLandLine(stateDir: string, alive = procAlive): { line: LandTicket[]; took: number[] } {
   const q = join(stateDir, 'queue');
+  const line = readQueue(q, 4, alive);
+  for (const t of line) {
+    const log = /^running the tests/.test(t.phase) ? 'land-test' : /^deploying: running the tests/.test(t.phase) ? 'test' : null;
+    if (t.got > 0 && log) t.tests = readTestCounts(join(stateDir, `${log}.progress`), t.mtime);
+  }
+  const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
+  return { line, took };
+}
+
+/**
+ * A queue folder's tickets in line order, its gone processes left out: deploy-queue.sh's queue/ (the "order" line is
+ * its 5th, `orderAt` 4) or the kit land template's <.git>/land-queue (its 8th, #1007). Both read .order the same way.
+ */
+export function readQueue(q: string, orderAt: number, alive = procAlive): LandTicket[] {
   const line: LandTicket[] = [];
   const order = readOrder(q);
   const rank = (t: LandTicket) => (t.got > 0 ? -1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
   for (const name of files(q).filter((n) => /^\d+$/.test(n)).sort()) {
     const f = join(q, name), text = read(f), at = mtime(f);
     if (text == null || at == null) continue;
-    const [proc = '', got = '0', label = '', phase = '', orders = ''] = text.split('\n');
+    const l = text.split('\n');
+    const [proc = '', got = '0', label = '', phase = ''] = l;
     if (!alive(proc)) continue;
-    const ticket: LandTicket = { seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: orders === 'order' };
-    const log = /^running the tests/.test(phase) ? 'land-test' : /^deploying: running the tests/.test(phase) ? 'test' : null;
-    if (ticket.got > 0 && log) ticket.tests = readTestCounts(join(stateDir, `${log}.progress`), at);
-    line.push(ticket);
+    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' });
   }
-  line.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
-  const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
-  return { line, took };
+  return line.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
+}
+
+/**
+ * Write a queue's .order (#1002, #1007): `seqs` first, the waiters it leaves out behind them in the line's order; a
+ * holder, a ticket no longer waiting or one from an older branch is left out (an older one waits for every lower
+ * ticket, so ranking it ahead of one could deadlock). `note` says who moved what, for the waiters' output. Returns the order written.
+ */
+export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string): number[] {
+  const waiting = line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
+  const order = [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
+  if (!order.length) throw new Error('No landing waiting in line to reorder');
+  const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;
+  // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
+  writeFileSync(tmp, `# ${note.replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
+  renameSync(tmp, f);
+  return order;
 }
 
 /** A landing's phase (queue_phase's words in land.sh and deploy.sh) as its stage, badge word and detail. */
@@ -328,14 +354,7 @@ export class Waits {
   setOrder(seqs: number[], note: string): number[] {
     if (!this.d.deployState) throw new Error('This server has no land line');
     this.poll();
-    // Only the landings that follow .order: an older one waits for every lower ticket, so ranking it ahead of one could deadlock.
-    const waiting = this.line.filter((t) => t.got === 0 && t.orders).map((t) => t.seq);
-    const order = [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
-    if (!order.length) throw new Error('No landing waiting in line to reorder');
-    const f = join(this.d.deployState, 'queue', '.order'), tmp = `${f}.tmp${process.pid}`;
-    // By a rename, as deploy-queue.sh writes its tickets, so a waiter never reads half of it.
-    writeFileSync(tmp, `# ${note.replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
-    renameSync(tmp, f);
+    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note);
     this.poll();
     return order;
   }

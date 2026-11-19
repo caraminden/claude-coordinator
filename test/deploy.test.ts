@@ -718,3 +718,21 @@ test('a server that is only slow at the second check is not rolled back, and the
   assert.deepEqual(r.lockHeldAtReport, [true, true, true], 'the restart still held the lock at each report');
   assert.equal(r.noteLeft, false);
 });
+
+// Roll back to last green (#1016): deploy.sh --to's restart carries DEPLOY_PIN, the commit it rolled back from. Healthy,
+// it holds lands with <state>/bad until the fix (tools/land.sh bad_check, tagged "rollback" for its message) and pushes
+// nothing; failed, it goes back to what ran, which main still holds, so there's nothing to hold.
+test('a roll back\'s healthy restart holds lands until the fix, and a failed one holds nothing', { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  const from = 'f'.repeat(40);
+  const bad = (name: string) => join(root, `${name}-live`, '.git', 'cc-deploy', 'bad');
+  const ok = await restartWith('pinned', (_restarts, _n, { target }) => health(target), { DEPLOY_PIN: from });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.lastGood, ok.target);
+  assert.match(readFileSync(bad('pinned'), 'utf8'), new RegExp(`^${from} ${ok.target} \\d+ ${from} rollback\\n$`));
+  assert.match(ok.reports[0].text, /^Rolled back to [0-9a-f]{7} \"target\": the server restarted and is healthy\. Lands wait for the fix to fffffff\.$/);
+  const failed = await restartWith('pinned-failed', (restarts, _n, { good }) => (restarts >= 2 ? health(good) : 503), { DEPLOY_PIN: from });
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.equal(failed.head, failed.good);
+  assert.equal(existsSync(bad('pinned-failed')), false);
+});

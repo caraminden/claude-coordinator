@@ -463,7 +463,8 @@ if [ "$mode" = land ] || [ "$mode" = into ]; then
   fi
 fi
 
-# <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh).
+# <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh),
+# or with " rollback" after it by a Roll back to last green from <commit> (deploy.sh --to, #1016).
 # While main still holds that commit every deploy pulls it in again and is rolled back too (#553), so only its fix
 # may land: a branch that changes a file that deploy changed, or one the lander vouches for with LAND_FIX=1.
 bad_check() {
@@ -473,7 +474,9 @@ bad_check() {
   git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }
   [ -z "${LAND_FIX:-}" ] || return 0
   [ -z "$(comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort))" ] || return 0 # not `| grep -q`, as above
-  refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back (the restart on it failed: its report is in the chat of the minion that deployed it), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
+  local why="the restart on it failed: its report is in the chat of the minion that deployed it"
+  [ "${rest##* }" != rollback ] || why="a member pressed Roll back to last green on Releases"
+  refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back ($why), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
 }
 [ "$mode" = into ] || [ "$mode" = full ] || bad_check
 

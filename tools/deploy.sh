@@ -18,6 +18,9 @@
 #    it before the pull: no pull, reload or restart while another restart is still being judged (#566).
 # 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
 #    push is logged and shows in the report, but the deploy stands.
+# 5. --to <commit> (Roll back to last green, #1016): the same boot check and restart for an older commit of main, which
+#    passed the full suite in CI, so no tests. Main stays as it is and nothing is pushed. Once it is live, <state>/bad
+#    holds the commit it rolled back from, so tools/land.sh lands only a fix for it until the fix's own deploy clears it.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
 set -euo pipefail
 
@@ -34,6 +37,8 @@ BOOT_TIMEOUT=${DEPLOY_BOOT_TIMEOUT:-420} # boot-check.ts gives up by itself at 1
 IDLE_POLL=${DEPLOY_IDLE_POLL:-10} # seconds between looks at the running turns (tests shrink it)
 UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server that is up but doesn't answer
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
+TO='' # --to <commit>: roll back to it (#1016)
+PIN=${DEPLOY_PIN:-} # the queued restart of a roll back: the commit it rolls back from, for <state>/bad once it is live
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
@@ -409,8 +414,13 @@ restart() {
   R_OUT=$([ "$rc" = 0 ] && echo live || echo "rolled back") R_FIRST="$R_UP $R_SETTLED" # the rollback's restart_healthy sets them again
   if [ "$rc" = 0 ]; then
     git_live tag -f last-good "$target" >/dev/null
-    rm -f "$STATE/bad"
     rotate_backups
+    if [ -n "$PIN" ]; then
+      echo "$PIN $target $(date +%s) $PIN rollback" >"$STATE/bad" # the hold until the fix (#1016), as after a rolled-back restart
+      report ok "Rolled back to $(short "$target"): the server restarted and is healthy. Lands wait for the fix to ${PIN:0:7}."
+      return 0
+    fi
+    rm -f "$STATE/bad"
     local pushed kind=ok
     pushed=$(push_github "$target") || kind=warn
     report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
@@ -430,10 +440,13 @@ restart() {
   # Written once the checkout is back, so land.sh finds its commit gone from it. For the deploy that waits on this restart, and for the landings after it while main keeps the commit (land.sh).
   # The commit stays the first one that failed while it is still part of what failed now: a landing on top of it
   # that is rolled back too goes off main again, and the first is what main still holds.
-  local held=
-  [ ! -s "$STATE/bad" ] || read -r held _ <"$STATE/bad" || true
-  { [ -n "$held" ] && git_live merge-base --is-ancestor "$held" "$target" 2>/dev/null && ! git_live merge-base --is-ancestor "$held" "$good" 2>/dev/null; } || held=$target
-  echo "$held $good $(date +%s) $target" >"$STATE/bad"
+  # A roll back that didn't come up goes back to what ran, which main still holds: nothing to hold lands for.
+  if [ -z "$PIN" ]; then
+    local held=
+    [ ! -s "$STATE/bad" ] || read -r held _ <"$STATE/bad" || true
+    { [ -n "$held" ] && git_live merge-base --is-ancestor "$held" "$target" 2>/dev/null && ! git_live merge-base --is-ancestor "$held" "$good" 2>/dev/null; } || held=$target
+    echo "$held $good $(date +%s) $target" >"$STATE/bad"
+  fi
   # Code from before turn units can't re-attach: it would resume turns that still run. Stop them, so
   # it resumes them alone.
   if ! git_live cat-file -e "$good:src/turn-wrapper.ts" 2>/dev/null; then
@@ -477,6 +490,12 @@ deploy() {
     say "$LIVE has local changes; refusing to deploy over them"
     exit 1
   fi
+  if [ -n "$TO" ]; then
+    # A landing's note first, with both locks (deploy-queue.sh): a roll back moves the checkout off the commit it names.
+    main_moving_back "$STATE" "$LIVE" "$SOURCE"
+    git -C "$SOURCE" merge-base --is-ancestor "$TO" main 2>/dev/null || { say "$TO isn't on main; nothing changed"; exit 1; }
+    ! systemctl --user is-active -q "$UNIT" 2>/dev/null || { say "a restart is queued as $UNIT already; roll back once it has gone live"; exit 1; }
+  fi
 
   local prev new running kind version
   prev=$(git_live rev-parse HEAD)
@@ -493,13 +512,19 @@ deploy() {
   trap 'undo; exit 143' TERM
   trap 'undo; exit 129' HUP
   echo "$prev" >"$STATE/unchecked"
-  git_live pull -q --ff-only "$SOURCE" main
+  if [ -n "$TO" ]; then
+    git_live fetch -q "$SOURCE" main
+    git_live reset -q --hard "$TO"
+  else
+    git_live pull -q --ff-only "$SOURCE" main
+  fi
   new=$(git_live rev-parse HEAD)
   running=$(health commit)
   kind=$(change_kind "$LIVE" "$running" "$new")
   if [ "$kind" = none ]; then
     trap - INT TERM HUP
-    rm -f "$STATE/unchecked" "$STATE/bad" # a revert of the commit that was rolled back ends here: main is good again
+    rm -f "$STATE/unchecked"
+    [ -n "$TO" ] || rm -f "$STATE/bad" # a revert of the commit that was rolled back ends here: main is good again
     say "nothing to deploy: the server already runs $(short "$new")"
     mark queued
     mark live
@@ -514,6 +539,8 @@ deploy() {
   # a stray file here (an untracked test) wasn't in that run, so then it tests again.
   if [ "$kind" = light ]; then
     say "skipping the tests and the boot check: nothing changed but docs and config no test or server code reads"
+  elif [ -n "$TO" ]; then
+    say "skipping the tests: $(short "$new") is last green, so CI passed the full suite on it"
   elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
     say "skipping the tests: land.sh just ran them on $(short "$new")"
   else
@@ -563,7 +590,7 @@ deploy() {
   fi
   trap - ERR INT TERM HUP
   rm -f "$STATE/unchecked"
-  kit_land_drift "$prev" "$new" || true
+  [ -n "$TO" ] || kit_land_drift "$prev" "$new" || true
 
   queue_phase "deploying: going live"
   # SIGHUP for light too: it re-reads an unchanged public/ and takes the checkout's HEAD as live, so no restart.
@@ -576,10 +603,15 @@ deploy() {
       if { [ "$kind" = light ] && [ "$(health commit)" = "$new" ]; } || { [ "$kind" != light ] && [ "$(health version)" = "$version" ]; }; then
         mark live
         git_live tag -f last-good "$new" >/dev/null
-        rm -f "$STATE/bad"
         local what="docs and config only, nothing to reload" pushed
         [ "$kind" = light ] || what="the server reloaded the front end ($version); open tabs reload when idle"
         say "live now: $what. No restart."
+        if [ -n "$TO" ]; then
+          echo "$prev $new $(date +%s) $prev rollback" >"$STATE/bad" # the hold until the fix (#1016)
+          report_me "Rolled back to $(short "$new"): ${what%%;*}, no restart. Lands wait for the fix to $(short "$prev")."
+          return 0
+        fi
+        rm -f "$STATE/bad"
         local kind=ok
         pushed=$(push_github "$new") || kind=warn
         report_me "Deployed $(short "$new"): ${what%%;*}, no restart.$pushed" "$kind"
@@ -606,7 +638,7 @@ deploy() {
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
-    --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" \
+    --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" --setenv=DEPLOY_PIN="${TO:+$prev}" \
     bash "$copy" restart 2>&1 9>&- 7>&-); then
     reporter
     mark queued
@@ -614,6 +646,11 @@ deploy() {
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
+    if [ -n "$TO" ]; then # that restart would deploy it as a plain deploy, with no hold: put the checkout back
+      git_live reset -q --hard "$prev"
+      say "a restart was queued as $UNIT meanwhile, so nothing rolled back; try again once it has gone live"
+      exit 1
+    fi
     reporter
     mark queued
     if [ -n "$NOW" ]; then
@@ -637,13 +674,18 @@ deploy() {
   was=$(cat "$STATE/bad" 2>/dev/null || true)
   for _ in $(seq "$limit"); do
     sleep 1
-    if git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; then
+    # A roll back's commit is older than last-good until its own restart tags it.
+    if { [ -n "$TO" ] && [ "$(git_live rev-parse -q --verify 'last-good^{commit}')" = "$new" ]; } || { [ -z "$TO" ] && git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; }; then
       mark live
       say "live now: the server restarted on $(short "$new") and stayed healthy"
       return 0
     fi
+    if [ -n "$TO" ] && [ "$(git_live rev-parse HEAD)" != "$new" ]; then
+      say "the restart on $(short "$new") failed, so it went back to $(short "$(git_live rev-parse HEAD)") (see journalctl --user -u $UNIT)"
+      exit 1
+    fi
     bad=$(cat "$STATE/bad" 2>/dev/null || true)
-    if [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
+    if [ -z "$TO" ] && [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
       say "the restart on $(short "${bad##* }") failed and was rolled back; its report in this chat says why (see journalctl --user -u $UNIT)"
       exit 1
     fi
@@ -661,6 +703,7 @@ deploy() {
 case "${1:-}" in
   '') deploy ;;
   --now) NOW=1 deploy ;;
+  --to) [[ ${2:-} =~ ^[0-9a-f]{40}$ ]] || { echo "usage: $0 --to <full commit>" >&2; exit 2; }; TO=$2 REMOTE='' deploy ;;
   restart) restart ;;
   interruptible) interruptible ;;
   waiting-on) turns "$(interruptible)" ;;
@@ -671,5 +714,5 @@ case "${1:-}" in
   kit-land-drift) kit_land_drift "$2" "$3" ;;
   backup-db) backup_db "$2" ;;
   rotate-backups) rotate_backups ;;
-  *) echo "usage: $0 [--now | interruptible | waiting-on | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | kit-land-drift <from> <to> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | --to <commit> | interruptible | waiting-on | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | kit-land-drift <from> <to> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

@@ -15,7 +15,7 @@ import { until } from './wait.ts';
 // health: more for /api/health to say, a function asked on each request with whether a SIGHUP came yet (reload: 'sighup'
 // has the systemctl stand-in take one, noting it in <dir>/sighups; after it the stand-in reports the live checkout's HEAD,
 // as the real server does).
-async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
+async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>, args?: string[]) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
   const r = setup();
   for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
@@ -31,6 +31,7 @@ async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: 
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\ncase "$*" in *' kill -s HUP '*) echo "$*" >>${JSON.stringify(join(r.dir, 'sighups'))}; exit 0 ;; esac\nexit 1\n`);
   writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
 lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/restart.lock
+echo "$*" >>${JSON.stringify(join(r.dir, 'systemd-run.args'))}
 (flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD) 7>&- >/dev/null 2>&1 &
 `);
   for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
@@ -42,7 +43,7 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/restart.loc
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   try {
     const url = `http://127.0.0.1:${(server.address() as any).port}`;
-    const run = (script: string, cwd: string, extra: Record<string, string> = {}) => promisify(execFile)('bash', [script], {
+    const run = (script: string, cwd: string, extra: Record<string, string> = {}, args: string[] = []) => promisify(execFile)('bash', [script, ...args], {
       cwd, encoding: 'utf8',
       env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', TEST_RUNS: testRuns, ...extra },
     });
@@ -250,4 +251,32 @@ test("deploy.sh's test run that can't write its temp file says no test ran, and 
     assert.doesNotMatch(err.stderr, /tests failed/);
     assert.deepEqual(runs(), []);
     assert.equal(git(r.live, 'rev-parse', 'HEAD'), before);
+  }));
+
+// Roll back to last green (#1016): deploy.sh --to <commit> boots and restarts an older commit of main with no tests
+// (CI passed the full suite on it), leaves main alone, and hands the restart the commit it rolled back from, whose
+// healthy restart then holds lands until the fix (tools/deploy.sh restart, test/deploy.test.ts).
+test('deploy.sh --to rolls the server back to an older commit of main, with the boot check and no tests, and leaves main alone', () =>
+  withRealDeploy(async (r, run, runs) => {
+    const deploy = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
+    const green = git(r.source, 'rev-parse', 'main');
+    mkdirSync(join(r.source, 'src'), { recursive: true });
+    r.commit(r.source, 'src/broken.ts', 'throw 1;\n');
+    await run(deploy, r.source); // the server runs it now
+    const broken = git(r.source, 'rev-parse', 'main');
+    r.commit(r.wt, 'mine.txt', 'mine\n');
+    const offMain = git(r.wt, 'rev-parse', 'HEAD');
+    const refused = await run(deploy, r.source, {}, ['--to', offMain]).then(() => assert.fail('a commit off main should be refused'), (e) => e);
+    assert.match(refused.stderr, /isn't on main; nothing changed/);
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), broken);
+    const ran = runs().length;
+    const res = await run(deploy, r.source, {}, ['--to', green]);
+    assert.match(res.stderr, /skipping the tests: [0-9a-f]{7} "real deploy\.sh" is last green/);
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.equal(runs().length, ran, 'no tests ran');
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), green);
+    assert.equal(git(r.source, 'rev-parse', 'main'), broken, 'main keeps the broken commit, so the fix lands on top');
+    const [plain, rolled] = readFileSync(join(r.dir, 'systemd-run.args'), 'utf8').trim().split('\n');
+    assert.match(plain, /--setenv=DEPLOY_PIN= /, 'a plain deploy hands its restart no pin');
+    assert.match(rolled, new RegExp(`--setenv=DEPLOY_PIN=${broken} `));
   }));

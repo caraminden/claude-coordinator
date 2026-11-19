@@ -28,7 +28,7 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { deleteNote, ensureFolder, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
+import { deleteNote, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -1138,14 +1138,17 @@ export const projectRoutes: Route[] = [
       const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
       if (req.method !== 'GET') {
         const body = req.method === 'PUT' ? await readJson(req) : {};
-        const folder = folders[Number(req.method === 'PUT' ? body.folder : url.searchParams.get('folder'))];
+        const folder = folders.find((f) => f.id === (req.method === 'PUT' ? body.folder : url.searchParams.get('folder')));
         const file = noteFile(req.method === 'PUT' ? body.file : url.searchParams.get('file'));
         if (!folder || !file) throw new HttpError(400, 'Say which folder and note');
         try {
-          if (req.method === 'DELETE') deleteNote(folder.dir, file);
+          if (req.method === 'DELETE') {
+            deleteNote(folder.dir, file);
+            // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
+            app.store.deleteClaudeState(join(folder.rel, file));
+          }
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
-            ensureFolder(folder.dir);
             saveNote(folder.dir, file, body.text);
           }
         } catch (err: any) {

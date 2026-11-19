@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deleteNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags } from '../src/memory-files.ts';
@@ -12,10 +12,11 @@ test('memoryFolders maps a repo path to each login\'s projects/<slug>/memory, on
     { label: 'Dev account 2', configDir: '/d/claude-accounts/1/2' },
     { label: 'same as first', configDir: '/h/.claude' },
   ]);
-  assert.deepEqual(got, [
-    { label: "The server's own login", dir: '/h/.claude/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
-    { label: 'Dev account 2', dir: '/d/claude-accounts/1/2/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
+  assert.deepEqual(got.map(({ id, ...f }) => f), [
+    { label: "The server's own login", rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/h/.claude/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
+    { label: 'Dev account 2', rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/d/claude-accounts/1/2/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
   ]);
+  assert.notEqual(got[0].id, got[1].id);
   assert.equal(memoryDir('/c', '/a/b'), '/c/projects/-a-b/memory');
   assert.deepEqual(memoryFolders(null, [{ label: 'x', configDir: '/c' }]), []);
 });
@@ -61,4 +62,23 @@ test('staleFlags: only dates after a recheck-style word, past or within 3 days',
   const now = Date.parse('2026-11-19T12:00:00-08:00');
   const f = staleFlags('recheck after 2026-11-21; shipped 2026-01-01; by 2027-01-01', () => false, now);
   assert.deepEqual(f, { closed: [], datesPast: [], datesSoon: ['2026-11-21'] });
+});
+
+test('a note that is a symlink is neither listed, edited nor deleted', () => {
+  const dir = setup();
+  const outside = join(mkdtempSync(join(tmpdir(), 'outside-')), 'secret.md');
+  writeFileSync(outside, 'secret');
+  symlinkSync(outside, join(dir, 'link.md'));
+  assert.equal(readFolder({ label: 'L', dir }, () => false).notes.some((n) => n.file === 'link.md'), false);
+  assert.throws(() => saveNote(dir, 'link.md', 'x'), /No such note/);
+  assert.throws(() => deleteNote(dir, 'link.md'), /No such note/);
+  assert.equal(readFileSync(outside, 'utf8'), 'secret');
+});
+
+test('an unreadable index still lists the notes; a past date in prose ("decided on") is not flagged', () => {
+  const dir = setup();
+  rmSync(join(dir, 'MEMORY.md'));
+  mkdirSync(join(dir, 'MEMORY.md'));
+  assert.equal(readFolder({ label: 'L', dir }, () => false).notes.length, 2);
+  assert.deepEqual(staleFlags('Cara decided on 2026-11-10; set by Josh 2026-11-12', () => false, Date.parse('2026-11-19T12:00:00-08:00')).datesPast, []);
 });

@@ -1,12 +1,13 @@
 // A scheme's Claude Code memory notes (the Scheme → Memory page): a MEMORY.md index plus one file per fact, under a
 // Claude login's config dir at projects/<slugged repo path>/memory/. Every later session loads them, so a person can
 // read, edit and delete them here. Not src/memory.ts, which is search by meaning over chats.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectSlug } from './sessions.ts';
 
 /** One login's memory folder for a scheme. `label` names the login, never an email. */
-export interface MemoryFolder { label: string; dir: string }
+export interface MemoryFolder { label: string; dir: string; /** Stable across logins coming and going: what a write names. */ id: string; /** The folder under a config dir, which is how claude_state rows name its files. */ rel: string }
 /** A login as the caller knows it: a label and its Claude config dir. */
 export interface MemoryLogin { label: string; configDir: string }
 
@@ -26,7 +27,7 @@ export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): Me
     const dir = memoryDir(l.configDir, repoDir);
     if (seen.has(dir)) continue;
     seen.add(dir);
-    out.push({ label: l.label, dir });
+    out.push({ label: l.label, dir, id: createHash('sha1').update(dir).digest('hex').slice(0, 12), rel: join('projects', projectSlug(repoDir), 'memory') });
   }
   return out;
 }
@@ -48,73 +49,83 @@ export function frontmatter(text: string): { name: string; description: string; 
   return { name: get('name'), description: get('description'), type: get('type') };
 }
 
+/** A plain file, never a symlink: a note that links elsewhere would show or overwrite a file outside the memory folder. */
+const plain = (path: string): boolean => { try { return lstatSync(path).isFile(); } catch { return false; } };
+
 const DAY = 86_400_000;
-/** Minions a note names (#N) and dates that passed or fall in the next 3 days, when written after a "recheck/after/until/by" word. */
+const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+/** Minions a note names (#N) and dates that passed or fall in the next 3 days (Pacific), when written after a "recheck/after/until/before/due" word. */
 export function staleFlags(text: string, isClosed: (n: number) => boolean, now = Date.now()): MemoryNote['flags'] {
+  const today = pacificDay(now);
+  const soon = pacificDay(now + 3 * DAY);
   const closed = [...new Set([...text.matchAll(/(?<![\w&])#(\d{1,6})\b/g)].map((m) => Number(m[1])))].filter(isClosed).sort((a, b) => a - b);
   const datesPast: string[] = [];
   const datesSoon: string[] = [];
-  for (const m of text.matchAll(/\b(?:re-?check|after|until|by|before|expires?|due|owed|on)\b[^\n\d]{0,25}(\d{4}-\d{2}-\d{2})\b/gi)) {
-    const t = Date.parse(`${m[1]}T23:59:59-08:00`);
-    if (Number.isNaN(t)) continue;
-    const list = t < now ? datesPast : t < now + 3 * DAY ? datesSoon : null;
+  for (const m of text.matchAll(/\b(?:re-?check|after|until|before|expires?|due)\b[^\n\d]{0,25}(\d{4}-\d{2}-\d{2})\b/gi)) {
+    const list = m[1] < today ? datesPast : m[1] <= soon ? datesSoon : null;
     if (list && !list.includes(m[1])) list.push(m[1]);
   }
   return { closed, datesPast, datesSoon };
 }
 
-export interface FolderView { label: string; reachable: boolean; bytes: number; notes: MemoryNote[]; index: string }
+export interface FolderView { id?: string; label: string; reachable: boolean; bytes: number; notes: MemoryNote[]; index: string }
 
 /** A folder's notes, in the index's order first, then the rest by newest. An unreadable or missing folder is "not reachable". */
 export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, now = Date.now()): FolderView {
   if (!existsSync(f.dir)) return { label: f.label, reachable: false, bytes: 0, notes: [], index: '' };
   let names: string[];
   try { names = readdirSync(f.dir); } catch { return { label: f.label, reachable: false, bytes: 0, notes: [], index: '' }; }
-  const index = existsSync(join(f.dir, 'MEMORY.md')) ? readFileSync(join(f.dir, 'MEMORY.md'), 'utf8') : '';
+  let index = '';
+  try { if (plain(join(f.dir, 'MEMORY.md'))) index = readFileSync(join(f.dir, 'MEMORY.md'), 'utf8'); } catch { /* an unreadable index doesn't hide the notes */ }
   const notes: MemoryNote[] = [];
   for (const file of names) {
     if (!noteFile(file)) continue;
     const path = join(f.dir, file);
     let st; let text;
-    try { st = statSync(path); if (!st.isFile()) continue; text = readFileSync(path, 'utf8'); } catch { continue; }
+    try { if (!plain(path)) continue; st = lstatSync(path); text = readFileSync(path, 'utf8'); } catch { continue; }
     const fm = frontmatter(text);
     notes.push({ file, name: fm.name || file.replace(/\.md$/, ''), description: fm.description, type: fm.type, text, bytes: st.size, modified: st.mtimeMs, flags: staleFlags(text, isClosed, now) });
   }
   const at = (n: MemoryNote) => { const i = index.indexOf(`](${n.file})`); return i < 0 ? Infinity : i; };
   notes.sort((a, b) => at(a) - at(b) || b.modified - a.modified);
-  return { label: f.label, reachable: true, bytes: notes.reduce((s, n) => s + n.bytes, 0), notes, index };
+  return { id: f.id, label: f.label, reachable: true, bytes: notes.reduce((s, n) => s + n.bytes, 0), notes, index };
 }
 
-/** Write a whole file in one step (a temp file then a rename), so a session reading it never sees half. */
+/** Write a whole file in one step (a new temp file made exclusively, then a rename), so a session reading it never sees half. */
 function writeAtomic(path: string, text: string) {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, path);
+  const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  const fd = openSync(tmp, 'wx', 0o600);
+  try {
+    writeSync(fd, text);
+    closeSync(fd);
+    renameSync(tmp, path);
+  } catch (err) {
+    try { closeSync(fd); } catch { /* already closed */ }
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /** Replace one note's text (it must exist: this edits, never adds). */
 export function saveNote(dir: string, file: string, text: string) {
-  if (!existsSync(join(dir, file))) throw new Error('No such note');
+  if (!plain(join(dir, file))) throw new Error('No such note');
   writeAtomic(join(dir, file), text);
 }
 
-/** Delete a note and its MEMORY.md line(s) together: the file first, then the index rewritten without the lines that link it. */
+/** Delete a note and its MEMORY.md line(s): the file first, then the index rewritten without the lines that link it (a stray index line is a smaller harm than a note the index forgot). */
 export function deleteNote(dir: string, file: string): number {
   const path = join(dir, file);
-  if (!existsSync(path)) throw new Error('No such note');
-  const indexPath = join(dir, 'MEMORY.md');
-  let removed = 0;
-  if (existsSync(indexPath)) {
-    const kept = readFileSync(indexPath, 'utf8').split('\n').filter((l) => {
-      const gone = l.includes(`](${file})`);
-      if (gone) removed++;
-      return !gone;
-    });
-    writeAtomic(indexPath, kept.join('\n'));
-  }
+  if (!plain(path)) throw new Error('No such note');
   rmSync(path);
+  const indexPath = join(dir, 'MEMORY.md');
+  if (!plain(indexPath)) return 0;
+  let removed = 0;
+  const kept = readFileSync(indexPath, 'utf8').split('\n').filter((l) => {
+    const gone = l.includes(`](${file})`);
+    if (gone) removed++;
+    return !gone;
+  });
+  writeAtomic(indexPath, kept.join('\n'));
   return removed;
 }
 
-/** Make sure a folder exists before a first write (a scheme whose Taskmaster hasn't written yet has none). */
-export const ensureFolder = (dir: string) => mkdirSync(dir, { recursive: true });

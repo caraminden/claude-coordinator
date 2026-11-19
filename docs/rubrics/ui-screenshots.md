@@ -33,6 +33,22 @@ same URLs gives the numbers. A state the data lacks (a waiting card, a turn mid-
 - An app's own radius set or heading face (First look, 10) is not a finding when the first reply names
   its reason, the radii keep their order, and body type is still Citadel's.
 
+### First look: Citadel's own pages
+
+Josh picked Citadel's look on 2026-11-19 (#1068, `.claude/rules/citadel-look.md`). On a page under
+`public/` (not `public/ui/`, which is the apps'), each of these is a finding:
+
+- Shot with every row closed, the page doesn't tell its state: a part with no closed row, or a closed
+  line with no toned chip or no number.
+- Detail open by default: a table, list or explanation on the page itself in place of inside a row.
+- A status as a grey sentence in place of a toned chip.
+- A grey page: no hue on row tiles or section headings, a scheme not in its own hue, items as plain
+  text where they could be hue rows, numbers compared across rows with no bar.
+- A list or table over about six items shown whole, with no "Show all".
+- An empty state as a bare sentence in place of an empty card.
+- An opened row whose body sits tight under its head (Josh asked for "better padding below the
+  header once expanded"), or a head that doesn't tint when opened.
+
 ## Notes
 
 | Date | Minion | About | Words |

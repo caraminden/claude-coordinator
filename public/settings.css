@@ -509,7 +509,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 /* A scheme's name as a square tag in its hue (schemeTag). */
 .scheme-tag { display: inline-block; max-width: 100%; box-sizing: border-box; padding: 0.05rem 0.4rem; border-radius: 4px; background: color-mix(in srgb, var(--h) 13%, var(--panel)); color: color-mix(in srgb, var(--h) 82%, var(--ink)); font-size: 0.85em; font-weight: 600; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 /* Stat tiles: a big number in its hue over what it counts. */
-.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.5rem; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr)); gap: 0.5rem; }
 .stat-tile { padding: 0.55rem 0.7rem; border-radius: 8px; background: color-mix(in srgb, var(--h) 10%, var(--panel)); }
 .stat-tile b { display: block; font-size: 1.35rem; font-weight: 750; line-height: 1.15; color: var(--h); font-variant-numeric: tabular-nums; }
 .stat-tile span { display: block; margin-top: 0.15rem; font-size: 0.8em; line-height: 1.3; color: var(--muted); }

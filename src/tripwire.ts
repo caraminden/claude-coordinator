@@ -27,7 +27,7 @@
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -167,8 +167,44 @@ function searchesEnv(name: string, args: Word[]): boolean {
   const only = values(/^--include$/);
   return !coversEnv(values(/^--exclude$/)) && !(only.length && !globCovers(only, '.env') && !globCovers(only, '.env.local'));
 }
+/** Whether a recursive search follows symlinks it meets below its root: grep -R, rg -L, ag -f. */
+const follows = (name: string, args: Word[]) => args.some((w) => name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$/.test(w.text) : /^-[a-zA-Z]*R|^--dereference-recursive$/.test(w.text));
 /** Where a recursive search over root meets a folder whose .env files stay closed, or null. */
 const envRootMet = (root: string, cfg: TripwireConfig) => cfg.envFiles?.find((r) => under(root, r) || under(r, root)) ?? null;
+
+/** How many folder entries the .env walk reads before it gives up and counts the search as unsafe. */
+export const ENV_WALK_LIMIT = 10_000;
+const ENV_WALK_SKIP = new Set(['node_modules', '.git']);
+
+/**
+ * What a recursive search over root could reach of a closed .env file (#1030), or null when it can't: walks the part of root inside each
+ * closed folder, skipping node_modules and .git, and answers on finding one, on a symlink the search would follow (`follow`), on a glob
+ * it can't settle, or once it has read `limit` entries. A search of a scheme's src with no .env below then passes without an --exclude.
+ */
+export function envBelow(root: string, cfg: TripwireConfig, follow: boolean, limit = ENV_WALK_LIMIT): string | null {
+  const todo: string[] = [];
+  for (const r of cfg.envFiles ?? []) {
+    const start = under(root, r) ? root : under(r, root) ? r : null;
+    if (!start) continue;
+    let st;
+    try { st = statSync(start); } catch { if (/[*?[]/.test(start)) return 'a pattern it could not check'; continue; }
+    if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
+    todo.push(start);
+  }
+  let seen = 0;
+  while (todo.length) {
+    const dir = todo.pop()!;
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (++seen > limit) return `more than ${limit} files to check for them`;
+      if (ENV_FILE.test(e.name)) return join(dir, e.name);
+      if (e.isSymbolicLink()) { if (follow) return `a symlink it would follow, ${join(dir, e.name)}`; continue; }
+      if (e.isDirectory() && !ENV_WALK_SKIP.has(e.name)) todo.push(join(dir, e.name));
+    }
+  }
+  return null;
+}
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
@@ -1288,7 +1324,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     for (const p of roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : []) {
       const secret = secretInside(p, cfg);
       if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
-      if (envRootMet(p, cfg) && searchesEnv(name, args)) return hard(`Searching ${p} could print .env files. ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);
+      const env = searchesEnv(name, args) ? envBelow(p, cfg, follows(name, args)) : null;
+      if (env) return hard(`Searching ${p} could print .env files (${env}). ${ENV_FILE_WHY} Leave them out: \`--exclude='.env*'\` for grep, or let rg skip hidden files.`);
     }
   }
   const text = textOperands(name, args);
@@ -1649,7 +1686,8 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   const secret = tool === 'Grep' ? secretInside(p, cfg) : null;
   if (secret) return hard(`Grep of ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
   // The Grep tool searches hidden files; a `glob` that can't match .env keeps them out.
-  if (tool === 'Grep' && envRootMet(p, cfg) && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local'))) return hard(`Grep of ${p} could print .env files. ${ENV_FILE_WHY} Give it a \`glob\` such as "*.ts", or use grep with \`--exclude='.env*'\`.`);
+  const env = tool === 'Grep' && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local')) ? envBelow(p, cfg, false) : null;
+  if (env) return hard(`Grep of ${p} could print .env files (${env}). ${ENV_FILE_WHY} Give it a \`glob\` such as "*.ts", or use grep with \`--exclude='.env*'\`.`);
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
     const why = writeReason(p, cfg);
     if (why) return hard(`${tool} of ${p} is blocked. ${why}`);

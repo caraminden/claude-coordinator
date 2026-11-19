@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
-import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
+import { envBelow, tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { tripwireHooks } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
@@ -1124,4 +1124,35 @@ test('the six folders turns no longer deny by Read rule stay refused here, for e
       assert.ok(t(tool, input), `${tool} ${JSON.stringify(input)}`);
     for (const command of [`cat ${f}`, `grep -r x ${d}`, `head ${f}`, `cd ${d} && cat id_ed25519`]) assert.ok(bash(command), command);
   }
+});
+
+test('a Taskmaster\'s recursive search passes when no .env sits below its root, and is refused when one does or the walk runs out (#1030)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-env-'));
+  try {
+    const d = join(tmp, 'data');
+    const repo = join(d, 'projects/3/repo');
+    for (const dir of ['src/lib', 'app', 'node_modules/pkg', '.git']) mkdirSync(join(repo, dir), { recursive: true });
+    writeFileSync(join(repo, 'src/lib/a.ts'), 'SECRET');
+    writeFileSync(join(repo, 'app/.env.local'), 'SECRET=x');
+    // A package's own .env and git's insides are skipped, as the brief says: a search there isn't a scheme's secret.
+    writeFileSync(join(repo, 'node_modules/pkg/.env'), 'x');
+    const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live'), envFiles: [d] };
+    const run = (command: string) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read another scheme' }, cwd: join(d, 'projects/2/coordinator') }, c)?.reason ?? null;
+    const grepTool = (path: string) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', path }, cwd: d }, c)?.reason ?? null;
+    for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET --exclude='.env*' ${repo}`, `rg --hidden SECRET ${repo}/src`, `cd ${repo}/src && grep -r SECRET .`]) assert.equal(run(cmd), null, cmd);
+    assert.equal(grepTool(join(repo, 'src')), null);
+    for (const cmd of [`grep -rn SECRET ${repo}`, `grep -rn SECRET ${repo}/app`, `grep -rn SECRET ${d}/projects`, `rg -uu SECRET ${repo}`]) assert.match(run(cmd) ?? '', /could print \.env files \(.*\.env\.local\)/, cmd);
+    assert.match(grepTool(repo) ?? '', /\.env\.local/);
+    // A search that follows symlinks can't be walked safely, so a link below it refuses; plain -r doesn't follow them.
+    symlinkSync(join(repo, 'app'), join(repo, 'src/linked'));
+    assert.equal(run(`grep -rn SECRET ${repo}/src`), null);
+    assert.match(run(`grep -Rn SECRET ${repo}/src`) ?? '', /symlink it would follow/);
+    assert.match(run(`rg -L --hidden SECRET ${repo}/src`) ?? '', /symlink it would follow/);
+    // The walk stops at its bound and counts the search as unsafe.
+    assert.equal(envBelow(join(repo, 'src'), c, false), null);
+    assert.match(envBelow(join(repo, 'src'), c, false, 1) ?? '', /more than 1 files/);
+    for (let i = 0; i < 5; i++) writeFileSync(join(repo, `src/f${i}.ts`), '');
+    assert.match(envBelow(join(repo, 'src'), c, false, 4) ?? '', /more than 4/);
+    assert.equal(envBelow(join(tmp, 'elsewhere'), c, false, 1), null, 'outside the closed folders nothing is walked');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

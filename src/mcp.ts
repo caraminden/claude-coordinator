@@ -2131,7 +2131,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
       const lines = r.relays.map((o: any) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
       if (r.cancelled) return `Cancelled relay #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
-      if (r.id) return r.queued ? `Queued as #${r.id}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
+      if (r.id) return r.queued ? `Queued as #${r.id}${r.ids?.length > 1 ? ` (relays #${r.ids.join(', #')}, one per recipient)` : ''}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
       return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
     }
     case 'wake_at': {

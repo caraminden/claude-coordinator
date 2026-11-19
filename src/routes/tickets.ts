@@ -1347,7 +1347,7 @@ export const ticketRoutes: Route[] = [
       if (queuedRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(queuedRs)} queued until ${commit.slice(0, 7)} is live: ${short}` });
       if (sentRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(sentRs)} sent: ${commit.slice(0, 7)} was live already: ${short}` });
       const queued = queuedRs.length > 0;
-      const relay = added[0].relay;
+      const relay = (queuedRs[0] ?? added[0].relay);
       return json(res, 201, { queued, id: relay.id, ids: queuedRs.map((r) => r.id), commit, to: dest, relays: mine() });
     },
   },

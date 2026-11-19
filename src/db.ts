@@ -87,6 +87,8 @@ export interface Project {
   ci_quiet: string;
   /** Workflow files, one per line, whose first red run on main in a streak wakes the Taskmaster (#774, src/ci-health.ts); '' for none. */
   ci_watch: string;
+  /** How its lands go (#1017, src/fast-mode.ts): off, the full gate; fast, a low or medium risk land lands on the smoke check and the full suite runs behind it. */
+  land_mode: LandMode;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -186,6 +188,9 @@ export const ONBOARDING = ['interview', 'planned', 'setting-up', 'done', 'skippe
 export type Onboarding = (typeof ONBOARDING)[number];
 export const ONBOARDING_MODES = ['first-run', 'tune-up'] as const;
 export type OnboardingMode = (typeof ONBOARDING_MODES)[number];
+/** A scheme's land modes (#1017): Settings shows them as a toggle. */
+export const LAND_MODES = ['off', 'fast'] as const;
+export type LandMode = (typeof LAND_MODES)[number];
 
 /** Whether a scheme is still being set up, which is what gives its Taskmaster the onboarding section. */
 export const onboardingOpen = (p: Pick<Project, 'onboarding'>) => p.onboarding !== 'done' && p.onboarding !== 'skipped';
@@ -1255,6 +1260,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'list_groups', "ALTER TABLE projects ADD COLUMN list_groups TEXT NOT NULL DEFAULT '[]'"],
   ['projects', 'ci_quiet', "ALTER TABLE projects ADD COLUMN ci_quiet TEXT NOT NULL DEFAULT ''"],
   ['projects', 'ci_watch', "ALTER TABLE projects ADD COLUMN ci_watch TEXT NOT NULL DEFAULT ''"],
+  ['projects', 'land_mode', "ALTER TABLE projects ADD COLUMN land_mode TEXT NOT NULL DEFAULT 'off'"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   // No REFERENCES: ON DELETE SET NULL would turn a removed person's Taskmaster into a second Overlord, which one_coordinator refuses.
@@ -1355,6 +1361,7 @@ export const SCHEMA_HISTORY = [
   [67, 'turn_grunts (#948)'],
   [68, 'contraptions.static_paths (#987)'],
   [69, "drop Peek Auras' Windows Builds 1277-1291 recorded live before PCs could take them (#1019)"],
+  [70, 'projects.land_mode (#1017)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1743,7 +1750,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

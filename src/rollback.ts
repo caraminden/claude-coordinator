@@ -4,7 +4,7 @@
 // runs is newer than last green (Q2: "Last green only"); each kind's starter does the deploy and its own checks.
 import { gitContains, type Contains, type LastGreen, type Pin } from './last-green.ts';
 import { HttpError } from './http.ts';
-import type { TargetView } from './releases.ts';
+import { CITADEL_TARGET, type TargetView } from './releases.ts';
 
 /** What a card shows of it (TargetView.rollback). */
 export interface RollbackInfo {
@@ -86,8 +86,14 @@ export class Rollback {
     const key = keyOf(projectId, id);
     const running = this.starting.has(key) || this.d.running(tv);
     const current = tv.current?.version;
+    // Something else deployed over it (a land's deploy of the fix, a person's Deploy): the pin is over.
+    let pin = this.d.lastGreen.pinned(projectId, id);
+    if (pin && !running && current && current !== pin.sha && current !== pin.from) {
+      this.d.lastGreen.unpin(projectId, id);
+      pin = null;
+    }
     const can = !running && !!current && /^[0-9a-f]{40}$/.test(current) && this.isOlder(dir, green.sha, current) === true;
-    return { sha: green.sha, can, pin: this.d.lastGreen.pinned(projectId, id), running, failed: this.fails()[key] ?? null };
+    return { sha: green.sha, can, pin, running, failed: this.fails()[key] ?? null };
   }
 
   /** The button: deploy last green now and pin the target there. Throws (an HttpError) when it can't. */
@@ -122,7 +128,10 @@ export class Rollback {
       delete fails[key];
       this.d.set(FAILED, fails);
     }
-    this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page. It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's deploy of it is refused meanwhile. Land the fix for what broke.`);
+    const holds = kind === CITADEL_TARGET
+      ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
+      : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's deploy of it is refused meanwhile. Land the fix for what broke.`;
+    this.d.tell(projectId, `${by} rolled ${name} back to last green ${green.sha.slice(0, 9)} from ${from.slice(0, 9)} on the Releases page. ${holds}`);
     return green.sha;
   }
 

@@ -88,3 +88,13 @@ test("a roll back that didn't go live lets go of its pin and shows why, until th
   await w.rb.rollBack(w.tv(B), 'Cara', 1);
   assert.equal(w.rb.info(w.tv(B))?.failed, null);
 });
+
+test('a deploy of anything else (the fix, a person\'s Deploy) ends the pin', async () => {
+  const w = world();
+  w.store.setSetting('last-green:3', { sha: A, at: 1 });
+  await w.rb.rollBack(w.tv(B), 'Cara', 1);
+  assert.ok(w.rb.info(w.tv(A))?.pin, 'it runs last green: pinned');
+  assert.ok(w.rb.info(w.tv(B))?.pin, 'back where it was, until failed() says why: still pinned');
+  assert.equal(w.rb.info(w.tv(X))?.pin, null, 'it runs a third commit');
+  assert.equal(w.lastGreen.pinned(3, 'app:peek'), null);
+});

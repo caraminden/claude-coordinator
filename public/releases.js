@@ -401,7 +401,10 @@ function rollbackBar(projectId, tv) {
   const busy = rb.running || (rollingBack.has(key) && rb.can);
   const pin = rb.pin;
   const line = busy ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
-    : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: it stays there until main has a newer commit that passes the full suite. Deploy ships main now.`)
+    : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
+      // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
+      tv.deploy ? 'it stays there until main has a newer commit that passes the full suite. Deploy ships main now.'
+        : `lands wait for a fix to ${pin.from.slice(0, 7)}, whose deploy ships main.`)
       : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
   const button = !busy && rb.can
     ? h('button', { type: 'button', class: 'secondary', onclick: press, title: `Deploy ${to}, the newest commit on main that passed the full suite, and hold it there until a newer one passes` }, `Roll back to last green ${to}`)

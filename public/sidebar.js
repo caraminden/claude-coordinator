@@ -11,7 +11,7 @@ import { presenceChip } from './presence.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
-import { pendingRelease } from './releases.js';
+import { pendingRelease, releaseOrder } from './releases.js';
 import { replaceHash } from './navstack.js';
 import { openDialog } from './ui/dialog.js';
 import { mountTips } from './ui/tip.js';
@@ -167,7 +167,7 @@ export function renderSidebar() {
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed' || t.release);
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
-  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
+  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project), releaseOrder()).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
       h('h3', {}, s.build ? buildHeading(s) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));

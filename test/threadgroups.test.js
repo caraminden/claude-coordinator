@@ -116,3 +116,12 @@ test('a minion the server is landing (line, rebase, tests, deploy) sits in Deplo
     m(6, 'bug', { status: 'idle', server_work: land, ship: { stage: 'failed' } }), m(7, 'bug', { status: 'idle', server_work: land, approvals: 1 }), m(8, 'bug', { status: 'idle', ship: { stage: 'branch' } })]),
     [['deploying', false, [1, 2, 3]], ['feature', false, [4]], ['bug', false, [5, 6, 7, 8]]]);
 });
+
+test('Deploying rows follow the Releases page order; ones it does not list go after, in list order (#1003)', () => {
+  const place = { 1: 2, 2: 0, 3: 1 }; // minion n -> its place in the Releases order
+  const order = (t) => place[t.n];
+  const land = { kind: 'land' };
+  const rows = threadSections([m(4, 'bug', { status: 'closed', release: {} }), m(1, 'bug', { server_work: land, status: 'idle' }), m(5, 'bug', { state: 'pending-deploy', status: 'idle' }),
+    m(2, 'bug', { server_work: land, status: 'idle' }), m(3, 'bug', { server_work: land, status: 'idle' })], TYPES, [], order)[0].rows.map((t) => t.n);
+  assert.deepEqual(rows, [2, 3, 1, 4, 5]);
+});

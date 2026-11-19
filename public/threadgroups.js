@@ -28,11 +28,13 @@ const wakesItself = (t) => !!t.wakes_on;
 /**
  * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are
  * the type values in list order (an unknown or missing type counts as "other"); `groups` the scheme's
- * promoted "key: value"s.
+ * promoted "key: value"s. `deployOrder` is releases.js's releaseOrder.
  */
-export function threadSections(all, types, groups = []) {
+export function threadSections(all, types, groups = [], deployOrder = () => undefined) {
   const buildOf = (t) => t.build ?? 0;
-  const deploying = all.filter(isDeploying);
+  // Deploying reads in the Releases page's order (Cara, 2026-11-18: "Inside of that deploying group, lets order by deploy order"):
+  // `deployOrder(t)` is its place there; rows it doesn't list go after, in the list's own order (the sort is stable).
+  const deploying = all.filter(isDeploying).sort((a, b) => (deployOrder(a) ?? Infinity) - (deployOrder(b) ?? Infinity));
   const parked = all.filter((t) => isParked(t) && !buildOf(t));
   const parkedInBuild = all.filter((t) => isParked(t) && buildOf(t));
   const open = all.filter((t) => !isParked(t) && !isDeploying(t));

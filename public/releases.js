@@ -391,6 +391,26 @@ function keyBar(projectId, tv) {
     h('span', { class: 'muted' }, 'No release key yet, so its Android app isn\'t built.'));
 }
 
+/** A target's changes in the order its list shows them: the ones under way (-1), furthest along first, then the land line in its order. */
+function changeRows(tv) {
+  const changes = tv.next?.changes ?? [];
+  const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
+  return [
+    ...changes.map((c) => ({ c, i: at(c.ticketId) })),
+    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i }])),
+  ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
+}
+
+/** Each minion's place in that order across the targets (the minions list's Deploying section sorts by it, #1003): ticketId → index. */
+export function releaseOrder() {
+  const order = new Map();
+  for (const s of schemes.values()) for (const tv of s.targets) for (const { c, e } of changeRows(tv)) {
+    const id = (c ?? e).ticketId;
+    if (id != null && !order.has(id)) order.set(id, order.size);
+  }
+  return (t) => order.get(t.id);
+}
+
 /**
  * The changes on their way and the land line as one list (Josh, 2026-11-13: "this feels like we wrote the same UI twice?
  * can we consolidate into one list?"): those past the line first, then the line in its order, the lock's holder at its
@@ -401,12 +421,7 @@ function keyBar(projectId, tv) {
  */
 function changeList(projectId, tv) {
   const n = tv.next, hl = page?.hl;
-  const changes = n?.changes ?? [];
-  const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
-  const rows = [
-    ...changes.map((c) => ({ c, i: at(c.ticketId) })),
-    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i }])),
-  ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
+  const rows = changeRows(tv);
   if (!rows.length) return '';
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).

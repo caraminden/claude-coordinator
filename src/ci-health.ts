@@ -1082,9 +1082,9 @@ export class CiHealth {
     const watch = new Set(lines(p.ci_watch ?? ''));
     // Fast mode (#1017; Cara, 2026-11-18: "We should also not send Mandate alerts for CI failures in fast mode, they are
     // expected to some extent"): a land's push red on main is src/fast-mode.ts's to pin and hand out, so it neither wakes
-    // the Taskmaster nor makes an item. Scheduled and dispatched reds still do.
+    // the Taskmaster nor makes an item. Scheduled and dispatched reds still do, and so does a workflow the scheme watches.
     const landed = (r: Run) => p.land_mode === 'fast' && r.event === 'push';
-    const watched = (r: Run) => !landed(r) && (watch.has(workflowFile(r)) || !quiet.has(workflowFile(r)));
+    const watched = (r: Run) => watch.has(workflowFile(r)) || (!landed(r) && !quiet.has(workflowFile(r)));
     const save = () => {
       // Ids GitHub no longer lists are dropped, but only when the list was read, so a bad answer can't forget them.
       this.store.setSetting(key, Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told]);

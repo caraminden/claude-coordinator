@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -511,6 +511,38 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')), 'the shipped line is in its chat');
 
+  } finally {
+    await srv.stop();
+  }
+});
+
+// Fast mode (#1017): in a fast scheme a low or medium land gets LAND_FAST=1 and a high one doesn't; both get the
+// scheme's known reds. Peek-like scheme, not Citadel (the every-scheme skill).
+test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger to every land', async () => {
+  const srv = await bootServer();
+  try {
+    const store = new Store(join(srv.data, 'coordinator.db'));
+    const project = store.createProject('Peek', null);
+    store.setProjectSettings(project.id, { land_mode: 'fast' });
+    store.setSetting(`fast-mode:${project.id}`, { reds: [{ ids: ['test/x.test.ts'], sha: 'abc1234', ticket: null, n: 41, at: 0 }], landed: {} });
+    const landWith = async (name: string, body: object) => {
+      const minion = store.createTicket({ project_id: project.id, title: name, permission_mode: 'default', created_by: 'Cara' });
+      const cwd = join(srv.root, name);
+      mkdirSync(join(cwd, 'tools'), { recursive: true });
+      const dump = join(srv.root, `${name}.env`);
+      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" >${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+      git(cwd, 'init', '-q');
+      git(cwd, 'add', '.');
+      git(cwd, 'commit', '-qm', 'init');
+      store.setTicketDir(minion.id, cwd, null);
+      const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: name, risk_reason: 'r', ...body }) });
+      assert.equal(res.status, 202, await res.text());
+      await until(`${name} land.sh ran`, () => existsSync(dump), 20_000);
+      return readFileSync(dump, 'utf8');
+    };
+    assert.equal(await landWith('low', { risk: 'low' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
+    assert.equal(await landWith('medium', { risk: 'medium' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
+    assert.equal(await landWith('high', { risk: 'high', go: 'Cara, 10:00 PST' }), 'fast=\nknown=test/x.test.ts\t#41 is fixing it\n', 'high keeps the full gate');
   } finally {
     await srv.stop();
   }

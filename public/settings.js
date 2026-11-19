@@ -396,7 +396,7 @@ function fastModeRow(p) {
   const [row, sum] = settingsRow({ icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
     h('label', { class: 'toggle', title: 'Land now, test behind' }, on, 'Land now, test behind'),
     settingsHelp('Low and medium lands go live on the smoke check alone, and the full suite runs on main behind them.',
-      'A red reopens the minion whose land broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other lands up. High-risk lands and changes to the land pipeline keep the full gate, and CI reds on main from lands send no Mandate alerts.'));
+      'A red reopens the minion whose land broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other lands up. High-risk lands and changes to the land pipeline keep the full gate, and CI reds on main from lands send no Mandate alerts, except from watched workflows.'));
   const shown = () => {
     on.checked = view.project?.land_mode === 'fast';
     sum.textContent = on.checked ? 'On' : 'Off';

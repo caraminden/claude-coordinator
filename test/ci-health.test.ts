@@ -868,6 +868,12 @@ test("fast mode: a land's push going red on main wakes no one and makes no item;
   await health.tick(NOW + RED_FIX_MS + MIN);
   assert.equal(told.length, 1);
   assert.match(told[0], /run 9102 failed on bad0102 \(schedule/);
+  // A workflow the scheme watches alerts on a land's push red too.
+  w.store.setProjectSettings(w.peek.id, { ci_watch: 'release.yml' });
+  w.gh.mainRuns = [runOf({ id: 9103, workflow_id: 8, path: '.github/workflows/release.yml', conclusion: 'failure', event: 'push', head_sha: 'bad0103fff', created_at: iso(-3 * MIN), updated_at: iso(-4 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + RED_FIX_MS + 2 * MIN);
+  assert.equal(told.length, 2, told.join('\n'));
+  assert.match(told[1], /run 9103 failed on bad0103/);
 });
 
 test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on with no fix minion naming the run, or once it is still red after the fix closed (#968)', async () => {

@@ -60,3 +60,14 @@
 # land_after() { # <commit> <branch>
 #   timeout 60 gh pr close "$2" --comment "Landed as $1" >/dev/null 2>&1 || true
 # }
+
+# Fast mode (the scheme's Settings, #1017): a low or medium risk land lands on the smoke check alone, and the full
+# CHECK and CI run behind it on main (tools/land.sh --verify). The paths that keep a land on the full gate besides the
+# pipeline's own files (bash case patterns, split by spaces):
+# FAST_FULL='db/migrations/* src/auth/*'
+# The ids of what failed, from a check's or CI's output on stdin, one a line: fast mode's ledger of known reds and
+# LAND_KNOWN_RED match on them. The core's finds test files in node's, pytest's and jest's output and red workflows
+# in CI's (ci:<file>). A scheme whose CI_STATUS prints its own: replace it.
+# land_failures() {
+#   sed -nE 's/^FAILED: (\S+)$/\1/p'
+# }

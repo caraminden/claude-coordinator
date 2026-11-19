@@ -11,6 +11,14 @@
 #   tools/land.sh --check   only says whether the rebase onto main would conflict (exit 3, naming the files), changing
 #       nothing; Citadel's hand_off_land runs it first. While others are ahead in line, each move of main is checked
 #       the same way, and a conflict leaves the line at once.
+#   tools/land.sh --verify  the full check and CI on HEAD, a commit already on main, out of line and without the land
+#       lock: Citadel's fast mode runs it behind the lands. It prints "verify: green", or "verify: failing <id>" for
+#       each failure land_failures finds (below) and "verify: red"; exit 0 green, 1 red, 75 CI gave no verdict.
+# Fast mode (#1017): with LAND_FAST=1 (Citadel sets it for a low or medium risk land in a scheme whose Settings turn
+#    fast mode on), a branch that changes none of tools/land.sh, tools/land.local.sh, the LANES map, .github/* or the
+#    scheme's FAST_FULL patterns lands on the smoke check alone: no check, no CI. The full suite runs behind it on main.
+# Known reds: LAND_KNOWN_RED (from Citadel in fast mode) lists what already fails on main, a line "<id><TAB><who is
+#    fixing it>" each. A smoke, check or CI red whose failures (land_failures) are all known reds doesn't refuse.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
 #    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
@@ -105,6 +113,9 @@ CI_STACK=${LAND_STACK_DEPTH:-3}
 CI_BATCH=${LAND_BATCH:-1}
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 PUSH_MAIN=1
+# Fast mode: the paths (bash case patterns, where * also matches /, split by spaces) that keep a land on the full gate
+# besides the pipeline's own files: 'migrations/* src/auth/*'.
+FAST_FULL=''
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
@@ -116,6 +127,20 @@ park() { say "$*"; exit 75; }
 #                                 lock and the place in line already free. The head of a batch runs it for each
 #                                 member it landed, from its own worktree: only the arguments name the landing.
 #                                 A failure (or an exit) in it is only warned about.
+#   land_failures                 reads a check's or CI's output on stdin and prints the ids of what failed, one a
+#                                 line (known reds and fast mode's ledger match on them). The one below finds test
+#                                 files in node's test runner, pytest and jest output, and red workflows in CI's.
+land_failures() {
+  awk '
+    /^test at [^ ]+:[0-9]+:[0-9]+/ { p = $3; sub(/:[0-9]+:[0-9]+$/, "", p); print p; next }
+    /^not ok / { tap = 1; next }
+    tap && /^ *location: / { p = $2; gsub(/\047/, "", p); sub(/:[0-9]+:[0-9]+$/, "", p); print p; tap = 0; next }
+    /^(ok|# Subtest)/ { tap = 0 }
+    /^FAILED [^ ]+::/ { p = $2; sub(/::.*/, "", p); print p; next }
+    /^FAIL [^ ]+/ { print $2; next }
+    /^[^ :]+: completed (failure|timed_out)/ { p = $1; sub(/:$/, "", p); print "ci:" p }
+  '
+}
 LOCAL=$(dirname "${BASH_SOURCE[0]}")/land.local.sh
 if [ -f "$LOCAL" ]; then
   trap 'say "$LOCAL failed (exit $?), so nothing ran: a command in it, or its last line, came out false"' EXIT
@@ -360,7 +385,7 @@ queue_join() {
       n=${t:-0}
     fi
     n=$(printf '%010d' $((10#$n + 1)))
-    queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting - - -
+    queue_write "$Q_DIR/$n" "$Q_ME" 0 "$Q_LABEL" waiting - "$UNRUN" -
     echo "$((10#$n))" >"$Q_DIR/.seq"
     echo "$n"
   )
@@ -642,13 +667,15 @@ early_conflict() {
 }
 
 # --check: only the early check, changing nothing; exit 3 on a conflict, else 0. Citadel runs it at hand_off_land.
-check=
+check='' verify=''
 [ "${1:-}" != --check ] || { check=1; shift; }
+[ "${1:-}" != --verify ] || { verify=1; shift; }
 [ $# -eq 0 ] || refuse "takes no arguments"
 here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
+[ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
 if [ -n "$check" ]; then
   { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || exit 0 # the land itself refuses these
   early_conflict HEAD "at hand-off" || exit 3
@@ -666,6 +693,30 @@ fi
 rm -f "$gitdir/land-branch"
 { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || refuse "run it from a minion's branch, not $BRANCH or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
+# Fast mode (the header): the first path the branch changes since it forked from main that keeps the full gate.
+fast_full() {
+  local fork f p
+  fork=$(git merge-base "refs/heads/$BRANCH" HEAD 2>/dev/null) || { echo "(couldn't find where it forked from $BRANCH)"; return; }
+  while IFS= read -r f; do
+    case $f in tools/land.sh | tools/land.local.sh | .github/*) echo "$f"; return ;; esac
+    [ -z "$LANES" ] || [ "$f" != "$LANES" ] || { echo "$f"; return; }
+    for p in $FAST_FULL; do
+      case $f in $p) echo "$f"; return ;; esac
+    done
+  done < <(git diff --no-renames --name-only "$fork" HEAD)
+}
+FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
+if [ "${LAND_FAST:-}" = 1 ]; then
+  why=$(set -f; fast_full)
+  if [ -z "$why" ]; then
+    FAST=1 UNRUN=old CHECK='' LANES='' CI_ON='' CI_WORKFLOWS='' CI_STATUS='' CI_STACK=1 CI_LIMIT=0 CI_BATCH=1 BATCH='' BUILDERS=1 BISECT=0
+    # Its ticket says "old" (a land.sh older than batches), so the batches of the gated landings around it never take
+    # it in: it lands alone, with no CI run of theirs to wait for.
+    say "fast mode: this lands on the smoke check alone; the full suite runs on $BRANCH behind it"
+  else
+    say "fast mode is on, but $why takes the full gate"
+  fi
+fi
 # The main checkout is the first entry of the worktree list.
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 state=$(git -C "$MAIN" rev-parse --absolute-git-dir)
@@ -697,8 +748,31 @@ fronted='' # with batches: it has been in the head's batch, so CI's limits count
 g_last='' g_quiet='' # with batches, the head: when it last asked CI about the commit it lands, and since when with no answer
 
 # CI's verdict on [commit] ($tip if none) in [lane] ($ci_lane if none), by the exit codes in the header at CI_STATUS;
-# what it found goes to $cilog. A lane that runs no CI is green.
+# what it found goes to $cilog. A lane that runs no CI is green. ci_verdict: the same, but red only on failures that
+# aren't known reds (known_red).
 ci_verdict() {
+  local rc=0
+  ci_runs "$@" || rc=$?
+  [ "$rc" != 1 ] || ! known_red "CI on $(git rev-parse --short=12 "${1:-$tip}")" <"$cilog" || rc=0
+  return "$rc"
+}
+
+# known_red <what>: reads what failed on stdin; true when land_failures finds failures in it and every one is a known
+# red (LAND_KNOWN_RED, the header), saying so.
+known_red() {
+  local id who all='' ids
+  [ -n "${LAND_KNOWN_RED:-}" ] || return 1
+  ids=$(land_failures | sed "s|^$here/||" | sort -u)
+  [ -n "$ids" ] || return 1
+  while IFS= read -r id; do
+    who=$(awk -F'\t' -v i="$id" '$1 == i { print $2; exit }' <<<"$LAND_KNOWN_RED")
+    [ -n "$who" ] || return 1
+    all+="; $id: known red, $who is fixing it"
+  done <<<"$ids"
+  say "$1 failed only on known reds, so it goes on${all/#;/:}"
+}
+
+ci_runs() {
   local sha=${1:-$tip} ln=${2:-$ci_lane} runs w path id status result one failed skipped j rank worst=0 worst_rank=0
   : >"$cilog"
   ci_skipped=''
@@ -886,7 +960,7 @@ build() {
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
   base=$want tip='' blocked='' keep='' green='' retried='' pushed_at='' verdict=-
   queue_set 4 -
-  queue_set 5 -
+  queue_set 5 "$UNRUN"
   queue_set 6 "$want"
   if [ "$Q_AHEAD" = 0 ]; then
     on="$BRANCH ($(git log -1 --format='%h "%s"' "$want"))" phase="rebasing onto $BRANCH"
@@ -937,7 +1011,7 @@ build() {
   fi
   ci_lane=$lane
   if [ -z "$chk" ]; then
-    say "lane $lane runs no check"
+    [ -n "$FAST" ] || say "lane $lane runs no check"
   else
     say "running $chk"
     queue_phase "waiting to run the check"
@@ -955,7 +1029,7 @@ build() {
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
       echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
     fi
-    if [ "$rc" != 0 ]; then
+    if [ "$rc" != 0 ] && ! known_red "the check" <"$log"; then
       tail -n 40 "$log" >&2
       keep=$(git rev-parse HEAD)
       blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
@@ -1001,7 +1075,7 @@ batch_look() {
     mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue
     [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
     if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
-    [ -n "${l[5]:-}" ] || break # older than batches: the next batch
+    [ -n "${l[5]:-}" ] && [ "${l[5]}" != old ] || break # older than batches, or fast mode's: the next batch
     batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
   done
 }
@@ -1121,13 +1195,63 @@ smoke() {
     out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1) || rc=$?
     if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
       say "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, so it doesn't decide: getting in line"
-    elif [ "$rc" != 0 ]; then
+    elif [ "$rc" != 0 ] && ! known_red "smoke: SMOKE_CMD" <<<"$out"; then
       tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
       refuse "smoke: SMOKE_CMD failed (exit $rc), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
     fi
   fi
   say "smoke: passed in $((SECONDS - t0)) s"
 }
+
+# --verify (the header): the full CHECK under the check lock, then with the CI gate on, CI on land/verify (with lanes
+# land/full/verify) within CI_START and CI_LIMIT. Both run, so one verdict names every failure.
+verify_run() {
+  local rc=0 log="$state/land-verify.log" red="" ids="" ci=""
+  tip=$(git rev-parse HEAD) ci_lane=full
+  say "verify: ${tip:0:12}"
+  if [ -n "$CHECK" ]; then
+    (
+      flock -w "$CHECK_WAIT" 7 || { echo "land: the check lock was still taken after ${CHECK_WAIT}s"; exit 1; }
+      timeout -k 30 "$CHECK_LIMIT" bash -c "$CHECK" 2>&1 7>&-
+    ) >"$log" 7>"$state/land-check.lock" || rc=$?
+    if [ "$rc" != 0 ]; then
+      tail -n 40 "$log" >&2
+      red=1 ids=$(land_failures <"$log" | sed "s|^$here/||")
+      [ -n "$ids" ] || ids='the check'
+    fi
+  fi
+  if [ -n "$CI_ON" ]; then
+    rc=0 ci_clock=$SECONDS
+    ci_runs || rc=$?
+    [ "$rc" = 0 ] || [ "$rc" = 2 ] || ci_push
+    while [ "$rc" != 0 ] && [ "$rc" != 1 ]; do
+      sleep "$CI_POLL"
+      rc=0
+      ci_runs || rc=$?
+      [ "$rc" != 2 ] || ci_begun=1
+      if [ "$rc" = 4 ] && [ -z "$retried" ]; then retried=1 && ci_push; continue; fi
+      if [ "$rc" = 4 ] || { [ -z "$ci_begun" ] && [ $((SECONDS - ci_clock)) -ge "$CI_START" ]; } || [ $((SECONDS - ci_clock)) -ge "$CI_LIMIT" ]; then
+        cat "$cilog" >&2
+        [ -n "$red" ] && break
+        hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
+        echo "verify: no verdict"
+        exit 75
+      fi
+    done
+    [ -z "$pushed" ] || hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
+    if [ "$rc" = 1 ]; then
+      cat "$cilog" >&2
+      red=1 ci=$(land_failures <"$cilog")
+      ids+=$'\n'${ci:-CI}
+    fi
+  fi
+  if [ -z "$red" ]; then echo "verify: green"; exit 0; fi
+  sed '/^$/d' <<<"$ids" | sort -u | sed 's/^/verify: failing /'
+  echo "verify: red"
+  exit 1
+}
+[ -z "$verify" ] || verify_run
+
 [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 queue_join "$state" "$branch"
 trap leave EXIT
@@ -1175,7 +1299,7 @@ while :; do
       [ -z "$pushed" ] || ci_cancel
       base='' tip='' blocked='' green='' verdict=-
       queue_set 4 -
-      queue_set 5 -
+      queue_set 5 "$UNRUN"
       queue_set 6 -
       queue_phase waiting
     fi

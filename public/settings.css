@@ -9,7 +9,7 @@
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
 .settings-link .count[hidden], .settings-tabs a .count[hidden] { display: none; }
 /* The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue (--h, from data-hue), every page with
-   an icon. On a phone it is one row of chips that scrolls sideways; from 801px it is a column beside the page. */
+   an icon. On a phone it hides and Settings opens on a list of its pages (settingsHome, #1018); from 801px it is a column beside the page. */
 /* The hues a menu group or a row takes, by data-hue (no inline styles: the page's CSP refuses them). */
 [data-hue=running] { --h: var(--running); } [data-hue=held] { --h: var(--held); } [data-hue=teal] { --h: var(--cat-5); }
 [data-hue=waiting] { --h: var(--waiting); } [data-hue=accent] { --h: var(--accent); } [data-hue=ink] { --h: var(--ink); }
@@ -97,7 +97,7 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .settings-row.saved .settings-row-actions [role=status]::before { content: '✓ '; font-weight: 700; }
 .settings-help { margin: 0; }
 .settings-empty { margin: 0; padding: 0.85rem 0.75rem; }
-/* Jump links (#997): chips under the head; on a phone one row that scrolls sideways, like the menu's chips. */
+/* Jump links (#997): chips under the head; on a phone one row that scrolls sideways. */
 .settings-jump { display: flex; gap: 0.35rem; margin: 0.6rem 0 0.2rem; overflow-x: auto; scrollbar-width: none; }
 .settings-jump::-webkit-scrollbar { display: none; }
 .settings-jump a { flex: none; display: inline-flex; align-items: center; min-height: var(--control-h); box-sizing: border-box; padding: 0 0.7rem; border: 1px solid var(--line); border-radius: 99px; color: var(--ink); font-size: 0.88em; text-decoration: none; white-space: nowrap; }

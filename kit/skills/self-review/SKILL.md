@@ -125,7 +125,9 @@ new page, view or flow also gets that skill's dogfood pass (`references/dogfood.
 When the turn's "Review set:" line names rubrics, run `citadel:critique` for each one whose `when:` matches
 this diff, after the reviewer's fixes. Its blockers are findings like the reviewer's: fixed, or in
 "Not fixed" with a reason; a `gate: blocks-ready` rubric holds the change until it passes or a
-person decides. The critic doesn't set the label: you do, in 4.
+person decides (Citadel holds it too: `hand_off_land` refuses while its last recorded run is a fail).
+Record each round with `review_set` (slug, `run: {round, verdict}`), and the pre-ship review and the
+finding checker too when the line names them as entries. The critic doesn't set the label: you do, in 4.
 
 When Project facts names a **Real-hardware ledger**, everything this change does that wasn't
 seen working on real hardware gets an entry there, committed with the change, as the ledger's

@@ -14,14 +14,14 @@ critic's model changes, or Known blind spots grows by three since the last trial
   flagged; count the notes, not the items.
 - **Controls:** 3 to 5 items they passed as they were. These catch a critic that fails everything.
 
-Take them from the rubric's Notes and Calibration board, `critic.md` logs, review pages
+Take them from the rubric's Verdicts (people's recorded disagreements, each a note), Notes and Calibration board, `critic.md` logs, review pages
 (`artifact_data`), and shipped PRs' review comments. Use the artifacts as they were when the person
 judged them, not the fixed versions.
 
 ## 2. Hide the answers
 
 The critic reads the whole rubric, and the rubric holds these verdicts. Copy it to `$TMPDIR` and
-delete from the copy every Notes, Calibration board and Known blind spots row about an item in the
+delete from the copy every Verdicts, Notes, Calibration board and Known blind spots row about an item in the
 set. Write each item's brief as step 2 of the skill says, from the brief the author had, never from
 the person's notes.
 

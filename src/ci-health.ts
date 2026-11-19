@@ -745,7 +745,7 @@ export class CiHealth {
     return out;
   }
 
-  /** The minion fixing a red: the one its re-run is for (#1074), else the first of the scheme's made since its Taskmaster heard whose title or brief names the run. */
+  /** The minion fixing a red: the one its re-run is for (#1074), else of the scheme's made since its Taskmaster heard whose title or brief names the run, the newest open one, else the newest. */
   private fixMinion(p: Project, mark: RedMark): Fix | null {
     const t = this.fixTicket(p, mark);
     return t ? { number: t.number!, closedAt: t.status === 'closed' ? t.updated_at : null } : null;
@@ -754,8 +754,10 @@ export class CiHealth {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
     if (held && held.project_id === p.id && held.number != null) return held;
     const id = String(mark.run);
-    return this.store.listTickets(p.id).filter((x) => x.number != null && x.created_at >= (mark.told ?? 0) - 60_000).sort((a, b) => a.created_at - b.created_at)
-      .find((x) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id)) ?? null;
+    // Newest first, an open one before any closed (Josh, 2026-11-19): a second fix after the first didn't hold is the one at work.
+    const named = this.store.listTickets(p.id).filter((x) => x.number != null && x.created_at >= (mark.told ?? 0) - 60_000).sort((a, b) => b.created_at - a.created_at)
+      .filter((x) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id));
+    return named.find((x) => x.status !== 'closed') ?? named[0] ?? null;
   }
 
   /**

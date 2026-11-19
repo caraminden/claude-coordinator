@@ -922,6 +922,32 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
   assert.equal(item('ci.open'), null);
 });
 
+test("a red whose first fix minion closed names the open one fixing it now, else the newest (#1074, Josh 2026-11-19)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  w.gh.mainRuns = [runOf({ id: 9601, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'bad0601fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  const first = w.minion(w.peek.id, 'ticket/7-fix');
+  w.store.addEvent(first.id, 'user_message', { text: 'Fix the red tests run 9601 on main' });
+  w.store.updateTicket(first.id, { status: 'closed' });
+  // Its fix didn't hold: a later run is red too, and a second minion is on it.
+  const closedAt = w.store.getTicket(first.id)!.updated_at;
+  w.gh.mainRuns = [runOf({ id: 9602, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'bad0602fff', conclusion: 'failure', created_at: new Date(closedAt + MIN).toISOString() }), ...w.gh.mainRuns];
+  const now = w.minion(w.peek.id, 'ticket/8-fix-again');
+  w.store.addEvent(now.id, 'user_message', { text: 'Run 9601 is still red after the first fix: fix it' });
+  await health.tick(NOW + 2 * HOUR);
+  assert.match(item()!, new RegExp(`: fix minion #${now.number} started\\.`), 'the open fix minion, not the closed first one');
+  assert.equal(item('ci.open') ?? null, null, 'an open fix minion keeps it from ringing');
+  assert.match(health.hold(now.id)!, /run 9601/);
+  assert.equal(health.hold(first.id), null);
+  w.store.updateTicket(now.id, { status: 'closed' });
+  await health.tick(NOW + 2 * HOUR + 5 * MIN);
+  // Both closed: the newest (9602 came after both closed, so it rings, naming the second).
+  assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${now.number} closed`));
+});
+
 test("a red's fix minion is held open; once its fix is on main the workflow is dispatched once per fix, and green dismisses it (#1074)", async () => {
   const w = outsideWorld();
   w.quietDelve();

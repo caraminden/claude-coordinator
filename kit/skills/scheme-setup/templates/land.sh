@@ -767,8 +767,11 @@ g_last='' g_quiet='' # with batches, the head: when it last asked CI about the c
 ci_verdict() {
   local rc=0
   ci_runs "$@" || rc=$?
-  [ "$rc" != 1 ] || ! known_red "CI on $(git rev-parse --short=12 "${1:-$tip}")" <"$cilog" || rc=$ci_open
-  return "$rc"
+  [ "$rc" = 1 ] || return "$rc"
+  # A red only on known ids still waits for the workflows running beside it (said once they've all finished).
+  if [ "$ci_open" = 0 ]; then known_red "CI on $(git rev-parse --short=12 "${1:-$tip}")" <"$cilog" || return 1; return 0; fi
+  known_red x <"$cilog" 2>/dev/null || return 1
+  return "$ci_open"
 }
 
 # known_red <what>: reads what failed on stdin; true when land_failures finds failures in it and every one is a known

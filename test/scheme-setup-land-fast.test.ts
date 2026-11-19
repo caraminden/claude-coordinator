@@ -24,7 +24,7 @@ const CI = { CI_STATUS: '"$CI_FAKE"' };
 const red = (...files: string[]) => `printf "test at %s:3:1\\n" ${files.join(' ')}; exit 1`;
 
 test('fast mode: a land goes live on the smoke check alone, with no check and no CI; without LAND_FAST the gate holds', () => {
-  const r = setup('false', CI);
+  const r = setup('false', { ...CI, SMOKE_CMD: 'true' });
   const ci = fakeCi(r.dir);
   r.commit(r.wt, 'b.txt', 'b\n');
   const gated = r.run(ci.env);
@@ -62,7 +62,7 @@ test('fast mode: the smoke check still refuses, and a branch changing the pipeli
 });
 
 test('known reds: a smoke, check or CI red only on known reds goes through and says who is fixing it; a new failure still refuses', () => {
-  const known = { LAND_KNOWN_RED: 'test/x.test.ts\t#41\nci:ci.yml\t#42' };
+  const known = { LAND_KNOWN_RED: 'test/x.test.ts\t#41 is fixing it\nci:ci.yml\t#42 is fixing it' };
   // The smoke check
   const s = setup('true', { SMOKE_CMD: red('test/x.test.ts') });
   s.commit(s.wt, 'b.txt', 'b\n');
@@ -101,7 +101,7 @@ test('--verify: the full check and CI on HEAD, out of line; prints green, or eac
   const verify = (extra: Record<string, string> = {}) => spawnSync('bash', [join(v, 'tools', 'land.sh'), '--verify'], { cwd: v, encoding: 'utf8', timeout: 30_000, env: { ...env, ...ci.env, ...extra } });
   const head = git(v, 'rev-parse', 'HEAD');
   ci.answer(head, 1, 'ci.yml: completed failure https://x\n');
-  const out = verify({ LAND_KNOWN_RED: 'test/a.test.ts\t#1' });
+  const out = verify({ LAND_KNOWN_RED: 'test/a.test.ts\t#1 is fixing it' });
   assert.equal(out.status, 1, out.stderr);
   assert.equal(out.stdout, 'verify: failing ci:ci.yml\nverify: failing test/a.test.ts\nverify: failing test/b.test.ts\nverify: red\n', 'known reds count as red here');
   assert.equal(git(r.origin, 'for-each-ref', 'refs/heads/land'), '', 'its scratch branch is gone');
@@ -121,7 +121,7 @@ test('--verify: the full check and CI on HEAD, out of line; prints green, or eac
 });
 
 test('fast mode in a batched line: the fast landing is a batch of its own, and the gated ones around it land on their own runs', { timeout: 120_000 }, async () => {
-  const q = queueSetup(3, 'until [ -e "$GATE" ]; do sleep 0.05; done', CI);
+  const q = queueSetup(3, 'until [ -e "$GATE" ]; do sleep 0.05; done', { ...CI, SMOKE_CMD: 'true' });
   const ci = fakeCi(q.dir);
   const e = { ...ci.env, LAND_BATCH: '3', LAND_CI_START: '60' };
   const started: ReturnType<typeof q.land>[] = [];
@@ -154,4 +154,61 @@ test('fast mode in a batched line: the fast landing is a batch of its own, and t
   } finally {
     for (const l of started) if (l.child.exitCode === null) l.child.kill('SIGKILL');
   }
+});
+
+test('fast mode: with no smoke check a land takes the full gate', () => {
+  const r = setup('false');
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const out = r.run({ LAND_FAST: '1' });
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /fast mode is on, but a land with no smoke check takes the full gate/);
+  assert.match(out.stderr, /the check failed/);
+  const off = setup('false', { SMOKE_CMD: 'true' });
+  off.commit(off.wt, 'b.txt', 'b\n');
+  assert.equal(off.run({ LAND_FAST: '1', LAND_SMOKE: '0' }).status, 1, 'LAND_SMOKE=0 turns the smoke check off, so fast mode too');
+});
+
+test('known reds: a per-test id covers only that test, a file id covers its tests, and a check that hung is never waived', () => {
+  // node's spec output: "test at <file>:l:c" then the failing test's name after a cross.
+  const spec = (...names: string[]) => `printf "${names.map((n) => `test at test/x.test.ts:3:1\\n\\342\\234\\226 ${n} (1ms)\\n`).join('')}"; exit 1`;
+  const one = setup(spec('a'));
+  one.commit(one.wt, 'b.txt', 'b\n');
+  const ok = one.run({ LAND_KNOWN_RED: 'test/x.test.ts::a\t#41 is fixing it' });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stderr, /test\/x\.test\.ts::a: known red, #41 is fixing it/);
+  const two = setup(spec('a', 'b'));
+  two.commit(two.wt, 'b.txt', 'b\n');
+  assert.equal(two.run({ LAND_KNOWN_RED: 'test/x.test.ts::a\t#41 is fixing it' }).status, 1, 'b failing is new');
+  const file = setup(spec('a', 'b'));
+  file.commit(file.wt, 'b.txt', 'b\n');
+  assert.equal(file.run({ LAND_KNOWN_RED: 'test/x.test.ts\t#41 is fixing it' }).status, 0, 'the file id covers both');
+  const hung = setup('printf "test at test/x.test.ts:3:1\\n"; sleep 20');
+  hung.commit(hung.wt, 'b.txt', 'b\n');
+  const h = hung.run({ LAND_KNOWN_RED: 'test/x.test.ts\t#41 is fixing it', LAND_CHECK_TIMEOUT: '1' });
+  assert.equal(h.status, 1, h.stderr);
+  assert.doesNotMatch(h.stderr, /only on known reds/);
+});
+
+test('known reds: a known CI red waits for the workflows still running before it goes on', () => {
+  const g = setup('true', CI);
+  const ci = fakeCi(g.dir);
+  g.commit(g.wt, 'b.txt', 'b\n');
+  ci.answer(git(g.wt, 'rev-parse', 'HEAD'), 1, 'ci.yml: completed failure https://x\nother.yml: in_progress https://y\n');
+  const out = g.run({ ...ci.env, LAND_KNOWN_RED: 'ci:ci.yml\t#42 is fixing it', LAND_CI_TIMEOUT: '2' });
+  assert.notEqual(out.status, 0, out.stderr);
+  assert.doesNotMatch(out.stderr, /failed only on known reds, so it goes on/);
+  assert.equal(git(g.main, 'log', '-1', '--format=%s', 'main'), 'base', 'nothing landed');
+});
+
+test('--verify with LAND_VERIFY_IDS: only those ids, each file alone through CHECK_FILE_CMD, and no CI without a ci: id', () => {
+  const r = setup('exit 9', { ...CI, CHECK_FILE_CMD: 'echo {file} >>"$RAN"; [ {file} != test/b.test.ts ] || { printf "test at %s:3:1\\n" {file}; exit 1; }' });
+  const ci = fakeCi(r.dir);
+  const v = join(r.dir, 'verify');
+  git(r.main, 'worktree', 'add', '-q', '--detach', v, 'main');
+  const ran = join(r.dir, 'ran');
+  const out = spawnSync('bash', [join(v, 'tools', 'land.sh'), '--verify'], { cwd: v, encoding: 'utf8', timeout: 30_000, env: { ...env, ...ci.env, RAN: ran, LAND_VERIFY_IDS: 'test/a.test.ts::one\ntest/b.test.ts\ntest/a.test.ts::two' } });
+  assert.equal(out.status, 1, out.stderr);
+  assert.equal(out.stdout, 'verify: failing test/b.test.ts\nverify: red\n');
+  assert.deepEqual(readFileSync(ran, 'utf8').split('\n').filter(Boolean), ['test/a.test.ts', 'test/b.test.ts'], 'each file once, not the whole check');
+  assert.deepEqual(ci.asked(), [], 'no ci: id, so CI was not asked');
 });

@@ -73,6 +73,47 @@ test('6 go through, the 7th is held, Continue releases it and starts the count a
   assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'too many'), true);
 });
 
+test('a person writing to a Taskmaster continues every minion of the scheme without a settings read per minion (#1029)', () => {
+  const store = new Store(join(root, 'many.db'));
+  const project = store.createProject('P', null);
+  const coordinator = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const minions = Array.from({ length: 300 }, (_, i) => store.createTicket({ project_id: project.id, title: `M${i}`, permission_mode: 'default', created_by: 'Cara' }));
+  for (const t of [coordinator, ...minions]) store.setTicketDir(t.id, root, null);
+  // Other settings rows, as the live table has thousands: a scan of them per minion held the loop for 0.4 s (#1029).
+  for (let i = 0; i < 2000; i++) store.setSetting(`plan:${i}`, { i });
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  runner.now = () => 1_000_000;
+  const held = minions[150];
+  for (let i = 0; i < LOOP_LIMIT; i++) runner.relay(held.id, held.id, 'Taskmaster', `m${i}`);
+  assert.equal(runner.relay(held.id, held.id, 'Taskmaster', 'seventh'), true);
+
+  const calls: Record<string, number> = { settingKeys: 0, getSetting: 0, ownerCoordinator: 0 };
+  for (const name of Object.keys(calls)) {
+    const f = (store as any)[name].bind(store);
+    (store as any)[name] = (...a: unknown[]) => (calls[name]++, f(...a));
+  }
+  assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 1);
+  assert.ok(said(store, held.id).includes('seventh'));
+  // One read of the loop keys, then only the minion that has one (and the send of its held message): not 300 of each.
+  assert.equal(calls.settingKeys, 2);
+  assert.ok(calls.getSetting < 10 && calls.ownerCoordinator < 10, JSON.stringify(calls));
+  assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 0);
+
+  // One minion with no loop to lift reads its own loop state, not its Taskmaster.
+  calls.ownerCoordinator = 0;
+  assert.equal(runner.continueLoop(minions[0].id, 'Cara'), 0);
+  assert.equal(calls.ownerCoordinator, 0);
+});
+
+test('settingKeys finds exactly the keys under a prefix', () => {
+  const store = new Store(join(root, 'keys.db'));
+  for (const k of ['loop:', 'loop:1', 'loop:minions:1:2', 'loop;', 'loo', 'loop', 'loop:\u{1F600}', 'Loop:1', 'loops:1']) store.setSetting(k, 1);
+  assert.deepEqual(store.settingKeys('loop:'), ['loop:', 'loop:1', 'loop:minions:1:2', 'loop:\u{1F600}']);
+  assert.deepEqual(store.settingKeys('loop:minions:'), ['loop:minions:1:2']);
+  assert.deepEqual(store.settingKeys('nope:'), []);
+  assert.ok(store.settingKeys('').length >= 9);
+});
+
 test('the window rolls: messages older than the window stop counting', () => {
   const store = new Store(join(root, 'window.db'));
   const project = store.createProject('P', null);

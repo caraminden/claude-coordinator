@@ -3438,7 +3438,11 @@ export class Store {
 
   /** Every settings key starting with `prefix`. */
   settingKeys(prefix: string): string[] {
-    return (this.db.prepare('SELECT key FROM settings WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key);
+    // A range on the key's index: substr() alone scanned every key, 0.4 ms a call on the live table (#1029).
+    const last = prefix.codePointAt(prefix.length - 1);
+    const upto = last === undefined || last >= 0xd800 ? null : prefix.slice(0, -1) + String.fromCodePoint(last + 1);
+    return (this.db.prepare(`SELECT key FROM settings WHERE key >= ? ${upto === null ? '' : 'AND key < ?'} AND substr(key, 1, ?) = ? ORDER BY key`)
+      .all(...[prefix, upto, prefix.length, prefix].filter((v) => v !== null)) as { key: string }[]).map((r) => r.key);
   }
 
   listMachines(): Machine[] {

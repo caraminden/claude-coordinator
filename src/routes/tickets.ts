@@ -271,7 +271,7 @@ function personWrote({ app: { store, runner, presence }, caller, session, ticket
   // Writing in a minion's chat (or answering its card) touches it: its updates reach their Taskmaster too (#919).
   if (ticket.kind !== 'coordinator' && session.uid != null) store.touch(ticket.id, session.uid);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
-  for (const t of minions) runner.continueLoop(t.id, session.name);
+  runner.continueLoops(minions.map((t) => t.id), session.name);
 }
 
 /**

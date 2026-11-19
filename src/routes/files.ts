@@ -658,7 +658,7 @@ export const fileRoutes: Route[] = [
       if (answered) app.runner.broadcastTicket(to.id);
       app.runner.personWrote(to.id);
       // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
-      for (const t of to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]) app.runner.continueLoop(t.id, session.name);
+      app.runner.continueLoops((to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id), session.name);
       return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });
     },
   },

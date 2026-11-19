@@ -1842,6 +1842,18 @@ export class Runner {
   }
 
   /**
+   * continueLoop for each of `ticketIds` that has loop state (a person writing to a Taskmaster continues every minion of
+   * its scheme): one read of the loop keys, not one continueLoop per minion, which held the server 0.7 s a message (#1029).
+   */
+  continueLoops(ticketIds: number[], by: string): number {
+    // loop:<minion>, loop:taskmasters:<a>:<b> and loop:minions:<a>:<b> each name the chats whose loops they hold.
+    const named = new Set(this.store.settingKeys('loop:').flatMap((key) => key.split(':').slice(1).map(Number)));
+    let total = 0;
+    for (const id of ticketIds) if (named.has(id)) total += this.continueLoop(id, by);
+    return total;
+  }
+
+  /**
    * A person continued a minion paused by the loop guard, or wrote into its chat or its Taskmaster's:
    * the held messages go through in order and its count starts again. For a Taskmaster, the same for
    * each of its exchanges with other schemes' Taskmasters. Returns how many were held.
@@ -1849,13 +1861,14 @@ export class Runner {
   continueLoop(ticketId: number, by: string): number {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return 0;
-    const loops: { key: string; chats: number[]; pair?: true }[] = ticket.kind === 'coordinator'
+    const loops: { key: string; chats: () => number[]; pair?: true }[] = ticket.kind === 'coordinator'
       ? this.store.listProjects().flatMap((p) => this.store.listCoordinators(p.id)).filter((c) => c && c.id !== ticketId)
-        .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
-      : [{ key: loopKey(ticketId), chats: this.relays.loopChats(ticket) },
+        .map((c) => ({ key: pairKey(ticketId, c!.id), chats: () => [ticketId, c!.id] }))
+      // Its Taskmaster only once there's a loop to lift: looking it up for every minion cost 0.2 ms each (#1029).
+      : [{ key: loopKey(ticketId), chats: () => this.relays.loopChats(ticket) },
         // Its direct exchanges with the scheme's other minions (#783).
         ...this.store.settingKeys(MINION_PAIRS).map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number)).filter((ids) => ids.includes(ticketId))
-          .map(([a, b]) => ({ key: minionPairKey(a, b), chats: [ticketId, a === ticketId ? b : a], pair: true as const }))];
+          .map(([a, b]) => ({ key: minionPairKey(a, b), chats: () => [ticketId, a === ticketId ? b : a], pair: true as const }))];
     let total = 0;
     for (const { key, chats, pair } of loops) {
       const loop = this.store.getSetting<LoopState>(key);
@@ -1865,7 +1878,7 @@ export class Runner {
       if (!n) continue;
       const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
       // A minion's note is keyed by the minion in both chats; a Taskmasters' or two minions' note by each chat's own.
-      for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
+      for (const id of chats()) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
       // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
       for (const m of loop.held) {
         if (pair) this.relays.copyToTaskmaster(m.to, m.author, m.text);

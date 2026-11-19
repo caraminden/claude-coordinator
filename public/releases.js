@@ -300,7 +300,7 @@ const openPrevious = new Set();
 function previousList(projectId, tv) {
   if (!tv.recent.length) return '';
   const key = `${projectId}/${tv.target.id}`;
-  const label = (r) => (r.number != null ? releaseName(r) : r.outcome === 'signed' ? 'Signed build' : 'Failed try');
+  const label = (r) => (r.number != null ? releaseName(r) : r.outcome === 'signed' ? 'Signed build' : r.outcome === 'live' ? 'Earlier release' : 'Failed try');
   return h('details', { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (e) => (e.target.open ? openPrevious.add(key) : openPrevious.delete(key)) },
     h('summary', {}, `Previous releases (${tv.recent.length})`),
     h('ul', { class: 'rel-prev-list' }, tv.recent.map((r) => {

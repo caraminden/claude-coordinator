@@ -790,7 +790,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'schedule-runs': {
-    about: 'Genesis Tree (a template row beside a hand-made copy) and Threadspace (no Test audit), with run history, outcomes and costs (#1057)',
+    about: 'a scheme with a template row beside a hand-made copy, plus Threadspace (no Test audit), with run history, outcomes and costs (#1057)',
     seed(c) {
       const user = c.store.listUsers().find((u) => u.name === c.who);
       const day = 864e5;
@@ -801,7 +801,8 @@ mock.boards('#takes', { boards: [
         if (user) c.store.addMember(p.id, user.id);
         return p;
       };
-      const gt = scheme('Genesis Tree');
+      // The Seeded scheme gets the Genesis Tree case (a template row beside a hand-made copy); Threadspace is the left-out case.
+      const gt = c.project;
       scheme('Threadspace');
       const t = loadTemplates().get('code-health')!;
       const vars = templateVars(c.store, c.dataDir, gt.id);

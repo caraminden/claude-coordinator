@@ -87,6 +87,9 @@ before(async () => {
   const res = await fetch(`${srv.base}/api/invite/${invited.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
   olive = { id: invited.data.person.id, cookie: res.headers.get('set-cookie')!.split(';')[0] };
   assert.equal((await enable(cara, true)).status, 200);
+  // The boot-time read of the stub's install files (#987) ends on its 512 px icon: let it finish here, so its requests
+  // never land inside a test that counts what the stub saw (they did at CI load 15-16).
+  await until('the boot-time install-files read', () => seen.some((x) => x.path === '/apps/stub/web/i512.png'));
 });
 after(async () => {
   await srv?.stop();

@@ -28,7 +28,7 @@ Everything else, and every doubt, is every scheme. A part of a feature can be Ci
 
 - **Code**: key on the ticket's or viewer's `project_id`, never on `p.name === 'Citadel'`, `ownScheme()` or `GLOBAL_OWNER` unless §1 says it is Citadel-only. A setting a scheme can have is a per-scheme row or property, with Citadel-wide as the fallback.
 - **Rules for agents**: Citadel-wide instructions (Settings, `edit_instructions` scope `citadel`) reach every scheme; scheme instructions reach one. A rule about running a scheme goes Citadel-wide.
-- **Skills**: `kit/skills/` and `kit/agents/` load in every scheme (and a kit skill names no repo's paths); `.claude/skills/` and `.claude/rules/` load in Citadel's repo only. A skill about running a scheme goes in the kit.
+- **Skills**: `kit/skills/` and `kit/agents/` load in every scheme (and a kit skill names no repo's paths); `.claude/skills/` and `.claude/rules/` load in Citadel's repo only. A skill about running a scheme goes in the kit (this one is repo-local only because it is about building Citadel's code).
 - **Tool and prompt text**: `src/mcp.ts` descriptions and `src/prompts.ts` are every scheme's. Words like "Citadel's" or a Citadel path in them mislead other schemes' minions.
 - **Pages**: `public/` shows a scheme's pages from its own data. A control behind `own`, `buildPreviews` or a scheme name is a Citadel-only control: §1 must name it.
 

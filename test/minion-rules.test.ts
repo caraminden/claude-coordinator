@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanRules } from '../src/approvals.ts';
 import { findPlugins } from '../src/plugin-scan.ts';
-// @ts-ignore: front-end module, plain JS
 import { APPROVALS, ciOn, handRules, pluginMode, setCi, setPluginMode, ticked, toggleApproval } from '../public/minion-rules.js';
 
 test('approvals: ticking adds the rules, unticking removes only them, and hand rules stay', () => {
@@ -51,11 +50,12 @@ test('CI alerts: off joins ci_quiet and leaves ci_watch, on leaves ci_quiet', ()
 test('findPlugins lists folders with a plugin manifest, skips kit/ and reads name and description', async () => {
   const root = mkdtempSync(join(tmpdir(), 'plugin-scan-'));
   try {
-    for (const [dir, manifest] of [['tools/plugins/devtools', '{"name":"devtools","description":"Console"}'], ['kit/skills', '{"name":"kit"}'], ['tools/mods/odd', '{broken']] as const) {
+    for (const [dir, manifest] of [['tools/plugins/devtools', '{"name":"devtools","description":"Console"}'], ['kit/skills', '{"name":"kit"}'], ['tools/mods/odd', '{broken'], ['tools/mods/nul', 'null']] as const) {
       mkdirSync(join(root, dir, '.claude-plugin'), { recursive: true });
       writeFileSync(join(root, dir, '.claude-plugin', 'plugin.json'), manifest);
     }
     assert.deepEqual(await findPlugins(root), [
+      { dir: 'tools/mods/nul', name: 'nul', description: '' },
       { dir: 'tools/mods/odd', name: 'odd', description: '' },
       { dir: 'tools/plugins/devtools', name: 'devtools', description: 'Console' },
     ]);

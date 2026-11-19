@@ -56,7 +56,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const p = view.project;
   const stored = () => view.project;
   // Read once the page opens (settings.js), then every row redraws.
-  const data = { found: [], registry: [], workflows: [] };
+  const data = { found: [], registry: [], workflows: [], failed: {} };
   /** A row that redraws its body from view.project whenever the project changes (onProjectUpdate dispatches settings-refresh). */
   const live = (meta, help, draw, ...after) => {
     const mount = h('div', { class: 'rules-body' });
@@ -117,7 +117,9 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       }, handOpen, area, actions);
   };
 
-  const plugins = () => live({ icon: 'plug', hue: 'held', title: 'Plugins' },
+  const plugins = () => {
+    const hand = handLine('tools/mods/my-plugin', (dir) => save(setPluginMode(stored(), dir.replace(/\/+$/, '').replace(/^\.\//, ''), 'picked'), 'add a plugin folder'));
+    return live({ icon: 'plug', hue: 'held', title: 'Plugins' },
     settingsHelp('Plugin folders found in this scheme\'s repo.', 'Picked loads one only for minions that pick it (the Plugins picker beside Send); Every minion loads it on every turn. Only an admin changes these.'),
     (mount) => {
       const s = stored(), admin = !!account?.admin;
@@ -129,13 +131,16 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
           h('span', { class: 'rules-what' }, h('b', {}, f.name), h('code', {}, f.dir), f.missing ? h('span', { class: 'muted small' }, 'not found in the repo') : f.description ? h('span', { class: 'muted small' }, f.description) : ''),
           seg([['off', 'Off'], ['picked', 'Picked'], ['every', 'Every minion']], pluginMode(s, f.dir), (mode) => save(setPluginMode(stored(), f.dir, mode), `set ${f.name} to ${mode}`), !admin, f.name))),
         all.length ? '' : h('p', { class: 'muted small' }, 'No plugin folders in this scheme\'s repo yet.'),
-        admin ? handLine('tools/mods/my-plugin', (dir) => save(setPluginMode(stored(), dir.replace(/\/+$/, '').replace(/^\.\//, ''), 'picked'), 'add a plugin folder')) : h('p', { class: 'muted small' }, 'Only an admin changes these.'));
+        data.failed.plugins ? h('p', { class: 'error small' }, 'Couldn\'t read the repo\'s plugin folders: reload to retry.') : '',
+        admin ? hand : h('p', { class: 'muted small' }, 'Only an admin changes these.'));
       const on = all.filter((f) => pluginMode(s, f.dir) !== 'off');
       return on.length ? `${on.length} on: ${on.map((f) => f.name).join(', ')}` : 'None on';
     });
+  };
 
   const listGroups = () => {
     let key = '';
+    const hand = handLine('area: balance', (line) => { const groups = listGroupsOf(stored()); save({ list_groups: JSON.stringify([...groups.filter((g) => g !== line), line]) }, `add the group ${line}`); });
     return live({ icon: 'rows', hue: 'teal', title: 'List groups' },
       settingsHelp('Minions outside a build that carry one of these get their own group at the top of the minions list.', 'A minion that matches two sits in the first.'),
       (mount) => {
@@ -157,12 +162,14 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
             h('button', { type: 'button', class: 'rules-mini', disabled: !i, 'aria-label': `Move ${g} up`, onclick: () => commit(groups.map((g2, j) => (j === i - 1 ? groups[i] : j === i ? groups[i - 1] : g2)), `move ${g} up`) }, '↑'),
             h('button', { type: 'button', class: 'rules-mini', 'aria-label': `Remove ${g}`, onclick: () => commit(groups.filter((_, j) => j !== i), `remove the group ${g}`) }, '✕'))))
             : h('p', { class: 'muted small' }, 'No groups yet.'),
-          handLine('area: balance', (line) => commit([...groups.filter((g) => g !== line), line], `add the group ${line}`)));
+          hand);
         return groups.length ? `${groups.length} group${groups.length > 1 ? 's' : ''}: ${groups.join(', ')}` : 'No groups yet';
       });
   };
 
-  const ci = () => live({ icon: 'belloff', hue: 'running', title: 'CI alerts' },
+  const ci = () => {
+    const hand = handLine('nightly.yml', (file) => { const f = file.replace(/^\.?\/?\.github\/workflows\//, ''); save(setCi({ ...stored(), ci_watch: text([...lines(stored().ci_watch), f]) }, f, true), 'watch a workflow'); });
+    return live({ icon: 'belloff', hue: 'running', title: 'CI alerts' },
     settingsHelp('This scheme\'s workflows, from the CI page. On wakes the Taskmaster when one goes red on the default branch; Off keeps it quiet (the CI page still shows it).',
       'A red run starts a fix and says when it is green again. A minion that dispatched a run on its own branch still hears its result.'),
     (mount) => {
@@ -177,16 +184,18 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
             h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': `Wakes the Taskmaster: ${w.name}`, onclick: () => save(setCi(stored(), w.file, !on), `${on ? 'quiet' : 'watch'} ${w.name}`) }));
         }),
         all.length ? '' : h('p', { class: 'muted small' }, 'No workflows seen yet.'),
-        handLine('nightly.yml', (file) => save(setCi({ ...stored(), ci_watch: text([...lines(stored().ci_watch), file.replace(/^\.?\/?\.github\/workflows\//, '')]) }, file.replace(/^\.?\/?\.github\/workflows\//, ''), true), 'watch a workflow')));
+        data.failed.ci ? h('p', { class: 'error small' }, 'Couldn\'t read CI\'s workflows: reload to retry.') : '',
+        hand);
       const quiet = all.filter((w) => !ciOn(s, w.file)).length;
       return all.length ? `${all.length - quiet} of ${all.length} wake the Taskmaster` : 'No workflows seen yet';
     });
+  };
 
   const effort = () => live({ icon: 'spark', hue: 'running', title: 'Default effort' },
     settingsHelp('How hard minions think when they have no effort of their own.', 'Claude default leaves it to Claude Code. The Taskmaster is not affected.'),
     (mount) => {
       const cur = stored().default_effort ?? '';
-      mount.replaceChildren(seg([['', 'Claude default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], cur, (v) => save({ default_effort: v }, 'set the default effort'), false, 'Default effort'));
+      mount.replaceChildren(seg([['', 'Claude default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ...(['', 'low', 'medium', 'high'].includes(cur) ? [] : [[cur, cur]])], cur, (v) => save({ default_effort: v }, 'set the default effort'), false, 'Default effort'));
       return cur ? cur[0].toUpperCase() + cur.slice(1) : 'Claude default';
     });
 
@@ -201,7 +210,7 @@ export function elsewhereRows(scheduleCount) {
     h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), h('span', { class: 'settings-row-sum' }, sum)),
     h('span', { class: 'settings-row-chev' }, icon('forward')));
   return [
-    link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}`, () => setTimeout(() => document.querySelector('.schedules-btn')?.click(), 300)),
+    link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}`, () => setTimeout(() => { const b = document.querySelector('.schedules-btn'); if (b && b.getAttribute('aria-pressed') !== 'true') b.click(); }, 300)),
     link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/all`),
     link('users', 'running', 'Members', 'Who works in this scheme', `#/p/${id}/members`),
     link('bell', 'held', 'Notifications', 'You: push, and what pings you', `#/p/${id}/notifications`),

@@ -475,6 +475,7 @@ export function settingsHelp(first, ...rest) {
 function loadRulesData(rules, elsewhere) {
   const id = view.projectId;
   Promise.allSettled([api(`api/projects/${id}/plugins`), api(`api/projects/${id}/properties`), api('api/ci'), api(`api/projects/${id}/schedules`)]).then(([pl, pr, ci, sc]) => {
+    rules.data.failed = { plugins: pl.status === 'rejected', ci: ci.status === 'rejected' };
     if (pl.value) rules.data.found = pl.value.plugins;
     if (pr.value) rules.data.registry = pr.value.keys.filter((k) => k.value_kind === 'enum' && k.status === 'active').map((k) => ({ key: k.key, values: k.values.filter((v) => v.status !== 'proposed' && v.status !== 'archived').map((v) => v.value) }));
     if (ci.value) rules.data.workflows = ci.value.schemes.find((s) => s.id === id)?.view.workflows ?? [];

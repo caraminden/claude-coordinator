@@ -654,30 +654,33 @@ mock.boards('#takes', { boards: [
     },
   },
   ci: {
-    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners; the CI chip turns red',
+    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners, each run linking its minion (#1019); the CI chip turns red',
     seed(c) {
       c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
       const now = Date.now();
       const iso = (min: number) => new Date(now - min * 60_000).toISOString();
       const url = (id: number) => `https://github.com/caraminden/seeded/actions/runs/${id}`;
-      const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push') => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id) });
+      // The minions the runs test (#1019): one in review on its branch, one landing, one whose land is main's verdict.
+      const [review, landing, landed] = [minion(c, 'Sound tab in settings'), minion(c, 'Drag panels between monitors', { status: 'closed' }), minion(c, 'Aura vanishes when its outline is removed', { status: 'closed' }, 'bug')];
+      const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push', who: Ticket | null = null) => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id), minion: who?.number ?? null });
       c.store.setSetting(`ci-health:view:${c.project.id}`, {
         at: now - 2 * 60_000, slug: 'caraminden/seeded', branch: 'main',
         runners: [
           { name: 'DESKTOP-G248IJ8-desktop', status: 'offline', busy: false, labels: ['self-hosted', 'Windows', 'seeded-ci'], job: null, offlineSince: now - 42 * 60_000 },
           { name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: true, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: 'tests (linux)', offlineSince: null },
         ],
-        waiting: [{ name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104 }],
+        waiting: [{ name: 'windows build', labels: ['self-hosted', 'seeded-ci'], since: iso(31), run: 9104, branch: review.branch!, event: 'pull_request', minion: review.number }],
         workflows: [
-          { name: 'tests', file: 'tests.yml', verdict: run(9101, 'tests', 'main', 55, 'completed', 'success'), skipped: ['windows build'] },
+          { name: 'tests', file: 'tests.yml', verdict: run(9101, 'tests', 'main', 55, 'completed', 'success', 'push', landed), skipped: ['windows build'] },
           { name: 'drift', file: 'drift.yml', verdict: run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'), skipped: [] },
           { name: 'release', file: 'release.yml', verdict: null, skipped: [] },
         ],
         runs: [
-          run(9104, 'tests', 'ticket/42-seeded', 31, 'queued', null, 'pull_request'),
-          run(9103, 'tests', 'land/41', 12, 'in_progress', null),
-          run(9101, 'tests', 'main', 55, 'completed', 'success'),
-          run(9099, 'tests', 'ticket/40-seeded', 80, 'completed', 'cancelled', 'pull_request'),
+          run(9104, 'tests', review.branch!, 31, 'queued', null, 'pull_request', review),
+          run(9103, 'tests', `land/${landing.branch}`, 12, 'in_progress', null, 'push', landing),
+          run(9101, 'tests', 'main', 55, 'completed', 'success', 'push', landed),
+          run(9100, 'tests', 'main', 70, 'completed', 'success'),
+          run(9099, 'tests', review.branch!, 80, 'completed', 'cancelled', 'pull_request', review),
           run(9090, 'drift', 'main', 190, 'completed', 'failure', 'schedule'),
         ],
       });

@@ -704,7 +704,7 @@ export function pendingRelease(t) {
 /** Each minion's pending release as rows show it, so a releases event redraws the list only when one changed. */
 let rowsKey = '';
 function rowsChanged() {
-  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.later, c.stage, c.waitingOn ?? c.text]))));
+  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.later, c.stage, c.waitingOn ?? c.text, stuckFor(c) > 0]))));
   const changed = key !== rowsKey;
   rowsKey = key;
   return changed;

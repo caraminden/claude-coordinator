@@ -62,6 +62,7 @@
     "COORDINATOR_PROJECT": "1",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "1",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/1-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
@@ -83,7 +84,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-1\",\"roots\":[\"<ROOT>/ticket-1\",\"<ROOT>/projects/1/shared/project\"],\"nudged\":\"<ROOT>/run/turns/1-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-1\",\"roots\":[\"<ROOT>/ticket-1\",\"<ROOT>/projects/1/shared/project\"],\"nudged\":\"<ROOT>/run/turns/1-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -95,7 +96,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -106,7 +107,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/1/shared/project\"],\"sent\":\"<ROOT>/run/turns/1-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/1/shared/project\"],\"sent\":\"<ROOT>/run/turns/1-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -116,7 +117,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -272,6 +273,7 @@
     "COORDINATOR_PROJECT": "2",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "2",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/2-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
@@ -298,7 +300,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-2\",\"roots\":[\"<ROOT>/ticket-2\",\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/2-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-2\",\"roots\":[\"<ROOT>/ticket-2\",\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/2-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -310,7 +312,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -321,7 +323,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/2-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/2-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -331,7 +333,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -528,6 +530,7 @@
     "COORDINATOR_PROJECT": "3",
     "COORDINATOR_ROLE": "coordinator",
     "COORDINATOR_TICKET": "3",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/3-<TIME>/pin/.compile-cache",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
     "CITADEL_HEAVY_WHO": "P3 #null (cara)",
@@ -544,7 +547,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-3\",\"roots\":[\"<ROOT>/ticket-3\",\"<ROOT>/projects/3/shared/project\"],\"nudged\":\"<ROOT>/run/turns/3-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-3\",\"roots\":[\"<ROOT>/ticket-3\",\"<ROOT>/projects/3/shared/project\"],\"nudged\":\"<ROOT>/run/turns/3-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -556,7 +559,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -567,7 +570,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/3/shared/project\"],\"sent\":\"<ROOT>/run/turns/3-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/3/shared/project\"],\"sent\":\"<ROOT>/run/turns/3-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -577,7 +580,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -937,6 +940,7 @@
     "COORDINATOR_PROJECT": "2",
     "COORDINATOR_ROLE": "coordinator",
     "COORDINATOR_TICKET": "4",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/4-<TIME>/pin/.compile-cache",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
     "CITADEL_HEAVY_WHO": "P2 #null (cara)",
@@ -955,7 +959,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-4\",\"roots\":[\"<ROOT>/ticket-4\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/4-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-4\",\"roots\":[\"<ROOT>/ticket-4\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/4-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -967,7 +971,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -978,7 +982,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/4-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/4-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -988,7 +992,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1310,6 +1314,7 @@
     "COORDINATOR_PROJECT": "4",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "5",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -1333,7 +1338,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-5\",\"roots\":[\"<ROOT>/ticket-5\",\"<ROOT>/projects/4/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/5-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-5\",\"roots\":[\"<ROOT>/ticket-5\",\"<ROOT>/projects/4/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/5-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -1345,7 +1350,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -1356,7 +1361,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/4/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/4/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1366,7 +1371,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1518,6 +1523,7 @@
     "COORDINATOR_PROJECT": "5",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "6",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -1541,7 +1547,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-6\",\"roots\":[\"<ROOT>/ticket-6\",\"<ROOT>/projects/5/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/6-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-6\",\"roots\":[\"<ROOT>/ticket-6\",\"<ROOT>/projects/5/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/6-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -1553,7 +1559,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -1564,7 +1570,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/5/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/5/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1574,7 +1580,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1733,6 +1739,7 @@
     "COORDINATOR_PROJECT": "6",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "7",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -1755,7 +1762,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-7\",\"roots\":[\"<ROOT>/ticket-7\",\"<ROOT>/projects/6/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/7-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-7\",\"roots\":[\"<ROOT>/ticket-7\",\"<ROOT>/projects/6/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/7-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -1767,7 +1774,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -1778,7 +1785,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/6/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/6/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1788,7 +1795,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -1961,6 +1968,7 @@
     "COORDINATOR_PROJECT": "7",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "8",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -1984,7 +1992,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-8\",\"roots\":[\"<ROOT>/ticket-8\",\"<ROOT>/projects/7/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/8-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-8\",\"roots\":[\"<ROOT>/ticket-8\",\"<ROOT>/projects/7/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/8-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -1996,7 +2004,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -2007,7 +2015,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/7/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/7/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2017,7 +2025,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2193,6 +2201,7 @@
     "COORDINATOR_PROJECT": "8",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "9",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -2216,7 +2225,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-9\",\"roots\":[\"<ROOT>/ticket-9\",\"<ROOT>/projects/8/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/9-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-9\",\"roots\":[\"<ROOT>/ticket-9\",\"<ROOT>/projects/8/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/9-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -2228,7 +2237,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -2239,7 +2248,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/8/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/8/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2249,7 +2258,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2408,6 +2417,7 @@
     "COORDINATOR_PROJECT": "9",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "10",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "COORDINATOR_CONTAINER": "1",
     "CARGO_BUILD_JOBS": "4",
@@ -2430,7 +2440,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-10\",\"roots\":[\"<ROOT>/ticket-10\",\"<ROOT>/projects/9/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-1/10-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-10\",\"roots\":[\"<ROOT>/ticket-10\",\"<ROOT>/projects/9/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-1/10-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -2442,7 +2452,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -2453,7 +2463,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/9/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/9/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2463,7 +2473,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2626,6 +2636,7 @@
     "COORDINATOR_PROJECT": "10",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "11",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/11-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
@@ -2648,7 +2659,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-11\",\"roots\":[\"<ROOT>/ticket-11\",\"<ROOT>/projects/10/shared/project\"],\"nudged\":\"<ROOT>/run/turns/11-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-11\",\"roots\":[\"<ROOT>/ticket-11\",\"<ROOT>/projects/10/shared/project\"],\"nudged\":\"<ROOT>/run/turns/11-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -2660,7 +2671,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -2671,7 +2682,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/10/shared/project\"],\"sent\":\"<ROOT>/run/turns/11-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/10/shared/project\"],\"sent\":\"<ROOT>/run/turns/11-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2681,7 +2692,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2844,6 +2855,7 @@
     "COORDINATOR_PROJECT": "11",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "12",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/12-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
@@ -2865,7 +2877,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-12\",\"roots\":[\"<ROOT>/ticket-12\",\"<ROOT>/projects/11/shared/project\"],\"nudged\":\"<ROOT>/run/turns/12-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-12\",\"roots\":[\"<ROOT>/ticket-12\",\"<ROOT>/projects/11/shared/project\"],\"nudged\":\"<ROOT>/run/turns/12-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -2877,7 +2889,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -2888,7 +2900,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/11/shared/project\"],\"sent\":\"<ROOT>/run/turns/12-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/11/shared/project\"],\"sent\":\"<ROOT>/run/turns/12-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -2898,7 +2910,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]
@@ -3053,6 +3065,7 @@
     "COORDINATOR_PROJECT": "12",
     "COORDINATOR_ROLE": "thread",
     "COORDINATOR_TICKET": "13",
+    "CITADEL_HOOK_CACHE": "<ROOT>/run/turns/13-<TIME>/pin/.compile-cache",
     "CITADEL_MINION_TITLE": "T",
     "CARGO_BUILD_JOBS": "4",
     "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
@@ -3074,7 +3087,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-13\",\"roots\":[\"<ROOT>/ticket-13\",\"<ROOT>/projects/12/shared/project\"],\"nudged\":\"<ROOT>/run/turns/13-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-13\",\"roots\":[\"<ROOT>/ticket-13\",\"<ROOT>/projects/12/shared/project\"],\"nudged\":\"<ROOT>/run/turns/13-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\"}'",
         "timeout": 10
        }
       ]
@@ -3086,7 +3099,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
         "timeout": 10,
         "onFailure": "block"
        }
@@ -3097,7 +3110,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/12/shared/project\"],\"sent\":\"<ROOT>/run/turns/13-<TIME>/wording-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/12/shared/project\"],\"sent\":\"<ROOT>/run/turns/13-<TIME>/wording-sent\"}'",
         "timeout": 10
        }
       ]
@@ -3107,7 +3120,7 @@
       "hooks": [
        {
         "type": "command",
-        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs-sent\"}'",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs-sent\"}'",
         "timeout": 10
        }
       ]

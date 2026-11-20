@@ -1073,7 +1073,7 @@ export const projectRoutes: Route[] = [
       const fromGrunt = ((body.overlaps ?? []) as string[]).map((o) => o.trim()).filter(Boolean);
       const askerId = store.turnAsker(ticket.id);
       const asker = askerId === null ? undefined : store.getUser(askerId);
-      const by = `#${ticket.id} for ${asker?.name ?? 'nobody'}`;
+      const by = `#${ticket.number ?? ticket.id} for ${asker?.name ?? 'nobody'}`;
       const scope = citadel ? 'citadel' : 'scheme';
       const held = { scope, project: project.id, old: original, text, edits: edits as FindReplace[], by } as const;
       const found = settingsOverlaps(app, project, scope, original, text);

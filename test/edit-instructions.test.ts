@@ -65,8 +65,11 @@ before(async () => {
   store = new Store(join(srv.data, 'coordinator.db'));
   store.updateUser(josh, { server_login: 1 });
   store.setProjectInstructions(project.id, 'Alpha one.\nBeta two.\nBeta two again.', 'Cara');
+  // A minion in another scheme first, so this one's number in its scheme isn't its id (#1287 F4).
+  store.createTicket({ project_id: (await api('/api/projects', 'POST', { name: 'Other' })).id, title: 'earlier', permission_mode: 'bypassPermissions', created_by: 'x' });
   ticket = await api(`/api/projects/${project.id}/tickets`, 'POST', { message: 'edit the settings' }, joshCookie);
   await until('the first turn', () => turns().length >= 1);
+  assert.notEqual(ticket.number, ticket.id, 'the number in the scheme differs from the id, or the checks below prove nothing (#1287 F4)');
 });
 
 test('a partial match saves nothing and names the failing edits', async () => {
@@ -80,7 +83,7 @@ test('a scheme save is one history row by the minion and the person its turn run
   await edit('scheme', [{ find: 'Alpha one.', replace: 'Alpha 1.' }, { find: 'Beta two again.', replace: 'Gamma.' }]);
   assert.equal(store.getProject(project.id)!.instructions, 'Alpha 1.\nBeta two.\nGamma.');
   const [row] = store.instructionHistory(project.id, 1);
-  assert.equal(row.by, `#${ticket.id} for Josh`);
+  assert.equal(row.by, `#${ticket.number} for Josh`);
   assert.equal(row.old_text, 'Alpha one.\nBeta two.\nBeta two again.');
 });
 
@@ -91,7 +94,7 @@ test('Citadel-wide text is refused for a turn run for a non-member, and saves on
   store.updateUser(josh, { admin: 1 });
   await edit('citadel', [{ find: 'Rule A.', replace: 'Rule B.' }]);
   assert.equal(store.appInstructions().text, 'Rule B.');
-  assert.equal(store.appInstructionHistory(1)[0].by, `#${ticket.id} for Josh`);
+  assert.equal(store.appInstructionHistory(1)[0].by, `#${ticket.number} for Josh`);
 });
 
 // One home per rule (#1162): an edit that repeats a registered rule, or that the turn's Grunt says is already written, is
@@ -120,7 +123,7 @@ test('an edit repeating the card rule is held on a card, and Save anyway saves w
   const ok = await verdict('approve');
   assert.equal(ok.status, 202, JSON.stringify(ok.body).slice(0, 300));
   assert.equal(store.getProject(project.id)!.instructions, `${was}\n\n${COPY}`);
-  assert.match(store.instructionHistory(project.id, 1)[0].by, new RegExp(`#${ticket.id} for Josh, saved by `));
+  assert.match(store.instructionHistory(project.id, 1)[0].by, new RegExp(`#${ticket.number} for Josh, saved by `));
   assert.equal((await verdict('reject')).status, 409, 'decided once');
 });
 

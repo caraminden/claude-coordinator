@@ -573,6 +573,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
   args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
   env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+  // The kit's title check (kit/hooks/answer-check.ts, #1154) compares the title the turn starts with to its prompt. Not
+  // COORDINATOR_: those count toward the cached prefix's fingerprint (src/keepalive.ts), which a rename doesn't change.
+  if (ticket.kind !== 'coordinator') env.CITADEL_MINION_TITLE = ticket.title;
   // The server login's extra Claude account (#779): its own config folder, so nothing of the host's own login may win over it.
   if (place.host && place.env) {
     for (const v of AUTH_VARS) delete env[v];

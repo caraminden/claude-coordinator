@@ -26,6 +26,8 @@ export function takeStatus(text: string): { text: string; status: StatusFields |
   } catch {
     return { text: rest, status: null, bad: `not JSON: ${m[1].slice(0, 80)}` };
   }
+  // `<!-- status: null -->` means "state null": the only shape ignored live in the week to 2026-11-19 (#1154), so it's read, not refused.
+  if (parsed === null) return { text: rest, status: { state: null }, bad: null };
   const status: StatusFields = {};
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) for (const k of ['state', 'note', 'replies'] as const) if (k in parsed) status[k] = parsed[k];
   // An over-long note or reply is clipped, not refused: a refusal arrives after the turn is over, too late to fix, and drops the state with it.

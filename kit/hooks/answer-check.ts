@@ -11,6 +11,10 @@
  *  - Live-state claim without a read (#1113): the final text states another minion's, CI's or a deploy's
  *    state, or that something waits on a person, and the turn made no call that reads it (live_facts,
  *    read_ticket, list_tickets, host_check, gh, git…) nor got it in its prompt from Citadel or that minion.
+ *  - The minion checks (#1154, mechanism first): three rules of the minion prompt, minions only. No status line
+ *    (or one Citadel can't read) at the end of the final reply; the title still the opening words of the first
+ *    message at the end of the first turn (CITADEL_MINION_TITLE, the title the turn started with); and a ship handed
+ *    off (hand_off_land or land) with no self-review anywhere in the session.
  * Each hit writes one `would refuse` line to the retro log. The weekly process digest counts them and
  * how many were false alarms; refusal turns on only for a check with under one false alarm in five.
  * Refusing is on for one shape, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106): the
@@ -32,9 +36,10 @@ export const MIN_ANSWER_CHARS = 200;
 const ACTIONS = ['ask_question', 'propose_plan', 'message_coordinator', 'message_taskmaster', 'message_ticket', 'create_ticket'];
 
 /** What one turn did, read from its transcript. */
-export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string; commands?: string[]; prompt?: string };
+export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string; commands?: string[]; prompt?: string; titled?: boolean };
 // `cardText`: the question and option description text of the turn's ask_question calls, where a command can sit too.
 // `commands` and `prompt`: the turn's Bash commands and its prompt's text, for the live-claim check's reads.
+// `titled`: the turn called set_thread_status with a title, for the title check.
 // `steered` covers every turn cut short rather than ended: a steer, a stop, a usage-limit or API error.
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);
@@ -74,6 +79,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
         if (b?.type === 'tool_use') {
           turn.toolCalls.push(String(b.name ?? ''));
           if (b.name === 'Bash' && typeof b.input?.command === 'string') (turn.commands ??= []).push(b.input.command);
+          if (/(^|__)set_thread_status$/.test(String(b.name ?? '')) && typeof b.input?.title === 'string' && b.input.title.trim()) turn.titled = true;
           if (/(^|__)ask_question$/.test(String(b.name ?? ''))) {
             const qs = Array.isArray(b.input?.questions) ? b.input.questions : [];
             const parts = qs.flatMap((q: any) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: any) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
@@ -199,6 +205,60 @@ export function liveClaimCheck(turn: Turn): string[] {
   return liveClaims(turn.finalText).filter((s) => !passedOn(s)).slice(0, 3).map((s) => `live-state claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
 }
 
+// The minion checks (#1154). The trailer as src/status-trailer.ts reads it: only at the very end, its body can't cross a `-->`.
+const STATUS_TRAILER = /<!--\s*status:\s*((?:(?!-->)[\s\S])*?)\s*-->`?\s*$/;
+const SHIP = /(?:^|__)(?:hand_off_land|land)$/;
+
+/** A final reply with no status line, or one src/status-trailer.ts would ignore. */
+export function statusLineCheck(turn: Turn): string[] {
+  if (turn.steered) return [];
+  const text = turn.finalText.trimEnd();
+  const m = STATUS_TRAILER.exec(text);
+  if (!m) return [`no status line · "…${text.replace(/\s+/g, ' ').slice(-80)}"`];
+  try {
+    const v = JSON.parse(m[1]);
+    if (v === null || (v && typeof v === 'object' && !Array.isArray(v) && ['state', 'note', 'replies'].some((k) => k in v))) return [];
+  } catch {
+    // Not JSON: unreadable.
+  }
+  return [`unreadable status line · "${m[1].replace(/\s+/g, ' ').slice(0, 80)}"`];
+}
+
+/** The turn's title (CITADEL_MINION_TITLE, as it started) is still the opening words of its prompt, and the turn set none. */
+export function titleCheck(turn: Turn, title: string | undefined): string[] {
+  if (turn.steered || turn.titled || !title) return [];
+  // provisionalTitle (src/routes/projects.ts) cuts near 40 characters and adds `…`.
+  const stem = title.replace(/…$/, '').replace(/\s+/g, ' ').trim();
+  if (stem.length < 8) return [];
+  const prompt = (turn.prompt ?? '').replace(/\s+/g, ' ').trim();
+  // The first message opens the prompt, or follows its sender's tag ("[Josh]: "); a later turn's prompt doesn't, so only the first turn counts.
+  return prompt.startsWith(stem) || prompt.includes(`]: ${stem}`) ? [`title still the opening words · "${title.slice(0, 80)}"`] : [];
+}
+
+/**
+ * A turn that handed off a ship (hand_off_land or land) in a session with no self-review in it: no Skill call to
+ * self-review and no reviewer Grunt, before or after the hand-off (a low-risk ship is reviewed while it ships).
+ * shortcut: any review in the session counts, so a second ship after more edits passes; tighten if the digest shows it.
+ */
+export function shipReviewCheck(turn: Turn, transcript: string): string[] {
+  if (turn.steered || !turn.toolCalls.some((n) => SHIP.test(n))) return [];
+  for (const raw of transcript.split('\n')) {
+    if (!raw.includes('"tool_use"')) continue;
+    let e: any;
+    try {
+      e = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    for (const b of Array.isArray(e?.message?.content) ? e.message.content : []) {
+      if (b?.type !== 'tool_use') continue;
+      if (b.name === 'Skill' && /(?:^|:)self-review$/.test(String(b.input?.skill ?? ''))) return [];
+      if ((b.name === 'Agent' || b.name === 'Task') && /(?:^|:)reviewer$/.test(String(b.input?.subagent_type ?? ''))) return [];
+    }
+  }
+  return ['ship with no self-review'];
+}
+
 /** The text of a `Process:` line (self-review's last line) at the start of a line, or null for none or no such line. */
 export function processLine(text: string): string | null {
   const m = text.match(/^Process:[ \t]*(.*\S)[ \t]*$/m);
@@ -217,10 +277,12 @@ export function answerHook(input: any, env = process.env, refusal?: { stateDir?:
   const role = env.COORDINATOR_ROLE;
   if (role !== 'thread' && role !== 'coordinator') return [];
   let turn: Turn = { toolCalls: [], finalText: '', steered: false };
-  if (input?.transcript_path) turn = readTurn(readFileSync(input.transcript_path, 'utf8'), input.prompt_id ?? undefined);
+  const transcript = input?.transcript_path ? readFileSync(input.transcript_path, 'utf8') : '';
+  if (transcript) turn = readTurn(transcript, input.prompt_id ?? undefined);
   // Claude Code's own copy of the last message beats the transcript, which may not be flushed yet.
   if (typeof input?.last_assistant_message === 'string' && input.last_assistant_message.trim()) turn.finalText = input.last_assistant_message;
   const hits = [...answerCheck(turn), ...liveClaimCheck(turn)];
+  if (role === 'thread') hits.push(...statusLineCheck(turn), ...titleCheck(turn, env.CITADEL_MINION_TITLE), ...shipReviewCheck(turn, transcript));
   const refuse = refusal ? refusalFor(input, hits, refusal.stateDir ?? join(tmpdir(), 'citadel-kit')) : null;
   for (const hit of hits) {
     if (refuse && REFUSED.test(hit)) {

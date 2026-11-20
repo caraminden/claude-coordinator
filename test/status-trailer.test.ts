@@ -37,6 +37,10 @@ test('a malformed trailer is still hidden, and says why it was ignored', () => {
   assert.match(takeStatus('<!-- status: {"colour":"red"} -->').bad!, /no state, note or replies/);
 });
 
+test('a trailer of plain null reads as state null, not an ignored line (#1154: the one shape ignored live)', () => {
+  assert.deepEqual(takeStatus('Waiting on the card.\n<!-- status: null -->'), { text: 'Waiting on the card.', status: { state: null }, bad: null });
+});
+
 // Through the server: a stand-in claude replies with whatever reply.txt holds, then ends the turn.
 const root = mkdtempSync(join(tmpdir(), 'status-trailer-'));
 const replyFile = join(root, 'reply.txt');

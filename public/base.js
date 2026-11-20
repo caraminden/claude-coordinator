@@ -49,7 +49,7 @@ export function setView(next) {
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
-  if (!who) forgetKept(); // signing out leaves nothing of theirs on the device
+  if (!who) forgetKept(), answers.clear(); // signing out leaves nothing of theirs on the device, or for the next to keep
 }
 // The shell's login page (core.js renderLogin), shown when the server says you're signed out.
 let showLogin = () => {};
@@ -77,6 +77,7 @@ export async function api(path, opts = {}) {
   if (res.status === 401 && path !== 'api/login') {
     me = null;
     forgetKept();
+    answers.clear();
     showLogin();
     throw new Error('Not logged in');
   }

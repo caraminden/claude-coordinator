@@ -283,7 +283,8 @@ queue_lock() {
 # one to hold the locks can finish what a SIGKILL cut off. The first two are written and read only under the deploy
 # lock; taken-back is also written, with no lock, by a landing whose own restart was rolled back (land.sh's main_back).
 #   unchecked   the commit the live checkout was on before a pull whose checks have not ended (tools/deploy.sh)
-#   moving      "<main before> <tip>", then its branch, of a landing that moved main and has not seen its deploy end (tools/land.sh)
+#   moving      "<main before> <tip>", then its branch, of a landing that moved main and has not seen its deploy end (tools/land.sh);
+#               then "<commit> <branch>" for each other ship of its ship train
 #   taken-back  "<tip> <branch>" of each landing whose commit came off main again, newest last (tools/land.sh reads it before it rebases)
 
 # <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back. Not when a
@@ -309,7 +310,7 @@ deploy_unchecked_back() {
 # <state> <live> <source>: a landing died after it moved main, and the live checkout never took its commit
 # (the deploy's checks failed, or never ran). Nothing has landed on top (main is still its tip), so main goes back.
 main_moving_back() {
-  local l old tip
+  local l old tip line
   [ -s "$1/moving" ] || return 0
   mapfile -t l <"$1/moving" || true
   read -r old tip <<<"${l[0]:-}" || true
@@ -320,6 +321,8 @@ main_moving_back() {
     ! git -C "$2" merge-base --is-ancestor "$tip" last-good 2>/dev/null || rm -f "$1/moving"
     return 0
   fi
+  # A ship train's other ships follow as "<commit> <branch>" lines (#1166).
+  for line in "${l[@]:2}"; do [ -z "$line" ] || taken_back "$1" "${line%% *}" "${line#* }"; done
   taken_back "$1" "$tip" "${l[1]:-}" # before main goes back, so a kill in between still leaves the record
   rm -f "$1/moving"
   git -C "$3" reset -q --keep "$old" || return 0

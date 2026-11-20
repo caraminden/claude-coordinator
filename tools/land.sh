@@ -380,29 +380,51 @@ if [ -z "$resumed" ]; then
 fi
 # shellcheck source=tools/deploy-queue.sh
 . "$tools/deploy-queue.sh"
-# A rider's side of the ship train (#1166). The landing at the front writes <state>/train/<this ticket>: "riding
-# <front's branch>" while it tests the train; then "landed <this ship's commit> <live|restart> <front's branch> <this
-# branch's tip it took> <ships in the train>", or "refused <front's branch> <the red CI run>" with the failure's last
-# lines after it. No file: on no train, or the train left it in line. <held>: this holds the lock now, so a "riding"
-# is what a front that was killed left. On landed or refused this ends the landing, as its own ship would have.
+# A rider's side of the ship train (#1166). The landing at the front writes <state>/train/<this ticket>, one line:
+#   riding <front's branch>                     it is testing a train with this ship on it
+#   moving <train commit> <front> <tip it took>  main holds the train and its deploy runs: the branch moves to its
+#                                                train commit now, so the release row the deploy writes lists it
+#   back <train commit> <tip it took> <front>    the train went without it, or didn't ship: back to waiting, as it was
+#   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped
+#   refused <front> <the red CI run>            the bisect found it the first ship that turned the train red; the
+#                                                failure's last lines follow
+# No file: on no train. <held>: this holds the lock now, so a riding or moving is what a front that was killed left.
+# On landed or refused this ends the landing, as its own ship would have.
 train_dir=$state/train riding=''
 [ "$mode" != land ] || [ "${LAND_TRAIN:-1}" = 0 ] || QUEUE_TRAIN=train # the ticket's 6th line (tools/deploy-queue.sh)
 train_verdict() {
-  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e lines=()
-  [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -s "$f" ] || { riding=''; return 0; }
+  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e lines=() at
+  if [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || [ ! -s "$f" ]; then
+    [ -z "$riding" ] || { riding=''; queue_phase waiting; say "back in line on its own: the ship train went without $branch"; }
+    return 0
+  fi
   read -r v a b c d e <"$f" || true
+  at=$(git rev-parse HEAD)
+  if [ -n "${1:-}" ]; then # what a front killed mid-train left
+    [ "$v" != riding ] || { rm -f "$f"; riding=''; return 0; }
+    [ "$v" != moving ] || { v=back e=$b b=$c c=$e; }
+  fi
   case $v in
     riding)
-      [ -z "${1:-}" ] || { rm -f "$f"; return 0; }
       [ -n "$riding" ] || { riding=1; queue_phase "riding in $a's ship train"; say "riding in $a's ship train: waiting for CI on the train"; }
       return 1 ;;
+    moving)
+      [ "$at" != "$c" ] || git reset -q --keep "$a" || true
+      return 1 ;;
+    back)
+      [ "$at" != "$a" ] || git reset -q --keep "$b" || true
+      rm -f "$f"
+      riding=''
+      say "back in line on its own: ${c:-the front}'s ship train went without $branch"
+      queue_phase waiting
+      return 0 ;;
     landed)
       rm -f "$f"
-      say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
-      if [ "$(git rev-parse HEAD)" != "$d" ] || ! git reset -q --keep "$a"; then
+      [ "$at" = "$a" ] || { [ "$at" = "$d" ] && git reset -q --keep "$a"; } ||
         say "$branch moved after the train took it, so it stays as it is; what shipped of it is $(git rev-parse --short "$a")"
-      fi
+      say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
       say "main is now at $(git log -1 --format='%h "%s"' "$a"), in $c's ship train"
+      land_mark lock
       land_mark landed
       if [ "$b" = live ]; then
         echo "deploy: live now: $c's ship train went live with it" >&2
@@ -561,12 +583,12 @@ fi
 # <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two
 # deliberate removals of another minion's work (what the trailer is for), and nothing else; the line counts of
 # 2026-11-15 refused the same over ~1,090 landings in seven.
-undo_guard() {
-  local base
-  base=$(git merge-base HEAD "$1") || return 2
+undo_guard() { # <onto> [<head> <its branch>]: HEAD and $branch unless named (the ship train's riders, #1166)
+  local base head=${2:-HEAD} of=${3:-$branch}
+  base=$(git merge-base "$head" "$1") || return 2
   perl -e '
     use strict; use warnings; use List::Util qw(min max);
-    my ($base, $ticket) = @ARGV;
+    my ($base, $ticket, $head) = @ARGV;
     sub run { my $out = `$_[0]`; $? == 0 or die "undo guard: $_[0] failed\n"; $out }
     sub lines { # how many times a diff adds (+) or removes (-) each trimmed line of 12+ characters, keyed by file
       my ($sign, $cmd) = @_; my (%set, $f);
@@ -581,8 +603,8 @@ undo_guard() {
     }
     sub text { (split /\0/, $_[0], 2)[1] }
     sub ticket { my $s = shift; return $1 if $s =~ /^(?:WIP:? )?#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
-    my @named = run("git log --format=%B $base..HEAD") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
-    my $diff = "diff -U0 --no-renames --no-color $base HEAD";
+    my @named = run("git log --format=%B $base..$head") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
+    my $diff = "diff -U0 --no-renames --no-color $base $head";
     my ($removed, $added) = (lines("-", $diff), lines("+", $diff));
     my %net; # per text, how many more lines the branch removes than adds back anywhere
     $net{text($_)} += $removed->{$_} for keys %$removed;
@@ -607,7 +629,7 @@ undo_guard() {
     exit 0 unless @bad;
     print join("\n", @bad), "\n";
     exit 1;
-  ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$branch")"
+  ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$of")" "$head"
 }
 
 if [ "$mode" = land ] || [ "$mode" = into ]; then
@@ -818,12 +840,12 @@ ci_gate() {
   esac
 }
 
-# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log
-# (they can't reach it from the desktop, so they are written from its output here).
+# A red run's failed log into $failed (its last lines go on stderr with the refusal, or in a ship train to the ship
+# that turned it red), and run-tests.sh's flake labels into the retro log (they can't reach it from the desktop, so
+# they are written from its output here).
 ci_failed() {
   local f load
   failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
-  tail -n 40 <<<"$failed" >&2
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI"
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
@@ -844,16 +866,115 @@ flake_only() {
   sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
 }
 
-# The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
-trap 'land_timing $? || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
-fellback=
-rc=0
-failed=''
-reran=''
-land_mark ci ci
-if [ "$lane" = light ]; then
-  rc=light
-else
+# The ship train (#1166), the front's side: up to LAND_TRAIN_MAX plain lands waiting behind this one, in line order,
+# each replayed onto the one before it in a scratch worktree, so CI runs once on the top. Its riders: own=this ship's
+# commit, then train_tip, train_br, train_n (its ticket), train_was (its tip as the train took it). Not for a ship
+# with no CI to answer (one ship's fallback run is all perigee should take on), nor while deploys are refusing or
+# rolled back. A waiter is passed over, and keeps its place, when it changes the pipeline (tools/pipeline-files.txt:
+# those land alone), has merge commits, sits on a commit that came off main, conflicts with the train, or fails the
+# undo guard against it.
+own=$tip train_tip=() train_br=() train_n=() train_was=() greens=' '
+# <from> <to>: whether the change touches a path in tools/pipeline-files.txt (a path ending / is its folder).
+pipeline_touch() {
+  [ -f tools/pipeline-files.txt ] || return 1
+  awk 'NR == FNR { if ($0 !~ /^[[:space:]]*(#|$)/) p[++n] = $0; next }
+    { for (i = 1; i <= n; i++) if ($0 == p[i] || (p[i] ~ /\/$/ && index($0, p[i]) == 1)) { hit = 1; exit } }
+    END { exit !hit }' tools/pipeline-files.txt <(git diff --no-renames --name-only "$1" "$2")
+}
+# <rider index> <lines>: its verdict, by a rename, so it never reads half of one.
+train_say() {
+  local f=$train_dir/${train_n[$1]}
+  shift
+  printf '%s\n' "$@" >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
+}
+# [<index>]: the riders from there on (all by default) leave the train with no verdict: back in line as they were.
+train_drop() {
+  local i v x c
+  for ((i = ${1:-0}; i < ${#train_n[@]}; i++)); do
+    read -r v x c <"$train_dir/${train_n[$i]}" 2>/dev/null || continue
+    case $v in
+      riding) rm -f "$train_dir/${train_n[$i]}" ;;
+      moving) # killed after main moved: landed if the deploy got its commit live or its restart queued
+        if grep -qE '^(queued|live) ' "$times" 2>/dev/null; then train_landed "$i"; else train_say "$i" "back ${train_tip[$i]} ${train_was[$i]} $branch"; fi ;;
+    esac
+  done
+  train_tip=("${train_tip[@]:0:${1:-0}}") train_br=("${train_br[@]:0:${1:-0}}") train_n=("${train_n[@]:0:${1:-0}}") train_was=("${train_was[@]:0:${1:-0}}")
+}
+train_landed() { # <rider index>
+  local kind=restart
+  ! grep -q '^live ' "$times" 2>/dev/null || kind=live
+  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))"
+}
+# "<commit> <branch>" of each ship in the train but the top one, which is "$tip $train_owner": what came off main with
+# it when main goes back (taken-back), so each branch on its train commit leaves the others' commits behind.
+train_others() {
+  local i
+  [ ${#train_n[@]} -gt 0 ] || return 0
+  echo "$own $branch"
+  for ((i = 0; i + 1 < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done
+}
+# <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
+train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
+train_build() {
+  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x
+  [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] || return 0
+  [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
+  [ ! -s "$state/bad" ] && [ ! -s "$state/refusing" ] || return 0
+  [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] && git remote get-url "$REMOTE" >/dev/null 2>&1 || return 0
+  read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
+  ! [[ $down_at =~ ^[0-9]+$ ]] || [ $(($(date +%s) - down_at)) -ge "$CI_DOWN" ] || return 0
+  ! pipeline_touch "$old" "$own" || return 0
+  local -A QUEUE_RANK=()
+  local QUEUE_OLD=() QUEUE_ORDER_BY=''
+  queue_order "$q"
+  mkdir -p -m 700 "$train_dir"
+  while read -r x t <&4; do # not on stdin, which git and perl below may read
+    [ ${#train_n[@]} -lt "$max" ] || break
+    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
+    [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
+    b=${l[2]:-}
+    [ -n "$b" ] && [ "$b" != "$branch" ] && [[ $b != build/* ]] && r=$(git rev-parse -q --verify "refs/heads/$b^{commit}") || continue
+    skip=''
+    base=$(git merge-base main "$r") || continue
+    [ -z "$(git rev-list --merges "$base..$r")" ] || skip="it has merge commits"
+    while read -r x c; do
+      [ -z "$skip" ] && [ "$c" != "$b" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null || continue
+      skip="it sits on a commit that came off main"
+    done < <(cat "$state/taken-back" 2>/dev/null || true)
+    if [ -z "$skip" ]; then
+      if [ -z "$wt" ]; then
+        wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
+      fi
+      if git -C "$wt" checkout -q --detach "$r" 2>/dev/null && git -C "$wt" rebase -q --onto "$cur" "$base" >/dev/null 2>&1; then
+        c=$(git -C "$wt" rev-parse HEAD)
+        if [ "$c" = "$cur" ]; then skip="main already has all of it"
+        elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"
+        elif ! undo_guard "$cur" "$c" "$b" >/dev/null 2>&1; then skip="the undo guard stops it on the train"
+        fi
+      else
+        git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+        skip="it doesn't rebase cleanly onto the train"
+      fi
+    fi
+    if [ -n "$skip" ]; then say "ship train: $b stays in line ($skip)"; continue; fi
+    train_n+=("${t##*/}") train_br+=("$b") train_tip+=("$c") train_was+=("$r")
+    train_say $((${#train_n[@]} - 1)) "riding $branch"
+    cur=$c
+  done 4< <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
+  [ -z "$wt" ] || git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  [ ${#train_n[@]} -gt 0 ] || return 0
+  tip=$cur short=$(git rev-parse --short "$cur")
+  say "ship train: $branch takes the $((${#train_n[@]})) ships waiting behind it (${train_br[*]}): CI runs once on all $((${#train_n[@]} + 1)), and they ship together"
+  retro_log "ship train · $label · ${#train_n[@]} riders: ${train_br[*]}"
+}
+
+# <commit>: the gate on it. 0: green, 1: red (its log in $failed, its run in $ci_url; $reran when it was the one fresh
+# run after a red of flakes only), 2: no answer ($why).
+gate() {
+  local rc=0
+  ci_done
+  tip=$1 short=$(git rev-parse --short "$1") failed='' reran=''
   ci_gate || rc=$?
   # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
   # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
@@ -877,6 +998,57 @@ else
       [ "$rc" != 1 ] || ci_failed
     fi
   fi
+  [ "$rc" != 0 ] || greens="$greens$1 "
+  return "$rc"
+}
+# A red train: which ship turned it red, by bisecting its prefixes (each assumed green below the first red one). The
+# green part ships, the first red ship is refused with its own failure, and the ships after it go back in line. This
+# one's own commit red: the whole train goes back in line, and this one is refused as usual. A no-answer: the train
+# goes back in line, and this one falls back on its own.
+train_bisect() {
+  local lo=-1 hi=${#train_n[@]} mid hf=$failed hu=$ci_url hr=$reran
+  say "CI is red on the ship train ($ci_url): finding the first ship that turned it red"
+  queue_phase "finding the ship that turned the train red"
+  while [ $((hi - lo)) -gt 1 ]; do
+    mid=$(((lo + hi) / 2))
+    rc=0
+    gate "$(train_at "$mid")" || rc=$?
+    if [ "$rc" = 2 ]; then return; fi
+    if [ "$rc" = 0 ]; then lo=$mid; else hi=$mid hf=$failed hu=$ci_url hr=$reran; fi
+  done
+  failed=$hf ci_url=$hu reran=$hr
+  if [ "$hi" = 0 ]; then
+    say "the bisect found $branch itself red, so the ships behind it go back in line"
+    train_drop
+    rc=1
+    return
+  fi
+  say "the bisect found ${train_br[$((hi - 1))]} the first ship that turned the train red ($hu): it is refused, and the ${lo} before it ship"
+  retro_log "ship train red · $label · ${train_br[$((hi - 1))]} · $hu"
+  train_say $((hi - 1)) "refused $branch $hu" "$(tail -n 40 <<<"$hf")"
+  train_drop "$hi"
+  train_tip=("${train_tip[@]:0:$((hi - 1))}") train_br=("${train_br[@]:0:$((hi - 1))}") train_n=("${train_n[@]:0:$((hi - 1))}") train_was=("${train_was[@]:0:$((hi - 1))}")
+  tip=$(train_at "$lo") short=$(git rev-parse --short "$(train_at "$lo")") rc=0
+}
+
+# The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
+trap 'land_rc=$?; train_drop; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+fellback=
+rc=0
+failed=''
+reran=''
+land_mark ci ci
+if [ "$lane" = light ]; then
+  rc=light
+else
+  train_build
+  gate "$tip" || rc=$?
+  [ "$rc" != 1 ] || [ ${#train_n[@]} = 0 ] || train_bisect
+  if [ "$rc" = 2 ] && [ ${#train_n[@]} -gt 0 ]; then
+    say "the ship train goes back in line, since CI gave no answer ($why): $branch goes on alone"
+    train_drop
+    tip=$own short=$(git rev-parse --short "$own")
+  fi
 fi
 land_mark gate
 if [ "$rc" = light ]; then
@@ -886,6 +1058,7 @@ elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
+  tail -n 40 <<<"$failed" >&2
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else
@@ -928,10 +1101,27 @@ if [ "$(git -C "$SOURCE" rev-parse main)" != "$old" ]; then
   # The gate passed a commit that sits on what came off main: the rebase and the gate are done again, by the land.sh of that rebase.
   [ -z "$redo" ] || refuse "main moved again while this waited for the restart ahead, for the second time, so nothing landed. A person needs to look at main and $state"
   say "main went back to $(git -C "$SOURCE" log -1 --format='%h "%s"' main) while this waited (the restart ahead was rolled back): rebasing $branch onto it and testing again"
+  train_drop
   flock -u 7
   exec 7>&-
   LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
 fi
+
+# A rider that left the line while the train was tested (its minion was stopped) doesn't ship: the train ships up to
+# the ship before it, and the ones after it go back in line. That commit is tested only if CI passed on it.
+for ((i = 0; i < ${#train_n[@]}; i++)); do
+  tl=() tv=''
+  mapfile -t tl 2>/dev/null <"$state/queue/${train_n[$i]}" || true
+  read -r tv _ 2>/dev/null <"$train_dir/${train_n[$i]}" || true
+  [ -z "${tl[0]:-}" ] || [ "$(queue_proc "${tl[0]%% *}")" != "${tl[0]}" ] || [ "$tv" != riding ] || continue
+  say "ship train: ${train_br[$i]} left the line while the train was tested, so it ships without it and the ships after it go back in line"
+  train_drop "$i"
+  tip=$(train_at "$i") short=$(git rev-parse --short "$(train_at "$i")")
+  [[ $greens == *" $tip "* ]] || tested=''
+  break
+done
+train_owner=$branch
+[ ${#train_n[@]} = 0 ] || train_owner=${train_br[-1]}
 
 # Only when the live checkout doesn't have it (a failed check or a rolled-back restart put it back, or it never pulled): main follows, unless it moved on since.
 moved=
@@ -942,7 +1132,8 @@ main_back() {
   ! flock -n 9 2>/dev/null || ! flock -n 7 2>/dev/null || deploy_unchecked_back "$state" "$LIVE"
   git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && return 0
   if [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
-    taken_back "$state" "$tip" "$branch" # first: the landing behind looks for it the moment main goes back
+    while read -r c b; do taken_back "$state" "$c" "$b"; done < <(train_others)
+    taken_back "$state" "$tip" "$train_owner" # first: the landing behind looks for it the moment main goes back
     git -C "$SOURCE" reset -q --keep "$old"
   fi
   # Also when the landing behind this one took it off main first (it does once the restart has its verdict).
@@ -956,11 +1147,25 @@ trap 'main_back; exit 143' TERM
 trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
-printf '%s\n' "$old $tip" "$branch" >"$state/moving"
-trap 'land_timing $? || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+{ echo "$old $tip"; echo "$train_owner"; train_others; } >"$state/moving"
+trap 'land_rc=$?; train_drop; land_timing $land_rc || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
+if [ ${#train_n[@]} -gt 0 ]; then
+  # Each rider moves its own branch (its worktree is its own) within a poll of the line, before the deploy writes the
+  # release row, which finds each ship by its branch's tip (src/releases.ts landedIn).
+  for ((i = 0; i < ${#train_n[@]}; i++)); do train_say "$i" "moving ${train_tip[$i]} $branch ${train_was[$i]}"; done
+  for ((w = 0; w < 20; w++)); do
+    late=''
+    for ((i = 0; i < ${#train_n[@]}; i++)); do
+      [ "$(git rev-parse -q --verify "refs/heads/${train_br[$i]}")" = "${train_tip[$i]}" ] || late="$late ${train_br[$i]}"
+    done
+    [ -n "$late" ] || break
+    sleep 0.5
+  done
+  [ -z "$late" ] || say "ship train:$late didn't move to its train commit within 10 s, so the release row may leave it out"
+fi
 queue_phase "deploying"
 land_mark deploy deploy
 
@@ -970,6 +1175,12 @@ if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" "$here/tools/
 fi
 trap - INT TERM HUP
 land_mark landed
+if [ ${#train_n[@]} -gt 0 ]; then
+  for ((i = 0; i < ${#train_n[@]}; i++)); do train_landed "$i"; done
+  say "ship train: ${train_br[*]} shipped with $branch, each with its own shipped line"
+  retro_log "ship train shipped · $label · $((${#train_n[@]} + 1)) ships · $(git rev-parse --short "$tip")"
+  train_n=() train_br=() train_tip=() train_was=()
+fi
 if [ "$mode" = build ]; then
   # Landed: the branch goes, so the app stops calling it open. Its tip stays in the log line, for a rollback.
   if git update-ref -d "refs/heads/$build" "$base"; then

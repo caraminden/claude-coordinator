@@ -18,7 +18,7 @@ went green on CI at 09:01Z, and again with main taken in (run 44706923935).
    Not made, proposed for the pipeline lane: a `--full` land refused at rebase only because `build/<n>` moved could merge
    the new tip and stay in line.
 2. **Main took the next `SCHEMA_HISTORY` number (and the prompt budget) out from under the build, again.**
-   #1123's host_samples and #1130's tickets.goal were renumbered twice, ending at 89 and 90. The minion and Taskmaster
+   #1123's host_samples and #1130's tickets.goal were renumbered twice, then a third time after the build's last merge of main, when the Fable review found main's `ideas` and `flake_fixes` holding 89 and 90. They ended at 91 and 92. The minion and Taskmaster
    budgets in `test/prompt-budget.test.ts` went over on both merges of main (+47 and +17 chars).
    Both showed up only in CI on Cara's desktop, which compares with the newest origin/main. Build 2 and Build 4 hit the
    same schema clash. It is now a ledger row.
@@ -46,6 +46,24 @@ went green on CI at 09:01Z, and again with main taken in (run 44706923935).
   build list harder to check from `git log`.
 - `test/review-set-api.test.ts` flaked under load and refused the 05:16Z full run (33 flake lines across lands that
   night). Main's fix (98f6a888, 77454774) is in the build.
+
+## The build's Fable review
+
+Label high, set by `deploy/offbox-serve.sh` (#1142). The edit itself fails safe. Who-sees-what came back clean.
+
+Fixed:
+- Schema renumbered to 91 and 92.
+- #1144's kept answers held every GET for the whole session. They now hold only the paths a chat's opening replays,
+  at most 200.
+- Home ticked "Answered" on rows that had only been opened or withdrawn. It now says "Done".
+
+Left, all low:
+- The status dev seed still points the Seeded scheme at the running checkout: its ships need this repo.
+- `test/dev-copy.test.ts` needs a git checkout.
+- The first start after shipping nudges every target already slow today.
+- The CSP allows `data:` images for #1141's crop.
+- The service worker fetches the whole shell again on any asset change.
+- A long-time member with no last action sees the first-day welcome.
 
 ## Spec gaps (for Josh to judge)
 

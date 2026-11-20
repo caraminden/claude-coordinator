@@ -67,7 +67,8 @@ test('shared: unpointed old files are candidates; pinned, pointed-at and young o
   assert.match(r.stdout, /specs\/s\.md.*\*\* says "Nothing is built"/);
 
   put(sh, 'list.txt', 'handoffs/old-unpointed.md\nhandoffs/old-pointed.md\nhandoffs/old-pinned.md\n../escape.md\n');
-  const a = run('archive', '--dir', sh, '--list', join(sh, 'list.txt'), '--pins', join(sh, 'pins.txt'));
+  assert.equal(run('archive', '--dir', sh, '--list', join(sh, 'list.txt')).status, 2);
+  const a = run('archive', '--dir', sh, '--list', join(sh, 'list.txt'), '--pins', join(sh, 'pins.txt'), '--refs', join(dir, 'repo'));
   assert.match(a.stdout, /1 of 4 moved/);
   assert.ok(existsSync(join(sh, 'archive/handoffs/old-unpointed.md')));
   assert.ok(!existsSync(join(sh, 'handoffs/old-unpointed.md')));

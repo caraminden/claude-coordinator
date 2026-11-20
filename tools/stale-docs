@@ -15,12 +15,12 @@
 //     For each file in the shared folder's handoffs/ and specs/: who points at it (any other shared file, or any --refs
 //     file or folder: the repo, the memory folder, a dump of minion briefs), whether it is pinned (--pins: one path per
 //     line, relative to the folder), the minions it names (#N, for the caller to check closed and live), its age, and a
-//     reason. Verdict: pinned, pointed-at, young (under --min-age days, default 14) or unpointed: the only archive candidate.
+//     reason. A bare file name in another file's text counts as pointing at it, so candidates err toward fewer. Verdict: pinned, pointed-at, young (under --min-age days, default 14) or unpointed: the only archive candidate.
 //     A spec that says "Nothing is built" / "Nothing here is built" is listed as a stale claim for a person to check.
 //
 //   stale-docs archive --dir <shared folder> --list <file> [--pins <file>] [--refs <path>...]
 //     Moves the files named in <list> (one path per line, relative to the folder) into <folder>/archive/<same path>, never
-//     deleting. It re-checks each one first and leaves it where it is when it is pinned or something points at it.
+//     deleting. --refs is required (the same ones `shared` ran with). It re-checks each one first and leaves it where it is when it is pinned or something points at it.
 //     Run it only on a list a member has approved.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs';
@@ -194,13 +194,14 @@ function sharedCheck() {
 function archive() {
   const dir = resolve(opt.dir ?? die('--dir <shared folder> is needed'));
   const list = lines(opt.list ?? die('--list <file> is needed')).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  if (!opt.refs.length) die('archive needs --refs <path>... (the repo, the memory folder: the same ones `shared` was run with), or it can\'t see what points at a file');
   const corpus = corpusOf(dir, opt.refs);
   const pins = pinsOf();
   let moved = 0;
   for (const file of list) {
     if (file.startsWith('/') || file.split('/').includes('..') || file.startsWith('archive/')) { console.log(`skipped ${file}: not a path inside the folder`); continue; }
     if (!existsSync(join(dir, file))) { console.log(`skipped ${file}: not there`); continue; }
-    const r = judge(dir, file, corpus, pins, 0);
+    const r = judge(dir, file, corpus, pins, opt.minAge ?? 14);
     if (r.verdict !== 'unpointed') { console.log(`skipped ${file}: ${r.reason}`); continue; }
     const to = join(dir, 'archive', file);
     if (existsSync(to)) { console.log(`skipped ${file}: archive/${file} exists`); continue; }

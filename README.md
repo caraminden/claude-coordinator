@@ -647,4 +647,4 @@ commands; it hands the real work to minions.
 
 ## stale-docs (#1164)
 
-`tools/stale-docs` (on every turn's PATH, plain JS, any scheme's repo): `stale-docs refs` fails when a backticked path in CLAUDE.md, README.md, `.claude/skills/*/SKILL.md` or `.claude/rules/*.md` isn't in the repo (a repo's `.stale-docs-allow` lists the on-purpose ones, each with a reason); `stale-docs shared --dir <shared folder> --refs <repo> <memory folder> --pins <file>` lists which `handoffs/` and `specs/` files nothing points at, and `stale-docs archive --list <approved list>` moves only those to `archive/`, never deleting.
+`tools/stale-docs` (on every turn's PATH, plain JS, any scheme's repo): `stale-docs refs` fails when a backticked path in CLAUDE.md, README.md, `.claude/skills/*/SKILL.md` or `.claude/rules/*.md` isn't in the repo (a repo's `.stale-docs-allow` lists the on-purpose ones, each with a reason); `stale-docs shared --dir <shared folder> --refs <repo> <memory folder> --pins <file>` lists which `handoffs/` and `specs/` files nothing points at, and `stale-docs archive --list <approved list> --refs <the same paths>` moves only those to `archive/`, never deleting.

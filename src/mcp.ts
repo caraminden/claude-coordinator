@@ -285,6 +285,32 @@ const PROPOSE_MACHINE_NOTES = {
   },
 };
 
+const PROPOSE_MEMORY = {
+  name: 'propose_memory',
+  description:
+    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (a member ticks each one by hand), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      changes: {
+        type: 'array', maxItems: 300,
+        items: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['edit', 'add', 'delete', 'index', 'flag'] },
+            file: { type: 'string', description: 'The note file name, like some-note.md (never MEMORY.md)' },
+            text: { type: 'string', description: 'edit, add: the whole new note, frontmatter included' },
+            line: { type: 'string', description: 'add, index (optional on edit): its whole MEMORY.md line, "- [Name](file.md) — hook", under about 150 characters' },
+            reason: { type: 'string', maxLength: 500, description: 'Why, in one plain sentence' },
+          },
+          required: ['action', 'file', 'reason'],
+        },
+      },
+    },
+    required: ['changes'],
+  },
+};
+
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
   description:
@@ -2201,6 +2227,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
+    case 'propose_memory': {
+      const { href, counts } = await call('POST', `/api/tickets/${TICKET}/memory-proposal`, { changes: args.changes });
+      return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member decides each change on the Memory page, and the answer comes as a message. End your turn now, in state ready, and close yourself with close_self once the answer comes.`;
+    }
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
@@ -2430,7 +2460,7 @@ function toolListAll() {
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

@@ -80,6 +80,7 @@ import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
+import { memoryCuratorRoutes } from './src/routes/memory-curator.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
@@ -1407,7 +1408,7 @@ github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
 github.onCiFailed = (t) => {
   if (store.getProject(t.project_id)?.ship_path !== 'citadel') stallWatch.shipFailed(t.id, 'red CI on its PR');
 };
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

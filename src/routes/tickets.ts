@@ -223,7 +223,7 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
  * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
  * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
-function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
+export function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a parked minion too (#718): answering is as deliberate as Unpark.
   app.runner.send(ticketId, author, text, images, extra, false, files);
 }
@@ -318,9 +318,9 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
  * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
  * and a release key card (#837) that app's.
  */
-function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string } }) {
+export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; memory?: object }) {
   const { store, runner } = app;
-  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : 'plan');
+  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.memory ? 'memory' : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {
     const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
@@ -852,6 +852,8 @@ export const ticketRoutes: Route[] = [
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
+      // A memory tidy card (#1111) is decided change by change on the Memory page, never with Approve on the card.
+      if (card.memory) throw new HttpError(409, 'Review the memory tidy on the Memory page: each change is ticked there');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       const fixed = card.machine || card.releaseKey;
       const notes = body.verdict === 'approve' ? null : fixed && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);

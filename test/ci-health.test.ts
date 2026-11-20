@@ -208,6 +208,8 @@ function world({ delve = false } = {}) {
     runs: [] as Run[],
     jobs: new Map<number, Job[]>(),
     mainRuns: [] as Run[],
+    // Workflows listed after desktop's two (#1254: citadel-heavy's).
+    workflows: [] as { id: number; name: string; path: string; state: string }[],
     // GitHub's main tip, for the re-run after a red's fix ships (#1074).
     mainHead: 'aaaa000fff',
     // The repo's CI_RUNNER variable (the kit's switch onto GitHub's runners); null: unset (404).
@@ -230,11 +232,12 @@ function world({ delve = false } = {}) {
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
     let body: any;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
-    else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }] };
+    else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }, ...gh.workflows] };
     else if (path.endsWith('/actions/runners?per_page=100') && gh.runnersDenied) return { status: 403, etag: null, body: { message: 'Resource not accessible by integration' } };
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
+    else if (/\/actions\/workflows\/\d+\/runs\?branch=main/.test(path)) body = { workflow_runs: [] };
     else if (path.endsWith('/branches/main')) body = { name: 'main', commit: { sha: gh.mainHead } };
     else if (path.endsWith('/actions/variables/CI_RUNNER') && gh.ciRunner != null) body = { name: 'CI_RUNNER', value: gh.ciRunner };
     // Peek's own; any other repo has none.
@@ -892,7 +895,9 @@ test("a citadel-heavy job's red is the minion's own command, not main's: it wake
   const w = outsideWorld();
   w.quietDelve();
   const told: string[] = [];
-  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, text: string) => (told.push(text), true) });
+  const greens: string[][] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, text: string) => (told.push(text), true), green: (_p: unknown, runs: { file: string }[]) => greens.push(runs.map((r) => r.file)) });
+  w.gh.workflows = [{ id: 9, name: 'citadel-heavy', path: '.github/workflows/citadel-heavy.yml', state: 'active' }];
   // Dispatched on the default branch, with the minion's snapshot as an input: GitHub files it under main.
   const heavy = (fields: Partial<Run>) => runOf({ workflow_id: 9, name: 'citadel-heavy', path: '.github/workflows/citadel-heavy.yml', event: 'workflow_dispatch', conclusion: 'failure', ...fields });
   w.gh.mainRuns = [heavy({ id: 9201, head_sha: 'aaa0201fff', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
@@ -901,6 +906,12 @@ test("a citadel-heavy job's red is the minion's own command, not main's: it wake
   await health.tick(NOW + RED_FIX_MS + MIN);
   assert.deepEqual(told, []);
   assert.ok(!w.puts.some(([, key]) => /^ci\.(red|open)/.test(key)), 'no Mandate item');
+  // Nor a green: a heavy job passing on main's tip doesn't make that commit's CI green, and the page lists no verdict for it.
+  w.gh.runs = [heavy({ id: 9202, conclusion: 'success' }), runOf({ id: 9203, workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'success' })];
+  await health.tick(NOW + RED_FIX_MS + 2 * MIN);
+  assert.deepEqual(greens.at(-1), ['desktop.yml']);
+  const view = health.snapshot(() => true).find((x) => x.id === w.peek.id)!.view!;
+  assert.deepEqual(view.workflows.map((x) => x.file), ['desktop.yml']);
 });
 
 test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on with no fix minion naming the run, or once it is still red after the fix closed (#968)', async () => {

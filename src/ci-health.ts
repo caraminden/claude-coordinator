@@ -534,6 +534,7 @@ export class CiHealth {
     const minion = (r: Run) => runMinion(r.head_branch, r.head_sha, tickets, tips);
     const shown: CiView['workflows'] = [];
     for (const w of workflows) {
+      if (String(w.path ?? '').endsWith(`/${HEAVY_WORKFLOW}`)) continue; // minions' own commands: no verdict on main to show
       const mainRuns = onMain.get(w.id) ?? [];
       const verdict = mainRuns.find((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
       const pair = verdictPair(mainRuns);

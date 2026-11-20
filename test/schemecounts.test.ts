@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isShipping, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -55,9 +55,15 @@ test('isWorking: only a turn doing work spins the scheme\'s spinner and counts b
   }
   assert.equal(isWorking(undefined), false, 'no Taskmaster loaded yet');
   // The server landing it after its turn ended counts as working (#727), unless a card holds it or it was dismissed.
-  assert.equal(isWorking(minion({ server_work: { kind: 'land' } })), true, 'its handed-off land runs');
-  assert.equal(isWorking(minion({ server_work: { kind: 'land' }, approvals: 1 })), false, 'a card waits on a person');
-  assert.equal(isWorking(minion({ server_work: { kind: 'land' }, status: 'closed' })), false, 'dismissed');
+  // The server landing it after its turn ended is not working (#1294) but shipping: counted apart.
+  assert.equal(isWorking(minion({ server_work: { kind: 'land' } })), false, 'its handed-off land is not a running turn');
+  assert.equal(isShipping(minion({ server_work: { kind: 'land' } })), true, 'it waits on the server');
+  assert.equal(isShipping(minion({ server_work: { kind: 'land' }, status: 'running' })), false, 'a turn runs: working, not waiting');
+  assert.equal(isShipping(minion({ server_work: { kind: 'land' }, approvals: 1 })), false, 'a card waits on a person');
+  assert.equal(isShipping(minion({ server_work: { kind: 'land' }, status: 'closed' })), false, 'dismissed');
+  assert.equal(turnMoved(minion({}), minion({ server_work: { kind: 'land' } })), true, 'a ship entering the line moves the pill');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3, shipping: 6 }), { need: 2, busy: true, working: 3, shipping: 6, fresh: false, label: '2 need your answer · 3 minions working · 6 waiting to ship' }, 'running, waiting to ship, and needs-you apart');
+  assert.equal(schemePill({ shipping: 1 }).label, '1 waiting to ship', 'waiting alone shows');
   assert.equal(turnMoved(minion({ status: 'running' }), minion({ status: 'running', approvals: 1 })), true, 'an approval card stops the spinner');
   assert.equal(turnMoved(minion({ status: 'running', approvals: 1 }), minion({ status: 'running' })), true, 'answering it starts it again');
 });
@@ -79,19 +85,19 @@ test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on yo
 });
 
 test('schemePill: the spinner shows beside the Needs-you count, not only at zero (#314), with the working number only over 1 (#278)', () => {
-  assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, fresh: false, label: '' }, 'nothing: hidden');
-  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, fresh: false, label: '2 need your answer' }, 'badge only');
-  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, fresh: false, label: '1 minion working' }, 'spinner only, one minion: no number');
-  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, fresh: false, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, fresh: false, label: '2 need your answer · 1 minion working' }, 'both');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, fresh: false, label: '2 need your answer · 3 minions working' }, 'both, with the working number');
+  assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, shipping: 0, fresh: false, label: '' }, 'nothing: hidden');
+  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, shipping: 0, fresh: false, label: '2 need your answer' }, 'badge only');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, shipping: 0, fresh: false, label: '1 minion working' }, 'spinner only, one minion: no number');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, shipping: 0, fresh: false, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, shipping: 0, fresh: false, label: '2 need your answer · 1 minion working' }, 'both');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, shipping: 0, fresh: false, label: '2 need your answer · 3 minions working' }, 'both, with the working number');
   assert.equal(schemePill({ inbox: 1, running: false, working: 3 }).working, 0, 'no turn running: no working number, whatever the field says');
 });
 
 test('schemePill: violet only when something new waits, not when the count moved, and nothing at zero (#498, #539)', () => {
   assert.equal(schemePill({ inbox: 3 }).fresh, false, 'nothing new');
-  assert.deepEqual(schemePill({ inbox: 3, fresh: true }), { need: 3, busy: false, working: 0, fresh: true, label: '3 need your answer (something new since you last opened it)' }, 'new');
-  assert.deepEqual(schemePill({ inbox: 0, fresh: true }), { need: 0, busy: false, working: 0, fresh: false, label: '' }, 'at zero: hidden, never a violet 0');
+  assert.deepEqual(schemePill({ inbox: 3, fresh: true }), { need: 3, busy: false, working: 0, shipping: 0, fresh: true, label: '3 need your answer (something new since you last opened it)' }, 'new');
+  assert.deepEqual(schemePill({ inbox: 0, fresh: true }), { need: 0, busy: false, working: 0, shipping: 0, fresh: false, label: '' }, 'at zero: hidden, never a violet 0');
   assert.equal(schemePill({ inbox: 2, fresh: true, running: true, working: 1 }).label, '2 need your answer (something new since you last opened it) · 1 minion working');
 });
 

@@ -14,13 +14,16 @@ export const countMoved = (before, after) => !before || before.state !== after.s
 /**
  * A minion or Taskmaster whose turn is doing work, for the spinner and its number (#248, #278). A turn
  * held open on an approval card waits on a person, not working (#373; Cara, 2026-11-07: "it should only
- * count actually working minions"). `t.approvals` is how many of its cards wait, as runner.view sends it. The server
- * working for it with no turn of its own (`t.server_work`, a handed-off land) counts too (#727).
+ * count actually working minions"). `t.approvals` is how many of its cards wait, as runner.view sends it. Only a
+ * running turn counts: the server working for it (`t.server_work`) is `isShipping`, apart (#1294; Cara, 2026-11-20: "Running only").
  */
-export const isWorking = (t) => !!t && !t.approvals && (t.status === 'running' || (t.status !== 'closed' && !!t.server_work));
+export const isWorking = (t) => !!t && !t.approvals && t.status === 'running';
 
-/** A minion started or ended work: the spinner beside the count (#248). */
-export const turnMoved = (before, after) => isWorking(before) !== isWorking(after);
+/** The server works for a minion with no turn running: its ship waits in the line, lands or deploys (#727, #1294). */
+export const isShipping = (t) => !!t && !t.approvals && t.status !== 'running' && t.status !== 'closed' && !!t.server_work;
+
+/** A minion started or ended work, or began or stopped waiting on the server: the spinner and the waiting dots (#248, #1294). */
+export const turnMoved = (before, after) => isWorking(before) !== isWorking(after) || isShipping(before) !== isShipping(after);
 
 /**
  * What a scheme's pill shows (`p` as api/projects sends it): the Needs-you count, the spinner while a
@@ -38,10 +41,12 @@ export function schemePill(p) {
   // Josh, 2026-11-11: "Only when it went up", then "if one went up and one went down, or even 2 went down it should
   // still be purple"). Items only going away leave it plain, and at zero there's nothing to show.
   const fresh = need > 0 && !!p.fresh;
+  const shipping = p.shipping > 0 ? p.shipping : 0;
   const parts = [];
   if (need) parts.push(`${need} need${need === 1 ? 's' : ''} your answer${fresh ? ' (something new since you last opened it)' : ''}`);
   if (busy) parts.push(p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working');
-  return { need, busy, working: busy && p.working > 1 ? p.working : 0, fresh, label: parts.join(' · ') };
+  if (shipping) parts.push(`${shipping} waiting to ship`);
+  return { need, busy, working: busy && p.working > 1 ? p.working : 0, shipping, fresh, label: parts.join(' · ') };
 }
 
 /**

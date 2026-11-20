@@ -55,6 +55,12 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 .scheme-count > .busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the count has */
 .scheme-count > .busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
 .scheme-count > .busy b { margin-left: 0.3em; color: var(--running); font-weight: 600; font-variant-numeric: tabular-nums; } /* how many minions are working (#278) */
+/* Minions waiting on the server (#1294): green, apart from blue running, orange count and violet fresh. The number, then "…" that steps dot by dot. */
+.scheme-count > .ship { display: inline-flex; align-items: baseline; color: var(--done); font-weight: 600; }
+.scheme-count > .ship b { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 0.15em; }
+.scheme-count > .ship i { font-style: normal; display: inline-block; width: 1em; overflow: hidden; white-space: nowrap; animation: scheme-dots 1.4s steps(4, end) infinite; }
+@keyframes scheme-dots { from { width: 0; } to { width: 1em; } }
+@media (prefers-reduced-motion: reduce) { .scheme-count > .ship i { animation: none; width: auto; } }
 @keyframes scheme-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .scheme-count > .busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
@@ -138,7 +144,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   .shelf[open] > :not(#schemes-shelf, summary) { contain: inline-size; }
   /* What changes live leaves the width alone (#861): each scheme row keeps room for its pill whether it shows or not,
      and the release rows' ticking ETAs fit the width the names set. */
-  .shelf[open] .scheme-count { min-width: 7em; justify-content: flex-end; }
+  .shelf[open] .scheme-count { min-width: 10em; justify-content: flex-end; }
   .shelf[open] .scheme-count[hidden] { display: inline-flex; visibility: hidden; }
   .shelf[open] .rel-rows { contain: inline-size; }
   .sidebar[open] { width: auto; }

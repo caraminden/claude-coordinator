@@ -15,7 +15,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
-import { isWorking } from '../../public/schemecounts.js';
+import { isShipping, isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
 import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
 import { inOrder } from '../../public/reorder.js';
@@ -445,7 +445,8 @@ export const projectRoutes: Route[] = [
     // hidden: this person hid it (#226); its badge stays at zero.
     // minimized: this person minimized it (#1243): listed after the others; the counts stay real, and the front end draws it quiet.
     // member: they own it or were added to it (#674); false for one only admin reach opens, listed apart from theirs.
-    // running: a minion or its Taskmaster has a turn doing work, or the server works for it (#248, #727; not one held on an approval card, #373), for the spinner; false when hidden.
+    // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
+    // shipping: how many minions have no turn but the server works for them: ship in line, landing, deploying (#727, #1294); 0 when hidden.
     // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
     // coordinator_id: the scheme's Taskmaster, null until its first open makes one.
     // fresh: something waits on this person that wasn't waiting when they last had the scheme open (#498, #539), for the
@@ -475,6 +476,7 @@ export const projectRoutes: Route[] = [
           fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
           running: !hidden.has(p.id) && tickets.some(busy),
           working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
+          shipping: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && isShipping({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) })).length,
           icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
           // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
           coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,

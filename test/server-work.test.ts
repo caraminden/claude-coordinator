@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Landings } from '../src/land.ts';
 import { serverWorkWatch } from '../src/server-work.ts';
-import { isWorking } from '../public/schemecounts.js';
+import { isShipping, isWorking } from '../public/schemecounts.js';
 
 test("server work (#727): a handed-off land is working until it settles, and its row is sent at each end", (t) => {
   const data = mkdtempSync(join(tmpdir(), 'server-work-'));
@@ -22,7 +22,8 @@ test("server work (#727): a handed-off land is working until it settles, and its
 
   assert.deepEqual(work.of(5), { kind: 'land' });
   assert.equal(work.of(6), null, 'another minion');
-  assert.equal(isWorking({ status: 'idle', server_work: work.of(5) }), true, 'its scheme counts it working');
+  assert.equal(isShipping({ status: 'idle', server_work: work.of(5) }), true, 'its scheme counts it waiting to ship, not working');
+  assert.equal(isWorking({ status: 'idle', server_work: work.of(5) }), false);
   work.sync();
   assert.deepEqual(sent, [5], 'its row is sent as the land starts');
   work.sync();
@@ -33,7 +34,7 @@ test("server work (#727): a handed-off land is working until it settles, and its
   work.sync();
   assert.deepEqual(sent, [5, 5], 'settled: its row is sent again');
   assert.equal(work.of(5), null);
-  assert.equal(isWorking({ status: 'idle', server_work: work.of(5) }), false, 'and no longer counts');
+  assert.equal(isShipping({ status: 'idle', server_work: work.of(5) }), false, 'and no longer counts');
   clock += 1001;
   assert.equal(work.of(5), null);
 });

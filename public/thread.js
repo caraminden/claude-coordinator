@@ -936,7 +936,7 @@ function drawEvent(event, scroll) {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
-        { id: event.id, strikes: data.strikes, brief: data.brief, schedule: data.schedule, ask: data.ask },
+        { id: event.id, strikes: data.strikes, brief: data.brief, schedule: data.schedule, ask: data.ask, mentions: data.mentions },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
       // What its ✎ puts back in the message box while it waits in the queue (markQueued); a comment on a file would lose its file.

@@ -213,6 +213,9 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 .msg hr { border: 0; border-top: 1px solid var(--line); margin: 1.2rem 0; }
 .msg .link { text-decoration: underline dotted; }
 .msg.user.pending { opacity: 0.7; }
+/* @mentions (#1149): a member's name as a chip; your own in amber, like the rest of what waits on you. */
+.msg .mention { padding: 0.05em 0.35em; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--running) 14%, transparent); font-weight: 600; white-space: nowrap; }
+.msg .mention.me { background: color-mix(in srgb, var(--waiting-tint) 30%, transparent); }
 /* A message that didn't reach the server (composer.js notSent): kept, with ↻ and ✎ in its who-line. */
 .msg.user.not-sent { border-color: var(--error); }
 .msg .who .unsent-tag { color: var(--error); }

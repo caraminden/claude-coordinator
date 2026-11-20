@@ -411,7 +411,7 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
   const kinds = [
     { kind: 'approval', card: {} }, { kind: 'question', card: {} }, { kind: 'question', card: { doc: 'x.html' } }, { kind: 'question', card: { notice: 'x' } },
     { kind: 'question', card: { secret: { name: 'X' } } }, { kind: 'plan', card: {} }, { kind: 'spend', card: { stage: 5 } }, { kind: 'quiet' },
-    { kind: 'replies' },
+    { kind: 'replies' }, { kind: 'mention', card: { by: 'Cara', text: '@Josh can you look at this' } },
   ];
   for (const item of kinds) {
     const why = askWhy({ at, ...item }, { state: 'ready' }, NOW);

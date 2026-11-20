@@ -14,7 +14,9 @@ const inboxSeen = new Map();
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
-const faded = (item) => item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
+// A mention (#1149) goes once you've opened its chat since it came.
+const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))
+  || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
 
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
@@ -92,7 +94,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', mention: '@ Mention', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.

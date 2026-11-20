@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { after, test } from 'node:test';
+import { procsUnder, until } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
 
 // tools/citadel-test (#641): a minion's own test files, run with the leak guard and a time limit, showing only the
@@ -65,13 +66,33 @@ test('--name keeps only the tests it matches', async () => {
   assert.match(r.out, /^✔ 1 passed, 0 failed/);
 });
 
-test('a hung test ends at the limit, named, with a line saying so', async () => {
-  const f = file('hang.test.ts', `test('quick', () => {});\ntest('waits forever', () => new Promise(() => setInterval(() => {}, 1000)));`);
-  const r = await run([f, '--timeout', '3']);
-  assert.equal(r.code, 124, r.out);
-  assert.ok(r.ms < 15_000, `it stopped at the limit, not later (${r.ms} ms)`);
-  assert.match(r.out, /stopped before the end \(1 passed, 0 failed by then\)\. Still running:\n {2}.*hang\.test\.ts:4 › waits forever\n/);
-  assert.match(r.out, /✖ stopped at the time limit, 3 s/);
+test('a hung test ends at the limit, named, with a line saying so, and what it started stops too', async () => {
+  // Outside the run's TMPDIR, whose processes the leak guard kills: this one only the limit's group TERM stops.
+  const away = mkdtempSync(join(tmpdir(), 'citadel-test-away-'));
+  after(() => rmSync(away, { recursive: true, force: true }));
+  const worker = join(away, 'worker');
+  const f = file(
+    'hang.test.ts',
+    `import { spawn } from 'node:child_process';\ntest('quick', () => {});\n` +
+      `test('waits forever', () => {\n` +
+      `  spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', ${JSON.stringify(worker)}], { stdio: 'ignore' });\n` +
+      // Printed a turn after the test started, so its line reaches the log after the runner has the start.
+      `  setTimeout(() => console.log('hung test running'), 0);\n` +
+      `  return new Promise(() => setInterval(() => {}, 1000));\n});`,
+  );
+  const log = join(tmp, 'citadel-test.log');
+  rmSync(log, { force: true });
+  const r = run([f, '--timeout', '120']);
+  // The limit fires once the hung test runs, not on a clock that races the file's start under load (#1198): SIGALRM
+  // is what timeout's own timer sends it.
+  await until('the hung test to start', () => existsSync(log) && readFileSync(log, 'utf8').includes('hung test running'));
+  const [limit] = await until('the time limit', () => [...procsUnder([tmp])].find(([, cmd]) => cmd.startsWith('timeout --foreground')));
+  process.kill(limit, 'SIGALRM');
+  const { code, out } = await r;
+  assert.equal(code, 124, `the runner stopped on the limit's SIGTERM, not the KILL 10 s later: ${out}`);
+  assert.match(out, /stopped before the end \(1 passed, 0 failed by then\)\. Still running:\n {2}.*hang\.test\.ts:5 › waits forever\n/);
+  assert.match(out, /✖ stopped at the time limit, 120 s/);
+  await until('the process the hung test started to stop', () => procsUnder([away]).size === 0, 10_000);
 });
 
 test('a process a test leaves running is reported and the run fails', async () => {

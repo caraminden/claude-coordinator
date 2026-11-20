@@ -241,6 +241,12 @@ test('machine tools are lazy: a remembered tool list answers the turn\'s start, 
   assert.equal(app.machine.gets, gets + 1);
   assert.equal(app.calls.filter((c) => c.path.startsWith('/api/machines/5/session?')).at(-1)!.token, 'token-b');
   assert.ok(app.machine.posts.some((m) => m.method === 'initialize'));
+
+  // A notification on the open link (Claude Code cancelling a call) reaches the machine, and the pool lives on.
+  await rpc(pool.port, 'token-b', path, { method: 'notifications/cancelled', params: { requestId: 3 } });
+  await until('the machine got the notification', () => app.machine.posts.some((m) => m.method === 'notifications/cancelled'));
+  process.kill(pool.pid, 0);
+  assert.equal((await rpc(pool.port, 'token-b', path, toolCall(4, 'run_task', { task: 'again' }))).result.content[0].text, 'ran run_task');
 });
 
 test('a turn whose pool won\'t start runs with its own helpers instead (the stdio config)', async () => {

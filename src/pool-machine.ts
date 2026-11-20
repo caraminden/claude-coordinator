@@ -58,10 +58,16 @@ export async function machineRequest(token: string, machine: number, server: 'mc
   if (msg?.method === 'initialize' || msg?.method === 'notifications/initialized') {
     turn.handshake = msg.method === 'initialize' ? [msg] : [...turn.handshake.filter((m) => m.method === 'initialize'), msg];
   }
+  const headers = { Authorization: `Bearer ${token}` };
+  async function post(l: Link, m: any) {
+    const r = await fetch(`${api}/api/machines/${machine}/${route}/${l.session}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
+    if (!r.ok) throw new Error(r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
+  }
   const cache = readCache(cacheDir, machine, server);
   if (msg?.id === undefined) {
-    // A notification reaches an open session only; the handshake is replayed when one opens.
-    if (turn.link) turn.link.then((l) => post(l, msg), () => {});
+    // A notification reaches an open session only; the handshake is replayed when one opens. A lost one is dropped:
+    // a throw here would end the pool, and every turn's calls with it.
+    if (turn.link) turn.link.then((l) => post(l, msg)).catch(() => {});
     return null;
   }
   if (msg.method === 'ping') return { jsonrpc: '2.0', id: msg.id, result: {} };
@@ -69,11 +75,6 @@ export async function machineRequest(token: string, machine: number, server: 'mc
     return { jsonrpc: '2.0', id: msg.id, result: msg.method === 'initialize' ? cache.init : { tools: cache.tools } };
   }
   const t = turn;
-  const headers = { Authorization: `Bearer ${token}` };
-  async function post(l: Link, m: any) {
-    const r = await fetch(`${api}/api/machines/${machine}/${route}/${l.session}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
-    if (!r.ok) throw new Error(r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
-  }
   if (!t.link) {
     t.link = open(api, route, machine, server, name, headers, msg.method === 'initialize' ? [] : t.handshake, cacheDir, () => {
       if (byKey!.get(k) === t) t.link = null;

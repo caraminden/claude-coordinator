@@ -50,8 +50,14 @@ async function turnOf(token: string): Promise<TurnContext | null> {
     await new Promise<void>((done) => {
       const list = waiting.get(token) ?? [];
       waiting.set(token, list);
-      const t = setTimeout(done, WAIT);
-      list.push(() => (clearTimeout(t), done()));
+      const wake = () => (clearTimeout(t), done());
+      // A token that never registers leaves nothing behind.
+      const t = setTimeout(() => {
+        list.splice(list.indexOf(wake), 1);
+        if (!list.length && waiting.get(token) === list) waiting.delete(token);
+        done();
+      }, WAIT);
+      list.push(wake);
     });
   }
   const t = turns.get(token);
@@ -148,7 +154,20 @@ const listen = (port: number) =>
     server.once('error', () => done(false));
     server.listen(port, '127.0.0.1', () => done(true));
   });
-if (!(await listen(lastPort())) && !(await listen(0))) throw new Error('could not listen');
+/**
+ * Running turns' Claude has the last port in its env for good, so a restart waits up to 10 s for it to come free
+ * before taking a new one (then only turns started from now on reach the pool; the others lose their tools).
+ */
+async function bind(): Promise<boolean> {
+  const last = lastPort();
+  for (const end = Date.now() + 10_000; last; ) {
+    if (await listen(last)) return true;
+    if (Date.now() > end) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return listen(0);
+}
+if (!(await bind())) throw new Error('could not listen');
 const port = (server.address() as AddressInfo).port;
 const write = (file: string, text: string) => {
   writeFileSync(`${file}.tmp`, text, { mode: 0o600 });

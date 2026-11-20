@@ -2892,9 +2892,11 @@ export class Runner {
       const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
       // A side question's fork runs as the server's child: it is short, and a restart loses it anyway.
       const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+      // A host turn with no unit of its own (a side question) keeps its own helpers: a pool it started would live in the
+      // server's cgroup and die on the next deploy restart, with every host turn's calls.
       // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
       const plan = launchPlan({
-        project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex,
+        project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex && !(place.host && !unit && this.units),
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
           // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
           openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },

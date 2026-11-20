@@ -8,6 +8,11 @@
 .shelf .account .point-entry { display: none; align-items: center; gap: 0.4rem; min-height: var(--control-h); color: var(--ink); text-decoration: none; }
 .shelf .account .point-entry:is(:hover, :focus-visible) { text-decoration: underline; }
 @media (max-width: 800px) { .shelf .account .point-entry { display: inline-flex; } }
+/* The desktop app's link (#1186) sits between the name and Sign out on one line; at the overview's narrowest the name
+   and Sign out stay whole and the link gives way. */
+.shelf .account .foot:has(.get-app) { gap: 0.4rem; }
+.shelf .account .foot:has(.get-app) > * { flex: none; white-space: nowrap; }
+.shelf .account .foot .get-app { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: block; line-height: var(--control-h); color: var(--accent); }
 .shelf .account .foot > :is(a, button):is(:hover, :focus-visible) { text-decoration: underline; }
 .shelf .account .foot .sign-out:is(:hover, :focus-visible) { color: var(--ink); }
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }

@@ -1352,6 +1352,18 @@ const BACKUP_SCHEME = 2;
 contraptions.appsDomain = APPS_DOMAIN;
 contraptions.appsHome = services.opts.home;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN, { chunked, home: services.opts.home });
+// A drain comes before every restart of an app's service: its requests wait for it until the release, and a little after (#1118).
+const drainTurns = services.drain;
+services.drain = async (row) => {
+  const restarted = apps.restarts.hold(row.name);
+  try {
+    const quiet = await drainTurns(row);
+    return { said: quiet.said, release: () => (quiet.release(), restarted()) };
+  } catch (err) {
+    restarted();
+    throw err;
+  }
+};
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,

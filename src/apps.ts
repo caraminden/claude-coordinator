@@ -15,6 +15,7 @@
 // signed with the contraption's key (src/contraptions.ts), which the contraption checks. The proxy never
 // hands the contraption's server either login cookie, nor lets it set one, nor a cookie for another host.
 import { join } from 'node:path';
+import { connect } from 'node:net';
 import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { APP_NAME } from './appname.ts';
@@ -34,6 +35,63 @@ export const MAX_BODY = 20 * 1024 * 1024;
 const UPLOADS = /^\/apps\/_citadel\/uploads\/([a-z0-9-]+)(?:\/([^/]+))?$/;
 /** How often open streams and websockets are checked against who the contraption is enabled for. */
 const SWEEP_MS = 2000;
+
+/** How long a request waits for a restarting app's port (#1118); the server's own socket hold is the precedent. */
+export const HOLD_MS = 5000;
+
+/**
+ * Apps restarting now (#1118): from a deploy's or restart's drain until its release, and HOLD_MS after (a restart's
+ * systemctl returns before the app listens). Meanwhile a request waits until the app's port takes a connection, up
+ * to HOLD_MS, before it is forwarded, so a deploy isn't a burst of 502s. Nothing goes to the app before its port is
+ * open, so nothing is replayed, bodies included; an app that isn't restarting fails fast as before.
+ */
+export class RestartHolds {
+  private holdMs: number;
+  /** Past this many waiting on one app, a request goes on at once (and fails fast if the app is down). */
+  private maxWaiting: number;
+  private apps = new Map<string, { holds: number; ended: number; waiting: number }>();
+
+  constructor(holdMs = HOLD_MS, maxWaiting = 200) {
+    this.holdMs = holdMs;
+    this.maxWaiting = maxWaiting;
+  }
+
+  /** The app is restarting until the returned release is called (once; again does nothing). */
+  hold(name: string): () => void {
+    const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };
+    this.apps.set(name, app);
+    app.holds++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      app.holds--;
+      app.ended = Date.now();
+    };
+  }
+
+  /** null: go now. Else resolves once the app's port is open, the hold's time is up, or the asker is gone. */
+  wait(name: string, port: number, gone: () => boolean): Promise<void> | null {
+    const app = this.apps.get(name);
+    if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return null;
+    app.waiting++;
+    const until = Date.now() + this.holdMs;
+    const poll = async () => {
+      while (!gone() && Date.now() < until && !(await accepts(port))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - Date.now()))));
+    };
+    return poll().finally(() => app.waiting--);
+  }
+}
+
+/** Whether something takes connections on 127.0.0.1:port (the connection is closed at once). */
+const accepts = (port: number) => new Promise<boolean>((ok) => {
+  const s = connect(port, '127.0.0.1');
+  s.once('connect', () => {
+    s.destroy();
+    ok(true);
+  });
+  s.once('error', () => ok(false));
+});
 
 /** Whether a path under the contraption (after /apps/<name>) is one of its open paths, or under one. */
 export function isOpenPath(openPaths: string[], rest: string): boolean {
@@ -129,6 +187,8 @@ export class AppProxy {
   private open = new Map<{ destroy(): void }, { name: string; uid: number }>();
   /** A 5xx answer from a contraption, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
   onServerError: (row: ContraptionRow, status: number, method: string, path: string, note?: string) => void = () => {};
+  /** Apps restarting now, whose requests wait for them (#1118): server.ts holds one around each drain. */
+  readonly restarts = new RestartHolds();
   /** Big uploads, and the home folder apps' DATA_DIRs are under (~/.local/share/<name>); null: no uploads. */
   private uploads: { chunked: ChunkedUploads; home: string } | null;
 
@@ -186,7 +246,17 @@ export class AppProxy {
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
     const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
-    forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
+    const go = () => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
+    this.whenUp(a.row, res, go);
+  }
+
+  /** Go now, or once a restarting app's port is open (#1118); never for an asker who left meanwhile. */
+  private whenUp(row: ContraptionRow, conn: { once(e: 'close', f: () => void): unknown }, go: () => void) {
+    let gone = false;
+    const waiting = this.restarts.wait(row.name, row.port, () => gone);
+    if (!waiting) return go();
+    conn.once('close', () => (gone = true));
+    void waiting.then(() => gone || go());
   }
 
   /** Serve a request that asks to upgrade (a websocket): the same gate, then a tunnel. */
@@ -201,7 +271,7 @@ export class AppProxy {
     const a = this.admit(req, url, appHost(req, this.domain));
     if ('status' in a) return answerRaw(socket, a.status, a.reason, a.headers, a.body);
     this.track(socket, a);
-    forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed));
+    this.whenUp(a.row, socket, () => forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed)));
   }
 
   private track(conn: { destroy(): void; once(e: 'close', f: () => void): unknown }, a: Admitted) {

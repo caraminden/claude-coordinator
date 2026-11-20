@@ -2,11 +2,14 @@
 // owner (or an admin) gives the go, pauses, resumes, stops, runs now and sets job hours. The agent's side is in
 // routes/machines.ts (job-input, job-state, job-upload); the queue is src/machine-jobs.ts.
 import { join } from 'node:path';
-import type { ContraptionRow, Machine, Project } from '../db.ts';
-import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
+import type { ContraptionRow, Machine, MachineJob, Project } from '../db.ts';
+import { HttpError, json, ownWrites, readJson, type App, type Ctx, type Route } from '../http.ts';
 import { cleanKind, jobInputs, jobMachinesFor, type Actor, type Choice } from '../machine-jobs.ts';
 import { ensureCoordinator } from './projects.ts';
 import { projectSharedDir } from '../workspace.ts';
+
+/** A job as it stands once this request's own writes have landed: the job helpers re-read it before then (#1244). */
+const landed = async (app: App, job: MachineJob) => { await ownWrites(); return app.jobs.view(app.store.getMachineJob(job.id) ?? job); };
 
 const people = { who: ['person'], refuse: 'Only people decide on a machine\'s jobs' } as const;
 const minion = { who: ['minion'], refuse: 'Only a minion queues jobs here' } as const;
@@ -65,7 +68,7 @@ export const jobRoutes: Route[] = [
       const roots = [ticket.cwd, app.sharedDir(ticket), projectSharedDir(app.dataDir, project.id)];
       const q = await queueFrom(app, body, project, roots);
       const job = app.jobs.queue({ ...q, projectId: project.id, ticketId: ticket.id, contraptionId: null, askedBy: `#${ticket.number} ${ticket.title}`.slice(0, 120) });
-      return json(res, 201, app.jobs.view(job));
+      return json(res, 201, await landed(app, job));
     },
   },
   {
@@ -76,10 +79,10 @@ export const jobRoutes: Route[] = [
   },
   {
     method: 'POST', path: '/api/tickets/:ticket/jobs/:job/stop', ...minion,
-    handler(ctx) {
+    async handler(ctx) {
       const job = ctx.app.jobs.get(jobId(ctx));
       if (job.ticket_id !== ctx.ticket.id) throw new HttpError(404, 'No such job of this minion\'s');
-      return json(ctx.res, 200, ctx.app.jobs.view(ctx.app.jobs.stopJob(job.id, { asker: true })));
+      return json(ctx.res, 200, await landed(ctx.app, ctx.app.jobs.stopJob(job.id, { asker: true })));
     },
   },
 
@@ -114,17 +117,17 @@ export const jobRoutes: Route[] = [
     async handler(ctx) {
       const choice = (await readJson(ctx.req)).choice as Choice;
       if (!['hours', 'now', 'always', 'no'].includes(choice)) throw new HttpError(400, 'choice must be hours, now, always or no');
-      return json(ctx.res, 200, ctx.app.jobs.view(ctx.app.jobs.decide(jobId(ctx), choice, actor(ctx))));
+      return json(ctx.res, 200, await landed(ctx.app, ctx.app.jobs.decide(jobId(ctx), choice, actor(ctx))));
     },
   },
   ...(['pause', 'resume', 'stop', 'run-now'] as const).map((action): Route => ({
     method: 'POST', path: `/api/jobs/:job/${action}`, ...people,
-    handler(ctx) {
+    async handler(ctx) {
       const { jobs } = ctx.app;
       const id = jobId(ctx);
       const who = actor(ctx);
       const job = action === 'pause' ? jobs.pause(id, who) : action === 'resume' ? jobs.resume(id, who) : action === 'stop' ? jobs.stopJob(id, who) : jobs.runNow(id, who);
-      return json(ctx.res, 200, jobs.view(job));
+      return json(ctx.res, 200, await landed(ctx.app, job));
     },
   })),
 
@@ -141,7 +144,7 @@ export const jobRoutes: Route[] = [
       const person = Number(body.person);
       const who = Number.isInteger(person) ? app.store.getUser(person)?.name : undefined;
       const job = app.jobs.queue({ ...q, projectId: home.id, ticketId: null, contraptionId: c.id, askedBy: `${c.title}${who ? ` for ${who}` : ''}`.slice(0, 120) });
-      return json(res, 201, app.jobs.view(job));
+      return json(res, 201, await landed(app, job));
     },
   },
   {
@@ -150,9 +153,9 @@ export const jobRoutes: Route[] = [
   },
   {
     method: 'POST', path: '/api/contraptions/jobs/:job/stop', who: 'contraption',
-    handler(ctx) {
+    async handler(ctx) {
       const job = contraptionJob(ctx.app, ctx.contraption, jobId(ctx));
-      return json(ctx.res, 200, ctx.app.jobs.view(ctx.app.jobs.stopJob(job.id, { asker: true })));
+      return json(ctx.res, 200, await landed(ctx.app, ctx.app.jobs.stopJob(job.id, { asker: true })));
     },
   },
 ];

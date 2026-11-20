@@ -45,7 +45,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '..
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
@@ -390,6 +390,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const closeCancelled = setLabels(app, ticket, await readJson(req), session.name, caller?.id ?? null);
+      await ownWrites(); // the reply re-reads the row it just wrote (#1244)
       return json(res, 200, { ...ticketView(app, ticket.id), ...(closeCancelled && { close_cancelled: closeCancelled }) });
     },
   },
@@ -907,7 +908,7 @@ export const ticketRoutes: Route[] = [
         if (ins.scope === 'citadel' && !session.admin) throw new HttpError(403, `Only a ${APP_NAME} admin or a member of the ${APP_NAME} scheme can save the ${APP_NAME}-wide text`);
         const now = ins.scope === 'citadel' ? store.appInstructions().text : store.getProject(ins.project)?.instructions;
         if (now !== ins.old) throw new HttpError(409, 'The instructions changed since this edit was held; ask the minion to make it again');
-        saveInstructions(app, id, ins, `${ins.by}, saved by ${session.name}`);
+        await saveInstructions(app, id, ins, `${ins.by}, saved by ${session.name}`);
       }
       // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
       if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
@@ -1145,11 +1146,13 @@ export const ticketRoutes: Route[] = [
         await runner.close(id, `${session.name} dismissed this minion.`);
       } else {
         store.updateTicket(id, { status: body.status });
+        await ownWrites(); // the broadcast, the worktree check and the reply read it back (#1244)
         runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });
         runner.broadcastTicket(id);
         // Its worktree back now if the sweep removed it (#660), behind any dismissal cleanup on its lane.
         void runner.reopened(id);
       }
+      await ownWrites();
       return json(res, 200, ticketView(app, id));
     },
   },

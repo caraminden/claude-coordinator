@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { READ_WAIT_MS, writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
-import { writes } from '../src/http.ts';
+import { json, ownWrites, writes } from '../src/http.ts';
 import { until } from './wait.ts';
 
 // #795: with WAL and synchronous=NORMAL, the first write after a checkpoint fsyncs the WAL's new header on the
@@ -146,13 +146,57 @@ test('a write that returns a value waits for the queue, and what it writes insid
   assert.equal(store.getTicket(t.id)!.title, 'a minion');
 });
 
-test('a response waits for the request\'s writes, so a client reading the file sees them', () => {
-  const { store } = open();
-  store.setSetting('seen', 'yes');
-  writes.settle!();
-  const other = new DatabaseSync(store.path, { readOnly: true });
-  assert.deepEqual({ ...other.prepare("SELECT value FROM settings WHERE key = 'seen'").get() }, { value: '"yes"' });
-  other.close();
+test('a read in a request still waits only READ_WAIT_MS; awaiting its own writes, it sees them, off the event loop (#1244)', async () => {
+  const { store, w } = open(READ_WAIT_MS * 3);
+  const has = (key: string) => store.db.prepare('SELECT 1 FROM settings WHERE key = ?').get(key) !== undefined;
+  await writes.request.run({ seq: 0 }, async () => {
+    store.setSetting('mine', 1);
+    const t0 = performance.now();
+    assert.equal(has('mine'), false, 'a read gives up waiting: the disk is "stalled"');
+    assert.ok(performance.now() - t0 < READ_WAIT_MS + 100, 'and never holds the server longer than any read');
+    await ownWrites();
+    assert.equal(has('mine'), true, 'once it has awaited its own writes, it sees them');
+    writes.request.getStore()!.done = true;
+    store.setSetting('later', 1);
+    assert.equal(writes.landed!(), null, 'once its response is sent, work it started is no longer its own');
+  });
+  assert.ok(w.drain());
+});
+
+test('a response waits for its own request\'s writes, however slow, off the event loop (#1244)', async () => {
+  const { store, w } = open(READ_WAIT_MS * 3);
+  const seen = () => {
+    const other = new DatabaseSync(store.path, { readOnly: true });
+    try { return other.prepare("SELECT value FROM settings WHERE key = 'seen'").get()?.value; } finally { other.close(); }
+  };
+  store.setSetting('other', 'not this request\'s');
+  assert.equal(writes.request.run({ seq: 0 }, () => writes.landed!()), null, 'a request that wrote nothing waits for nothing');
+  await writes.request.run({ seq: 0 }, async () => {
+    store.setSetting('seen', 'yes');
+    let worst = 0, last = performance.now();
+    const tick = setInterval(() => { worst = Math.max(worst, performance.now() - last); last = performance.now(); }, 10);
+    await writes.landed!();
+    clearInterval(tick);
+    assert.equal(seen(), '"yes"', 'a client reading the file sees it');
+    assert.ok(worst < 100, `the event loop was held ${Math.round(worst)} ms`);
+    assert.equal(writes.landed!(), null, 'once they have landed, nothing to wait for');
+  });
+  w.drain();
+});
+
+test('a response whose own writes outlast the wait goes out once, without them (#1244)', async () => {
+  const { store, w } = open(READ_WAIT_MS * 20, READ_WAIT_MS * 2);
+  const sent: number[] = [];
+  const res = { destroyed: false, headersSent: false, writeHead() { this.headersSent = true; }, end() { sent.push(performance.now()); } };
+  const t0 = performance.now();
+  writes.request.run({ seq: 0 }, () => {
+    store.setSetting('slow', 1);
+    json(res as never, 200, { ok: true });
+  });
+  await until('the reply goes out', () => sent.length > 0);
+  assert.ok(sent[0] - t0 < READ_WAIT_MS * 15, `sent after ${Math.round(sent[0] - t0)} ms, not held until the write landed`);
+  assert.ok(w.drain(5000), 'the write lands');
+  assert.equal(sent.length, 1, 'sent once, never held again');
 });
 
 test('if the worker stops, writes run on the server\'s thread again', async () => {

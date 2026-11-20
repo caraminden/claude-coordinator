@@ -23,7 +23,7 @@ import { relay } from '../relay.ts';
 import { makeApp } from '../make-app.ts';
 import { pushToPeople } from '../fcm.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
-import { HttpError, json, oneOf, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, oneOf, ownWrites, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
@@ -307,6 +307,7 @@ export const contraptionRoutes: Route[] = [
       const person = app.store.findUser('login', decodeURIComponent(params.person).replace(/^@/, ''));
       if (!person) throw new HttpError(404, 'No such person');
       app.store.setContraptionUser(c.id, person.id, body.enabled, asker);
+      await ownWrites(); // the reply lists who it is enabled for (#1244)
       return json(res, 200, { name: c.name, people: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean) });
     },
   },
@@ -538,6 +539,7 @@ export const contraptionRoutes: Route[] = [
       const c = contraption(app, params.name);
       app.store.updateContraption(c.name, fields(app, await readJson(req), false));
       void app.releases.refresh(true); // a new home scheme or repo moves its row (#627)
+      await ownWrites(); // the reply re-reads the row it just wrote (#1244)
       const now = contraption(app, c.name);
       if (now.home_scheme !== null) addAppTurnsCheck(app.store, app.dataDir, now.home_scheme);
       return json(res, 200, view(app, now));
@@ -555,6 +557,7 @@ export const contraptionRoutes: Route[] = [
       const person = ref.startsWith('@') ? app.store.findUser('login', ref.slice(1)) : app.store.getUser(Number(ref));
       if (!person) throw new HttpError(404, 'No such person');
       app.store.setContraptionUser(c.id, person.id, body.enabled, session.uid ?? (caller ? app.store.turnAsker(caller.id) : null));
+      await ownWrites(); // the reply lists who it is enabled for (#1244)
       return json(res, 200, view(app, c));
     },
   }),

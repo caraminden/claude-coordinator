@@ -16,7 +16,7 @@ import { place } from '../chunked-uploads.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import type { PageItem } from '../ideas.ts';
-import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
+import { HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
 import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks } from '../../public/ui/marks.js';
 
@@ -109,6 +109,7 @@ async function sharedPinPath(app: App, projectId: number, abs: string, pinning: 
 async function pinShared(app: App, projectId: number, rel: string, by: string | null) {
   const already = !!by && app.store.sharedPins(projectId).some((p) => p.path === rel);
   app.store.setSharedPin(projectId, rel, by);
+  await ownWrites(); // the reply and the broadcast re-read the pins (#1244)
   app.broadcast({ type: 'artifacts', projectId });
   const file = (await app.sharedFiles(projectId)).find((f) => f.path === rel);
   return { file, already };
@@ -490,6 +491,7 @@ export const fileRoutes: Route[] = [
       // Pinning one already pinned keeps who pinned it first.
       const already = !!body.pinned && a.pinned_at !== null;
       if (!already) app.store.setArtifactPinned(a.id, body.pinned ? by : null);
+      await ownWrites(); // the reply re-reads the artifact (#1244)
       app.broadcast({ type: 'artifacts', projectId: project.id });
       const updated = app.store.getArtifact(a.id);
       return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated, already });
@@ -635,6 +637,7 @@ export const fileRoutes: Route[] = [
       if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
       if (body.op === 'write') {
         writeStore(app.store, project.id, file, cleanEntries(body.entries), session.name);
+        await ownWrites(); // the reply re-reads the entries (#1244)
         app.broadcast({ type: 'artifact-data', projectId: project.id, store: storeId(project.id, file) });
       } else if (body.op !== 'list') throw new HttpError(400, 'op is list or write');
       return json(res, 200, { store: storeId(project.id, file), entries: entriesView(app.store.artifactData(project.id, file)), person: session.name });
@@ -686,6 +689,7 @@ export const fileRoutes: Route[] = [
       const file = await agentPage(app, project, caller!, body);
       if (body.entries != null) {
         writeStore(app.store, project.id, file, cleanEntries(body.entries), caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`);
+        await ownWrites(); // the reply re-reads the entries (#1244)
         app.broadcast({ type: 'artifact-data', projectId: project.id, store: storeId(project.id, file) });
       }
       return json(res, 200, { file, entries: entriesView(app.store.artifactData(project.id, file)), limits: LIMITS });
@@ -696,6 +700,7 @@ export const fileRoutes: Route[] = [
     async handler({ req, res, app, session, artifact: a }) {
       const body = await readJson(req);
       app.store.setArtifactPinned(a.id, body.pinned ? session.name : null);
+      await ownWrites(); // the reply re-reads the artifact (#1244)
       app.broadcast({ type: 'artifacts', projectId: a.project_id });
       const updated = app.store.getArtifact(a.id);
       return json(res, 200, updated ? artifactView(app, updated) : null);

@@ -7,7 +7,7 @@ import { recheckDecisions } from './decisions-load.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { RULE_HOMES } from './rule-homes.ts';
 import { added, homeText, inSettingsHome, overlapsFor, readIn, schemeRules, section, settingsSources, type Overlap } from './rule-overlap.ts';
-import type { App } from './http.ts';
+import { ownWrites, type App } from './http.ts';
 import type { Project } from './db.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -19,11 +19,12 @@ export interface FindReplace { find: string; replace: string }
 export interface HeldEdit { scope: Scope; project: number; old: string; text: string; edits: FindReplace[]; by: string; count: number }
 
 /** Save through Settings' own setters and history, then tell the chat, the Taskmasters and open pages. */
-export function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit, 'count'>, by = held.by): void {
+export async function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit, 'count'>, by = held.by): Promise<void> {
   const { store, runner } = app;
   const citadel = held.scope === 'citadel';
   if (citadel) store.setAppInstructions(held.text, by);
   else store.setProjectInstructions(held.project, held.text, by);
+  await ownWrites(); // the decisions log and the broadcast read them back (#1244)
   recheckDecisions(app, citadel ? store.listProjects() : [store.getProject(held.project)!]);
   const where = citadel ? `${APP_NAME}-wide` : 'scheme';
   const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);

@@ -9,6 +9,7 @@ import type { ContraptionTurns } from './contraption-turns.ts';
 import type { ErrorDigest } from './contraption-errors.ts';
 import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { gzip } from 'node:zlib';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
@@ -79,11 +80,44 @@ export function framedWithApps(domain: string) {
 export const acceptsGzip = new WeakSet<ServerResponse>();
 const MIN_GZIP_BYTES = 1400;
 
-/** Set by the DB write worker (src/db-writer.ts): waits a moment for queued writes, so a response comes after its request's writes (#795). */
-export const writes = { settle: null as (() => void) | null };
+/**
+ * The DB writes each request made, for the write worker (src/db-writer.ts, #795): `request` holds the last one's number
+ * until its response is sent (`done`: work it started that outlives it, a turn, no longer counts), and `landed`, set by
+ * the worker, is null once they have all landed, else a promise of it. A response waits for them however long they
+ * take, off the event loop (#1244), so the client's next request, or a client reading the file, finds them; then a
+ * moment for everyone else's, as a read does. A handler that answers from rows it just wrote awaits `ownWrites()`
+ * first: a read on the server's thread waits only READ_WAIT_MS for them, so it never holds every other request.
+ */
+export const writes = {
+  request: new AsyncLocalStorage<{ seq: number; done?: boolean }>(),
+  landed: null as (() => Promise<void> | null) | null,
+  /** Waits a moment for anyone's queued writes, as a read does (#795). */
+  settle: null as (() => void) | null,
+};
+/** Wait for this request's own DB writes: a handler that answers from a re-read of rows it just wrote awaits this first. */
+export const ownWrites = async () => { await writes.landed?.(); };
+// Responses held back for their request's writes: a second send (the error handler's, after a throw) is dropped.
+const held = new WeakSet<ServerResponse>();
 
 /** Send a whole body, gzipped when the browser accepts it and it is big enough to be worth it. */
 export function send(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
+  if (held.has(res)) return;
+  const own = writes.landed?.();
+  const req = writes.request.getStore();
+  if (req) req.done = true;
+  if (own) {
+    held.add(res);
+    return void own.then(() => {
+      held.delete(res);
+      // A fallback that writes its own headers (an error page) may have answered meanwhile. Sent now even if the
+      // wait timed out: a second hold would wait again, and again.
+      if (!res.destroyed && !res.headersSent) deliver(res, status, headers, body);
+    });
+  }
+  deliver(res, status, headers, body);
+}
+
+function deliver(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
   writes.settle?.();
   const buf = typeof body === 'string' ? Buffer.from(body) : body;
   if (buf.length < MIN_GZIP_BYTES || !acceptsGzip.has(res)) {

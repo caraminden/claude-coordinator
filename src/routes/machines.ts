@@ -9,7 +9,7 @@ import { runnerAsk } from '../ci-runner.ts';
 import { ciJobReadRoutes, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
-import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, ownWrites, readJson, type Ctx, type Route } from '../http.ts';
 
 // The agent caps fetch_file at 20 MB too.
 const MAX_MACHINE_UPLOAD = 20_000_000;
@@ -65,6 +65,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   }
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
   if (lend) app.machines.setLend(machine.id, lend);
+  await ownWrites(); // what follows re-reads the grants and the machine (#1244)
   // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
   if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
   // Switched on: its workspace tools get their first check now.
@@ -299,6 +300,7 @@ export const machineRoutes: Route[] = [
       const token = newToken(machine.id);
       // A runner host is one from the start, before its agent first connects: its line and its install line say so.
       app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...(body.always_on === false ? { always_on: 0 } : {}), ...(body.runners ? { last_check: JSON.stringify({ at: machine.created_at, results: [], runners: true }) } : {}) });
+      await ownWrites(); // the reply re-reads the machine (#1244)
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // The only time the token is shown; the app keeps just its hash.
       return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
@@ -306,11 +308,12 @@ export const machineRoutes: Route[] = [
   },
   {
     method: 'POST', path: '/api/machines/:machine/token', ...people,
-    handler: managed(({ res, app, machine }) => {
+    handler: managed(async ({ res, app, machine }) => {
       // A new token locks out whoever holds the old one, the connected agent included.
       const token = newToken(machine.id);
       app.store.updateMachine(machine.id, { token_hash: hashToken(token) });
       app.machines.disconnect(machine.id);
+      await ownWrites(); // the reply re-reads the machine (#1244)
       return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
     }),
   },
@@ -329,10 +332,11 @@ export const machineRoutes: Route[] = [
   },
   {
     method: 'DELETE', path: '/api/machines/:machine', ...people,
-    handler: managed(({ res, app, machine }) => {
+    handler: managed(async ({ res, app, machine }) => {
       app.store.deleteMachine(machine.id);
       app.ciLoad.forget(machine.id);
       app.machines.disconnect(machine.id);
+      await ownWrites(); // the broadcast re-reads the list (#1244)
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 200, {});
     }),

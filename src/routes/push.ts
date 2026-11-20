@@ -1,7 +1,7 @@
 // Push notifications: each signed-in person turns them on per browser, and can mute schemes there
 // or keep it to the minions they pinned.
 import { DESKTOP, desktopId, validSubscription } from '../push.ts';
-import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, ownWrites, readJson, type App, type Ctx, type Route } from '../http.ts';
 
 /** This browser's subscription as the account panel needs it. */
 const pushView = (app: App, endpoint: string) => {
@@ -60,6 +60,7 @@ export const pushRoutes: Route[] = [
       // The device's pinned-only choice, its everything-in-this-scheme choice (#690), or a mute for one scheme.
       if (typeof body.onlyPinned === 'boolean') {
         app.store.setPushOnlyPinned(endpoint, body.onlyPinned);
+        await ownWrites(); // the view reads the row back (#1244)
         return json(res, 200, pushView(app, endpoint));
       }
       const projectId = Number(body.projectId);
@@ -68,12 +69,14 @@ export const pushRoutes: Route[] = [
         if (body.everything) all.add(projectId);
         else all.delete(projectId);
         app.store.setPushEverything(endpoint, [...all].filter((id) => app.store.getProject(id)));
+        await ownWrites(); // the view reads the row back (#1244)
         return json(res, 200, pushView(app, endpoint));
       }
       const muted = new Set<number>(JSON.parse(row.muted));
       if (body.muted) muted.add(projectId);
       else muted.delete(projectId);
       app.store.setPushMuted(endpoint, [...muted].filter((id) => app.store.getProject(id)));
+      await ownWrites();
       return json(res, 200, pushView(app, endpoint));
     },
   },
@@ -83,6 +86,7 @@ export const pushRoutes: Route[] = [
       const { endpoint, row, theirs } = await named(ctx);
       if (theirs) return json(ctx.res, 200, notTheirs);
       if (row) ctx.app.store.deletePushSubscription(endpoint);
+      await ownWrites();
       return json(ctx.res, 200, pushView(ctx.app, endpoint));
     },
   },

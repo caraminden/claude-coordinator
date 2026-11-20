@@ -50,7 +50,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
-import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
@@ -93,6 +93,7 @@ async function putOnGithub(app: App, projectId: number, dir: string, slug: strin
     // Keeps any repo_url: a Retry racing one that just worked mustn't drop its URL.
     app.store.setProjectUpstream(projectId, app.store.getProject(projectId)!.repo_url, errorText(err));
   }
+  await ownWrites(); // the strip and Retry read the outcome back (#1244)
   const saved = app.store.getProject(projectId)!;
   app.broadcast({ type: 'project', project: saved });
   return saved;
@@ -633,6 +634,7 @@ export const projectRoutes: Route[] = [
         if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true, as);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
+      await ownWrites(); // the kickoff and the reply re-read the scheme it just wrote (#1244)
       addMemoryCurator(app.store, app.dataDir, project.id);
       void app.releases.refresh(true); // its targets show up without anyone asking (#627)
       if (setup) {
@@ -917,6 +919,7 @@ export const projectRoutes: Route[] = [
       }
       if (instructions !== project.instructions) {
         store.setProjectInstructions(project.id, instructions, session.name);
+        await ownWrites(); // the decisions log is read from the new instructions (#1244)
         recheckDecisions(app, [store.getProject(project.id)!]);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
@@ -925,6 +928,7 @@ export const projectRoutes: Route[] = [
           });
         }
       }
+      await ownWrites(); // the reply and the broadcast re-read the row it just wrote (#1244)
       const saved = store.getProject(project.id)!;
       app.broadcast({ type: 'project', project: saved });
       return json(res, 200, saved);
@@ -939,6 +943,7 @@ export const projectRoutes: Route[] = [
       const coordinator = await ensureCoordinatorFor(app, project, session.uid);
       if (onboardingOpen(app.store.getProject(project.id)!)) throw new HttpError(409, 'A tune-up is under way already');
       app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
+      await ownWrites(); // the Taskmaster's turn and the reply read the row back (#1244)
       app.runner.send(coordinator.id, session.name, 'Tune up this scheme: onboarding is on again, in tune-up mode.');
       const saved = app.store.getProject(project.id)!;
       app.broadcast({ type: 'project', project: saved });
@@ -967,6 +972,7 @@ export const projectRoutes: Route[] = [
           throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_PERSONAL_INSTRUCTIONS.toLocaleString('en')}`);
         }
         app.store.setPersonalInstructions(uid, body.scope === 'scheme' ? project.id : null, text);
+        await ownWrites(); // the reply reads them back (#1244)
       }
       return json(res, 200, { everywhere: app.store.personalInstructions(uid, null), scheme: app.store.personalInstructions(uid, project.id), max: MAX_PERSONAL_INSTRUCTIONS });
     },
@@ -1010,6 +1016,7 @@ export const projectRoutes: Route[] = [
       }
       if (text !== store.appInstructions().text) {
         store.setAppInstructions(text, session.name);
+        await ownWrites(); // the decisions log, the broadcast and the reply read them back (#1244)
         recheckDecisions(app, store.listProjects());
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
@@ -1079,7 +1086,7 @@ export const projectRoutes: Route[] = [
         });
         return json(res, 202, { held: count, href: cardHref(ticket, event.id), found: found.map((o) => `${o.label}${o.line ? `:${o.line}` : ''}: ${o.why}`) });
       }
-      saveInstructions(app, ticket.id, held);
+      await saveInstructions(app, ticket.id, held);
       return json(res, 200, { saved: citadel ? `${APP_NAME}-wide` : 'scheme', edits: edits.length, length: text.length });
     },
   },
@@ -1211,6 +1218,7 @@ export const projectRoutes: Route[] = [
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.addPick(id, model, effort, pickBy, because);
       store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      await ownWrites(); // its build owner and the reply read the row back (#1244)
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
@@ -1452,6 +1460,7 @@ export const projectRoutes: Route[] = [
     async handler({ req, res, app, session, project }) {
       const body = await readJson(req);
       app.store.saveView(project.id, session.name, str(body.name, 'Name', 40), viewPicks(body.picks));
+      await ownWrites(); // the broadcast's refresh and the reply list it (#1244)
       // Every stream gets it; each tab refreshes only for its own person, like ticket_pin.
       app.broadcast({ type: 'views', name: session.name, projectId: project.id });
       return json(res, 200, app.store.listViews(project.id, session.name));

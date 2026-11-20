@@ -2,7 +2,7 @@
 // scheme's owner picks who else is in it.
 import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
-import { clientIp, HttpError, isSecure, json, readJson, type App, type Route } from '../http.ts';
+import { clientIp, HttpError, isSecure, json, ownWrites, readJson, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
@@ -83,9 +83,11 @@ export const peopleRoutes: Route[] = [
   {
     // A fresh link that sets their password: an invite again, or a reset for someone who forgot theirs.
     method: 'POST', path: '/api/people/:person/invite', ...admin,
-    handler({ res, app, params }) {
+    async handler({ res, app, params }) {
       const user = person(app, params.person);
-      return json(res, 200, { person: personView(app, user), token: app.auth.newInvite(user.id) });
+      const token = app.auth.newInvite(user.id);
+      await ownWrites(); // the view shows the invite just made (#1244)
+      return json(res, 200, { person: personView(app, app.store.getUser(user.id)!), token });
     },
   },
   {
@@ -103,6 +105,7 @@ export const peopleRoutes: Route[] = [
         if (body.server_login && user.id !== app.store.serverLoginOwner()) throw new HttpError(400, `Only the server login's owner runs on it; ${user.name} links their own Claude in Settings → Your account.`);
         app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
       }
+      await ownWrites(); // the reply re-reads the row it just wrote (#1244)
       return json(res, 200, personView(app, app.store.getUser(user.id)!));
     },
   },
@@ -162,6 +165,7 @@ export const peopleRoutes: Route[] = [
     method: 'GET', path: '/api/github/callback', who: ['person'],
     async handler({ req, res, app, url, session }) {
       const project = await app.github.finish(uidOf(session), url.searchParams, callbackUrl(req));
+      await ownWrites(); // the invites below read the GitHub link just saved (#1244)
       // Newly linked: their schemes' repos invite them, and as an owner their members (#310). The redirect doesn't wait.
       void app.repoAccess.syncPerson(uidOf(session)).catch((err) => console.error('repo access after linking', err));
       res.writeHead(302, { Location: project === null ? '../../c/' : `../../c/#/p/${project}/account`, 'Cache-Control': 'no-store' }).end();
@@ -189,6 +193,7 @@ export const peopleRoutes: Route[] = [
     method: 'DELETE', path: '/api/me/github', who: ['person'],
     async handler({ res, app, session }) {
       await app.github.unlink(uidOf(session));
+      await ownWrites(); // the reply reads the credential back (#1244), as the OpenRouter ones below
       return json(res, 200, await app.github.status(uidOf(session)));
     },
   },
@@ -226,20 +231,25 @@ export const peopleRoutes: Route[] = [
     method: 'POST', path: '/api/me/openrouter', who: ['person'],
     async handler({ req, res, app, session }) {
       const body = (await readJson(req)) ?? {};
-      return json(res, 200, await app.openrouter.connect(uidOf(session), body.key, body.cap));
+      await app.openrouter.connect(uidOf(session), body.key, body.cap);
+      await ownWrites();
+      return json(res, 200, app.openrouter.status(uidOf(session)));
     },
   },
   {
     method: 'PATCH', path: '/api/me/openrouter', who: ['person'],
     async handler({ req, res, app, session }) {
       const body = (await readJson(req)) ?? {};
-      return json(res, 200, app.openrouter.setCap(uidOf(session), body.cap));
+      app.openrouter.setCap(uidOf(session), body.cap);
+      await ownWrites();
+      return json(res, 200, app.openrouter.status(uidOf(session)));
     },
   },
   {
     method: 'DELETE', path: '/api/me/openrouter', who: ['person'],
-    handler({ res, app, session }) {
+    async handler({ res, app, session }) {
       app.openrouter.unlink(uidOf(session));
+      await ownWrites();
       return json(res, 200, app.openrouter.status(uidOf(session)));
     },
   },
@@ -275,6 +285,7 @@ export const peopleRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
+      await ownWrites(); // the reply reads the credential back (#1244)
       return json(res, 200, { ...app.claude.status(uid), usage: app.runner.usageOf(uid) });
     },
   },
@@ -284,7 +295,9 @@ export const peopleRoutes: Route[] = [
       const code = String((await readJson(req)).code ?? '').trim();
       // It is typed into the sign-in's terminal: printable characters only, so nothing can act as a key press.
       if (!/^[\x21-\x7e]{1,2000}$/.test(code)) throw new HttpError(400, 'Paste the code Anthropic showed you.');
-      return json(res, 200, await app.claude.code(uidOf(session), code).catch((err) => { throw new HttpError(400, err.message); }));
+      await app.claude.code(uidOf(session), code).catch((err) => { throw new HttpError(400, err.message); });
+      await ownWrites(); // the reply reads the credential back (#1244)
+      return json(res, 200, app.claude.status(uidOf(session)));
     },
   },
   {
@@ -293,6 +306,7 @@ export const peopleRoutes: Route[] = [
       // One account of several (#779), or with none named, the whole link.
       const account = url.searchParams.get('account');
       await app.claude.unlink(uidOf(session), account ? Number(account) : undefined).catch((err) => { throw new HttpError(400, err.message); });
+      await ownWrites(); // the reply reads the credential back (#1244)
       return json(res, 200, { ...app.claude.status(uidOf(session)), usage: app.runner.usageOf(uidOf(session)) });
     },
   },
@@ -355,9 +369,11 @@ export const peopleRoutes: Route[] = [
       const user = person(app, String((await readJson(req)).person));
       if (user.disabled_at) throw new HttpError(400, `${user.name} is disabled`);
       app.store.addMember(project.id, user.id);
+      await ownWrites(); // the GitHub invite and the reply read the membership back (#1244)
       app.broadcast({ type: 'project', project: app.store.getProject(project.id) });
       // Adding someone already in tries their GitHub invite again (#310).
       await app.repoAccess.sync(project.id, user.id);
+      await ownWrites(); // and the invite it recorded
       return json(res, 200, members(app, project.id));
     },
   },
@@ -365,9 +381,11 @@ export const peopleRoutes: Route[] = [
     method: 'DELETE', path: '/api/projects/:project/members/:person', who: ['person'],
     async handler({ res, app, project, params }) {
       app.store.removeMember(project.id, Number(params.person));
+      await ownWrites(); // as adding
       // Only a collaborator Citadel added comes off the repo; the refusal is said, and the next boot tries again.
       const error = await app.repoAccess.remove(project.id, Number(params.person));
       if (error) throw new HttpError(502, `They're out of the scheme, but not off GitHub yet: ${error}`);
+      await ownWrites();
       return json(res, 200, members(app, project.id));
     },
   },

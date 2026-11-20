@@ -52,7 +52,7 @@ import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
+import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
@@ -658,8 +658,9 @@ async function newMinion(project: Project, m: { title: string; props: Record<str
     store.props.setBuild(id, m.build, by);
   }
   try {
-    const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, m.title, store.getTicket(id)?.build ?? null);
+    const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, m.title, m.build ?? null);
     store.setTicketDir(id, dir.cwd, dir.branch);
+    await ownWrites(); // a request's reply shows its folder and branch (#1244)
   } catch (err: any) {
     store.deleteTicket(id);
     throw new HttpError(500, `Could not create working directory: ${errorText(err)}`);
@@ -1640,7 +1641,7 @@ setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref(
 const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets); anything else asking is served as usual.
-const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, async (req, res) => {
+const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
@@ -1703,7 +1704,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();
   }
-});
+}));
 
 // Contraptions' websockets, which a restart ends (their pages reconnect): open ones never let server.close finish.
 const upgraded = new Set<Duplex>();
@@ -1797,7 +1798,7 @@ process.on('SIGHUP', () => {
 // The machines-only listener: every agent route (connect, send, info, upload) and the agents' scripts, nothing else.
 if (MACHINES_URL) {
   const agentApi = router(agentRoutes);
-  const agents = createServer(async (req, res) => {
+  const agents = createServer((req, res) => writes.request.run({ seq: 0 }, async () => {
     try {
       const url = requestUrl(req);
       if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
@@ -1811,7 +1812,7 @@ if (MACHINES_URL) {
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
       else res.end();
     }
-  });
+  }));
   const port = Number(MACHINES_URL.port || 80);
   // The tailnet address may not be up yet at boot; keep trying rather than keep the app from starting.
   const listen = () => agents.listen(port, MACHINES_URL.hostname);

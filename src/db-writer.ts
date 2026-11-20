@@ -91,6 +91,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   let stalled = 0; // a read gave up waiting for this write: later reads don't wait until it has run
   let inline = 0; // inside a write on this thread: writes it makes run with it
   const pending = new Map<number, { name: string; args: any[]; resolve: () => void; reject: (e: Error) => void }>();
+  // Responses waiting for their request's writes (#1244): each until the write numbered `seq` has run.
+  const waiters = new Set<{ seq: number; done: () => void }>();
   // Settings sent and not yet written, by key (null: deleted). A read that gave up waiting still sees them, or a
   // get-then-set (merge goes, turn nonces) would write back a list without the update before it.
   const unwritten = new Map<string, { seq: number; json: string | null }>();
@@ -117,8 +119,22 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${target - applied()} queued writes${ok ? '' : ' and gave up'}.`);
     return ok;
   };
-  // A response waits as a read does, so a client reading the database itself (a test, a tool) finds the request's writes.
+  // After its own request's writes (landed, below), a response waits a moment for everyone else's, as a read does.
   writes.settle = beforeRead;
+  // A response waits for its own request's writes, however long they take, but off the event loop: a client's next
+  // request (an invite link right after making the person) or a client reading the file itself finds them (#1244).
+  writes.landed = () => {
+    const own = writes.request.getStore()?.seq ?? 0;
+    if (!alive || applied() >= own) return null;
+    return new Promise<void>((resolve) => {
+      const w = { seq: own, done: () => (clearTimeout(timer), waiters.delete(w), resolve()) };
+      const timer = setTimeout(() => {
+        console.error(`A response waited ${drainMs} ms for its request's DB writes, ${own - applied()} still queued, and went without them.`);
+        w.done();
+      }, drainMs).unref();
+      waiters.add(w);
+    });
+  };
   // A write here after a queue it can't wait out would land before writes made earlier: refuse it instead. If the
   // worker is gone, the queue is lost anyway and its 'exit' puts writes back on this thread.
   const beforeWrite = () => {
@@ -188,6 +204,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
         return f.apply(this, args);
       }
       seq = n;
+      const req = writes.request.getStore();
+      if (req && !req.done) req.seq = n;
       if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
       else if (name === 'deleteSetting') unwritten.set(args[0], { seq: n, json: null });
       // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
@@ -205,6 +223,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (p) FORGETS[p.name]?.(store, p.args);
     if (error) p?.reject(new Error(error));
     else p?.resolve();
+    for (const w of waiters) if (applied() >= w.seq) w.done();
   });
   worker.once('exit', (code) => {
     alive = false;
@@ -213,6 +232,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     seq = applied();
     for (const p of pending.values()) p.reject(new Error('the DB write worker stopped'));
     pending.clear();
+    for (const w of waiters) w.done();
     console.error(`DB write worker stopped (exit code ${code})${lost ? `, ${lost} queued writes lost` : ''}: writes run on the server's thread again.`);
     try {
       store.addHealthEvent('db-writer-stopped', Date.now(), null, `exit code ${code}, ${lost} queued writes lost`);

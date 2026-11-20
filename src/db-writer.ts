@@ -23,7 +23,7 @@ export const WRITES = [
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
   'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
-  'props.backfillOther', 'props.setBuild', 'schedules.ran', 'memory.deleteTicket',
+  'props.backfillOther', 'props.setBuild', 'schedules.ran', 'schedules.heldNote', 'memory.deleteTicket',
 ];
 
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */

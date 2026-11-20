@@ -56,7 +56,8 @@
 .g-build > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature { --gc: hsl(265 55% 55%); }
 .g-feature > h3 { color: var(--gc); }
-.g-bug { --gc: hsl(0 60% 52%); }
+/* Olive-lime: red read as the "stuck" state on a row (#1292); no row state or other type uses hue 90. */
+.g-bug { --gc: hsl(90 50% 33%); }
 .g-bug > h3 { color: var(--gc); }
 .g-design { --gc: hsl(330 55% 55%); }
 .g-design > h3 { color: var(--gc); }

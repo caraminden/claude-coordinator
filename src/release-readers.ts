@@ -44,11 +44,13 @@ export function usualOf(rows: { stages: string }[]): (stage: string) => number |
 /** The target as served: the finder's own fields stay here. */
 export const targetOf = (t: Found) => ({ id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: t.link, ...(t.numbering ? { numbering: t.numbering } : {}) });
 
-/** Whether files ship on `t` among its scheme's targets (#764, shipsTo); a scheme with one target takes everything. */
+/** Whether files ship on `t` among its scheme's targets (#764, shipsTo); a scheme with one target takes everything its paths hold (all, with none). */
 export function shipsOnTarget(t: Found, all: Found[]): (files: string[] | null | undefined) => boolean {
   if (t.own) return (files) => !files || files.some((f) => holds(t, f));
   const scheme = all.filter((x) => x.projectId === t.projectId);
-  return scheme.length < 2 ? () => true : (files) => shipsTo(files, scheme).includes(t.id);
+  // A lone target takes everything, unless a push `paths:` filter says what its build ships (the desktop zip, #1300).
+  if (scheme.length < 2) return t.paths?.length ? (files) => !files || files.some((f) => holds(t, f)) : () => true;
+  return (files) => shipsTo(files, scheme).includes(t.id);
 }
 
 /** What landed that ships on `t`: its commits and minions by the files they touched. */

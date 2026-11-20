@@ -129,6 +129,16 @@ test('an app in a folder of its repo (#1136) owns that folder: only changes ther
   assert.deepEqual(shipsTo(['server.ts'], root), ['app:site']);
 });
 
+test('a lone CI target with push paths ships only changes there (#1300)', () => {
+  const [d] = detect(facts({ workflows: [{ path: '.github/workflows/desktop.yml', text: "on:\n  push:\n    branches: [main]\n    paths:\n      - 'desktop/**'\njobs:\n  release:\n    steps:\n      - uses: actions/upload-artifact@v4\n" }] }));
+  assert.deepEqual(d.paths, ['desktop/**']);
+  const on = shipsOnTarget(d, [d]);
+  assert.equal(on(['src/x.ts']), false, 'a change outside desktop/ is not on it');
+  assert.equal(on(['desktop/main.js']), true);
+  assert.equal(on(null), true, 'files unknown: counted');
+  assert.equal(shipsOnTarget({ ...d, paths: undefined }, [{ ...d, paths: undefined }])(['src/x.ts']), true, 'no paths: takes everything, as before');
+});
+
 test('pushPaths and workdirOf read the folder a workflow and a contraption ship from', () => {
   assert.deepEqual(pushPaths('on:\n  push:\n    branches: [main]\n    paths: [\'android/**\', ".github/x.yml"]\njobs: {}\n'), ['android/**', '.github/x.yml']);
   assert.equal(pushPaths('on:\n  push:\n    branches: [main]\n  pull_request:\n    paths: [a/**]\njobs: {}\n'), null, "a PR's filter is not the push's");

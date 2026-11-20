@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -78,10 +78,26 @@ test('--base measures every worktree against one ref and drops the build rows', 
   assert.equal(row(r.stdout, 'build/2'), undefined);
 });
 
-test('it writes nothing: every worktree is as it was', () => {
-  const before = [w7, w8, w12].map((w) => git(w, 'status', '--porcelain'));
-  run(w9, 'shared.ts');
-  assert.deepEqual([w7, w8, w12].map((w) => git(w, 'status', '--porcelain')), before);
+test('it writes nothing: no index or other git file changes, even with a touched but unchanged file', () => {
+  // A file whose stat changed but whose content didn't makes plain `git diff` rewrite that worktree's index.
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(join(w7, 'other.ts'), later, later);
+  utimesSync(join(w8, 'shared.ts'), later, later);
+  const snapshot = () => {
+    const out: string[] = [];
+    const walk = (d: string) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else out.push(`${p} ${statSync(p).mtimeMs} ${statSync(p).size}`);
+      }
+    };
+    walk(join(repo, '.git'));
+    return out.sort();
+  };
+  const before = snapshot();
+  assert.equal(run(w9, 'shared.ts', 'other.ts').status, 0);
+  assert.deepEqual(snapshot(), before);
 });
 
 test('refuses no path, an unknown ref and a path outside the repo', () => {

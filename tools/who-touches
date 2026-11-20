@@ -115,7 +115,7 @@ async function baseOf(tree) {
 async function lookBuild(b) {
   const mb = (await git(top, ['merge-base', b, base]))?.trim();
   if (!mb) return null;
-  const files = numstat(await git(top, ['diff', '--numstat', '--no-renames', mb, b, '--', ...specs]));
+  const files = numstat(await git(top, ['diff-tree', '-r', '--numstat', '--no-renames', mb, b, '--', ...specs]));
   if (!Object.keys(files).length) return null;
   const when = Number(await git(top, ['log', '-1', '--format=%ct', b])) || 0;
   return { path: '', head: '', branch: b, from: base, files, uncommitted: {}, when };
@@ -127,7 +127,7 @@ async function look(tree) {
   const { mb, from } = at;
   // The merge-base against the working tree: committed and uncommitted changes in one diff.
   const [all, untracked] = await Promise.all([
-    git(tree.path, ['diff', '--numstat', '--no-renames', mb, '--', ...specs]),
+    git(tree.path, ['diff-index', '--numstat', '--no-renames', mb, '--', ...specs]),
     git(tree.path, ['ls-files', '--others', '--exclude-standard', '--', ...specs]),
   ]);
   if (all === null) return null;
@@ -136,7 +136,7 @@ async function look(tree) {
   for (const f of fresh) files[f] = [await untrackedLines(tree, f), 0];
   if (!Object.keys(files).length) return null;
   const [dirty, when] = await Promise.all([
-    git(tree.path, ['diff', '--numstat', '--no-renames', 'HEAD', '--', ...specs]),
+    git(tree.path, ['diff-index', '--numstat', '--no-renames', 'HEAD', '--', ...specs]),
     git(tree.path, ['log', '-1', '--format=%ct', 'HEAD']),
   ]);
   const uncommitted = numstat(dirty);

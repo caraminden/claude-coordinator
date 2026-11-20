@@ -90,6 +90,7 @@ import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
+import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
@@ -273,6 +274,16 @@ const runner = new Runner(
 runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
 runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
+// The server notices a stall (#1139): counts each minion's red tests, file churn and failed ships, and suggests a step-up to its Taskmaster.
+const stallWatch = new StallWatch({
+  store,
+  tell: (t, text) => {
+    const tm = store.ownerCoordinator(t);
+    return !!tm && runner.relay(t.id, tm.id, APP_NAME, text, false, true, 'decision') !== true;
+  },
+  note: (id, text) => runner.emit(id, 'note', { text }),
+});
+if (!PREVIEW) runner.onStreamEvent = (id, ev) => stallWatch.observe(id, ev);
 // Minions' branches served for people to try (src/previews.ts); a preview serves none of its own.
 const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {
@@ -1107,6 +1118,7 @@ if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fast mode', () => fa
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
+  failed: (id, kind) => stallWatch.shipFailed(id, kind),
   landed: (id, commit) => {
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);

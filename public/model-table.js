@@ -92,6 +92,24 @@ export function pickReason(by, type, model, effort) {
   return type ? `${type} → ${tier}` : tier;
 }
 
+/**
+ * The step-up for a stalled minion (#1139), read from the tiers' `then` and the advisor row: Sonnet → (the advisor, during its
+ * trial) → Opus medium → Opus high → Fable medium → Fable xhigh ("xhigh stays for a Fable run that failed twice"). Null at the
+ * top, or with no model set. `fable` false: the scheme has Fable off, so Opus high is the top.
+ */
+export function nextStep(model, effort, fable = true, today = new Date().toISOString().slice(0, 10)) {
+  const rank = EFFORT_LEVELS.indexOf(effort ?? 'medium');
+  const trial = (advisorTrialEnd() ?? '') >= today;
+  if (!model) return null;
+  if (/haiku/.test(model)) return { model: 'claude-sonnet-5-5', effort: 'medium' };
+  if (/\+opus-advisor$/.test(model) || (/sonnet/.test(model) && !trial)) return { model: 'claude-opus-5-5', effort: 'medium' };
+  if (/sonnet/.test(model)) return { model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' };
+  if (/opus/.test(model) && rank < 2) return { model, effort: 'high' };
+  if (/opus/.test(model)) return fable ? { model: 'claude-fable-5-2', effort: 'medium' } : null;
+  if (/fable/.test(model) && rank < 3) return { model, effort: 'xhigh' };
+  return null;
+}
+
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText(fable = true) {
   const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model)).map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');

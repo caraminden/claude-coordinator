@@ -570,6 +570,8 @@ export class Runner {
   wait: (ticketId: number) => Wait | null = () => null;
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
   serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
+  /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
+  onStreamEvent: (ticketId: number, ev: any) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -3359,6 +3361,11 @@ export class Runner {
     if (!slim) return;
     const progress = this.progressFor(ticketId);
     const row = this.emit(ticketId, 'claude', slim);
+    try {
+      this.onStreamEvent(ticketId, slim);
+    } catch (err: any) {
+      console.error(`[stall] minion ${ticketId}: counting failed:`, err.message);
+    }
     // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
     applyEvent(progress, 'claude', slim, row.created_at);
     this.recordSteps(ticketId, progress);

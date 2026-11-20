@@ -24,6 +24,15 @@
   "wrong": "Set the state to pending-deploy, so the server dismissed the minion once the deploy went live, with Cara's by-hand steps still undone.",
   "checks": [
     {
+      "call": "land|hand_off_land",
+      "why": "the go was given: ship it"
+    },
+    {
+      "call": "set_thread_status|ask_question|message_coordinator",
+      "input": "WSL|PowerShell|by hand|register",
+      "why": "say what Cara has to do by hand (a card or the status note)"
+    },
+    {
       "noCall": "set_thread_status",
       "input": "pending-deploy|complete",
       "why": "by-hand steps still owed keep the minion open"

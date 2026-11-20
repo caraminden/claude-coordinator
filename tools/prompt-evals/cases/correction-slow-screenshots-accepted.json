@@ -26,13 +26,13 @@
       "why": "the box was idle"
     }
   ],
-  "right": "Answer that #637 is stuck on minutes-long screenshots on an idle box, and treat that as a problem to fix for every UI minion: start or offer a minion for a shared fast screenshot tool.",
+  "right": "Answer that #637 is stuck on minutes-long screenshots on an idle box, and treat that as a problem to fix for every UI minion: tell #637 to use the fast shared screenshot tool (tools/ui-shot.ts) instead of its own script, or start or offer a minion for a faster one.",
   "wrong": "Said #637 was \"slow, not hung\" and \"nothing needed from you\", accepting 7-minute screenshots as normal.",
   "checks": [
     {
-      "call": "create_ticket|ask_question|message_coordinator",
-      "input": "screenshot",
-      "why": "minutes per screenshot on an idle box is a problem to fix, not a status to report"
+      "call": "create_ticket|ask_question|message_coordinator|message_ticket|message_minion",
+      "input": "screenshot|ui-shot",
+      "why": "minutes per screenshot on an idle box is a problem to act on (point #637 at the fast tool, or start a fix), not a status to report"
     }
   ]
 }

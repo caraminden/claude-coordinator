@@ -10,8 +10,8 @@
   },
   "commit": "2d9b6a72",
   "from": "Cara",
-  "history": "Cara asked that pending cards stop needing a scroll up to find. Your card offered choices; she picked \"Inline where asked\" for where a waiting card shows and \"Yes, first unread\" for where opening a minion lands. You're on your minion branch in public/ (plain JS, no build step), and UI changes are shown on a preview (start_preview) before they ship.",
-  "message": "When I say inline, it should be AFTER the message with the context for the question",
+  "history": "Cara asked that pending cards stop needing a scroll up to find. Your card offered choices; she picked \"Inline where asked\" for where a waiting card shows and \"Yes, first unread\" for where opening a minion lands. You're on your minion branch in public/ (plain JS, no build step); you built both, and UI changes are shown on a preview (start_preview) before they ship. The preview is not up yet.",
+  "message": "When I say inline, it should be AFTER the message with the context for the question. Is the preview up? Give me the link.",
   "facts": [
     {
       "tool": "start_preview",
@@ -20,9 +20,17 @@
       "why": "the preview address the reply should link"
     }
   ],
-  "right": "Place a waiting card right after the message that gives its context, and when pointing Cara at the preview, write the address as a markdown link [preview](https://...).",
+  "right": "Start the preview and give Cara its address as a markdown link [preview](https://...), and note the waiting card goes right after the message that gives its context.",
   "wrong": "Posted the preview address as a bold bare URL, not a clickable link.",
   "checks": [
+    {
+      "call": "start_preview",
+      "why": "the preview address is needed to answer"
+    },
+    {
+      "reply": "\\]\\(https?://[^)\\s]*preview[^)\\s]*\\)",
+      "why": "the address is given as a markdown link"
+    },
     {
       "noText": "(?<!\\]\\()(?<!<)\\bhttps?://\\S+",
       "why": "a URL in a reply is a markdown link, never bare or in backticks"

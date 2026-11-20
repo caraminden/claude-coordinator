@@ -30,14 +30,13 @@
   "wrong": "Read the job's start time but still told Cara and #993 that #993's test job never got a runner and waited in line behind other lands, and told #993 to retry.",
   "checks": [
     {
-      "call": "Bash|Read|Grep|read_ticket|read_minion|ci_runners|host_check",
-      "input": "mcp\\.ts|diff|show|node --check|993",
+      "call": "ci_runners|host_check|live_facts",
       "before": "never got a runner|(waited|queued|stuck) (in line )?behind",
-      "why": "check the jobs and #993's own change before blaming the queue"
+      "why": "read the jobs' start times before saying anything about the queue"
     },
     {
-      "noText": "never got a runner",
-      "why": "the claim the strike took back"
+      "noText": "never got a runner|(waited|queued|stuck) (in line )?behind|(busy|queued).{0,40}(other|their) (lands|ships|runs)",
+      "why": "the claim the strike took back: the jobs started at once, so it wasn't the queue"
     }
   ]
 }

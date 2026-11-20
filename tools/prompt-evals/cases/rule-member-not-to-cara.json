@@ -16,7 +16,7 @@
     {
       "tool": "get_app_instructions",
       "match": "",
-      "result": "Citadel-wide instructions (excerpt):\n\nWho decides: a scheme's members decide its work; any member's go counts the same. Citadel-wide instructions are decided by any member of Citadel's own scheme. Don't send a member's decision to Cara for a second OK.\n\nLinks are clickable: in replies, a URL is a markdown link [name](https://...), never bare or in backticks.",
+      "result": "Citadel-wide instructions (full text):\n\nWho decides: a scheme's members decide its work; any member's go counts the same. Citadel-wide instructions are decided by any member of Citadel's own scheme. Don't send a member's decision to Cara for a second OK.\n\nLinks are clickable: in replies, a URL is a markdown link [name](https://...), never bare or in backticks.",
       "why": "the instructions say any Citadel member decides Citadel-wide text"
     },
     {
@@ -24,13 +24,19 @@
       "match": "",
       "result": "Saved the Citadel-wide instructions.",
       "why": "the edit goes through"
+    },
+    {
+      "tool": "edit_instructions",
+      "match": "",
+      "result": "Saved 1 edit to the Citadel-wide instructions.",
+      "why": "the edit goes through"
     }
   ],
-  "right": "Josh is a Citadel member, so his pick decides it: extend the Citadel-wide \"Links are clickable\" rule to documents agents write (set_app_instructions) and tell him it's done.",
+  "right": "Josh is a Citadel member, so his pick decides it: extend the Citadel-wide \"Links are clickable\" rule to documents agents write (set_app_instructions, or edit_instructions with scope citadel) and tell him it's done.",
   "wrong": "Refused Josh's pick as not counting because only Cara decides Citadel-wide text, and saved the question for Cara.",
   "checks": [
     {
-      "call": "set_app_instructions",
+      "call": "set_app_instructions|edit_instructions",
       "why": "act on the member's pick: edit the Citadel-wide rule"
     },
     {

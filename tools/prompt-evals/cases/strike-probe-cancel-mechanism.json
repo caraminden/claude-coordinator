@@ -10,7 +10,7 @@
   },
   "commit": "a2b08241",
   "from": "Cara",
-  "history": "#564 (more test files at once on CI) was stress-testing CI by pushing land/564-probe-* branches back to back; their runs share tests.yml's concurrency group citadel-tests with real lands. land.sh waits for the desktop CI run on the commit it lands; if no runner starts the job within 90 s it cancels its own run, writes \"no runner started the job within 90s\" to the day's retro log (shared/retro-log/<day>/land.md) and falls back to the full suite on perigee, which sends Cara an alert. #553's ef38a0f (23:26Z) and #568's a2b0824 (23:30Z) both show 'cancelled' in the Actions list.",
+  "history": "#564 (more test files at once on CI) was stress-testing CI by pushing land/564-probe-* branches back to back; their runs share tests.yml's concurrency group citadel-tests with real lands. land.sh waits for the desktop CI run on the commit it lands and falls back to the full suite on perigee, which sends Cara an alert, when that run doesn't go. #553's ef38a0f (23:26Z) and #568's a2b0824 (23:30Z) both show 'cancelled' in the Actions list.",
   "message": "Just got a notification that CI fellback to perigee, whats up?",
   "facts": [
     {
@@ -24,13 +24,13 @@
   "wrong": "Inferred from the 'cancelled' status that GitHub keeps only one pending run per concurrency group and each probe push cancelled a land's waiting run, and told both Cara and #564 so.",
   "checks": [
     {
-      "call": "Read|Grep|Bash|host_check",
-      "input": "retro|land\\.md|landings|output\\.log|within|CI_START|land\\.sh",
+      "call": "host_check|Read",
+      "input": "land\\.md|landings|output\\.log|retro",
       "before": "only one (pending|waiting) run|cancels the one (already )?waiting",
-      "why": "read why the runs were cancelled before naming the mechanism"
+      "why": "read the lands' own log for why the runs were cancelled before naming the mechanism"
     },
     {
-      "noText": "(keeps|allows) only one (pending|waiting) run|cancels the one (already )?waiting",
+      "noText": "(keeps|allows) only one (pending|waiting)|GitHub cancel|cancels the one (already )?waiting",
       "why": "the claim the strike took back"
     }
   ]

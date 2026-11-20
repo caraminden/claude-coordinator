@@ -1,6 +1,6 @@
 // The Skills page's data (#1062): the skills and Grunt types a scheme's turns have, what each is for, and how they ran in
 // the last two weeks. Turning a kit skill off is the scheme settings' PATCH (skills_off), like the other Minion rules.
-import { KIT_DIR, listSkills, OFF_WARNINGS, offSkills, cachedUsage, refreshUsage, USAGE_DAYS } from '../skills.ts';
+import { KIT_DIR, listSkills, OFF_WARNINGS, offSkills, cachedUsage, refreshUsage, usageDetail, USAGE_DAYS } from '../skills.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { HttpError, json, type Route } from '../http.ts';
 
@@ -39,6 +39,18 @@ export const skillRoutes: Route[] = [
     async handler({ res, url, app, session, project }) {
       const { all, id } = scope(url, app, session, project);
       return json(res, 200, { ...usageBody(cachedUsage(app.store, id) ?? (await refreshUsage(app.store, id))), all });
+    },
+  },
+  {
+    // An opened row (#1082): where one skill or Grunt type ran, and the not-used evidence. ?name=citadel:grilling&kind=skill.
+    method: 'GET', path: '/api/projects/:project/skills/detail', who: ['person', 'taskmaster'],
+    async handler({ res, url, app, session, project }) {
+      const { all, id } = scope(url, app, session, project);
+      const name = url.searchParams.get('name') ?? '';
+      const kind = url.searchParams.get('kind');
+      if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/.test(name)) throw new HttpError(400, 'name: a skill or Grunt type\'s name');
+      if (kind !== 'skill' && kind !== 'agent') throw new HttpError(400, 'kind: skill or agent');
+      return json(res, 200, { ...(await usageDetail(app.store, id, name, kind)), all });
     },
   },
 ];

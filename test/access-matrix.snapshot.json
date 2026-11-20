@@ -2073,6 +2073,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/skills/detail": {
+  "anon": "401 Not logged in",
+  "person": "400 name: a skill or Grunt type's name",
+  "member": "400 name: a skill or Grunt type's name",
+  "outsider": "404 No such scheme",
+  "tmA": "400 name: a skill or Grunt type's name",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/skills/usage": {
   "anon": "401 Not logged in",
   "person": "200",

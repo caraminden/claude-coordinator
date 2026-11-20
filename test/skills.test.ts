@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
+import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, skillDetail, sentenceAround, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
@@ -169,6 +169,49 @@ test('an incremental refresh counts exactly what a fresh full scan and the old p
   assert.ok(!scanSkills(store.db, 0, inc.scan, now + 7 * 3_600_000).scan.events.some((e) => e.ticket_id === u.id), 'a full re-read does not');
 });
 
+test('an opened row: where it ran, its type\'s rate and misses with what they opened instead, and minions that were told to and never did', () => {
+  const store = new Store(':memory:');
+  const a = store.createProject('DA', null);
+  const b = store.createProject('DB', null);
+  const mk = (p: number, title: string, type: string | null, kind = 'ticket') => {
+    const t = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
+    if (type) store.props.set('minion', t.id, p, { type }, 'Cara');
+    return t;
+  };
+  const use = (name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu', name, input }] } });
+  const result = { type: 'result', subtype: 'success' };
+  const grill = mk(a.id, 'Grilled', 'feature'), told = mk(a.id, 'Told', 'feature'), quiet = mk(a.id, 'Quiet', 'feature'), bug = mk(a.id, 'Bug', 'bug');
+  const tm = mk(a.id, 'Taskmaster', null, 'coordinator'), other = mk(b.id, 'Elsewhere', 'feature');
+  store.addEvent(told.id, 'user_message', { text: 'Build the page.\nThis is design-shaped. Run citadel:grilling rounds with Josh, as cards. Then citadel:grilling again.' });
+  store.addEvent(tm.id, 'user_message', { text: 'Start a minion that runs citadel:grilling.' });
+  store.addEvent(grill.id, 'user_message', { text: 'Use citadel:grilling first.' });
+  store.addEvent(grill.id, 'claude', use('Skill', { skill: 'citadel:grilling' }));
+  store.addEvent(grill.id, 'claude', use('Edit', { file_path: '/x' }));
+  store.addEvent(grill.id, 'claude', use('Skill', { skill: 'citadel:grilling' }));
+  store.addEvent(grill.id, 'claude', result);
+  store.addEvent(told.id, 'claude', use('Skill', { skill: 'citadel:docs-and-mocks' }));
+  store.addEvent(told.id, 'claude', result);
+  store.addEvent(quiet.id, 'claude', result);
+  store.addEvent(bug.id, 'claude', result);
+  store.addEvent(tm.id, 'claude', result);
+  store.addEvent(other.id, 'claude', use('Skill', { skill: 'citadel:grilling' }));
+  store.addEvent(other.id, 'claude', result);
+  const { scan, tickets } = scanSkills(store.db, 0, null);
+  assert.deepEqual(scan.mentions.filter((m) => m.ticket_id === told.id).map((m) => [m.name, m.quote]), [['citadel:grilling', 'Run citadel:grilling rounds with Josh, as cards.']], 'once per message');
+  const d = skillDetail(scan, tickets, a.id, 0, 'citadel:grilling', 'skill');
+  assert.deepEqual(d.used.map((u) => [u.title, u.runs, u.phases]), [['Grilled', 2, { 'before any edit': 1, 'after edits': 1 }]], 'only this scheme');
+  assert.deepEqual(d.types, [{ type: 'feature', active: 3, opened: 1 }, { type: 'bug', active: 1, opened: 0 }], 'the Taskmaster is no minion of a type');
+  assert.equal(d.misses!.type, 'feature');
+  assert.equal(d.misses!.total, 2);
+  assert.deepEqual(d.misses!.rows.map((r) => [r.title, r.opened]).sort(), [['Quiet', []], ['Told', ['citadel:docs-and-mocks']]]);
+  assert.deepEqual(d.named.rows.map((r) => [r.title, r.quote]), [['Told', 'Run citadel:grilling rounds with Josh, as cards.']], 'not the Taskmaster, not a minion that opened it');
+  const never = skillDetail(scan, tickets, a.id, 0, 'citadel:upstream-check', 'skill');
+  assert.equal(never.misses, null, 'no type to miss in when nothing opened it');
+  assert.deepEqual(never.used, []);
+  assert.equal(skillDetail(scan, tickets, null, 0, 'citadel:grilling', 'skill').used.length, 2, 'every scheme');
+  assert.equal(sentenceAround('One. Two citadel:x three. Four.', 9), 'Two citadel:x three.');
+});
+
 test('cachedUsage answers from the last report at once and never waits on a scan', async () => {
   forgetUsage();
   const store = new Store(':memory:');
@@ -214,6 +257,11 @@ test('the page lists the skills, and a member turns a kit skill off and on, with
   assert.equal(typeof counts.data.usage.skills, 'object');
   assert.equal(typeof counts.data.since, 'number');
   assert.equal(counts.data.all, false);
+  const detail = await call(`/api/projects/${p.id}/skills/detail?name=citadel:grilling&kind=skill`);
+  assert.equal(detail.status, 200);
+  assert.deepEqual([detail.data.used, detail.data.misses, detail.data.named.total], [[], null, 0]);
+  assert.equal((await call(`/api/projects/${p.id}/skills/detail?name=../x&kind=skill`)).status, 400);
+  assert.equal((await call(`/api/projects/${p.id}/skills/detail?name=citadel:grilling&kind=x`)).status, 400);
   assert.match(page.data.warnings['self-review'], /every ship in this scheme waits for a person's go/);
   assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: ['not-a-skill'] } })).status, 400);
   assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: 'grilling' } })).status, 400);

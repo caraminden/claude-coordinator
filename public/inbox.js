@@ -124,7 +124,7 @@ export function schemeCount(p) {
   const { need, busy, working, shipping, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
-    shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `animation-delay: -${Date.now() % 1500}ms` }, '...')) : null,
+    shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
 

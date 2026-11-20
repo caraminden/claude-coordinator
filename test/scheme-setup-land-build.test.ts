@@ -191,7 +191,9 @@ test("claims (#1159): a feeder that writes another feeder's claimed file is refu
   b.commit(b.wts[0], 'f2.txt', 'one wrote it\n');
   const build = b.at('build/1');
   const why = /ticket\/1-x writes outside its claim in build\/1's build-claims\.md, so nothing merged: f2\.txt is #2's in the claims\. A late need goes through the build minion: ask #3/;
-  assert.match(b.run(1, '--check', '--into', 'build/1', 'f1.txt').stderr, why);
+  const early = b.run(1, '--check', '--into', 'build/1', 'f1.txt');
+  assert.equal(early.status, 3, 'the exit that stops a hand-off');
+  assert.match(early.stderr, why);
   const res = b.run(1, '--into', 'build/1', 'f1.txt');
   assert.equal(res.status, 1);
   assert.match(res.stderr, why);

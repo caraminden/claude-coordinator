@@ -348,7 +348,7 @@ function claimed(r: R) {
   build(r);
   const boss = worktree(r, 'ticket/9-build');
   r.commit(boss, 'hub.txt', 'top\n');
-  writeFileSync(join(boss, 'build-claims.md'), '# Build 3\nbuild: #9\n#1: b.txt\n#2: c.txt\nshared: hub.txt\n');
+  writeFileSync(join(boss, 'build-claims.md'), '# Build 3\nbuild: #9\n#1: b.txt\n- #2: `c.txt`, `x.txt`\nshared: hub.txt\n');
   git(boss, 'add', '-A');
   git(boss, 'commit', '-qm', 'claims');
   git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
@@ -370,8 +370,15 @@ test("claims: a feeder that writes a file another feeder claimed is refused with
   assert.equal(res.status, 1);
   assert.match(res.stderr, /ticket\/1-x writes outside its claim in build\/3's build-claims\.md, so nothing merged: c\.txt is #2's in the claims\. A late need goes through the build minion: ask #9/);
   assert.equal(tipOf(r, 'build/3'), before);
-  // --check, as hand_off_land runs it, refuses the same way before the land starts.
-  assert.match(r.run({}, ['--check', '--into', 'build/3', OK]).stderr, /c\.txt is #2's in the claims/);
+  // --check, as hand_off_land runs it, refuses the same way before the land starts, with the exit that stops a hand-off.
+  const early = r.run({}, ['--check', '--into', 'build/3', OK]);
+  assert.equal(early.status, 3);
+  assert.match(early.stderr, /c\.txt is #2's in the claims/);
+  // A feeder can't skip the check with --full, which is the build minion's.
+  assert.match(r.run({}, ['--into', 'build/3', '--full']).stderr, /--full is the build minion's \(#9\): a feeder merges in with tools\/land\.sh --into build\/3/);
+  // The list mark, backticks and comma in "- #2: `c.txt`, `x.txt`" still claim x.txt for #2.
+  r.commit(r.wt, 'x.txt', 'mine as well\n');
+  assert.match(into(r, [OK]).stderr, /c\.txt is #2's in the claims; x\.txt is #2's in the claims\./);
 });
 
 test('claims: its own and unclaimed new files merge in; one another feeder already merged in, or the claims file, do not', () => {

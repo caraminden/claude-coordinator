@@ -9,7 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { HttpError } from './http.ts';
-import { deleteNote, noteFile, plain, writeAtomic, type FolderView } from './memory-files.ts';
+import { deleteNote, memoryFolders, noteFile, plain, readFolder, writeAtomic, type FolderView, type MemoryFolder, type MemoryLogin } from './memory-files.ts';
 
 /** How long an applied proposal's old notes are kept for Put back (Josh, 2026-11-19: "30 days"). */
 export const KEEP_MS = 30 * 86_400_000;
@@ -261,4 +261,13 @@ export class MemoryProposals {
   prune(now = Date.now()): number {
     return Number(this.db.prepare('UPDATE memory_proposals SET backup = NULL WHERE backup IS NOT NULL AND decided_at < ?').run(now - KEEP_MS).changes);
   }
+}
+
+/** The folder a tidy works on: the scheme's reachable memory folder with the most notes (one per scheme in practice). */
+export function curatorTarget(repoDir: string | null, logins: MemoryLogin[]): { folder: MemoryFolder; notes: number } | null {
+  return memoryFolders(repoDir, logins)
+    .map((folder) => ({ folder, view: readFolder(folder, () => false) }))
+    .filter((f) => f.view.reachable)
+    .sort((a, b) => b.view.notes.length - a.view.notes.length)
+    .map(({ folder, view }) => ({ folder, notes: view.notes.length }))[0] ?? null;
 }

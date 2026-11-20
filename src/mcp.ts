@@ -117,7 +117,7 @@ export function closeSelfResult(cleared: boolean): string {
     + 'Do not announce the close in prose. If you do stay open, say plainly why ("Staying open in state ready for you to do X"; a complete minion closes by itself once a member has seen it). Finish your reply now.';
 }
 
-export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns'] as const;
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },

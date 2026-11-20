@@ -4,21 +4,11 @@ import { join } from 'node:path';
 import { cardHref } from '../card-links.ts';
 import { memoryLogins } from '../decisions-load.ts';
 import { lineDiff } from '../instructions.ts';
-import { memoryFolders, readFolder, type MemoryFolder } from '../memory-files.ts';
-import { applyChanges, checkChanges, countLine, KEEP_MS, restoreSaved, withDrift, type Change, type Proposal } from '../memory-curator.ts';
+import { memoryFolders, readFolder } from '../memory-files.ts';
+import { applyChanges, checkChanges, curatorTarget, countLine, KEEP_MS, restoreSaved, withDrift, type Change, type Proposal } from '../memory-curator.ts';
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
 import type { Project } from '../db.ts';
 import { deliverAnswer, postPlan } from './tickets.ts';
-
-/** The folder a tidy works on: the scheme's reachable memory folder with the most notes (one per scheme in practice). */
-function target(app: App, project: Project): { folder: MemoryFolder; notes: number } | null {
-  const closed = () => false;
-  return memoryFolders(project.repo_dir, memoryLogins(app))
-    .map((folder) => ({ folder, view: readFolder(folder, closed) }))
-    .filter((f) => f.view.reachable)
-    .sort((a, b) => b.view.notes.length - a.view.notes.length)
-    .map(({ folder, view }) => ({ folder, notes: view.notes.length }))[0] ?? null;
-}
 
 const folderOf = (app: App, project: Project, id: string) => memoryFolders(project.repo_dir, memoryLogins(app)).find((f) => f.id === id) ?? null;
 
@@ -66,7 +56,7 @@ export const memoryCuratorRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/memory-proposal', who: ['minion'], refuse: 'Only the curator run itself can propose a memory tidy in its chat',
     async handler({ req, res, app, ticket }) {
       const project = app.store.getProject(ticket.project_id)!;
-      const t = target(app, project);
+      const t = curatorTarget(project.repo_dir, memoryLogins(app));
       if (!t) throw new HttpError(404, 'This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself');
       const body = await readJson(req);
       if (Array.isArray(body.changes) && !body.changes.length) throw new HttpError(400, 'Nothing to propose: say so in one line and close yourself with close_self');

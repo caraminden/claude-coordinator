@@ -39,7 +39,8 @@ import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
-import { addAppTurnsChecks, backfillStandardAudits } from './src/standard-audits.ts';
+import { curatorTarget } from './src/memory-curator.ts';
+import { addAppTurnsChecks, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
@@ -63,7 +64,7 @@ import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { sweepKept } from './src/replay-keep.ts';
-import { loadDecisions } from './src/decisions-load.ts';
+import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
@@ -612,11 +613,15 @@ async function newMinion(project: Project, m: { title: string; props: Record<str
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
 // every half minute; a schedule that came due while the server was down runs once when it is back.
-const scheduledRuns = new ScheduledRuns({ store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR });
+const scheduledRuns = new ScheduledRuns({
+  store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR,
+  memoryTarget: (id) => { const t = curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink })); return t && { dir: t.folder.dir, notes: t.notes }; },
+});
 // Once per database (#799): the hand-made audits follow kit/schedules/, and each scheme gets the ones its repo fits.
 try {
   for (const line of backfillStandardAudits(store, DATA_DIR)) console.log(`Standard audits (#799): ${line}`);
   for (const line of addAppTurnsChecks(store, DATA_DIR)) console.log(`App turns check (#844): ${line}`);
+  for (const line of addMemoryCurators(store, DATA_DIR)) console.log(`Memory curator (#1111): ${line}`);
 } catch (err) {
   console.error('Standard audits (#799) backfill failed; it tries again at the next start:', err);
 }

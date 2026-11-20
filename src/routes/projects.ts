@@ -41,6 +41,7 @@ import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
+import { addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
@@ -592,6 +593,7 @@ export const projectRoutes: Route[] = [
         if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true, as);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
+      addMemoryCurator(app.store, app.dataDir, project.id);
       void app.releases.refresh(true); // its targets show up without anyone asking (#627)
       if (setup) {
         const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);

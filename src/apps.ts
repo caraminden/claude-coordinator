@@ -51,7 +51,7 @@ export class RestartHolds {
   private holdMs: number;
   /** Past this many waiting on one app, a request goes on at once (and fails fast if the app is down). */
   private maxWaiting: number;
-  private apps = new Map<string, { holds: number; ended: number; waiting: number }>();
+  private apps = new Map<string, { holds: number; ended: number; waiting: number; stopped?: boolean }>();
 
   constructor(holdMs = HOLD_MS, maxWaiting = 200) {
     this.holdMs = holdMs;
@@ -63,6 +63,7 @@ export class RestartHolds {
     const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };
     this.apps.set(name, app);
     app.holds++;
+    app.stopped = false;
     let done = false;
     return () => {
       if (done) return;
@@ -74,12 +75,28 @@ export class RestartHolds {
 
   /** The app was stopped on purpose: what is left of a restart's grace ends, so it fails fast. */
   stopped(name: string) {
-    const app = this.apps.get(name);
-    if (app) app.ended = 0;
+    const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };
+    this.apps.set(name, app);
+    app.ended = 0;
+    app.stopped = true;
   }
 
-  /** Run `go` now, or once a restarting app's port is open or the hold's time is up; never for an asker who left meanwhile. */
-  whenUp(name: string, port: number, conn: { once(e: 'close', f: () => void): unknown }, go: () => void) {
+  /** Whether the app was stopped on purpose and hasn't answered since: the proxy's retry (#1173) skips it, so it fails fast. */
+  isStopped(name: string): boolean {
+    return !!this.apps.get(name)?.stopped;
+  }
+
+  /** The app answered a request: it's running, so a stop's mark is gone. */
+  answered(name: string) {
+    const app = this.apps.get(name);
+    if (app) app.stopped = false;
+  }
+
+  /**
+   * Run `go` now, or once a restarting app's port is open or the hold's time is up; never for an asker who left meanwhile.
+   * `held` says it waited here, so the proxy needn't ask again on top (#1173's retry).
+   */
+  whenUp(name: string, port: number, conn: { once(e: 'close', f: () => void): unknown }, go: (held?: boolean) => void) {
     const app = this.apps.get(name);
     if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return go();
     let gone = false;
@@ -91,7 +108,7 @@ export class RestartHolds {
     };
     void poll().finally(() => {
       app.waiting--;
-      if (!gone) go();
+      if (!gone) go(true);
     });
   }
 }
@@ -264,7 +281,7 @@ export class AppProxy {
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
     const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
-    const go = () => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
+    const go = (held?: boolean) => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed, ...(held || this.restarts.isStopped(a.row.name) ? { retryMs: 0 } : {}) });
     this.restarts.whenUp(a.row.name, a.row.port, res, go);
   }
 
@@ -295,6 +312,7 @@ export class AppProxy {
       maxBody: MAX_BODY,
       // A contraption may set its own cookies, never a login, nor one for a wider domain (Citadel's, or the other apps').
       answer: (h) => {
+        this.restarts.answered(row.name);
         if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].filter((c) => !/^\s*(cc_session|cc_app)=/.test(c) && !/;\s*domain\s*=/i.test(c));
         if (renewed) h['set-cookie'] = [...(h['set-cookie'] ?? []), renewed];
         // An open path's answer on Citadel's host can't open as a document there (an <object> asks with Accept */*).

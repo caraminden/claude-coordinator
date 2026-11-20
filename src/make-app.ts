@@ -8,7 +8,6 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { appDir, generateApp, TITLE } from '../kit/skills/contraption-ui/new-app/new-app.ts';
 import { pickFor, pickReason } from '../public/model-table.js';
 import { APP_NAME } from './appname.ts';
 import { runnerLabel } from './ci-runner.ts';
@@ -57,6 +56,8 @@ export interface Made {
 /** The whole of make_app, for `caller` (a Taskmaster of `project`, which the route has checked). */
 export async function makeApp(app: App, project: Project, caller: Ticket, by: string, body: { name?: unknown; title?: unknown; idea?: unknown }): Promise<Made> {
   const { store } = app;
+  // Loaded on use, as doc-preview loads its kit script: a copy of the server with no kit/ (a test's, a preview's) still boots.
+  const { appDir, TITLE } = await import('../kit/skills/contraption-ui/new-app/new-app.ts');
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   const idea = typeof body.idea === 'string' ? body.idea.trim() : '';
@@ -86,6 +87,7 @@ export async function makeApp(app: App, project: Project, caller: Ticket, by: st
 async function make(app: App, project: Project, caller: Ticket, by: string, a: { name: string; title: string; idea: string; maker: { id: number; name: string }; repo: string; port: number }): Promise<Made> {
   const { store } = app;
   const { name, title, idea, maker, repo, port } = a;
+  const { appDir, generateApp } = await import('../kit/skills/contraption-ui/new-app/new-app.ts');
   const branch = (await run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: project.repo_dir! }).catch(() => null))?.stdout.trim() || 'main';
 
   // The minion first: its branch gets the app as its first commit, before its brief can start a turn.

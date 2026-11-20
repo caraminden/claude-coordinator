@@ -40,8 +40,10 @@ const stop = (s: Server) => new Promise<void>((ok) => {
 });
 
 /** The proxy in front of it, as AppProxy.serve uses the holds. */
-async function proxy(holds: RestartHolds, port: number): Promise<string> {
-  const s = createServer((req, res) => holds.whenUp('fixture', port, res, () => forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture' })));
+// The proxy's own retry of a refused GET (#1173, test/proxy-retry.test.ts) is off unless a test asks for it, so these
+// test the hold alone; a held request never retries on top, as in src/apps.ts.
+async function proxy(holds: RestartHolds, port: number, retryMs = 0): Promise<string> {
+  const s = createServer((req, res) => holds.whenUp('fixture', port, res, (held) => forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: held ? 0 : retryMs })));
   servers.push(s);
   const p = await freePort();
   await new Promise<void>((ok) => s.listen(p, '127.0.0.1', () => ok()));
@@ -101,7 +103,8 @@ test('an app that is not restarting and not answering: a 502 inside 1 s', async 
 test('a restart that never comes back: the hold ends at its cap with a 502', async () => {
   const port = await freePort();
   const holds = new RestartHolds(600);
-  const base = await proxy(holds, port);
+  // With the proxy's retry on: a request that waited out the hold doesn't then retry for another 5 s.
+  const base = await proxy(holds, port, 5000);
   holds.hold('fixture');
   const d = await timed(`${base}/apps/fixture/`);
   assert.equal(d.status, 502);

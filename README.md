@@ -231,7 +231,7 @@ journalctl --user -u claude-coordinator -f
 The service runs with `UMask=0077`, so the database and everything it writes are
 private (mode 600). `citadel.slice` caps the service and everything it runs (host turns, lands,
 each person's container) at `MemoryMax=22G` and `MemorySwapMax=6G` of perigee's 29G, which is shared
-(`resources.conf` puts the service in it; the numbers behind it are in the file). `citadel-turns.slice` adds `MemoryHigh=10G` for host turns (throttled, never killed), and each container's own unit caps it at 8G. `contraptions.slice` caps the apps at 5G, once their units name it. `claude-coordinator.socket` holds port
+(`resources.conf` puts the service in it; the numbers behind it are in the file). `citadel-turns.slice` adds `MemoryHigh=10G` for host turns (throttled, never killed), and each container's own unit caps it at 12G (throttled from 10G). `contraptions.slice` caps the apps at 5G, once their units name it. `claude-coordinator.socket` holds port
 8573 while the server restarts, so requests then wait instead of failing
 (`socket.conf` makes the service use it). `priority.conf` keeps the server out of swap and
 ahead of the turns for CPU; it and the host settings that go with it are in `deploy/priority.md`:

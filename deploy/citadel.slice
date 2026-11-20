@@ -2,7 +2,7 @@
 # runaway turn is throttled or OOM-killed in here instead of the kernel picking victims box-wide (#1214).
 # Inside: the server (claude-coordinator.service, its own MemoryMax=8G), host turns, lands and fast-verify
 # (citadel-turns.slice, a child by its name), each person's container (citadel-claude-N.service, its own
-# MemoryMax=8G: src/claude-link.ts CONTAINER_MEMORY) and landing test scopes (tools/run-tests.sh).
+# MemoryMax=12G: src/claude-link.ts CONTAINER_MEMORY) and landing test scopes (tools/run-tests.sh).
 #
 # Measured 2026-11-19/20 (journal "memory peak" lines and the units' cgroups):
 #   server            peak 6.5G, average 3.9G, no swap (priority.conf MemorySwapMax=0)

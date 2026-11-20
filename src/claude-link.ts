@@ -25,9 +25,10 @@ const LIVE_CHECKOUT = join(import.meta.dirname, '..');
 const MAX_MASKED = 50;
 /**
  * Each person's container's memory (#1214, sizes in deploy/citadel.slice): everyday peaks were 1.6G and 3.4G, one ran to
- * 22.3G with 21.6G of it in swap. Throttled past 6G, OOM-killed (one process, OOMPolicy=continue) past 8G, 4G of zram swap.
+ * 22.3G with 21.6G of it in swap. Throttled past 10G, OOM-killed (one process, OOMPolicy=continue) past 12G, 4G of zram swap.
+ * Raised from 6G/8G (#1258; Josh, 2026-11-20, "Raise to 10 GB": his container hit 6G with ~10 minions and a Rust build).
  */
-export const CONTAINER_MEMORY = { high: '6G', max: '8G', swap: '4G' };
+export const CONTAINER_MEMORY = { high: '10G', max: '12G', swap: '4G' };
 
 /**
  * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's

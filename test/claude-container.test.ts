@@ -321,12 +321,12 @@ test('a container turn whose wrapper process is gone and whose heartbeat stopped
 });
 
 test('podman run arguments: keep-id, host network, a :U volume, binds at their own path, the spec label', () => {
-  const spec = { name: 'citadel-claude-1', image: 'localhost/citadel-claude:abc', mounts: [{ src: 'citadel-claude-1', dst: '/home/u', volume: true }, { src: '/data/projects', dst: '/data/projects' }, { src: '/opt/claude', dst: '/opt/claude', ro: true }], env: { HOME: '/home/u' }, memory: { high: '6G', max: '8G', swap: '4G' } };
+  const spec = { name: 'citadel-claude-1', image: 'localhost/citadel-claude:abc', mounts: [{ src: 'citadel-claude-1', dst: '/home/u', volume: true }, { src: '/data/projects', dst: '/data/projects' }, { src: '/opt/claude', dst: '/opt/claude', ro: true }], env: { HOME: '/home/u' }, memory: { high: '10G', max: '12G', swap: '4G' } };
   const args = runArgs(spec);
   // The memory caps sit on the systemd unit: podman's --memory never reached a cgroup with a memory controller (#1214).
   assert.ok(!args.includes('--memory') && !args.includes('--cpus'));
-  assert.deepEqual(unitProps(spec), ['-p', 'MemoryHigh=6G', '-p', 'MemoryMax=8G', '-p', 'MemorySwapMax=4G']);
-  assert.notEqual(specHash(spec), specHash({ ...spec, memory: { ...spec.memory, max: '10G' } }), 'a new cap restarts the container once idle');
+  assert.deepEqual(unitProps(spec), ['-p', 'MemoryHigh=10G', '-p', 'MemoryMax=12G', '-p', 'MemorySwapMax=4G']);
+  assert.notEqual(specHash(spec), specHash({ ...spec, memory: { ...spec.memory, max: '14G' } }), 'a new cap restarts the container once idle');
   for (const a of ['--userns=keep-id', '--network=host', '--init', '--rm']) assert.ok(args.includes(a), a);
   assert.ok(!args.some((a) => /--pid=host|--privileged/.test(a)));
   assert.ok(args.includes('citadel-claude-1:/home/u:U'));
@@ -385,7 +385,7 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes('OOMPolicy=continue')));
   // ...and past its cap only its own unit's processes are OOM-killed, on the unit before podman's own arguments (#1214).
   const unit = log.find((c) => c[0] === 'systemd-run')!;
-  for (const p of ['MemoryHigh=6G', 'MemoryMax=8G', 'MemorySwapMax=4G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
+  for (const p of ['MemoryHigh=10G', 'MemoryMax=12G', 'MemorySwapMax=4G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
   // The container runs an old spec: a starting turn that's its only one restarts it; with another turn there, it waits.
   link.busy = () => 2;
   await link.ensure(josh.id, true);

@@ -21,7 +21,7 @@ export interface ContainerSpec {
   mounts: Mount[];
   env?: Record<string, string>;
   /**
-   * Memory limits, set on the container's systemd unit (src/containers.ts start), e.g. { high: '6G', max: '8G', swap: '4G' }:
+   * Memory limits, set on the container's systemd unit (src/containers.ts start), e.g. { high: '10G', max: '12G', swap: '4G' }:
    * high throttles and reclaims, max OOM-kills inside the unit, swap bounds zram, whose pages cost RAM the cgroup isn't
    * charged for. Not podman's --memory or --cpus: systemd-run gives podman no delegated controllers, so --cgroups=split's payload
    * cgroup has none and neither ever applied (#1214: a container started with --memory 6g peaked at 22.3G). No CPU cap, as before.

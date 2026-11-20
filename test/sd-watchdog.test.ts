@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MARK, markExit, pingEvery, restartDetail, startWatchdog, takeMark } from '../src/sd-watchdog.ts';
+import { MARK, markExit, markStop, pingEvery, restartDetail, startWatchdog, stopEvent, takeMark, takeStop } from '../src/sd-watchdog.ts';
 import { Store } from '../src/db.ts';
 import { until } from './wait.ts';
 
@@ -100,4 +100,31 @@ test('the restart names the last stall recorded before it', () => {
     store.db.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('every stop leaves a mark of how systemd says it ended, taken once at the next boot (#1325)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-stop-'));
+  try {
+    assert.equal(takeStop(dir), null);
+    markStop({ SERVICE_RESULT: 'oom-kill', EXIT_CODE: 'killed', EXIT_STATUS: 'KILL' }, dir, 1234);
+    assert.deepEqual(takeStop(dir), { at: 1234, result: 'oom-kill', code: 'killed', status: 'KILL' });
+    assert.equal(takeStop(dir), null, 'counted once');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('stopEvent names each cause from systemd\'s words; only a ship and a stop by hand are planned', () => {
+  const m = (result: string, code: string, status: string) => ({ at: 5, result, code, status });
+  const cause = (mark: ReturnType<typeof m> | null, newCode = false) => stopEvent(mark, newCode, 9).cause;
+  assert.equal(cause(m('success', 'exited', '0'), true), 'deploy');
+  assert.equal(cause(m('success', 'exited', '0')), 'by-hand');
+  assert.equal(cause(m('signal', 'killed', 'TERM')), 'by-hand');
+  assert.equal(cause(m('watchdog', 'killed', 'KILL'), true), 'watchdog', "systemd's result wins over new code");
+  assert.equal(cause(m('oom-kill', 'killed', 'KILL'), true), 'out-of-memory');
+  assert.equal(cause(m('signal', 'killed', 'KILL')), 'killed');
+  assert.equal(cause(m('exit-code', 'exited', '1')), 'crash');
+  assert.equal(cause(m('core-dump', 'dumped', 'SEGV')), 'crash');
+  assert.deepEqual(stopEvent(null, false, 9), { at: 9, cause: 'unknown', detail: 'unknown: no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed' });
+  assert.equal(stopEvent(m('oom-kill', 'killed', 'KILL'), false, 9).detail, 'out-of-memory: killed for memory, by systemd-oomd or the kernel (systemd: oom-kill, killed, KILL)');
 });

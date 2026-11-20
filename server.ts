@@ -21,7 +21,7 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { StatusPage, recordBoot } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
-import { restartDetail, startWatchdog, takeMark } from './src/sd-watchdog.ts';
+import { restartDetail, startWatchdog, takeMark, takeStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -115,7 +115,7 @@ import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './s
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
-import { HostJobs } from './src/host-job.ts';
+import { HostJobs, jobLost } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes } from './src/flake-fixes.ts';
@@ -1558,7 +1558,8 @@ const status = new StatusPage({
   tell: (projectId, text) => tellHome(projectId, text),
 });
 if (!BOOT_CHECK && !PREVIEW) {
-  recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT);
+  recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, takeStop(DATA_DIR));
+  jobLost.hear = (dir) => store.addHealthEvent('job-killed', Date.now(), null, `${dir}: ended with no exit code (killed from outside, stopped, or cut off by a restart)`);
   status.start();
   memoryStorms.start();
 }

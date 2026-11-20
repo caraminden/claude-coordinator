@@ -11,6 +11,7 @@ import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
 import { pressure } from './pressure.ts';
+import { stopEvent, type StopMark } from './sd-watchdog.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
@@ -126,22 +127,28 @@ export function stallSeconds(detail: string): number | null {
 
 /**
  * Record this server's start as a 'boot' health event and say why it started: a ship (new code since the last
- * start) or a restart on the same code (a crash, the watchdog or by hand). Returns that reason.
+ * start) or a restart on the same code (a crash, the watchdog or by hand). Returns that reason. Given the last stop's
+ * mark (null: none was left), also records why the last process ended as a 'stop' event (#1325, src/sd-watchdog.ts).
  */
-export function recordBoot(store: Store, commit: string, at: number): string {
+export function recordBoot(store: Store, commit: string, at: number, stop?: StopMark | null): string {
   const last = store.healthEventsSince(['boot'], 0).at(-1);
+  const newCode = !!(last?.commit_sha && commit && last.commit_sha !== commit);
   const reason = !last ? 'first start on record'
-    : last.commit_sha && commit && last.commit_sha !== commit ? `a ship: new code ${commit.slice(0, 8)}`
+    : newCode ? `a ship: new code ${commit.slice(0, 8)}`
     : 'a restart on the same code: a crash, the watchdog or by hand';
+  if (last && stop !== undefined) {
+    const s = stopEvent(stop, newCode, at);
+    store.addHealthEvent('stop', s.at, last.commit_sha, s.detail);
+  }
   store.addHealthEvent('boot', at, commit || null, reason);
   return reason;
 }
 
-/** Bytes of memory free for new work, from MemAvailable (free alone leaves out reclaimable cache). */
-async function readMem(): Promise<{ total: number; avail: number }> {
+/** Bytes of memory free for new work, from MemAvailable (free alone leaves out reclaimable cache), and swap in use (#1325). */
+async function readMem(): Promise<{ total: number; avail: number; swap?: number }> {
   const text = await readFile('/proc/meminfo', 'utf8');
   const kb = (k: string) => Number(new RegExp(`^${k}:\\s+(\\d+)`, 'm').exec(text)?.[1] ?? NaN) * 1024;
-  return { total: kb('MemTotal'), avail: kb('MemAvailable') };
+  return { total: kb('MemTotal'), avail: kb('MemAvailable'), swap: kb('SwapTotal') - kb('SwapFree') };
 }
 
 export interface StatusDeps {
@@ -163,7 +170,7 @@ export interface StatusDeps {
   home?: string;
   /** Tell a scheme's Taskmaster (a wake): the slow-ship nudge. Left out in a preview or a test that doesn't send. */
   tell?: (projectId: number, text: string) => void;
-  mem?: () => Promise<{ total: number; avail: number }>;
+  mem?: () => Promise<{ total: number; avail: number; swap?: number }>;
   /** Memory-limit storms still going (#1280, src/memory-storms.ts); the ones that ended are 'memory-high' health events. */
   storms?: () => Storm[];
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
@@ -203,6 +210,7 @@ export class StatusPage {
       const s: HostSample = {
         at: this.now(), mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
+        io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
       };
       this.deps.store.addHostSample(s);
       return s;

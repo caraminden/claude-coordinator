@@ -1,6 +1,6 @@
 // Incident timelines, written by themselves (#1145; handoff shared/project/handoffs/platform-incident-timeline.md, Josh
 // picked "Build it" on 2026-11-19). When something goes wrong with Citadel itself (the server was down, the ship line
-// stood still, a burst of red CI runs), this gathers what was already recorded for that window into one timeline in the
+// stood still, a burst of red CI runs, server stops or stalls in a row: #1325), this gathers what was already recorded for that window into one timeline in the
 // scheme's shared reports/ folder and wakes the Taskmaster to start a research minion on it.
 //
 // Read-only (why: an incident on 2026-11-18 was blamed on the wrong thing because the data was read after the
@@ -16,6 +16,7 @@ import type { Store } from './db.ts';
 import type { GhGet } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { ZONE, pacific } from './pacific.ts';
+import { PLANNED } from './sd-watchdog.ts';
 
 const run = promisify(execFile);
 const MIN = 60_000;
@@ -26,6 +27,20 @@ export const STILL_MS = 15 * MIN;
 /** This many failed CI runs within RED_WINDOW_MS is a burst. */
 export const RED_COUNT = 5;
 export const RED_WINDOW_MS = 30 * MIN;
+/** This many unplanned server stops (src/sd-watchdog.ts's 'stop' rows: out of memory, watchdog, crash, unknown) within STOPS_WINDOW_MS (#1325). */
+export const STOPS_COUNT = 3;
+export const STOPS_WINDOW_MS = 10 * MIN;
+/**
+ * Stalls adding up to more than this share of any STALL_WINDOW_MS are an incident (#1325). Picked from Nov 17 to 20's
+ * rows: every window on Nov 17 to 19 stayed at or under 1.7% (5 s of 5 min); Nov 20 passed 5% only at 01:30, 13:06 (the
+ * memory storm) and, from the journal, 11:12 to 11:27 (about 38 stalls of 0.5 to 2 s in 2 minutes).
+ */
+export const STALL_SHARE = 0.05;
+export const STALL_WINDOW_MS = 5 * MIN;
+/** The stall kinds counted: loop-lag, and #1295's loop-lag-boot (stalls in the 10 quiet minutes after a boot). */
+export const STALL_KINDS = ['loop-lag', 'loop-lag-boot'];
+/** How far back the stop and stall triggers look each tick: a cluster older than this was seen by an earlier tick. */
+const LOOK_BACK_MS = 60 * MIN;
 /** An open incident is written once this long passes with no trigger. */
 export const QUIET_MS = 30 * MIN;
 /** The timeline reads this long before the first trigger, and this long after the last. */
@@ -87,6 +102,36 @@ export function redTrigger(jobs: RedJob[], after: number, now: number): Trigger 
   if (runs.size < RED_COUNT) return null;
   const times = [...runs.values()];
   return { from: Math.min(...times), last: Math.max(...times), why: `a burst of red CI runs (${RED_COUNT} or more failed within ${RED_WINDOW_MS / MIN} min)` };
+}
+
+/** A health row as the stop and stall triggers read it. */
+export interface Row { at: number; detail: string }
+
+/** From the first row to the last of every `window`-long stretch (ending at a row) that `enough` passes; null with none. */
+function clusters(rows: Row[], window: number, enough: (inWindow: Row[]) => boolean): { from: number; last: number } | null {
+  let from = Infinity, last = -Infinity;
+  for (let i = 0, j = 0; i < rows.length; i++) {
+    while (rows[i].at - rows[j].at >= window) j++;
+    const w = rows.slice(j, i + 1);
+    if (enough(w)) (from = Math.min(from, w[0].at)), (last = rows[i].at);
+  }
+  return last > -Infinity ? { from, last } : null;
+}
+
+/** STOPS_COUNT or more unplanned server stops within STOPS_WINDOW_MS, of 'stop' rows oldest first. */
+export function stopsTrigger(rows: Row[]): Trigger | null {
+  const unplanned = rows.filter((r) => !(PLANNED as readonly string[]).includes(r.detail.split(':')[0]));
+  const c = clusters(unplanned, STOPS_WINDOW_MS, (w) => w.length >= STOPS_COUNT);
+  return c && { ...c, why: `the server stopped unplanned ${STOPS_COUNT} or more times within ${STOPS_WINDOW_MS / MIN} min (out of memory, watchdog, crash or unknown)` };
+}
+
+/** How long a stall row held the event loop, in ms, from its "held for 1.2 s" (0 when it doesn't say). */
+const heldMs = (detail: string) => Number(/held for ([\d.]+) s/.exec(detail)?.[1] ?? 0) * 1000;
+
+/** Stalls adding up to more than STALL_SHARE of some STALL_WINDOW_MS, of stall rows oldest first. */
+export function stallTrigger(rows: Row[]): Trigger | null {
+  const c = clusters(rows, STALL_WINDOW_MS, (w) => w.reduce((n, r) => n + heldMs(r.detail), 0) > STALL_SHARE * STALL_WINDOW_MS);
+  return c && { ...c, why: `repeated stalls: the event loop was held more than ${STALL_SHARE * 100}% of ${STALL_WINDOW_MS / MIN} min` };
 }
 
 /** One landing in the ship line, as src/waits.ts reads it. */
@@ -435,6 +480,11 @@ export class Incidents {
       // The same words each minute it stays still, so one stall is one reason, not one per minute.
       out.push({ from: this.line.since, last: now, why: `the ship line stood still from ${pacific(this.line.since)} (${head.label || `#${head.seq}`}${head.phase ? `, ${head.phase}` : ''})` });
     }
+    const since = Math.max(state.after + 1, now - LOOK_BACK_MS);
+    const stops = stopsTrigger(this.d.store.healthBetween(since, now + 1, 500, ['stop']));
+    if (stops) out.push(stops);
+    const stalls = stallTrigger(this.d.store.healthBetween(since, now + 1, 2000, STALL_KINDS));
+    if (stalls) out.push(stalls);
     const red = redTrigger(this.d.jobs(), state.after, now);
     if (red) out.push(red);
     return out;

@@ -88,6 +88,8 @@ test('a claude killed outright by a signal nobody sent from Citadel fails the tu
   const { ticket, errors } = await turn('signal');
   assert.equal(ticket.status, 'error');
   assert.match(errors[0] ?? '', /^Killed by SIGTERM from outside Citadel\./);
+  // A health row too, which outlives the chat's (#1325).
+  assert.deepEqual(store.healthEventsSince(['turn-killed'], 0).filter((e) => e.detail.startsWith(`minion ${ticket.id}:`)).map((e) => e.detail), [`minion ${ticket.id}: SIGTERM`]);
 });
 
 test('a turn killed together with its wrapper (no exit record) fails the turn rather than ending idle like a stop (#468 S03-4)', async () => {
@@ -107,6 +109,7 @@ test('a turn killed together with its wrapper (no exit record) fails the turn ra
     const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
     assert.match(errors[0] ?? '', /^The turn's process was killed before it finished/);
     assert.equal(failed.length, 1, 'people hear of it');
+    assert.equal(store.healthEventsSince(['turn-killed'], 0).filter((e) => e.detail === `minion ${t.id}: its unit or process group was killed, no exit noted`).length, 1);
   } finally {
     runner.onTurnError = () => {};
   }

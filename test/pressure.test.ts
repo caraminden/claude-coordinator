@@ -8,11 +8,11 @@ import { createPressure, MAX_CPU_PRESSURE, MAX_MEM_PRESSURE, RUN_ANYWAY_MS } fro
 const psi = (avg60: number) => `some avg10=0.00 avg60=${avg60.toFixed(2)} avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1\n`;
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'psi-'));
-  const cpuFile = join(dir, 'cpu'), memFile = join(dir, 'memory');
+  const cpuFile = join(dir, 'cpu'), memFile = join(dir, 'memory'), ioFile = join(dir, 'io');
   let t = 1_000_000;
   const logs: string[] = [];
-  const p = createPressure({ cpuFile, memFile, now: () => t, log: (l) => logs.push(l) });
-  return { cpuFile, memFile, p, logs, tick: (ms: number) => { t += ms; }, dir };
+  const p = createPressure({ cpuFile, memFile, ioFile, now: () => t, log: (l) => logs.push(l) });
+  return { cpuFile, memFile, ioFile, p, logs, tick: (ms: number) => { t += ms; }, dir };
 }
 
 test('starved by CPU at the line, not below it', async () => {
@@ -32,10 +32,17 @@ test('starved by memory', async () => {
   assert.deepEqual([r.starved, r.mem, r.why], [true, 20, 'memory pressure 20%']);
 });
 
+test('IO pressure is read for the host samples (#1325) but never starves a pass', async () => {
+  const s = setup();
+  writeFileSync(s.cpuFile, psi(1)); writeFileSync(s.memFile, psi(1)); writeFileSync(s.ioFile, psi(95));
+  const r = await s.p.read();
+  assert.deepEqual([r.io, r.starved], [95, false]);
+});
+
 test('no PSI file: never starved', async () => {
   const s = setup();
   const r = await s.p.read();
-  assert.deepEqual([r.cpu, r.mem, r.starved], [null, null, false]);
+  assert.deepEqual([r.cpu, r.mem, r.io, r.starved], [null, null, null, false]);
   assert.equal(await s.p.gate('memory index'), true);
 });
 

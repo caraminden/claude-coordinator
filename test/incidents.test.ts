@@ -6,8 +6,9 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import {
   ALIVE_KEY, ciEntries, DOWN_MS, group, Incidents, journalEntries, loadEntries, QUIET_MS, readCiRuns, readDeploys, RED_COUNT, redTrigger,
-  render, STATE_KEY, step, STILL_MS, type CiRun, type IncidentState, type InLine, type RedJob, type Sources,
+  render, stallTrigger, STATE_KEY, step, STILL_MS, stopsTrigger, type CiRun, type IncidentState, type InLine, type RedJob, type Sources,
 } from '../src/incidents.ts';
+import { stopEvent } from '../src/sd-watchdog.ts';
 import { git, makeRepo } from './git.ts';
 
 // Incident timelines (#1145): one timeline per incident, from what is already recorded, and one ask to the Taskmaster.
@@ -290,4 +291,59 @@ test("readDeploys: the live checkout's reflog, oldest first, inside the window",
   assert.deepEqual(all.map((d) => d.subject), ['first', '#866: second']);
   assert.equal(all[1].how, 'commit');
   assert.deepEqual(await readDeploys(dir, Date.now() + 10 * MIN, Date.now() + 20 * MIN), []);
+});
+
+// #1325: Nov 20's two incidents, replayed. Neither opened one at the time.
+const pst = (hms: string) => Date.parse(`2026-11-20T${hms}-08:00`);
+const stopRow = (s: ReturnType<typeof setup>, at: number, result: string, newCode = false) => {
+  const e = stopEvent({ at, result, code: result === 'success' ? 'exited' : 'killed', status: result === 'success' ? '0' : 'KILL' }, newCode, at);
+  s.store.addHealthEvent('stop', e.at, null, e.detail);
+};
+const stall = (s: ReturnType<typeof setup>, at: number, held: number, kind = 'loop-lag') =>
+  s.store.addHealthEvent(kind, at, null, `The event loop was held for ${held.toFixed(1)} s: the server answered nobody meanwhile.`);
+
+test('replay 10:44 to 10:47 on Nov 20: systemd-oomd stopped the server 11 times, one incident', async () => {
+  const s = setup(pst('10:00:00'));
+  // The 11 boots the live database holds for that storm; each stop was about 3 s before its boot (Restart=always).
+  for (const b of ['10:44:14', '10:44:29', '10:44:45', '10:45:01', '10:45:17', '10:45:32', '10:45:47', '10:46:03', '10:46:34', '10:47:06', '10:47:22']) stopRow(s, pst(b) - 3000, 'oom-kill');
+  const inc = s.make();
+  s.clock.now = pst('10:48:00');
+  await inc.tick();
+  const open = s.store.getSetting<IncidentState>(STATE_KEY)!.open!;
+  assert.deepEqual([open.from, open.last], [pst('10:44:11'), pst('10:47:19')]);
+  assert.match(open.why.join('; '), /the server stopped unplanned 3 or more times within 10 min/);
+  s.clock.now = pst('10:47:19') + QUIET_MS;
+  await inc.tick();
+  assert.equal(s.files.length, 1);
+  assert.equal(s.told.length, 1);
+});
+
+test('replay 11:10 to 11:30 on Nov 20: three ships are planned stops, but the stalls between them are one incident', async () => {
+  const s = setup(pst('11:00:00'));
+  for (const at of ['11:12:01', '11:17:07', '11:21:19']) stopRow(s, pst(at), 'success', true);
+  // The journal's 38 stalls of 0.5 to 2 s in 2 minutes before 11:27, the first ones in a boot's quiet minutes (#1295's kind).
+  for (let i = 0; i < 38; i++) stall(s, pst('11:25:00') + i * 3000, 0.5 + (i % 4) * 0.5, i < 10 ? 'loop-lag-boot' : 'loop-lag');
+  const inc = s.make();
+  s.clock.now = pst('11:30:00');
+  await inc.tick();
+  const open = s.store.getSetting<IncidentState>(STATE_KEY)!.open!;
+  assert.deepEqual(open.why, ['repeated stalls: the event loop was held more than 5% of 5 min']);
+  s.clock.now = open.last + QUIET_MS;
+  await inc.tick();
+  assert.equal(s.files.length, 1);
+});
+
+test('stopsTrigger and stallTrigger: below the line, and planned stops, open nothing', () => {
+  const row = (at: number, detail: string) => ({ at, detail });
+  // Two unplanned stops in 10 minutes, or three spread over 25: no incident. Ships and stops by hand never count.
+  assert.equal(stopsTrigger([row(0, 'out-of-memory: x'), row(5 * MIN, 'crash: x')]), null);
+  assert.equal(stopsTrigger([row(0, 'crash: x'), row(12 * MIN, 'crash: x'), row(24 * MIN, 'crash: x')]), null);
+  assert.equal(stopsTrigger([row(0, 'deploy: x'), row(MIN, 'by-hand: x'), row(2 * MIN, 'deploy: x'), row(3 * MIN, 'watchdog: x')]), null);
+  assert.deepEqual(stopsTrigger([row(0, 'watchdog: x'), row(4 * MIN, 'unknown: x'), row(9 * MIN, 'killed: x')])?.from, 0);
+  // Nov 18's worst window: 5.1 s of stalls in 5 minutes (1.7%). 15 s exactly is 5%, not more than it.
+  const held = (s: number) => `The event loop was held for ${s.toFixed(1)} s: the server answered nobody meanwhile.`;
+  assert.equal(stallTrigger([row(0, held(2.0)), row(MIN, held(1.6)), row(2 * MIN, held(1.5))]), null);
+  assert.equal(stallTrigger([row(0, held(7.5)), row(4 * MIN, held(7.5))]), null);
+  assert.equal(stallTrigger([row(0, held(8)), row(6 * MIN, held(8))]), null, 'more than 5 minutes apart');
+  assert.deepEqual(stallTrigger([row(0, held(0.5)), row(MIN, held(8)), row(2 * MIN, held(8))]), { from: 0, last: 2 * MIN, why: 'repeated stalls: the event loop was held more than 5% of 5 min' });
 });

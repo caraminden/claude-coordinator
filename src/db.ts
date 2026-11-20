@@ -60,6 +60,9 @@ export interface HostSample {
   /** CPU and memory pressure ("some avg60", whole percent) at the reading; null before #1301 or without PSI. */
   cpu_psi?: number | null;
   mem_psi?: number | null;
+  /** IO pressure the same way, and swap in use in bytes (#1325); null before it or where it can't be read. */
+  io_psi?: number | null;
+  swap_used?: number | null;
 }
 
 export interface ReleaseRow {
@@ -1293,7 +1296,9 @@ CREATE TABLE IF NOT EXISTS host_samples (
   load1 REAL NOT NULL,
   rss INTEGER NOT NULL,
   cpu_psi INTEGER,
-  mem_psi INTEGER
+  mem_psi INTEGER,
+  io_psi INTEGER,
+  swap_used INTEGER
 );
 -- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
 CREATE TABLE IF NOT EXISTS flake_events (
@@ -1450,6 +1455,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'subdir', 'ALTER TABLE contraptions ADD COLUMN subdir TEXT'],
   ['host_samples', 'cpu_psi', 'ALTER TABLE host_samples ADD COLUMN cpu_psi INTEGER'],
   ['host_samples', 'mem_psi', 'ALTER TABLE host_samples ADD COLUMN mem_psi INTEGER'],
+  ['host_samples', 'io_psi', 'ALTER TABLE host_samples ADD COLUMN io_psi INTEGER'],
+  ['host_samples', 'swap_used', 'ALTER TABLE host_samples ADD COLUMN swap_used INTEGER'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1639,6 +1646,7 @@ export const SCHEMA_HISTORY = [
   [97, 'project_minimizes (#1243)'],
   [98, 'host_samples.cpu_psi, mem_psi (#1301)'],
   [99, 'usage_counts (#1306)'],
+  [100, 'host_samples.io_psi, swap_used (#1325)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3737,8 +3745,8 @@ export class Store {
 
   /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
   addHostSample(s: HostSample) {
-    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null);
+    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null);
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 
@@ -3796,7 +3804,7 @@ export class Store {
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
       // Boots, slow-ship nudges, Investigate clicks and looks (#1273) are few and the Status page and the once-a-day rule need them: only the time keep drops them.
-      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'stop', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

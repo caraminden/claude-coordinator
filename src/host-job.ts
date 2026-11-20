@@ -38,6 +38,9 @@ const SKIP = /^(BASH.*|SHELLOPTS|UID|EUID|PPID|ENV|_|__job)$/;
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** Hears each job that ended with no exit code (killed from outside, stopped, or cut off by a restart), once; the server records it. */
+export const jobLost = { hear: (_dir: string) => {} };
+
 export class HostJobs {
   /** Jobs running as the server's child (no units, or systemd-run failed): a restart would cut them off. */
   private children = new Set<ChildProcess>();
@@ -113,6 +116,13 @@ export class HostJobs {
           return null;
         }
         code = -1;
+        // Noted once per job, as its code, so the hook hears it once (#1325): ships cut off by systemd-oomd were only in the journal.
+        try {
+          writeFileSync(join(dir, 'code'), '-1', { flag: 'wx' });
+          jobLost.hear(dir);
+        } catch {
+          // Noted already.
+        }
       }
     }
     return { output: tail(join(dir, 'output.log'), maxOutput), code };

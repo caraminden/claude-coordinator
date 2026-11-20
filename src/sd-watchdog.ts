@@ -61,6 +61,51 @@ export function takeMark(dataDir: string): number | null {
   }
 }
 
+/** The mark ExecStopPost leaves for every stop (#1325): how systemd says the last run ended, read once at the next boot. */
+export const STOP_MARK = 'last-stop.json';
+
+/** systemd's word on one stop (ExecStopPost's SERVICE_RESULT, EXIT_CODE and EXIT_STATUS) and when. */
+export interface StopMark { at: number; result: string; code: string; status: string }
+
+/** ExecStopPost's other step: note every stop, whatever ended it. */
+export function markStop(env: Env, dataDir: string, now = Date.now()): StopMark {
+  const mark = { at: now, result: env.SERVICE_RESULT ?? '', code: env.EXIT_CODE ?? '', status: env.EXIT_STATUS ?? '' };
+  writeFileSync(join(dataDir, STOP_MARK), JSON.stringify(mark));
+  return mark;
+}
+
+/** At boot: the last stop's mark (removed, so it counts once), or null when none was left. */
+export function takeStop(dataDir: string): StopMark | null {
+  const file = join(dataDir, STOP_MARK);
+  try {
+    const m = JSON.parse(readFileSync(file, 'utf8'));
+    return Number(m?.at) > 0 ? { at: Number(m.at), result: String(m.result ?? ''), code: String(m.code ?? ''), status: String(m.status ?? '') } : null;
+  } catch {
+    return null;
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+
+/** Why the last process ended; deploys and stops by hand are planned, the rest count toward an incident (src/incidents.ts). */
+export type StopCause = 'deploy' | 'by-hand' | 'watchdog' | 'out-of-memory' | 'killed' | 'crash' | 'unknown';
+export const PLANNED: readonly StopCause[] = ['deploy', 'by-hand'];
+
+/**
+ * The 'stop' health event for the last run: its cause, first in the detail ("cause: words"), and when it stopped.
+ * `newCode`: this boot runs other code than the last one did (a ship). `fallbackAt`: when to date a stop with no mark.
+ */
+export function stopEvent(mark: StopMark | null, newCode: boolean, fallbackAt: number): { at: number; cause: StopCause; detail: string } {
+  const how = mark ? ` (systemd: ${[mark.result, mark.code, mark.status].filter(Boolean).join(', ') || 'no result'})` : '';
+  const [cause, words]: [StopCause, string] = !mark ? ['unknown', 'no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed']
+    : mark.result === 'watchdog' ? ['watchdog', "systemd's watchdog stopped the hung server"]
+    : mark.result === 'oom-kill' ? ['out-of-memory', 'killed for memory, by systemd-oomd or the kernel']
+    : mark.status === 'KILL' ? ['killed', 'SIGKILL from outside Citadel: most likely systemd-oomd']
+    : mark.result === 'success' || mark.status === 'TERM' ? (newCode ? ['deploy', 'stopped for a ship: new code started'] : ['by-hand', 'stopped and started on the same code: by hand, or a deploy with nothing new'])
+    : ['crash', 'the server exited on its own'];
+  return { at: mark?.at ?? fallbackAt, cause, detail: `${cause}: ${words}${how}` };
+}
+
 /**
  * The health event's text for a watchdog restart at `at`. The hang itself leaves no stall line (its stall never ended),
  * so this names the last one recorded before it.

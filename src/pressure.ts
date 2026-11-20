@@ -1,7 +1,8 @@
-// How starved the box is (#1301, performance P8): one reader of /proc/pressure/cpu and /proc/pressure/memory ("some
-// avg60", the same line tools/citadel-heavy gates on), cached for 5 s and read asynchronously, so a look never blocks
-// the event loop. The server's background passes (indexers, sweeps, kit-sync's look) ask `pressure.gate(name)` and
-// skip a pass while starved; nothing a person or a minion starts asks (turn starts never read this).
+// How starved the box is (#1301, performance P8): one reader of /proc/pressure/cpu, /proc/pressure/memory and (for
+// the host samples, #1325) /proc/pressure/io ("some avg60", the same line tools/citadel-heavy gates on), cached for 5 s
+// and read asynchronously, so a look never blocks the event loop. The server's background passes (indexers, sweeps,
+// kit-sync's look) ask `pressure.gate(name)` and skip a pass while starved; nothing a person or a minion starts asks
+// (turn starts never read this).
 //
 // Small API: `pressure.read()` (the reading), `pressure.gate(name)` (true: run this pass), `createPressure()` (tests).
 import { readFile } from 'node:fs/promises';
@@ -14,11 +15,11 @@ export const MAX_MEM_PRESSURE = 20;
 export const RUN_ANYWAY_MS = 10 * 60_000;
 const CACHE_MS = 5_000;
 
-/** One look: whole percents (null without a PSI file) and whether either is at its line; `why` says which, for a log line. */
-export interface PressureReading { cpu: number | null; mem: number | null; starved: boolean; why: string }
+/** One look: whole percents (null without a PSI file) and whether CPU or memory is at its line; `why` says which, for a log line. IO is recorded, never gated on. */
+export interface PressureReading { cpu: number | null; mem: number | null; io: number | null; starved: boolean; why: string }
 
 export interface PressureOptions {
-  cpuFile?: string; memFile?: string; now?: () => number; log?: (line: string) => void;
+  cpuFile?: string; memFile?: string; ioFile?: string; now?: () => number; log?: (line: string) => void;
   maxCpu?: number; maxMem?: number; runAnywayMs?: number;
 }
 
@@ -33,6 +34,7 @@ export async function readPsi(file: string): Promise<number | null> {
 export function createPressure(opts: PressureOptions = {}) {
   const cpuFile = opts.cpuFile ?? process.env.CITADEL_PSI_CPU ?? '/proc/pressure/cpu';
   const memFile = opts.memFile ?? process.env.CITADEL_PSI_MEMORY ?? '/proc/pressure/memory';
+  const ioFile = opts.ioFile ?? process.env.CITADEL_PSI_IO ?? '/proc/pressure/io';
   const maxCpu = opts.maxCpu ?? (Number(process.env.CITADEL_HEAVY_MAX_PRESSURE) || MAX_CPU_PRESSURE);
   const maxMem = opts.maxMem ?? (Number(process.env.CITADEL_HEAVY_MAX_MEM_PRESSURE) || MAX_MEM_PRESSURE);
   const runAnywayMs = opts.runAnywayMs ?? RUN_ANYWAY_MS;
@@ -42,9 +44,9 @@ export function createPressure(opts: PressureOptions = {}) {
   const skipping = new Map<string, number>(); // pass name -> when its current run of skips began
 
   const look = async (): Promise<PressureReading> => {
-    const [cpu, mem] = await Promise.all([readPsi(cpuFile), readPsi(memFile)]);
+    const [cpu, mem, io] = await Promise.all([readPsi(cpuFile), readPsi(memFile), readPsi(ioFile)]);
     const why = cpu !== null && cpu >= maxCpu ? `CPU pressure ${cpu}%` : mem !== null && mem >= maxMem ? `memory pressure ${mem}%` : '';
-    return { cpu, mem, starved: why !== '', why };
+    return { cpu, mem, io, starved: why !== '', why };
   };
 
   /** The current reading, at most 5 s old. */

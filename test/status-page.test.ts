@@ -429,13 +429,34 @@ test('Investigate (#1273): a Citadel tile goes to Citadel, its reason carries it
   assert.equal(outside.canInvestigate, false);
 });
 
-test('host samples keep the CPU and memory pressure (#1301), null when there was none', () => {
+test('host samples keep the CPU, memory and IO pressure (#1301, #1325) and swap in use, null when there was none', () => {
   const { store } = setup('psi-samples');
   const base = { mem_total: 1, mem_avail: 1, disk_total: 1, disk_free: 1, load1: 0, rss: 1 };
-  store.addHostSample({ ...base, at: 1000, cpu_psi: 63, mem_psi: 4 });
+  store.addHostSample({ ...base, at: 1000, cpu_psi: 63, mem_psi: 4, io_psi: 16, swap_used: 2 ** 33 });
   store.addHostSample({ ...base, at: 2000 });
   const rows = store.hostSamples(0);
-  assert.deepEqual(rows.map((r) => [r.cpu_psi, r.mem_psi]), [[63, 4], [null, null]]);
+  assert.deepEqual(rows.map((r) => [r.cpu_psi, r.mem_psi, r.io_psi, r.swap_used]), [[63, 4, 16, 2 ** 33], [null, null, null, null]]);
+});
+
+test('a sample stores the swap the memory reading says is in use (#1325)', async () => {
+  const { store, citadel } = setup('swap-sample');
+  const page = new StatusPage({ store, dataDir: root, bootAt: 0, commit: 'c', ownScheme: () => citadel.id, now: () => 5000,
+    mem: async () => ({ total: 100, avail: 50, swap: 7 }), disk: async () => ({ total: 100, free: 50 }) });
+  assert.equal((await page.sample())!.swap_used, 7);
+  assert.equal(store.hostSamples(0).at(-1)!.swap_used, 7);
+});
+
+test('a boot records why the last process ended (#1325): a ship, by hand, out of memory, or no mark at all', () => {
+  const { store } = setup('stops');
+  const stops = () => store.healthEventsSince(['stop'], 0).map((e) => [e.at, e.detail.split(':')[0], e.commit_sha]);
+  recordBoot(store, 'aaaa1111', 1000, null);
+  assert.deepEqual(stops(), [], 'the first start on record has no last process to explain');
+  recordBoot(store, 'bbbb2222', 3000, { at: 2000, result: 'success', code: 'exited', status: '0' });
+  recordBoot(store, 'bbbb2222', 5000, { at: 4000, result: 'success', code: 'exited', status: '0' });
+  recordBoot(store, 'bbbb2222', 7000, { at: 6000, result: 'oom-kill', code: 'killed', status: 'KILL' });
+  recordBoot(store, 'bbbb2222', 9000, null);
+  recordBoot(store, 'bbbb2222', 11000); // a caller that can't read marks (a preview) records no stop
+  assert.deepEqual(stops(), [[2000, 'deploy', 'aaaa1111'], [4000, 'by-hand', 'bbbb2222'], [6000, 'out-of-memory', 'bbbb2222'], [9000, 'unknown', 'bbbb2222']]);
 });
 
 test('the last stall says its cause in words, and a stall just after a boot is shown, marked (P2)', async () => {

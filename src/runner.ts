@@ -3195,6 +3195,8 @@ export class Runner {
       : !stopped && !exit
         ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${live.container ? 'container' : live.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
         : null;
+    // A row that outlives the chat's (#1325): kill waves (systemd-oomd's, most often) are counted from these.
+    if (killed) this.store.addHealthEvent('turn-killed', Date.now(), null, `minion ${ticketId}${live.unit ? ` (${live.unit})` : ''}: ${exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted')}`);
     if (stopped || (signal && !killed)) {
       // Stopped by the user; leave it waiting for the next message.
     } else if (killed || !sawResult || code !== 0 || resultIsError) {

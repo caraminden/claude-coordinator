@@ -127,6 +127,7 @@ function Show-State {
   if (-not $gpu) { Write-Host 'GPU: none. This box has no GPU partition (gpu-host.ps1 on the host adds it), so it draws in software.' }
   foreach ($d in $gpu) { Write-Host "GPU: $($d.FriendlyName), $(if ($d.Status -eq 'OK') { 'on' } else { "off ($($d.Status))" })" }
   if (Test-Blocked) { Write-Host "GPU jobs: switched off on Cara's PC (gpu-host.ps1 -Block)" }
+  elseif (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\External')) { Write-Host "GPU jobs: the off switch can't be read (Hyper-V's data exchange isn't running in the box), so it counts as on" }
   $want = Get-Want
   Write-Host "Asked for by: $(if ($want) { ($want | ForEach-Object { "pid $($_.Name) since $($_.LastWriteTime.ToString('HH:mm:ss'))" }) -join ', ' } else { 'no job' })"
   Write-Host 'Direct3D adapters (an app gets the first by default):'

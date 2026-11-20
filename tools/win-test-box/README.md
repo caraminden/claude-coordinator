@@ -137,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-b
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\gpu-host.ps1" -Block
 ```
 
-From then on a `run-gpu` job is refused (exit 4) and one already running loses the GPU within a few seconds. Everything else on the box (CI, `run`, `build`) goes on in software. It stays off through restarts of the box and of her PC, until:
+From then on a `run-gpu` job is refused (exit 4), and one already running loses the GPU within a few seconds and doesn't get it back. Everything else on the box (CI, `run`, `build`) goes on in software. It stays off through restarts of the box and of her PC, until:
 
 ```powershell-admin
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\gpu-host.ps1" -Unblock

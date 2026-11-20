@@ -35,6 +35,9 @@ $ErrorActionPreference = 'Stop'
 function Say([string]$Text) { Write-Host "`n== $Text" -ForegroundColor Cyan }
 function Stop-With([string]$Why) { Write-Host "`nStopped: $Why" -ForegroundColor Red; exit 1 }
 
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { Stop-With 'run this in PowerShell as administrator (right-click, Run as administrator).' }
+
 # ---------- the off switch ----------
 # A Hyper-V key-value item from here to the box (no password); gpu.ps1 reads it as
 # HKLM:\SOFTWARE\Microsoft\Virtual Machine\External\CitadelGpu.
@@ -43,26 +46,36 @@ if ($Block -or $Unblock) {
   $ns = 'root\virtualization\v2'
   $svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
   $sys = Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter "ElementName='$Name'"
-  if (-not $sys) { Stop-With "there's no VM named '$Name' on this PC (or this isn't PowerShell as administrator)." }
+  if (-not $sys) { Stop-With "there's no VM named '$Name' on this PC." }
   # Hyper-V takes the item as CIM-XML text.
   $item = New-CimInstance -ClientOnly -CimClass (Get-CimClass -Namespace $ns -ClassName Msvm_KvpExchangeDataItem) -Property @{ Name = 'CitadelGpu'; Data = 'blocked'; Source = [uint16]0 }
   $xml = [Microsoft.Management.Infrastructure.Serialization.CimSerializer]::Create().Serialize($item, [Microsoft.Management.Infrastructure.Serialization.InstanceSerializationOptions]::None)
   $text = [Text.Encoding]::Unicode.GetString($xml)
+  # Returns $true when Hyper-V did it; $What empty means a failure is fine (removing what isn't there).
   function Invoke-Kvp([string]$Method, [string]$What) {
     $r = Invoke-CimMethod -InputObject $svc -MethodName $Method -Arguments @{ TargetSystem = $sys; DataItems = @($text) }
     if ($r.ReturnValue -eq 4096) {
       $job = $r.Job | Get-CimInstance
       while ($job.JobState -in 3, 4) { Start-Sleep -Milliseconds 200; $job = $job | Get-CimInstance }
-      if ($job.JobState -ne 7) { Stop-With "Hyper-V couldn't $($What): $($job.ErrorDescription)" }
-    } elseif ($r.ReturnValue) { Stop-With "Hyper-V couldn't $($What) (error $($r.ReturnValue))." }
+      if ($job.JobState -eq 7) { return $true }
+      if ($What) { Stop-With "Hyper-V couldn't $($What): $($job.ErrorDescription)" }
+      return $false
+    }
+    if (-not $r.ReturnValue) { return $true }
+    if ($What) { Stop-With "Hyper-V couldn't $($What) (error $($r.ReturnValue))." }
+    $false
   }
-  $set = Get-CimInstance -Namespace $ns -ClassName Msvm_KvpExchangeComponentSettingData | Where-Object InstanceID -like "*$($sys.Name)*"
-  $was = @($set.HostExchangeItems | Where-Object { $_ -match '>CitadelGpu<' }).Count -gt 0
   if ($Block) {
-    if (-not $was) { Invoke-Kvp AddKvpItems 'switch GPU jobs off' }
+    # Out and in again, so it works whether or not it was already off.
+    [void](Invoke-Kvp RemoveKvpItems '')
+    [void](Invoke-Kvp AddKvpItems 'switch GPU jobs off')
     Write-Host "GPU jobs are switched off. A job that asks is refused; one running now loses the GPU within a few seconds. To turn them back on:`n  powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Unblock" -ForegroundColor Yellow
   } else {
-    if ($was) { Invoke-Kvp RemoveKvpItems 'switch GPU jobs back on' }
+    # Removing fails when it isn't there; then look whether the box's settings name it at all.
+    if (-not (Invoke-Kvp RemoveKvpItems '')) {
+      $set = Get-CimInstance -Namespace $ns -ClassName Msvm_KvpExchangeComponentSettingData -Filter "InstanceID like 'Microsoft:$($sys.Name)%'"
+      if (@($set.HostExchangeItems) -match '>CitadelGpu<') { Stop-With "Hyper-V couldn't switch GPU jobs back on; they're still off." }
+    }
     Write-Host 'GPU jobs are switched on: a job that asks gets the GPU.' -ForegroundColor Green
   }
   exit 0
@@ -70,8 +83,6 @@ if ($Block -or $Unblock) {
 
 # ---------- 1. checks ----------
 Say 'Checking this PC'
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { Stop-With 'run this in PowerShell as administrator (right-click, Run as administrator).' }
 $os = Get-CimInstance Win32_OperatingSystem
 Write-Host "  $($os.Caption), build $($os.BuildNumber)"
 if ($os.Caption -notmatch 'Pro|Enterprise|Education') { Stop-With 'GPU partitioning needs Hyper-V, which needs Windows Pro, Enterprise or Education.' }

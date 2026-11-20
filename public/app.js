@@ -1,7 +1,7 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
 // each view lives in its own module (see base.js for what they share, core.js for the shell).
-import { api, h, view } from './base.js';
-import { app, reloadNow, renderInvite, renderUsage, start, usage } from './core.js';
+import { api, forgetKept, h, keptChat, view } from './base.js';
+import { app, goLive, reloadNow, renderInvite, renderUsage, start, startKept, usage } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 import { mountDialogs } from './ui/dialog.js';
@@ -53,12 +53,42 @@ else boot();
 // A sign-in check that fails for any reason but "Not logged in" (which shows the login) used to leave
 // a blank page with only the refresh button: say so, with a retry.
 function boot() {
-  api('api/me').then(start).catch((err) => {
-    if (err.message === 'Not logged in') return;
-    app.replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
+  // The installed app opens on the last chat kept on this device (#1144), at once, while the live answers come;
+  // a launch that names somewhere else, or nothing kept, waits for them as before.
+  const kept = keptChat(location.hash);
+  const live = api('api/me');
+  if (!kept) {
+    return live.then(start).catch((err) => {
+      if (err.message === 'Not logged in') return;
+      app.replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
+    });
+  }
+  if (location.hash !== kept.hash) history.replaceState(null, '', kept.hash); // no hashchange: startKept routes
+  startKept(kept).then(() => catchUp(live, kept.login));
+}
+
+/** Swap the kept chat for the live one once the server answers; offline, try again when the device is back online. */
+function catchUp(live, login) {
+  live.then((who) => {
+    // Someone else signed in on this device since: start afresh, with nothing of theirs kept.
+    if (who.login !== login) {
+      forgetKept();
+      return location.reload();
+    }
+    return goLive(who);
+  }).catch((err) => {
+    if (err.message === 'Not logged in') return; // the login shows, and the kept chat is forgotten
+    const again = () => {
+      removeEventListener('online', again);
+      clearTimeout(timer);
+      catchUp(api('api/me'), login);
+    };
+    addEventListener('online', again);
+    const timer = setTimeout(again, 15_000);
   });
 }
-// The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
+// The service worker makes the app installable (home screen, full screen), shows push notifications and keeps the app's own
+// files for opening with no network (src/shell.ts).
 // Absolute on purpose: a preview (/preview/N/) shares the live app's one worker instead of registering its own.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 // Only in the installed app, so browser tabs behave as before: on Android shrink the page when the keyboard opens so

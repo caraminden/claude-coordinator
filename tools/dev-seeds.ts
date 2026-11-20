@@ -79,10 +79,11 @@ function chat(c: SeedCtx, t: Ticket, steps: number) {
     done: (text: string) => claude({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: `seed-${t.id}`, total_cost_usd: 0.42, duration_ms: 95_000 }),
     /** A plan of steps, each with a guess in minutes, the first `finished` done and the next in progress. */
     plan: (steps: [string, number][], finished: number) => {
-      steps.forEach(([subject, estimate], i) => call('TaskCreate', { subject, description: `${subject}.`, metadata: { estimate } }, `Task #${i + 1} created successfully: ${subject}`));
+      call('mcp__thread__plan', { steps: steps.map(([step, minutes], i) => ({ n: i + 1, step, why: `${step}.`, minutes })) });
       for (let i = 0; i <= finished && i < steps.length; i++) {
-        call('TaskUpdate', { taskId: String(i + 1), status: 'in_progress' }, `Updated task #${i + 1} status`);
-        if (i < finished) call('TaskUpdate', { taskId: String(i + 1), status: 'completed', metadata: { outcome: 'Done as planned.' } }, `Updated task #${i + 1} status`);
+        const next = i < steps.length - 1 && i < finished ? [{ n: i + 2, status: 'doing' }] : [];
+        if (i === 0) call('mcp__thread__plan', { steps: [{ n: 1, status: 'doing' }] });
+        if (i < finished) call('mcp__thread__plan', { steps: [{ n: i + 1, status: 'done', outcome: 'Done as planned.' }, ...next] });
       }
     },
   };

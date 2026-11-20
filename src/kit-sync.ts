@@ -503,24 +503,25 @@ function list(items: string[]): string {
   return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
-const STANDING: Partial<Record<SchemeState, string>> = {
-  green: 'ready, its check passed',
-  red: 'its check failed (its Taskmaster has the output)',
-  conflict: 'clashes with its own edits (its Taskmaster has a note)',
-  pr: 'behind, but it ships by pull request, so it is not synced here',
-  failed: 'the sync could not be made (see the server log)',
-};
+// Where each scheme stands, as the card groups them (people read it: no paths or hashes).
+const STANDING: [SchemeState, string][] = [
+  ['green', 'Ready'],
+  ['red', "Check failed (its Taskmaster has the output)"],
+  ['conflict', "Clashes with the scheme's own edits (its Taskmaster has a note)"],
+  ['pr', 'Ships by pull request, so not synced here'],
+  ['failed', 'The sync could not be made (see the server log)'],
+];
 
 /** Citadel's card: every scheme that is behind and where it stands. */
 export function cardQuestion(round: Round) {
-  const files = KIT_FILES.filter((f) => round.blobs[f.template]).map((f) => f.path.split('/').pop()!);
-  const lines = round.schemes.filter((x) => STANDING[x.state]).map((x) => `- ${x.name}: ${STANDING[x.state]} (${list(x.files)})`);
+  const groups = STANDING.map(([state, label]) => [label, round.schemes.filter((x) => x.state === state).map((x) => x.name)] as const)
+    .filter(([, names]) => names.length).map(([label, names]) => `${label}: ${names.join(', ')}.`);
   const green = round.schemes.filter((x) => x.state === 'green').length;
   return {
     header: 'Kit sync',
-    question: `The kit's scheme files changed (Citadel ${short(round.kit)}). The server merged the change into each scheme whose copy is behind (${list(files)}), keeping each scheme's own edits, and ran its quick check:\n${lines.join('\n')}\nShip it ships the ${green} ready one${green === 1 ? '' : 's'}, each through its own land.sh, pushed as you. A scheme your GitHub login can't push to gets a card of its own instead.`,
+    question: `The kit's shared scheme files changed. The server merged the change into every scheme that was behind, keeping each one's own edits, and ran its quick check. ${groups.join(' ')} Ship the ${green} ready one${green === 1 ? '' : 's'}, pushed as you?`,
     options: [
-      { label: SHIP, description: `Ships the sync in every ready scheme, one after another`, recommended: true },
+      { label: SHIP, description: "Ships each ready scheme through its own land script, one after another; one you can't push to gets a card of its own", recommended: true },
       { label: NOT_NOW, description: 'Drops the sync branches; the next kit change makes new ones' },
     ],
   };
@@ -530,9 +531,9 @@ export function cardQuestion(round: Round) {
 export function schemeQuestion(round: Round, x: SchemeSync) {
   return {
     header: 'Kit sync',
-    question: `Citadel's kit changed (${short(round.kit)}), and the server merged it into this scheme's ${list(x.files)}, keeping this scheme's own edits. Its quick check passed. Citadel's go couldn't push to this repo, so it waits on yours: Ship it ships it through this scheme's land.sh, pushed as you.`,
+    question: `Citadel's kit changed its shared scheme files, and the server merged the change into this scheme's copies (${list(x.files.map((f) => f.split('/').pop()!))}), keeping this scheme's own edits. Its quick check passed. Citadel's go couldn't push to this repo, so it waits on yours. Ship it, pushed as you?`,
     options: [
-      { label: SHIP, description: "Ships the sync through this scheme's land.sh", recommended: true },
+      { label: SHIP, description: "Ships the sync through this scheme's land script", recommended: true },
       { label: NOT_NOW, description: 'Drops the sync branch; the next kit change makes a new one' },
     ],
   };

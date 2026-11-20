@@ -187,7 +187,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     assert.deepEqual(states(), { Green: 'green', Red: 'red', Elsewhere: 'green' });
     assert.equal(saved.round.kit, kitHead);
     assert.deepEqual(cards.map((c) => [c.ticket, c.card.kind, c.card.kitSync]), [[102, 'merge', kitHead]]);
-    assert.match(cards[0].card.questions[0].question, /Red: its check failed/);
+    assert.match(cards[0].card.questions[0].question, /Check failed \(its Taskmaster has the output\): Red\./);
     assert.deepEqual(mails.map(([t]) => t), [104]);
     assert.match(mails[0][1], /fails this scheme's check \(exit 3\)[\s\S]*the check broke/);
 

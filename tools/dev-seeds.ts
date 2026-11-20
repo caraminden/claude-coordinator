@@ -14,6 +14,7 @@ import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts
 import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
+import { templateBlobs } from '../src/kit-sync.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -1095,6 +1096,52 @@ mock.boards('#takes', { boards: [
         r.create(p.id, { slug: 'map-critic', name: 'Map critic', kind: 'critic', stage: 'work', trial: true, triggers: { diff: ['maps/**'] }, body: '## What it checks\n\nMaps.\n' } as never, c.who);
       }
       return `#/p/${id}/reviews`;
+    },
+  },
+  'kit-sync': {
+    about: "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed); within 20 s of boot (else the 10-minute look) one kit sync card lands in Seeded's Taskmaster chat",
+    seed(c) {
+      const kit = join(import.meta.dirname, '..');
+      const template = 'kit/skills/scheme-setup/templates/land.sh';
+      const old = execFileSync('git', ['-C', kit, 'log', '-2', '--format=%H', '--', template], { encoding: 'utf8' }).trim().split('\n')[1];
+      const id = { GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
+      const git = (repo: string, ...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, ...id } });
+      // Seeded is the home scheme: its repo holds the commit the copy runs, as Citadel's does.
+      const home = join(projectDir(c.dataDir, c.project.id), 'repo');
+      rmSync(home, { recursive: true, force: true });
+      execFileSync('git', ['clone', '-q', '--no-checkout', kit, home]);
+      c.store.setProjectRepoDir(c.project.id, home);
+      taskmaster(c);
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      const scheme = (name: string, local: string, origin: (dir: string) => string) => {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        c.store.setProjectSettings(p.id, { onboarding: 'skipped' });
+        if (user) c.store.addMember(p.id, user.id);
+        const dir = join(projectDir(c.dataDir, p.id), 'repo');
+        rmSync(join(projectDir(c.dataDir, p.id), 'kit-sync'), { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(join(dir, 'tools'), { recursive: true });
+        execFileSync('git', ['init', '-q', '-b', 'main', dir]);
+        writeFileSync(join(dir, 'tools', 'land.sh'), git(kit, 'show', `${old}:${template}`), { mode: 0o755 });
+        writeFileSync(join(dir, 'tools', 'land.local.sh'), local);
+        writeFileSync(join(dir, 'README.md'), `${name}\n`);
+        git(dir, 'add', '-A');
+        git(dir, 'commit', '-qm', 'seed');
+        git(dir, 'remote', 'add', 'origin', origin(dir));
+        if (!origin(dir).startsWith('https:')) {
+          rmSync(origin(dir), { recursive: true, force: true });
+          git(dir, 'clone', '-q', '--bare', dir, origin(dir));
+        }
+        c.store.setProjectRepoDir(p.id, dir);
+        taskmaster({ ...c, project: c.store.getProject(p.id)! });
+      };
+      const bare = (dir: string) => join(dir, '..', 'origin.git');
+      scheme('Green', "CHECK='true'\nSMOKE_CMD='echo smoke ok'\n", bare);
+      scheme('Red', "CHECK='true'\nSMOKE_CMD='echo the smoke test failed >&2; exit 3'\n", bare);
+      scheme('Elsewhere', "CHECK='true'\nSMOKE_CMD='true'\n", () => 'https://github.com/citadel-kit-sync-seed/no-such-repo.git');
+      // The last look saw the templates as they were before the newest land.sh change: the next look starts a round.
+      c.store.setSetting('kit-sync', { blobs: templateBlobs(kit, old) });
+      return `#/p/${c.project.id}`;
     },
   },
   'inbox-full': {

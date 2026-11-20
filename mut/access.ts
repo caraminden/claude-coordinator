@@ -1,0 +1,56 @@
+// Mutants of src/access.ts (#1284). Each is one small break a friend's ordinary action could hit.
+export default {
+  file: 'src/access.ts',
+  related: [
+    'test/contraption-asks.test.ts', 'test/lending-lists.test.ts', 'test/mandate-items.test.ts', 'test/presence.test.ts',
+    'test/own-machines.test.ts', 'test/people.test.ts', 'test/show-parts.test.ts', 'test/taskmaster-membership.test.ts',
+    'test/turn-person-env.test.ts', 'test/turn-asker.test.ts', 'test/app-instructions.test.ts', 'test/cold-mail.test.ts',
+    'test/contraption-read.test.ts', 'test/claude-container.test.ts', 'test/contraption-tools.test.ts', 'test/loop-guard.test.ts',
+    'test/scheme-refs.test.ts', 'test/taskmaster-mail.test.ts', 'test/taskmaster-sessions.test.ts', 'test/every-scheme.test.ts',
+    'test/missing-args.test.ts', 'test/hidden-schemes.test.ts', 'test/machines.test.ts', 'test/claude-link.test.ts',
+    'test/coordinator-access.test.ts',
+  ],
+  mutants: [
+    // messageScope / mayReceive: who gets which live news.
+    { id: 'a01', find: "if (ADMIN_ONLY.has(msg.type)) return 'admin';", replace: '', why: 'Citadel-wide instructions stream to everyone' },
+    { id: 'a02', find: "if (msg.projectId === undefined && 'projectId' in msg) return 'admin';", replace: '', why: "a gone minion's news goes to everyone" },
+    { id: 'a03', find: "return store.getTicket(ticketId)?.project_id ?? 'admin';", replace: 'return store.getTicket(ticketId)?.project_id ?? null;', why: "a gone minion's event goes to everyone" },
+    { id: 'a04', find: "if (msg.type === 'ticket') return msg.ticket.project_id;", replace: '', why: "a minion's row update scoped to nobody (everyone)" },
+    { id: 'a05', find: 'if (scope === null || who.admin) return true;', replace: 'if (scope === null) return true;', why: 'admins stop getting scheme news of schemes they are not in' },
+    { id: 'a06', find: "return scope !== 'admin' && store.canSee(who, scope);", replace: 'return store.canSee(who, scope as number);', why: 'admin-only news reaches members' },
+    { id: 'a07', find: "return scope !== 'admin' && store.canSee(who, scope);", replace: "return scope !== 'admin';", why: 'every scheme\'s news reaches everyone' },
+    // turnPayer: whose login a turn runs on.
+    { id: 'a08', find: "return user && store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;", replace: 'return user ? p : project.owner_id;', why: 'a removed member still pays for fallback turns (C1 shape)' },
+    { id: 'a09', find: 'if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);', replace: '', why: 'a resume runs for the batch, not the interrupted turn\'s person' },
+    { id: 'a10', find: 'if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);', replace: 'if (resuming && ticket.person_id != null) return ticket.person_id;', why: 'a resume runs for a removed member' },
+    { id: 'a11', find: 'if (disabled) return disabled.id;', replace: '', why: "a disabled person's queued message moves onto someone else's login" },
+    { id: 'a12', find: "const starter = batch.find((m) => !m.from && personOf(m.author));\n    return inScheme((starter && personOf(starter.author)) || ticket.coordinator_of);", replace: 'return inScheme(ticket.coordinator_of);', why: "another person's ask in someone's Taskmaster runs on the Taskmaster person's login" },
+    { id: 'a13', find: 'if (p) return m.from ? inScheme(p) : p;', replace: 'if (p) return p;', why: "a relay's asker who left the scheme still pays" },
+    { id: 'a14', find: 'const overlord = ticket.kind === \'coordinator\' && ticket.coordinator_of == null && store.isSplit(ticket.project_id);', replace: 'const overlord = false;', why: "a split scheme's Overlord runs for its last person, not the owner" },
+    { id: 'a15', find: 'return !overlord && ticket.person_id != null ? inScheme(ticket.person_id) : project.owner_id;', replace: 'return project.owner_id;', why: "a minion's automatic turn runs on the owner, not its last person" },
+    { id: 'a16', find: 'return !overlord && ticket.person_id != null ? inScheme(ticket.person_id) : project.owner_id;', replace: 'return !overlord && ticket.person_id != null ? ticket.person_id : project.owner_id;', why: "a removed member's old minion still runs on them (C1)" },
+    // turnRefusal / turnPlace / claudeRefusal: refusing turns that can't run.
+    { id: 'a17', find: 'if (user.disabled_at) return { refused: claudeRefusal(user, (uid) => link.linked(uid))! };', replace: '', why: "a disabled person's linked Claude still runs held mail and resumes (C3)" },
+    { id: 'a18', find: "if (!user) return { host: true };", replace: "if (!user) return { refused: 'no one' };", why: 'an ownerless scheme can no longer run turns' },
+    { id: 'a19', find: "if (who.disabled_at) return `${who.name}'s login is disabled", replace: "if (false) return `${who.name}'s login is disabled", why: 'a disabled person with the server login keeps running turns' },
+    { id: 'a20', find: 'if (who.server_login) return null;', replace: '', why: 'people allowed on the server login are refused until they link' },
+    { id: 'a21', find: "if (state === 'linked') return null;", replace: 'if (state !== null) return null;', why: 'an expired Claude sign-in is treated as linked' },
+    { id: 'a22', find: 'return claudeRefusal(who, linked, who.id === project?.owner_id && who.id !== named?.id);', replace: 'return null;', why: 'turnRefusal never refuses' },
+    // Machines: who sees and borrows whose machine.
+    { id: 'a23', find: 'return !!who.admin || (machine.owner_id !== null && machine.owner_id === who.uid);', replace: 'return !!who.admin || machine.owner_id === null || machine.owner_id === who.uid;', why: 'anyone manages ownerless machines' },
+    { id: 'a24', find: 'return who.admin ? machines : machines.filter((m) => managesMachine(who, m));', replace: 'return machines;', why: "everyone's Machines page lists everyone's machines" },
+    { id: 'a25', find: 'if (storedCheck(machine)?.runners || !store.machineGranted(machine.id, project.id)) return false;', replace: 'if (storedCheck(machine)?.runners) return false;', why: "a machine is lent to schemes not on its list" },
+    { id: 'a26', find: 'if (storedCheck(machine)?.runners || !store.machineGranted(machine.id, project.id)) return false;', replace: 'if (!store.machineGranted(machine.id, project.id)) return false;', why: 'a CI runner host is lent to turns' },
+    { id: 'a27', find: 'return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);', replace: 'return true;', why: "a person's own machine works for other people's turns" },
+    { id: 'a28', find: 'if (!owner || owner.disabled_at || !askers.includes(owner.id)) return false;', replace: 'if (!owner || !askers.includes(owner.id)) return false;', why: "a disabled person's machine still lent" },
+    { id: 'a29', find: 'return projectId === null || store.canSee({ uid: owner.id, admin: !!owner.admin }, projectId);', replace: 'return true;', why: "a machine owner who left the scheme still lends it there" },
+    { id: 'a30', find: 'if (store.isAdmin(asker)) return true;\n  return lendsMachine', replace: 'return lendsMachine', why: "an admin's Taskmaster can't see machines outside the scheme" },
+    // Taskmaster messaging and admin-only tools.
+    { id: 'a31', find: '|| (inFrom && store.canSee(who, p.id))', replace: '|| store.canSee(who, p.id)', why: "a Taskmaster run for someone outside its scheme messages that person's other schemes" },
+    { id: 'a32', find: '|| (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)', replace: '|| (from === GLOBAL_OWNER)', why: "Citadel's Taskmaster starts conversations in any scheme" },
+    { id: 'a33', find: 'return store.listProjects().filter((p) => p.id !== from && (p.id === GLOBAL_OWNER', replace: 'return store.listProjects().filter((p) => p.id !== from && (false', why: 'Taskmasters can no longer write to Citadel' },
+    { id: 'a34', find: 'if (store.isAdmin(user)) return null;\n  return `Only a turn', replace: 'return null;\n  return `Only a turn', why: 'admin-only tools open to every ask' },
+    { id: 'a35', find: 'return u && !u.disabled_at ? u.id : null;', replace: 'return u ? u.id : null;', why: "a disabled person's message counts as theirs for paying" },
+    { id: 'a36', find: 'return !!store.getUser(project.owner_id ?? -1)?.admin;', replace: 'return true;', why: 'any scheme\'s Taskmaster registers plugin folders' },
+  ],
+};

@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
-import { BUILT_INS, isKit, onFailText, whenText, type OnFail, type ReviewEntry } from './review-set.ts';
+import { BUILT_INS, isAgentFile, isKit, onFailText, whenText, type OnFail, type ReviewEntry } from './review-set.ts';
 
 /** How it works with the others (Q7, phase 3), which the agent may set on a scheme's own entries besides the body. */
 export interface Settings { gate?: 'block' | 'advise' | null; panel?: string | null; on_fail?: OnFail[] | null; position?: number }
@@ -24,10 +24,10 @@ const TIMEOUT_MS = 4 * 60_000;
 export function describePrompt(ask: string, entries: ReviewEntry[]): string {
   const set = entries.map((e) => {
     const kit = isKit(e) ? BUILT_INS.find((b) => b.slug === e.slug) : undefined;
-    return { slug: e.slug, name: e.name, kind: e.kind, stage: e.stage, on: e.enabled, trial: e.trial, when: kit?.when ?? (whenText(e.triggers) || 'ask'), ...(kit ? { kit: kit.what } : { position: e.position, gate: e.gate, panel: e.panel, on_fail: e.on_fail }), ...(e.extends ? { extends_kit_starter: e.extends } : {}), body: e.body };
+    return { slug: e.slug, name: e.name, kind: e.kind, stage: e.stage, on: e.enabled, trial: e.trial, when: kit?.when ?? (whenText(e.triggers) || 'ask'), ...(kit ? { kit: kit.what } : { position: e.position, gate: e.gate, panel: e.panel, on_fail: e.on_fail }), ...(e.extends ? { extends_kit_starter: e.extends } : {}), ...(isAgentFile(e) ? { agent_file: e.source!.slice(6) } : {}), body: e.body };
   });
   return [
-    "You edit a scheme's review set: the reviewers and critics that judge its work in Citadel. Each entry's `body` is a rubric in its own text: optional frontmatter (between --- lines; never name, extends, when, model, effort, trial, gate or calibrated, which the page owns), then its sections (## Blockers, ## Scale, ## Known blind spots and the like). An entry with `kit` is one of the kit's own reviewers: its text stays in the kit, and its body holds only this scheme's additions, read with it. An entry with `extends_kit_starter` adds to that kit starter the same way. The list is in run order: within a stage, later entries see earlier ones' verdicts.",
+    "You edit a scheme's review set: the reviewers and critics that judge its work in Citadel. Each entry's `body` is a rubric in its own text: optional frontmatter (between --- lines; never name, extends, when, model, effort, trial, gate or calibrated, which the page owns), then its sections (## Blockers, ## Scale, ## Known blind spots and the like). An entry with `kit` is one of the kit's own reviewers: its text stays in the kit, and its body holds only this scheme's additions, read with it. An entry with `agent_file` is one of this scheme's own agent files in its repo: its text stays in that file, and its body holds only this scheme's additions too. An entry with `extends_kit_starter` adds to that kit starter the same way. The list is in run order: within a stage, later entries see earlier ones' verdicts.",
     'Besides the body, an entry that isn\'t `kit` has four settings for how it works with the others, which you may change too: `position` (its run order within its stage, a whole number: lower runs first; to reorder, give each entry you move a new number, like swapping two entries\' numbers), `gate` ("block": its fail holds the ship; "advise": it only reports; an entry on trial only advises), `panel` (a name: the entries of a stage with the same panel judge the same work at once, and one of kind "referee" in it merges their verdicts; null for none), and `on_fail` (hand-offs as [{"after": failed rounds, "to": "professor", "person" or another entry\'s slug}], rising; null for the default: professor after 2, a person after 3).',
     `A person asked for this change:\n<ask>\n${ask}\n</ask>`,
     `The set:\n${JSON.stringify(set, null, 1)}`,

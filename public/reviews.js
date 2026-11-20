@@ -118,7 +118,7 @@ function columnUnits(here) {
   const out = [];
   const seen = new Set();
   for (const e of here) {
-    const key = isLens(e) ? 'lens' : e.panel && !e.kit ? `panel:${e.panel}` : null;
+    const key = isLens(e) ? 'lens' : e.panel && !e.kit && !e.file ? `panel:${e.panel}` : null;
     if (key && seen.has(key)) continue;
     // A panel sits where its first member that's on runs (orderLine), not at a switched-off one above it.
     if (key !== 'lens' && key && !e.enabled && here.some((x) => x.panel === e.panel && !x.kit && x.enabled)) continue;
@@ -127,7 +127,7 @@ function columnUnits(here) {
     else if (key) {
       const members = here.filter((x) => x.panel === e.panel && !x.kit);
       out.push({ node: panelBox(e.panel, members), runs: members.some((x) => x.enabled) });
-    } else out.push({ node: withTeachers(e), runs: !e.kit && e.enabled });
+    } else out.push({ node: withTeachers(e), runs: !e.kit && !e.file && e.enabled });
   }
   return out.flatMap((u, i) => i && u.runs && out[i - 1].runs ? [h('div', { class: 'rv-then', 'aria-hidden': 'true' }, '↓ then'), u.node] : [u.node]);
 }
@@ -156,7 +156,7 @@ function card(e) {
   return h('div', { class: `rv-card${e.slug === state.selected ? ' on' : ''}${e.enabled ? '' : ' off'}`, role: 'button', tabindex: 0, 'aria-pressed': String(e.slug === state.selected),
     onclick: () => select(e.slug), onkeydown: (ev) => { if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); select(e.slug); } } },
   h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, e.name), sw),
-  h('div', { class: 'rv-card-when' }, e.kit ? e.when : whenLine(e)),
+  h('div', { class: 'rv-card-when' }, e.kit || e.file ? e.when : whenLine(e)),
   chips(e),
   e.runs?.length ? h('div', { class: 'rv-card-rec' }, dots(e.runs), e.rate === null ? null : h('span', { class: 'muted' }, `${e.rate}%`)) : null);
 }
@@ -210,7 +210,9 @@ function chips(e) {
     e.stuck ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: `Its last ${e.firsts} first rounds all ${e.stuck === 'pass' ? 'passed: it may be too easy' : 'failed: it may be too strict, or the work keeps missing it'}` }, e.stuck === 'pass' ? 'always passes' : 'always fails') : null,
     labelGiver()?.slug === e.slug ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "Gives the risk label that decides whether a ship waits for a person's go" }, 'risk label') : null,
     e.kit ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "The kit's own: its text stays in the kit, and this scheme switches it and adds to it" }, 'kit')
+      : e.file ? h('span', { class: 'cui-chip', 'data-tone': 'ok', title: `This scheme's own agent file, ${e.file}: its text stays in the repo, and this page switches it and adds to it` }, 'repo')
       : e.extends ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `On top of the kit's ${e.extends} starter, so kit fixes reach it` }, 'kit') : null,
+    e.file && !e.agent ? h('span', { class: 'cui-chip', 'data-tone': 'danger', title: `${e.file} is gone from the repo` }, 'file gone') : null,
     e.enabled ? null : h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'off'));
 }
 
@@ -330,15 +332,17 @@ function detail() {
       h('h3', {}, e.name), chips(e)),
     h('div', { class: 'rv-switch-row' }, sw, h('span', {}, e.enabled ? 'On' : 'Off')),
     e.slug === 'pre-ship-review' ? preShipNote(e) : null,
-    e.kit || e.kind === 'teacher' ? null : judging(e),
-    e.kit ? section('What it does', h('p', {}, e.what)) : null,
-    e.kind === 'teacher' ? section('When it runs', h('p', {}, e.kit ? e.when : 'When a critic hands it a stubborn fail'), handOffs(e))
-      : section('Reviews', h('p', {}, e.kit ? e.when : whenLine(e)), e.kit ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
-    e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path), " in the kit: every scheme's minions read the same."),
-      h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), markdownElement(e.agent.text, { headingBase: 4 }))) : null,
-    e.kit ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, "None: it reads the kit's text alone. Edit by hand or describe a change to add to it."))
+    e.kit || e.file || e.kind === 'teacher' ? null : judging(e),
+    e.kit || e.file ? section('What it does', h('p', {}, e.what || "Its file has no description: add a description line to its frontmatter.")) : null,
+    e.kind === 'teacher' ? section('When it runs', h('p', {}, e.kit || e.file ? e.when : 'When a critic hands it a stubborn fail'), handOffs(e))
+      : section('Reviews', h('p', {}, e.kit || e.file ? e.when : whenLine(e)), e.kit || e.file ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
+    e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path),
+      e.kit ? " in the kit: every scheme's minions read the same." : e.file ? " in this scheme's repo: change it there, and the page reads it as it is." : ` in this scheme's repo: this entry runs as that agent, with its rubric below.`),
+      h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), markdownElement(e.agent.text, { headingBase: 4 })))
+      : e.file ? section('Its text', h('p', { class: 'error' }, h('code', {}, e.file), ' is gone from the repo, so nothing runs it. Put the file back, or delete this entry.')) : null,
+    e.kit || e.file ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, `None: it reads ${e.kit ? "the kit's text" : 'its file'} alone. Edit by hand or describe a change to add to it.`))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
-    e.kit ? null : section('With the others', ...withOthers(e)),
+    e.kit ? null : e.file ? (e.kind === 'teacher' ? null : section('With the others', onFailEditor(e))) : section('With the others', ...withOthers(e)),
     section('Record', e.calibrated ? h('p', {}, `Calibrated ${e.calibrated}`) : null, ...record(e)),
     e.verdicts?.length ? section('Verdicts', verdictList(e, false)) : null,
     h('div', { class: 'rv-actions' },
@@ -518,7 +522,7 @@ const field = (label, input, hint) => h('label', { class: 'rv-field' }, h('span'
 
 /** Edit by hand: the fields and the body as the critic reads it. A save names the version it started from, so a save over someone else's is refused. */
 function editForm(e) {
-  if (e.kit) return kitForm(e);
+  if (e.kit || e.file) return kitForm(e);
   const name = h('input', { class: 'cui-input', value: e.name, required: true });
   const kind = h('select', { class: 'cui-input' }, KINDS.map((k) => h('option', { value: k, selected: k === e.kind }, k)));
   const when = h('input', { class: 'cui-input', value: e.when === 'ask' ? '' : e.when, placeholder: 'ask' });
@@ -564,7 +568,7 @@ function editForm(e) {
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')));
 }
 
-/** A kit entry's edit: only this scheme's additions, read with the kit's text (which stays in the kit). */
+/** A kit entry's or an agent file's edit: only this scheme's additions, read with the kit's text or the file's (which stay where they are). */
 function kitForm(e) {
   const body = h('textarea', { class: 'cui-input rv-bodytext', rows: 12, spellcheck: false }, e.body);
   const note = h('input', { class: 'cui-input', placeholder: 'Edited by hand' });
@@ -589,7 +593,7 @@ function kitForm(e) {
   return h('form', { class: 'rv-form', onsubmit: submit },
     h('h3', {}, `Edit ${e.name}`),
     h('p', { class: 'muted' }, e.what),
-    field("This scheme's additions", body, "Read with the kit's own text and handed to its Grunt: what to look for here, what to let pass."),
+    field("This scheme's additions", body, `Read with ${e.kit ? "the kit's own text" : `its file, ${e.file},`} and handed to its Grunt: what to look for here, what to let pass.`),
     e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
     field('What changed', note),
     err,

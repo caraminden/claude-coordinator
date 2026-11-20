@@ -13,7 +13,7 @@ Weekly memory tidy for {scheme}: propose a tidier memory store, and change nothi
 The folder is {memory_dir}. Read MEMORY.md and every note in it, with Read, ls and grep only. Check each note against what is true now: list_tickets or read_minion for the minions it names, the repo for the files, tools and functions it names, and the scheme's instructions in your prompt.
 
 Look for:
-- notes MEMORY.md doesn't link: only the index loads at a start, so propose an `index` line for each, `- [Name](file.md) — one-line hook`;
+- notes nothing reaches: only MEMORY.md loads at a start, so a note counts as listed when MEMORY.md links it (`](file.md)` or `[[name]]`) or links a note that does (a topic index). Propose an `index` line for each one left, `- [Name](file.md) — one-line hook`, or a line in the topic index when MEMORY.md is near its 200 lines (an `edit` of that note);
 - notes past their date (a recheck or until date that has passed), and notes whose minion is closed and whose point is gone: `delete`, or `edit` to keep the part still true;
 - duplicates and near-duplicates: `edit` one to hold both, and `delete` the other;
 - a note that only repeats what the instructions, CLAUDE.md or the repo already say: `delete`;

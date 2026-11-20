@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, type Booted } from './helpers.ts';
 
 // #1211 (Josh, 2026-11-20: "Matcher, then a Grunt"): when the matcher finds repeats in a person's Settings save, a
 // one-shot Sonnet call on their own Claude login says whether each really repeats or conflicts. "Hold the save until
@@ -39,6 +39,7 @@ before(async () => {
   // Cara's turns run on the server's (stand-in) login; Josh has none linked.
   const store = new Store(join(srv.data, 'coordinator.db'));
   store.updateUser(store.listUsers().find((u) => u.name === 'Cara')!.id, { server_login: 1 });
+  store.setAppInstructions('## Asking and picking\n\nEvery choice goes on a card, one choice to a card.', 'Cara');
 });
 after(async () => {
   await srv?.stop();
@@ -50,22 +51,25 @@ const verdicts = async (text: string, cookie = srv.cookie) => {
   const r = await fetch(`${srv.base}/api/projects/${project.id}/instructions/overlaps/verdicts`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'scheme', text }) });
   return { status: r.status, data: await r.json() };
 };
-const calls = () => { try { return readFileSync(prompts, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+const calls = () => jsonLines(prompts);
 
 test("Sonnet reads the matcher's hits on the saver's own login and gives a verdict for each", async () => {
   const r = await verdicts(REPEAT);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.deepEqual(r.data.verdicts, [{ verdict: 'repeats', why: 'Same card rule, said again.' }]);
+  assert.deepEqual(r.data.places, ['Registered rule: When to use a card|3'], 'what each verdict is for');
   const [call] = calls();
   assert.ok(call.args.includes('sonnet') && call.args.includes('--tools'), call.args.join(' '));
   assert.match(call.input, /One card, one choice/);
   assert.match(call.input, /Registered rule: When to use a card/);
+  // The hit quotes the new words, so the rule's home goes with it for Sonnet to judge against.
+  assert.match(call.input, /<home>\nEvery choice goes on a card, one choice to a card\.\n {3}<\/home>/);
 });
 
 test('nothing found: no Sonnet call at all', async () => {
   const before = calls().length;
   const r = await verdicts('Hello there, a brand new line about lunch plans.');
-  assert.deepEqual(r.data, { verdicts: [] });
+  assert.deepEqual(r.data, { verdicts: [], places: [] });
   assert.equal(calls().length, before);
 });
 

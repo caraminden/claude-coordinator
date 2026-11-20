@@ -844,14 +844,14 @@ async function checkRepeats(scope, text, box, status) {
       note);
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
-    void fillVerdicts(scope, text, box, marks, note);
+    void fillVerdicts(scope, text, box, marks, note, found.map((o) => `${o.label}|${o.line}`).join('\n'));
   });
 }
 
 const VERDICT = { repeats: 'really repeats it', conflicts: 'conflicts with it', fine: 'only shares wording' };
 
 /** Sonnet's verdicts into the open repeats list; a later check or a closed list drops them. */
-async function fillVerdicts(scope, text, box, marks, note) {
+async function fillVerdicts(scope, text, box, marks, note, places) {
   const run = (box.dataset.run = String(Number(box.dataset.run ?? 0) + 1));
   let r;
   try {
@@ -860,13 +860,18 @@ async function fillVerdicts(scope, text, box, marks, note) {
     r = { failed: err.message };
   }
   if (box.dataset.run !== run || box.hidden) return;
+  // The server matched again; verdicts for a different list (the text changed under it) would land on the wrong rows.
+  if (r.verdicts && (r.places ?? []).join('\n') !== places) r = { failed: 'the saved text changed while it ran; save again to check' };
   if (r.verdicts) {
     marks.forEach((m, i) => {
       const v = r.verdicts[i];
       m.className = `repeat-verdict${v && v.verdict !== 'fine' ? ' strong' : ' muted'}`;
       m.textContent = v ? `Sonnet: ${VERDICT[v.verdict]}${v.why ? `. ${v.why}` : '.'}` : 'Sonnet: no verdict.';
     });
-    note.textContent = r.verdicts.some((v) => v && v.verdict !== 'fine') ? 'Sonnet has read them: work in the ones it marks, or save anyway.' : 'Sonnet found no real repeat here: saving anyway is fine.';
+    const vs = r.verdicts;
+    note.textContent = vs.some((v) => v && v.verdict !== 'fine') ? 'Sonnet has read them: work in the ones it marks, or save anyway.'
+      : vs.every((v) => v) ? 'Sonnet found no real repeat here: saving anyway is fine.'
+        : "Sonnet left some without a verdict, so read those yourself before saving anyway.";
     return;
   }
   for (const m of marks) m.remove();

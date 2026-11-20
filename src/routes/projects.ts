@@ -36,7 +36,7 @@ import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
-import { heldPlan, readVerdicts, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
+import { heldPlan, readVerdicts, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
 import { runDescribe } from '../review-describe.ts';
 import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
@@ -1077,12 +1077,14 @@ export const projectRoutes: Route[] = [
       const before = body.scope === 'citadel' ? app.store.appInstructions().text : project.instructions;
       const text = body.text.replace(/\r\n/g, '\n').trim();
       const found = settingsOverlaps(app, project, body.scope, before, text);
-      if (!found.length) return json(res, 200, { verdicts: [] });
+      // What the verdicts are for, in order, so the page can drop them if its list was different (a save in between).
+      const places = found.map((o) => `${o.label}|${o.line}`);
+      if (!found.length) return json(res, 200, { verdicts: [], places });
       const place = app.claude.place(session.uid);
       if (!place) return json(res, 200, { unlinked: "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the check on" });
       try {
-        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'repeat-check'), timeoutMs: 30_000 });
-        return json(res, 200, { verdicts: readVerdicts(reply, found.length) });
+        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found, (id) => ruleHome(app, project, id)), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'repeat-check'), timeoutMs: 30_000 });
+        return json(res, 200, { verdicts: readVerdicts(reply, found.length), places });
       } catch (err: any) {
         return json(res, 200, { failed: String(err.message).slice(0, 300) });
       }

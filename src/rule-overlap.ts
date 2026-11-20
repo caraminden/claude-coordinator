@@ -107,7 +107,8 @@ export function findCopies(sources: Source[], homes: Map<string, string | null>,
 }
 
 /** A paragraph elsewhere that speaks to the same thing as an edit's new words. */
-export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string }
+/** `rule`: the registered rule's id, on a registered-rule hit (whose excerpt is the new words, not the rule's home). */
+export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string; rule?: string }
 
 /** Paragraphs of `text` that are new against `before` (an edit's added words). */
 export function added(before: string, text: string): Para[] {
@@ -128,7 +129,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
   for (const p of news) {
     for (const rule of rules) {
       const hits = phraseHits(p.text, rule);
-      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
+      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), rule: rule.id, why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
     }
     const pr = runs(p.text);
     const pn = norm(p.text);
@@ -158,7 +159,7 @@ export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): st
   });
 }
 
-const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
+export const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
 const fileSources = (root: string, files: string[], href: (f: string) => string | null): Source[] =>
   files.flatMap((f) => { const text = readIn(root, f); return text === null ? [] : [{ label: f, text, code: !f.endsWith('.md'), href: href(f) }]; });
 

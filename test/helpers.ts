@@ -143,6 +143,9 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       // No scheme has id 0, so none is indexed: a test server never calls the box's live embedding service.
       CITADEL_MEMORY_SCHEMES: '0',
+      // A CI runner that is itself a systemd service sets INVOCATION_ID, which turns the shared tool server on (#1259):
+      // test turns keep their own helpers unless a test asks for the pool.
+      TURN_POOL: '0',
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

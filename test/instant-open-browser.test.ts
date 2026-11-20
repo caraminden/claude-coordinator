@@ -2,9 +2,11 @@
 // - with the server gone, it opens on the last chat from the files its service worker kept and the chat kept on the
 //   device, saying it is catching up;
 // - with the server there, the kept chat shows first, then the live one replaces it in place;
-// - signing out forgets the kept chat.
+// - signing out forgets the kept chat;
+// - a ship (SIGHUP with a changed public/, as tools/deploy.sh does) reaches an open app with no refresh by hand.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, until, type Booted } from './helpers.ts';
@@ -105,4 +107,33 @@ test('signing out forgets the kept chat', { skip }, async () => {
   const page = await openOnce(srv, hash);
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
   assert.equal(await page.eval(`localStorage.getItem('cc-last-chat')`), null);
+});
+
+test('a ship reaches an open app by itself: the worker keeps the new version\'s files and the page reloads into it', { skip }, async () => {
+  // A copy of the repo to ship into, so the change to public/ stays out of this checkout.
+  const repo = join(import.meta.dirname, '..');
+  const copy = mkdtempSync(join(tmpdir(), 'ship-'));
+  after(() => rmSync(copy, { recursive: true, force: true }));
+  cpSync(repo, copy, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
+  const srv = await bootServer({ script: join(copy, 'server.ts') });
+  servers.push(srv);
+  browser ??= await launch(bin!);
+  const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });
+  const [name, value] = srv.cookie.split('=');
+  await page.send('Network.setCookie', { name, value, url: srv.base });
+  await page.send('Page.navigate', { url: `${srv.base}/c/` });
+  const version = `document.querySelector('meta[name="citadel-version"]').content`;
+  await waitFor(page, 'the page', `!!document.querySelector('.topbar')`);
+  const v1 = await page.eval(version);
+  await waitFor(page, 'the kept files', `caches.keys().then((k) => k.join() === 'shell-${v1}')`);
+  await page.eval('window.beforeTheShip = true');
+
+  appendFileSync(join(copy, 'public', 'style.css'), '\n/* shipped */\n');
+  srv.proc.kill('SIGHUP');
+  await waitFor(page, 'the new version', `!window.beforeTheShip && document.querySelector('meta[name="citadel-version"]')?.content !== ${JSON.stringify(v1)}`);
+  const v2 = await page.eval(version);
+  assert.equal(v2, (await fetch(`${srv.base}/c/`)).headers.get('x-front-version'), 'the page is the version the server now runs');
+  await waitFor(page, 'only the new files kept', `caches.keys().then((k) => k.join() === 'shell-${v2}')`);
+  assert.equal(await page.eval(`fetch('style.css').then((r) => r.text()).then((t) => t.includes('/* shipped */'))`), true);
+  assert.equal(await page.eval('navigator.serviceWorker.controller?.state'), 'activated');
 });

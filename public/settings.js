@@ -379,7 +379,7 @@ export function projectTitle(project) {
 // each opens full screen").
 // Orders (#1071, Josh 2026-11-19: "Lets go with Orders"; picked "Minions | Orders tabs on the panel"): what minions read
 // and how work runs moved out of Settings to a tab beside Minions (ordersMenu). Settings keeps you and the admin pages.
-// 'schedules' has no page: its row opens the panel's schedules list.
+// Schedules (#1083) lists them in the panel and opens each one's page in the main pane.
 export const ORDERS_GROUPS = [
   ['What minions read', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
     ['skills', 'Skills', 'spark', 'What minions know how to do, and when'], ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'],
@@ -398,15 +398,6 @@ const SETTINGS_GROUPS = [
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
 const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
 
-/** Opens the panel's schedules list (Schedules has no page of its own). */
-function openSchedules(e) {
-  e?.preventDefault();
-  const btn = document.querySelector('.sidebar .schedules-btn');
-  if (btn && btn.getAttribute('aria-pressed') !== 'true') btn.click();
-  const side = btn?.closest('.sidebar');
-  if (side) side.open = true;
-}
-
 export function settingsTabs() {
   // An Orders page keeps the (hidden) menu so it shares the settings pages' layout; its menu is the panel's Orders tab.
   if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
@@ -424,8 +415,7 @@ export function ordersMenu() {
   return h('nav', { class: 'orders-pane', 'aria-label': 'Orders' }, ORDERS_GROUPS.map(([label, hue, items]) =>
     h('div', { class: 'orders-group', 'data-hue': hue }, h('span', { class: 'orders-group-label' }, label),
       items.map(([kind, text, ic, sum]) =>
-        h('a', { class: view.main === kind ? 'active' : '', href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`, title: sum,
-          'aria-current': view.main === kind ? 'page' : null, onclick: kind === 'schedules' ? openSchedules : null },
+        h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, title: sum, 'aria-current': view.main === kind ? 'page' : null },
           icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
 }
 
@@ -449,8 +439,7 @@ export function settingsHome(orders = false) {
     h('nav', { 'aria-label': title }, (orders ? ORDERS_GROUPS : settingsGroups()).flatMap(([label, hue, items]) => [
       h('h3', { class: 'settings-section', 'data-hue': hue }, label),
       h('div', { class: 'settings-rows' }, items.map(([kind, text, ic, sum]) =>
-        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`,
-          onclick: kind === 'schedules' ? (e) => { openSchedules(e); document.querySelector('.citadel-drawer-handle.right')?.click(); } : null },
+        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
           h('span', { class: 'settings-tile' }, icon(ic)),
           h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
           h('span', { class: 'settings-row-chev' }, icon('forward')))))])));

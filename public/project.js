@@ -15,7 +15,7 @@ import { usagePage } from './where.js';
 import { skillsPage } from './skills.js';
 import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
-import { schedulesButton, showSchedules } from './schedules.js';
+import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { memoryPage } from './memory.js';
 import { decisionsPage } from './decisions.js';
@@ -85,11 +85,9 @@ function clickPanelTab(sidebar, name) {
   if (location.hash.split('?')[0] !== to) location.hash = to;
 }
 
-/** Show the minions or the Orders pages in the panel; Orders closes the schedules list first. */
+/** Show the minions or the Orders pages in the panel. */
 function showPanelTab(sidebar, name) {
   const orders = name === 'orders';
-  const sched = sidebar.querySelector('.schedules-btn');
-  if (orders && sched?.getAttribute('aria-pressed') === 'true') sched.click();
   sidebar.classList.toggle('show-orders', orders);
   for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) t.setAttribute('aria-selected', String(t.classList.contains('orders-tab') === orders));
 }
@@ -124,6 +122,7 @@ function renderCrumbs(main) {
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'reviews' ? [projectLink, ' / ', settingsLink, ' / ', 'Reviewers and critics']
+      : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
@@ -139,6 +138,11 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // Moving between chats of the project already on screen only swaps the chat; the side panels stay.
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
+  }
+  // Another schedule of the Schedules page on screen only swaps its page and the list's highlight (#1083).
+  if (main.kind === 'schedules' && view?.kind === 'project' && view.main === 'schedules' && view.projectId === projectId && openSchedule(projectId, main.schedule)) {
+    renderCrumbs(main);
+    return;
   }
   // A scheme you were on earlier this session draws from its payload as you left it and refreshes in place
   // behind (#538), unless the link is to a minion that payload doesn't have.
@@ -227,7 +231,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     // Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): Orders swaps the list for its pages.
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
-      panelTab('minions', h('span', { class: 'tab-name' }, 'Minions')), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true }))), schedulesButton()),
+      panelTab('minions', h('span', { class: 'tab-name' }, 'Minions')), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true })))),
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
@@ -237,9 +241,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'saved-views', class: 'saved-views' }),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
     h('div', { id: 'threads' }),
-    h('div', { class: 'schedules-pane' }),
+    // Orders → Schedules lists the schedules in the panel in place of the Orders menu (#1083); a row opens its page.
+    main.kind === 'schedules' ? schedulesPane(projectId, main.schedule) : '',
     ordersMenu());
-  showSchedules(sidebar);
+  sidebar.classList.toggle('show-schedules', main.kind === 'schedules');
   // An Orders page, or the Orders crumb, opens on the Orders tab; anything else on the minions.
   showPanelTab(sidebar, isOrdersPage(main.kind) || main.orders ? 'orders' : 'minions');
   if (main.orders) sidebar.open = true;
@@ -273,6 +278,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'skills' ? skillsPage()
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'reviews' ? reviewsPage()
+    : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
     : main.kind === 'ci' ? ciPage(projectId, main.tab)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)

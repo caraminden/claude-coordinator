@@ -357,7 +357,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, messages, shots, ship, go, tryFirst, data, refreshAll };
 }
 
-/** Link rows to pages that live elsewhere (N9); Schedules opens the sidebar's list. */
+/** Link rows to pages that live elsewhere (N9). */
 export function elsewhereRows(scheduleCount) {
   const id = view.projectId;
   const link = (ic, hue, title, sum, href, onclick) => h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href, onclick },
@@ -365,7 +365,7 @@ export function elsewhereRows(scheduleCount) {
     h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), h('span', { class: 'settings-row-sum' }, sum)),
     h('span', { class: 'settings-row-chev' }, icon('forward')));
   return [
-    link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}`, () => setTimeout(() => { const b = document.querySelector('.schedules-btn'); if (b && b.getAttribute('aria-pressed') !== 'true') b.click(); }, 300)),
+    link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}/schedules`),
     link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/${Number(id) === 2 ? 'all' : id}`),
     link('users', 'running', 'Members', 'Who works in this scheme', `#/p/${id}/members`),
     link('bell', 'held', 'Notifications', 'You: push, and what pings you', `#/p/${id}/notifications`),

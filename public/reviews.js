@@ -433,7 +433,7 @@ function auditDetail(a) {
       h('button', { type: 'button', class: 'close-view narrow-only', 'aria-label': 'Back to the columns', title: 'Back', onclick: () => { state.selected = null; draw(); pageEl.scrollIntoView({ block: 'start' }); } }, icon('back')),
       h('h3', {}, a.name), auditChips(a)),
     h('div', { class: 'rv-switch-row' }, auditSwitch(a), h('span', {}, a.on ? 'On' : 'Off')),
-    h('section', { class: 'rv-sec' }, h('h4', {}, 'Runs'), h('p', {}, `${a.when}, as one of this scheme's scheduled minions (◷ beside Minions). Its switch here is that schedule's pause.`)),
+    h('section', { class: 'rv-sec' }, h('h4', {}, 'Runs'), h('p', {}, `${a.when}, as one of this scheme's scheduled minions (Orders → Schedules). Its switch here is that schedule's pause.`)),
     h('section', { class: 'rv-sec' }, h('h4', {}, 'For a scheme where'), h('p', {}, a.applies)));
 }
 

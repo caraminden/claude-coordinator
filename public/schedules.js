@@ -1,9 +1,10 @@
-// The scheme's scheduled minions (src/schedules.ts), shown in the Minions panel in place of the list
-// by the clock in its header.
-import { ago, api, h, view } from './base.js';
+// The scheme's scheduled minions (src/schedules.ts), under Orders → Schedules (#1083, Josh picked "List in the panel,
+// page on the right"): the panel lists them, standard audits then the scheme's own, each split by category, and a
+// row opens its page in the main pane at #/p/N/schedules/ID. The page leads with what it does, then its status.
+import { ago, api, h, icon, view } from './base.js';
 import { modelName } from './composer.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
-import { settingsRow } from './settings.js';
+import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 
 // A chip's tone as the hue of its row's tile and bar (Citadel's look, #1068).
@@ -15,6 +16,8 @@ const soon = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '
 
 const money = (n) => `$${n.toFixed(n < 10 ? 2 : 0)}`;
 
+const href = (id) => `#/p/${view.projectId}/schedules${id ? `/${id}` : ''}`;
+
 /** A run's outcome chip: what the minion found (its state), "running" while it works, "error" if it broke. */
 function outcome(status, state) {
   if (status === 'running') return ['info', 'running', 'Its last run is working now'];
@@ -23,16 +26,18 @@ function outcome(status, state) {
   return ['neutral', 'started', 'Its last run started; it has not reported a state'];
 }
 
-/** A collapsed section opened by its button; its body is built when first opened. */
-function toggle(label, body) {
-  const box = h('div', { class: 'schedule-toggle-body', hidden: true });
-  const btn = h('button', { type: 'button', class: 'secondary small', 'aria-expanded': 'false', onclick: () => {
-    const open = box.hidden;
-    if (open && !box.childElementCount) box.append(body());
-    box.hidden = !open;
-    btn.setAttribute('aria-expanded', String(open));
-  } }, label);
-  return h('div', { class: 'schedule-toggle' }, btn, box);
+/** A schedule's one status: paused, failed to start, its last run's outcome, or new. */
+function status(s) {
+  return s.paused ? ['warn', 'Paused', 'It starts nothing until resumed']
+    : s.last_error ? ['danger', 'Failed', "Its last run didn't start"]
+    : s.last_run_at ? outcome(s.last_status, s.last_state)
+    : ['neutral', 'New', 'It has not run yet'];
+}
+
+function chip(tone, word, tip) {
+  const c = toneChip(tone, word);
+  if (tip) c.title = tip;
+  return c;
 }
 
 function runLine(s, r) {
@@ -61,45 +66,220 @@ function auditsCheck(audits) {
   return h('div', { class: 'settings-rows schedule-audits' }, row);
 }
 
-function scheduleRow(s) {
-  const last = s.last_number != null
-    ? h('a', { href: `#/p/${s.project_id}/t/${s.last_number}` }, `#${s.last_number}`, ' ', ago(s.last_run_at))
-    : s.last_run_at ? ago(s.last_run_at) : '';
-  // One status chip leads the row (#492); the facts sit inside it once opened.
-  const [tone, word, tip] = s.paused ? ['warn', 'Paused', 'It starts nothing until resumed']
-    : s.last_error ? ['danger', 'Failed', "Its last run didn't start"]
-    : s.last_run_at ? outcome(s.last_status, s.last_state)
-    : ['neutral', 'New', 'It has not run yet'];
-  const cron = `${s.when} (server time) · cron: ${s.cron}`;
-  const chip = toneChip(tone, word);
-  chip.title = tip;
-  // A standard audit (#799) follows the kit's template: each run gets its current text plus this scheme's notes.
-  const std = s.template ? toneChip('info', 'Standard') : '';
-  if (s.template) std.title = `Follows the kit's ${s.template} template; each run gets its current text${s.notes ? ', plus this scheme\'s notes' : ''}`;
+/** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
+function runsAs(s) {
+  const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
+  return set.length ? h('span', { title: 'What each run starts with' }, set.join(', ')) : '';
+}
+
+/** What it does, in a line or two: the brief's first paragraph that isn't a heading, cut at a sentence near 240 characters. */
+export function briefSummary(brief) {
+  const para = brief.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).find((p) => p && !p.startsWith('#')) ?? '';
+  if (para.length <= 240) return para;
+  const cut = para.slice(0, 240).match(/^.*[.!?:](?=\s)/)?.[0];
+  return cut && cut.length > 60 ? cut : `${para.slice(0, 240).replace(/\s+\S*$/, '')}…`;
+}
+
+/** The skills its brief names: kit skills (citadel:name) and the repo's own (.claude/skills/name), each once. */
+export function briefSkills(brief) {
+  const kit = [...brief.matchAll(/\bcitadel:([a-z][a-z0-9-]*[a-z0-9])/g)].map((m) => `citadel:${m[1]}`);
+  const own = [...brief.matchAll(/\.claude\/skills\/([a-z0-9][a-z0-9-]*)/g)].map((m) => m[1]);
+  return [...new Set([...kit, ...own])];
+}
+
+// ---------- the list, in the panel ----------
+
+/** Standard audits, then the scheme's own; each split by category (Other last), paused ones last, the rest soonest first. */
+export function groupSchedules(schedules) {
+  const order = (a, b) => a.paused - b.paused || (a.next_run_at ?? Infinity) - (b.next_run_at ?? Infinity) || a.id - b.id;
+  const byCategory = (rows) => {
+    const m = new Map();
+    for (const s of rows) {
+      const c = s.category || 'Other';
+      m.set(c, [...(m.get(c) ?? []), s]);
+    }
+    return [...m.entries()].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, xs]) => [c, xs.sort(order)]);
+  };
+  return [['Standard audits', 'teal', schedules.filter((s) => s.template)], ["This scheme's own", 'running', schedules.filter((s) => !s.template)]]
+    .filter(([, , rows]) => rows.length).map(([title, hue, rows]) => [title, hue, byCategory(rows)]);
+}
+
+/** A compact row: name and status chip, then when it runs and when next. */
+function listRow(s) {
+  const [tone, word, tip] = status(s);
+  return h('a', { class: `schedule-item${s.id === current ? ' active' : ''}${s.paused ? ' paused' : ''}`, href: href(s.id), 'data-hue': s.paused ? 'held' : HUE[tone],
+    'aria-current': s.id === current ? 'page' : null },
+    h('span', { class: 'schedule-item-top' }, h('span', { class: 'schedule-item-name' }, s.name), chip(tone, word, tip)),
+    h('span', { class: 'schedule-item-sub' }, s.paused ? s.when : [s.when, ' · next ', h('span', { class: 'tnum' }, soon(s.next_run_at))]));
+}
+
+function scheduleList(schedules) {
+  if (!schedules.length) return emptyCard('Nothing scheduled yet', 'A schedule starts a minion on a timer; ask the Taskmaster to add one.', { mark: '◷', hue: 'muted' });
+  return h('div', { class: 'schedule-groups' }, groupSchedules(schedules).map(([title, hue, cats]) =>
+    h('section', { class: 'schedule-group', 'data-hue': hue },
+      h('h3', { class: 'settings-section', 'data-hue': hue }, title, h('span', { class: 'schedule-count' }, String(cats.reduce((n, [, xs]) => n + xs.length, 0)))),
+      cats.map(([c, xs]) => h('div', { class: 'schedule-cat' }, h('h4', { class: 'schedule-cat-name' }, c), h('div', { class: 'schedule-items' }, xs.map(listRow)))))));
+}
+
+/** The panel's list: a way back to the Orders menu, the standard-audits check, then the groups. */
+function drawPane() {
+  if (!paneEl?.isConnected) return;
+  const back = h('a', { class: 'schedules-back', href: `#/p/${view.projectId}/orders`, onclick: (e) => {
+    e.preventDefault();
+    e.currentTarget.closest('.sidebar')?.classList.remove('show-schedules');
+  } }, icon('back'), 'Orders');
+  const head = h('div', { class: 'schedules-pane-head' }, back, h('b', {}, 'Schedules'));
+  if (!data) return paneEl.replaceChildren(head, h('p', { class: 'muted small' }, 'Loading…'));
+  if (data.error) return paneEl.replaceChildren(head, h('p', { class: 'error' }, data.error));
+  paneEl.replaceChildren(head, auditsCheck(data.audits), scheduleList(data.schedules));
+}
+
+// ---------- the page, in the main pane ----------
+
+/** Its page: what it does, its status, its runs, then rows that open on the instructions, skills, model and gate. */
+function schedulePage(s) {
+  const [tone, word, tip] = status(s);
   const hue = s.paused ? 'held' : HUE[tone];
-  const tiles = [s.last_cost ? [money(s.last_cost), 'last run cost', 'accent'] : null, s.skips14 ? [String(s.skips14), 'skipped in 14 days', 'held'] : null].filter(Boolean);
-  const [row] = settingsRow({ key: `schedule:${s.id}`, icon: 'rows', hue, title: s.name,
-    summary: [chip, std, s.paused ? s.when : h('span', { title: cron }, `next ${soon(s.next_run_at)}`)] },
-    tiles.length ? statTiles(...tiles) : '',
-    h('div', { class: 'hue-rows schedule-facts' },
-      hueRow({ hue, lead: s.paused ? 'Would run' : 'Next', meta: undefined }, h('span', { title: cron }, s.paused ? s.when : [h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when])),
-      hueRow({ hue: 'accent', lead: 'Runs as' }, runsAs(s) || 'the scheme’s defaults'),
-      hueRow({ hue: 'teal', lead: 'Last run' }, s.last_run_at || s.last_number != null ? last : 'not run yet'),
-      s.last_note || s.last_cost ? hueRow({ hue: 'done', lead: 'Found' }, s.last_note ? `“${s.last_note}”` : '', s.last_cost ? [' ', h('span', { class: 'tnum', title: 'What its last run cost, at API prices' }, money(s.last_cost))] : '') : '',
-      s.last_skip ? hueRow({ hue: 'held', lead: 'Skipped' }, h('span', { title: 'The activity gate skipped this slot: no minion was made' }, s.last_skip)) : '',
-      s.last_error ? hueRow({ hue: 'danger', lead: 'Error' }, "Last run didn't start: ", s.last_error) : ''),
-    gateFields(s),
-    toggle('Brief', () => h('pre', { class: 'schedule-brief small' }, s.brief)),
-    s.runs.length ? toggle(`Last ${s.runs.length} runs`, () => {
-      return showFirst({ key: `schedule-runs:${s.id}`, items: s.runs.map((r) => runLine(s, r)), n: 5, noun: 'runs' });
-    }) : '',
-    h('div', { class: 'row schedule-actions' },
-      h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('[data-schedule]')) }, s.paused ? 'Resume' : 'Pause'),
-      h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('[data-schedule]')) }, 'Delete')));
-  row.classList.add('schedule-row');
-  if (s.paused) row.classList.add('paused');
-  row.dataset.schedule = s.id;
-  return row;
+  const cron = `${s.when} (server time) · cron: ${s.cron}`;
+  const std = s.template ? chip('info', 'Standard', `Follows the kit's ${s.template} template; each run gets its current text${s.notes ? ", plus this scheme's notes" : ''}`) : '';
+  const skills = briefSkills(s.brief);
+  const runs = s.runs ?? [];
+  const lastWord = s.last_number != null ? outcome(s.last_status, s.last_state)[1] : null;
+  return [
+    h('div', { class: 'schedule-head', 'data-hue': hue },
+      h('span', { class: 'settings-tile' }, icon('rows')),
+      h('div', { class: 'schedule-head-text' },
+        h('h3', {}, s.name),
+        h('div', { class: 'schedule-chips' }, chip(tone, word, tip), std, chip('violet', s.category || 'Other', 'Its group in the list'), chip('neutral', s.type, 'The type each run gets'),
+          s.once ? chip('neutral', 'Runs once') : '')),
+      h('div', { class: 'schedule-actions' },
+        h('button', { type: 'button', class: 'secondary small', onclick: () => pause(s) }, s.paused ? 'Resume' : 'Pause'),
+        h('button', { type: 'button', class: 'secondary small danger', onclick: () => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s) }, 'Delete'))),
+    // Josh (2026-11-19, on the choices page): "have a short summary of what it does as the first thing".
+    h('p', { class: 'schedule-summary' }, briefSummary(s.brief) || 'No brief.'),
+    statTiles(
+      [s.paused ? 'Paused' : soon(s.next_run_at), s.paused ? s.when : `next run · ${s.when}`, hue],
+      [s.last_number != null ? `#${s.last_number}` : '–', s.last_number != null ? `last run · ${lastWord}` : 'no run yet', s.last_number != null ? HUE[outcome(s.last_status, s.last_state)[0]] : 'held'],
+      [s.last_cost ? money(s.last_cost) : '–', 'last run cost', 'accent'],
+      [String(s.skips14 ?? 0), 'skipped in 14 days', 'held']),
+    s.last_error ? hueRow({ hue: 'danger', lead: 'Error' }, "Last run didn't start: ", s.last_error) : '',
+    h('h3', { class: 'settings-section', 'data-hue': 'teal' }, 'Recent runs'),
+    runs.length ? h('div', { class: 'schedule-runs-box' },
+      h('div', { class: 'schedule-strip', 'aria-hidden': 'true' }, [...runs].reverse().map((r) =>
+        h('i', { 'data-hue': r.skip ? 'held' : HUE[outcome(r.status, r.state)[0]], class: r.skip ? 'skip' : null, title: `${when(r.at)}: ${r.skip ? 'skipped' : outcome(r.status, r.state)[1]}` }))),
+      showFirst({ key: `schedule-runs:${s.id}`, items: runs.map((r) => runLine(s, r)), n: 5, noun: 'runs' }))
+      : emptyCard('No runs yet', s.paused ? 'It is paused; resume it to run.' : `Its first run is ${when(s.next_run_at)}.`, { mark: '◷', hue: 'muted' }),
+    h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'What it does'),
+    h('div', { class: 'settings-rows' },
+      settingsRow({ key: `schedule-brief:${s.id}`, icon: 'doc', hue: 'running', title: 'Instructions',
+        summary: [s.template ? toneChip('info', 'From the kit') : toneChip('neutral', 'Written here'), `${s.brief.length.toLocaleString()} characters`] },
+        h('pre', { class: 'schedule-brief small' }, s.brief),
+        s.template && s.notes ? [h('p', { class: 'look-prose' }, "This scheme's notes, added under the template:"), h('pre', { class: 'schedule-brief small' }, s.notes)] : '')[0],
+      settingsRow({ key: `schedule-skills:${s.id}`, icon: 'spark', hue: 'accent', title: 'Skills it uses',
+        summary: skills.length ? [toneChip('violet', String(skills.length)), skills.slice(0, 2).join(', ') + (skills.length > 2 ? '…' : '')] : 'None named in its brief' },
+        skills.length ? h('div', { class: 'schedule-skills' }, skills.map((k) => h('a', { class: 'cui-chip', 'data-tone': 'violet', href: `#/p/${view.projectId}/skills` }, k)))
+          : h('p', { class: 'look-prose' }, 'Its brief names no skill; the run uses whatever its minion picks.'))[0],
+      settingsRow({ key: `schedule-runs-as:${s.id}`, icon: 'user', hue: 'teal', title: 'Runs as',
+        summary: [runsAs(s) || 'the scheme’s defaults', ` · ${s.type}`] },
+        h('div', { class: 'hue-rows schedule-facts' },
+          hueRow({ hue: 'accent', lead: 'Model' }, s.model ? modelName(s.model) : 'the model table’s pick'),
+          hueRow({ hue: 'accent', lead: 'Effort' }, s.effort ?? 'the model table’s pick'),
+          hueRow({ hue: 'teal', lead: 'Type' }, s.type),
+          hueRow({ hue, lead: 'When' }, h('span', { title: cron }, s.when, s.paused ? '' : [' · next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at))])),
+          hueRow({ hue: 'held', lead: 'Cron' }, h('code', {}, s.cron))))[0],
+      settingsRow({ key: `schedule-gate:${s.id}`, icon: 'shield', hue: 'waiting', title: 'When it skips',
+        summary: s.min_minions != null ? [toneChip('warn', `Under ${s.min_minions}`), `minions since its last run${s.gate_scope === 'all' ? ', all schemes' : ''}`] : [toneChip('ok', 'Always runs'), s.last_skip ?? ''] },
+        gateFields(s), s.last_skip ? h('p', { class: 'look-prose' }, 'Last skip: ', s.last_skip) : '')[0],
+      settingsRow({ key: `schedule-cat:${s.id}`, icon: 'tag', hue: 'violet', title: 'Category', summary: [toneChip('violet', s.category || 'Other'), 'its group in the list'] },
+        categoryField(s))[0]),
+  ];
+}
+
+/** Every schedule at once: what runs on a timer, the next one, and what is paused; then where to pick one. */
+function overview(schedules) {
+  const live = schedules.filter((s) => !s.paused);
+  const next = live.reduce((a, s) => (a && a.next_run_at <= s.next_run_at ? a : s), null);
+  const failed = schedules.filter((s) => s.last_error).length;
+  return [
+    statTiles([String(live.length), 'on a timer', 'running'], [next ? soon(next.next_run_at) : '–', next ? `next · ${next.name}` : 'nothing due', 'teal'],
+      [String(schedules.length - live.length), 'paused or done', 'held'], failed ? [String(failed), "didn't start", 'danger'] : null),
+    h('div', { class: 'schedules-pick' }, emptyCard('Pick a schedule', 'Its page shows what it does, the skills it uses, its runs, and its pause and delete.', { mark: '◷', hue: 'muted' })),
+    // A phone has no panel beside it: the list sits here, and a tap opens the page full screen.
+    h('div', { class: 'schedules-narrow-list' }, auditsCheck(data.audits), scheduleList(schedules)),
+  ];
+}
+
+function drawPage() {
+  if (!pageEl?.isConnected) return;
+  const s = current && data?.schedules?.find((x) => x.id === current);
+  const head = h('div', { class: 'ticket-head' },
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
+      h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    settingsTabs(),
+    current ? h('a', { class: 'schedules-up', href: href(null) }, icon('back'), 'All schedules') : '');
+  const body = !data ? [h('p', { class: 'muted' }, 'Loading…')]
+    : data.error ? [h('p', { class: 'error' }, data.error)]
+    : s ? schedulePage(s)
+    : current ? [emptyCard('No such schedule', 'It may have been deleted. Pick another from the list.', { mark: '?', hue: 'muted' })]
+    : overview(data.schedules);
+  pageEl.replaceChildren(head, ...body);
+}
+
+// ---------- state, saving and redraws ----------
+
+let data = null; // { projectId, schedules, audits } or { error }
+let current = null; // the schedule whose page is open
+let paneEl = null;
+let pageEl = null;
+let token = 0;
+
+function draw() {
+  drawPane();
+  drawPage();
+}
+
+async function load(projectId) {
+  const mine = ++token;
+  try {
+    const [{ schedules }, { audits }] = await Promise.all([api(`api/projects/${projectId}/schedules`), api(`api/projects/${projectId}/schedule-audits`)]);
+    if (mine === token) data = { projectId, schedules, audits };
+  } catch (ex) {
+    if (mine === token) data = { projectId, error: ex.message };
+  }
+  if (mine === token) draw();
+}
+
+/** The panel's schedules list (Orders → Schedules); drawn from what was fetched last, then fresh. */
+export function schedulesPane(projectId, id) {
+  current = id ?? null;
+  if (data?.projectId !== projectId) data = null;
+  paneEl = h('div', { class: 'schedules-pane' });
+  drawPane();
+  return paneEl;
+}
+
+/** The main pane's Schedules page: the open schedule's page, or the overview with none picked. Fetches behind. */
+export function schedulesPage(projectId, id) {
+  current = id ?? null;
+  if (data?.projectId !== projectId) data = null;
+  pageEl = h('section', { class: 'artifacts-main settings-page schedules-main' });
+  drawPage();
+  load(projectId);
+  return pageEl;
+}
+
+/** Another schedule of the scheme on screen: swap the page and the list's highlight in place, no reload. False if not on it. */
+export function openSchedule(projectId, id) {
+  if (!pageEl?.isConnected || !paneEl?.isConnected || data?.projectId !== projectId) return false;
+  current = id ?? null;
+  draw();
+  pageEl.scrollTop = 0;
+  return true;
+}
+
+/** Someone added, changed or ran a schedule: refetch if its scheme's Schedules page is open. */
+export function onSchedulesChanged(projectId) {
+  if ((pageEl?.isConnected || paneEl?.isConnected) && view?.projectId === projectId) load(projectId);
 }
 
 /**
@@ -124,106 +304,57 @@ function gateFields(s) {
     h('label', { title: 'Pause after its first real run, for a one-off' }, h('input', { type: 'checkbox', checked: !!s.once, onchange: (e) => save(s, { once: e.target.checked }) }), ' Run once'));
 }
 
+/** Its category (#1083): any short name, with the scheme's others offered; blank puts it under Other. */
+function categoryField(s) {
+  const list = `schedule-cats-${s.id}`;
+  const cats = [...new Set(data.schedules.map((x) => x.category).filter(Boolean))].sort();
+  return h('div', { class: 'schedule-gate small' },
+    h('label', {}, 'Show it under ', h('input', { type: 'text', maxlength: 40, list, value: s.category, placeholder: 'Other', 'aria-label': 'Category',
+      onchange: (e) => save(s, { category: e.target.value.trim().replace(/\s+/g, ' ') }) })),
+    h('datalist', { id: list }, cats.map((c) => h('option', { value: c }))));
+}
+
 /**
- * Save a gate change: the row redraws with it at once, and a refusal puts the old values back. Edits to one field share
- * `sets`, so after several quick ones fail it ends at what the server last took; each redraw finds the row shown now.
+ * Save a change: the list and page redraw with it at once, and a refusal puts the old values back. Edits to one field
+ * share `sets`, so after several quick ones fail it ends at what the server last took.
  */
 function save(s, patch) {
   const was = Object.fromEntries(Object.keys(patch).map((k) => [k, s[k]]));
-  const show = (values) => {
-    Object.assign(s, values);
-    document.querySelector(`.schedule-row[data-schedule="${s.id}"]`)?.replaceWith(scheduleRow(s));
-  };
   optimistic({
     key: `schedule:${s.id}`,
     sets: `schedule-${Object.keys(patch).join()}:${s.id}`,
-    apply: () => show(patch),
+    apply: () => { Object.assign(s, patch); draw(); },
     send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: patch }),
-    undo: () => show(was),
+    undo: () => { Object.assign(s, was); draw(); },
     label: `change the schedule "${s.name}"`,
   });
 }
 
-// Both show at once and send behind; the server's broadcast then redraws the list, and a refusal puts the row back.
-function pause(s, row) {
+// Shows at once and sends behind; the server's broadcast then refetches, and a refusal puts it back.
+function pause(s) {
   const was = s.paused;
-  const show = (paused) => {
-    s.paused = paused;
-    const next = scheduleRow(s);
-    row.replaceWith(next);
-    row = next;
-  };
   optimistic({
     key: `schedule:${s.id}`,
     sets: `schedule-paused:${s.id}`,
-    apply: () => show(!was),
+    apply: () => { s.paused = was ? 0 : 1; draw(); },
     send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: { paused: !was } }),
-    undo: () => s.paused !== was && show(was), // unless something else changed it since
+    undo: () => { s.paused = was; draw(); },
     label: `${was ? 'resume' : 'pause'} the schedule "${s.name}"`,
   });
 }
 
-function remove(s, row) {
-  const list = row.parentNode;
-  const after = row.nextSibling;
+/** Delete: gone from the list at once and back to the overview; a refusal puts it back in the list. */
+function remove(s) {
+  const list = data.schedules;
   optimistic({
     key: `schedule:${s.id}`,
-    apply: () => row.remove(),
+    apply: () => {
+      data.schedules = list.filter((x) => x !== s);
+      if (current === s.id) location.hash = href(null);
+      draw();
+    },
     send: () => api(`api/schedules/${s.id}`, { method: 'DELETE' }),
-    undo: () => list.isConnected && list.insertBefore(row, after?.parentNode === list ? after : null),
+    undo: () => { if (data?.schedules && !data.schedules.includes(s)) data.schedules = [...data.schedules, s]; draw(); },
     label: `delete the schedule "${s.name}"`,
   });
-}
-
-/** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
-function runsAs(s) {
-  const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
-  return set.length ? h('span', { title: 'What each run starts with' }, set.join(', ')) : '';
-}
-
-/** The schedules as rows that open under a heading: its heading counts them, and the paused and failed ones. */
-function scheduleList(schedules) {
-  const bad = schedules.filter((s) => s.last_error).length, paused = schedules.filter((s) => s.paused).length;
-  return h('div', { class: 'schedule-list' },
-    h('h3', { class: 'settings-section', 'data-hue': bad ? 'danger' : 'teal' }, `Scheduled · ${schedules.length}`, bad ? ` · ${bad} failed` : '', paused ? ` · ${paused} paused` : ''),
-    h('div', { class: 'settings-rows' }, schedules.map(scheduleRow)));
-}
-
-/** Someone added, changed or ran a schedule: redraw the list if it is open on that scheme. */
-export function onSchedulesChanged(projectId) {
-  const sidebar = document.querySelector('.sidebar.show-schedules');
-  if (sidebar && view?.projectId === projectId) showSchedules(sidebar);
-}
-
-// Whether the Minions panel shows the schedules in place of the list; kept while you move between chats.
-let showing = false;
-
-/** The clock in the Minions header: swaps the minion list for the schedules and back. */
-export function schedulesButton() {
-  return h('button', { type: 'button', class: 'rename schedules-btn', onclick: (e) => { showing = !showing; showSchedules(e.currentTarget.closest('.sidebar')); } }, '◷');
-}
-
-/** Show the list or the schedules in `sidebar`, as `showing` says; the schedules are fetched each time they open. */
-export async function showSchedules(sidebar) {
-  sidebar.classList.toggle('show-schedules', showing);
-  const btn = sidebar.querySelector('.schedules-btn');
-  const label = showing ? 'Back to the minions' : 'Scheduled minions';
-  Object.entries({ 'aria-pressed': String(showing), 'aria-label': label, title: label }).forEach(([k, v]) => btn.setAttribute(k, v));
-  // The Minions tab reads Scheduled while the list shows, and is the tab in front (#1071).
-  sidebar.querySelector(':scope > summary .tab-name').textContent = showing ? 'Scheduled' : 'Minions';
-  if (showing && sidebar.classList.contains('show-orders')) {
-    sidebar.classList.remove('show-orders');
-    for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) t.setAttribute('aria-selected', String(t.classList.contains('minions-tab')));
-  }
-  const pane = sidebar.querySelector('.schedules-pane');
-  if (!showing) return pane.replaceChildren();
-  if (!pane.childElementCount) pane.replaceChildren(h('p', { class: 'muted small' }, 'Loading…'));
-  try {
-    const [{ schedules }, { audits }] = await Promise.all([api(`api/projects/${view.projectId}/schedules`), api(`api/projects/${view.projectId}/schedule-audits`)]);
-    pane.replaceChildren(auditsCheck(audits), schedules.length
-      ? scheduleList(schedules)
-      : emptyCard('Nothing scheduled yet', 'A schedule starts a minion on a timer; ask the Taskmaster to add one.', { mark: '◷', hue: 'muted' }));
-  } catch (ex) {
-    pane.replaceChildren(h('p', { class: 'error' }, ex.message));
-  }
 }

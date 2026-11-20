@@ -11,7 +11,7 @@ const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'ToolSearch', 'WebSear
 // Citadel's MCP tools that only read (src/mcp.ts); both servers' names, the minion's and the Taskmaster's.
 const READ_MCP = new Set(['read_minion', 'read_ticket', 'list_tickets', 'list_properties', 'list_artifacts', 'artifact_data', 'host_check', 'ci_runners', 'ci_files',
   'usage_split', 'list_schedules', 'list_catalogue', 'list_machines', 'check_machine', 'get_project_instructions', 'get_project_settings', 'read_person_instructions',
-  'get_app_instructions', 'list_contraptions', 'contraption_read', 'contraption_turns', 'search_memory']);
+  'get_app_instructions', 'list_contraptions', 'contraption_read', 'contraption_turns', 'search_memory', 'search_decisions']);
 
 // Commands that only read, whatever their arguments (a few flags that write are refused in FLAG_WRITES).
 const READERS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'stat', 'du', 'df', 'ps', 'pgrep', 'ss', 'pwd', 'echo', 'printf',

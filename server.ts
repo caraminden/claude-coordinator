@@ -35,7 +35,7 @@ import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
@@ -63,6 +63,7 @@ import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { sweepKept } from './src/replay-keep.ts';
+import { loadDecisions } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
@@ -1049,7 +1050,25 @@ const ciHealth = new CiHealth(store, {
     // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
     return store.eventsOfKinds(coordinator.id, ['user_message']).at(-1)?.id ?? true;
   },
+  // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
+  // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.
+  shipped: (p, t, sha) => (p.repo_dir && t.branch ? fixShipped(p.repo_dir, t.branch, Math.floor(t.created_at / 1000), sha) : Promise.resolve(null)),
+  held: (id, note) => {
+    const t = store.getTicket(id);
+    if (!t || t.status === 'closed') return;
+    if (note) store.updateTicket(id, { state: 'outside', note: note.slice(0, 60) });
+    else if (t.state === 'outside') store.updateTicket(id, { state: null, note: null });
+    runner.broadcastTicket(id);
+  },
+  dismiss: (id, text) => runner.ciGreen(id, text),
 });
+runner.ciHold = (id) => {
+  const held = ciHealth.hold(id);
+  const t = held ? store.getTicket(id) : null;
+  // Only as its deploy goes live, not at every close_self or turn end: two extra looks per scheme cost API calls.
+  if (t?.state === 'pending-deploy') ciHealth.soon(t.project_id);
+  return held;
+};
 if (!BOOT_CHECK) ciHealth.start();
 // Handed-off lands (#706): the server reports each once its land.sh ends, with no turn on a clean land (src/land.ts).
 // Fast mode's testing behind (#1017, src/fast-mode.ts): the full suite on main after fast lands, in each fast scheme.
@@ -1294,6 +1313,12 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
+// Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
+if (!BOOT_CHECK && !PREVIEW) {
+  const sweepDecisions = () => void safely('decisions sweep', async () => { for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {}); });
+  setTimeout(sweepDecisions, 15 * 60_000).unref();
+  setInterval(sweepDecisions, 24 * 60 * 60_000).unref();
+}
 // A reply's status trailer (#711) goes through set_thread_status's checks; one they refuse is noted, and the state stays cleared.
 runner.onStatusTrailer = (id, fields) => {
   const ticket = store.getTicket(id);

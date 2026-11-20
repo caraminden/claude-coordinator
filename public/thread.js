@@ -7,7 +7,8 @@ import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, load
 import { alertNote, composer, composerPlaceholder, outbox, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
-import { composerHint, heldLine } from './heldmsg.js';
+import { composerHint, heldLine, TRACKING } from './heldmsg.js';
+import { renderHeldCard } from './heldcard.js';
 import { rowState, SHIP, workingBy, workingLabel } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -321,6 +322,8 @@ export function chatSection(chatId, ticket) {
   // A parked minion reads nothing until it's unparked: said over the box before you send, not only after (renderTicketHead).
   form.prepend(h('div', { class: 'parked-hint', hidden: true }));
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
+  // What the next turn will read (#1067, heldcard.js): held mail and a loop-guard hold, over the replies.
+  form.prepend(h('div', { id: 'chat-held', hidden: true }));
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
@@ -457,6 +460,7 @@ export function renderTicketHead() {
     markQueued(bubble, t);
     if (bubble.heldData) markHeld(bubble, t);
   }
+  for (const run of chat?.querySelectorAll('.log .held-run') ?? []) sumRun(run);
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
   const form = chat?.querySelector('.composer');
@@ -471,6 +475,7 @@ export function renderTicketHead() {
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();
+    renderHeldCard(chat.querySelector('#chat-held'), t, unpark);
     // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
     const unparkSlot = form.querySelector('.unpark-slot');
     if (unparkSlot) {
@@ -714,21 +719,15 @@ function shipLine(t) {
 }
 
 /**
- * A message held for a minion says so in its bubble, in place: "Not sent yet" with a dashed look (and, for a parked
- * minion, Unpark and send) while the ticket still lists it as held, then a plain "Read" line once a turn took it.
- * The line is one fixed row either way, so nothing moves when it flips.
+ * Held mail (#1067): a bubble the next turn hasn't read yet stays out of the log (the held-mail card over the composer
+ * shows it), then shows with a small tag once a turn read it.
  */
 function markHeld(bubble, ticket) {
   const line = heldLine(bubble.heldData, Number(bubble.dataset.event), ticket);
   if (!line) return;
   bubble.classList.add('held-msg');
   bubble.classList.toggle('held-waiting', line.waiting);
-  let el = bubble.querySelector(':scope > .held-line');
-  if (!el) bubble.append(el = h('div', { class: 'held-line', role: 'status' }));
-  el.replaceChildren(
-    h('span', { class: 'held-icon', 'aria-hidden': 'true' }, line.waiting ? '⏸' : '✓'),
-    h('span', { class: 'held-text' }, line.text),
-    ...(line.unpark ? [h('button', { type: 'button', class: 'secondary small', onclick: () => unpark(ticket) }, 'Unpark and send')] : []));
+  if (!line.waiting && !bubble.querySelector('.held-tag')) bubble.querySelector('.who')?.append(h('span', { class: 'msg-tag held-tag', title: line.title }, line.tag));
 }
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
@@ -893,19 +892,18 @@ function drawEvent(event, scroll) {
       }
       if (data.need) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'What the sender said this message needs' }, `need: ${data.need}`));
       markQueued(bubble, view.ticket);
-      if (data.mail && TRACKING.test(data.text ?? '')) {
-        // A run of "for your tracking" notes from one minion is one collapsed row, each note behind it (#1001).
+      if (data.mail) {
+        // A run of held mail, from anyone, is one collapsed row once read, each message behind it (#1001, #1067).
         const pending = new Set(view.pendingMessages.map((m) => m.el));
         let prev = log.lastElementChild;
         while (prev && pending.has(prev)) prev = prev.previousElementSibling;
-        bubble.dataset.tracking = data.author;
-        if (prev?.matches('.mcopies.tracked') && prev.dataset.author === data.author) addTracked(prev, bubble);
-        else if (prev?.dataset.tracking === data.author) {
-          // The second note: the lone one above joins a new group row.
-          const group = newTracked(data.author);
+        if (prev?.matches('.held-run')) addHeld(prev, bubble);
+        else if (prev?.heldData) {
+          // The second one: the lone one above joins a new group row.
+          const group = h('details', { class: 'msg coord mcopies tracked held-run' }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
           prev.replaceWith(group);
           group.dataset.at = prev.dataset.at;
-          addTracked(addTracked(group, prev), bubble);
+          addHeld(addHeld(group, prev), bubble);
         } else nodes.push(bubble);
       } else nodes.push(bubble);
     }
@@ -1194,23 +1192,21 @@ function addMinionCopy(group, data, event) {
   return group;
 }
 
-/** Held mail the Taskmaster only keeps for tracking: the server's wording for a note that needs nothing done. */
-const TRACKING = /^\(for your tracking; nothing to do\)/;
-
-/** An empty group row for one sender's tracking notes; addTracked fills it. */
-function newTracked(author) {
-  const row = h('details', { class: 'msg coord mcopies tracked', 'data-author': author }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
-  return row;
+/** A held message into its run's row. */
+function addHeld(group, bubble) {
+  group.querySelector('.mc-list').append(bubble);
+  return sumRun(group);
 }
 
-/** One tracking note's own row into its group: the count and the sender in the summary, the newest note as the preview. */
-function addTracked(group, bubble) {
-  const list = group.querySelector('.mc-list');
-  list.append(bubble);
-  const count = list.children.length;
-  const sender = group.dataset.author.replace(/\s.*$/, '');
-  group.querySelector('.who').textContent = `${count} tracking note${count === 1 ? '' : 's'} from ${sender}`;
-  group.querySelector('.preview').textContent = bubble.querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
+/** A run's summary counts what turns have read (the card shows the rest): the count, the senders, the newest as the preview; hidden while none is read. */
+function sumRun(group) {
+  const read = [...group.querySelectorAll(':scope > .mc-list > .held-msg:not(.held-waiting)')];
+  group.hidden = !read.length;
+  if (!read.length) return group;
+  const by = new Map();
+  for (const b of read) by.set(b.heldData.author, (by.get(b.heldData.author) ?? 0) + 1);
+  group.querySelector('.who').textContent = `✉ ${read.length} held message${read.length === 1 ? '' : 's'} · ${[...by].map(([a, n]) => (n > 1 ? `${a} ×${n}` : a)).join(', ')}`;
+  group.querySelector('.preview').textContent = read.at(-1).querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
   return group;
 }
 
@@ -1283,7 +1279,7 @@ function syncHeldBrief() {
     } }, 'Show more'));
   }
   // Above the messages left for it, which come after the brief.
-  const first = [...log.children].find((c) => c.classList.contains('user') && c.heldData?.parked);
+  const first = [...log.children].find((c) => (c.classList.contains('user') && c.heldData?.parked) || (c.matches('.held-run') && [...c.querySelectorAll('.held-msg')].some((b) => b.heldData?.parked)));
   const after = log.querySelector(':scope > #recap, :scope > .pending');
   if (first) first.before(el); else if (after) after.before(el); else log.append(el);
 }

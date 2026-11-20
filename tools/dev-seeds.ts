@@ -12,6 +12,7 @@ import { projectDir } from '../src/workspace.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
+import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -515,6 +516,8 @@ mock.boards('#takes', { boards: [
       const o = chat(c, ovl, 6);
       o.said('Checking CI on main after the last land.');
       o.put('note', { text: 'CI on main fell back to perigee: the desktop runner is offline.', everyone: true });
+      o.put('note', { text: 'Cleaned up 4 worktrees today, 504 MiB freed', detail: 'ticket/1001-a  120 MiB\nticket/1002-b  384 MiB', everyone: true });
+      o.put('note', { text: '📋 Taskmaster updated the Citadel-wide instructions', everyone: true });
       const opts = [{ label: 'Wait for the desktop', recommended: true }, { label: 'Run on perigee' }];
       o.put('question', { id: hex(), everyone: true, questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
       return `#/p/${c.project.id}`;
@@ -579,6 +582,37 @@ mock.boards('#takes', { boards: [
       for (const m of to) note(`#${sender.number}'s relay to #${m.number} went out`);
       note(`#${sender.number} cancelled its relay to #${to[0].number}.`);
       return `#/p/${c.project.id}`;
+    },
+  },
+  'held-mail': {
+    about: 'a minion with held mail waiting for its next turn (#1067): a cold hold from two senders, one a loop-guard hold, so its chat shows the inbox card with Continue and Deliver now, and the list its loop badge',
+    seed(c) {
+      const tm = taskmaster(c);
+      const other = minion(c, 'Rail settings page');
+      const t = minion(c, 'Sidebar badge colours', { note: 'waiting on its next turn' });
+      const m = chat(c, t, 12);
+      m.asked('Fix the unread badges\' contrast in dark mode.');
+      m.init();
+      m.said('Fixed the contrast; checking phones next.');
+      m.done('Fixed.');
+      const held = (author: string, text: string, extra: object = {}) => {
+        const id = m.put('user_message', { author, text, mail: true, cold: true, ...extra });
+        return { author, text, images: [], id, from: tm.id };
+      };
+      const mail = [
+        held('Taskmaster', 'Josh asks whether the badge stays round at 390 px. Check it before you ship.', { need: 'ask' }),
+        held('Taskmaster', '(for your tracking; nothing to do) #12 shipped the rail tokens you build on.', { need: 'fyi' }),
+        held('Citadel', `#${other.number} shipped 4f2a91c: the rail colours moved to tokens; rebase before you touch sidebar.css.`, { note: true }),
+      ];
+      c.store.setSetting(mailKey(t.id), mail);
+      c.store.setSetting(coldKey(t.id), Date.now() - 40 * 60_000);
+      const now = Date.now();
+      const loop: LoopState = { sent: Array.from({ length: 8 }, (_, i) => now - (20 - i) * 60_000), held: [
+        { to: t.id, author: 'Taskmaster', text: 'Run the badge tests again and report the counts.', from: tm.id, at: now - 5 * 60_000 },
+        { to: t.id, author: 'Taskmaster', text: 'And screenshot the dark sidebar.', from: tm.id, at: now - 4 * 60_000 },
+      ] };
+      c.store.setSetting(loopKey(t.id), loop);
+      return route(c, t);
     },
   },
   'side-thread': {
@@ -731,6 +765,35 @@ mock.boards('#takes', { boards: [
       for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
       writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
       return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
+    },
+  },
+  decisions: {
+    about: "Settings → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    seed(c) {
+      SCENARIOS.memory.seed(c);
+      if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
+      const repo = c.store.getProject(c.project.id)!.repo_dir!;
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
+      const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', env });
+      const put = (path: string, text: string) => { mkdirSync(join(repo, path, '..'), { recursive: true }); writeFileSync(join(repo, path), text); };
+      // A second seed starts the repo over, so ADR 0002 is its own commit again.
+      for (const d of ['.git', 'docs', '.claude']) rmSync(join(repo, d), { recursive: true, force: true });
+      execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+      put('CLAUDE.md', '# CLAUDE.md\n\n- **Decisions log (ADRs):** `docs/adr/`.\n- Screens are checked at two widths (Josh, 2026-11-12: "desktop and phone, every time").\n');
+      put('.claude/rules/words.md', '# Words\n\n- Say land for a change reaching main (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it").\n- Old CI rule (Cara, 2026-11-10: "Keep failing, log it").\n');
+      put('docs/adr/0001-ci-red.md', '# 0001: A red CI run fails the land\n\nDate: 2026-11-10.\nCara, 2026-11-10, on #12\'s card: "Keep failing, log it".\n');
+      sh('add', '-A');
+      sh('commit', '-qm', 'Rules and the first ADR');
+      put('docs/adr/0002-rerun-flakes.md', '# 0002: A red run that is red only on flakes gets one fresh run\n\nDate: 2026-11-15.\nCara, 2026-11-15, on #31\'s card: "Rerun CI on flake-only red".\n\nThis reverses Cara\'s 2026-11-10 "Keep failing, log it" for the CI gate.\n');
+      sh('add', '-A');
+      sh('commit', '-qm', 'ADR 0002');
+      c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
+      c.store.setProjectInstructions(c.project.id, '## Shipping\nShip small fixes without asking (Cara, 2026-10-27: "move fast").\n\n## Pictures\nImages by code (Cara, 2026-11-14: "image via code should ABSOLUTELY be the default").\n', c.who);
+      const land = 'Land, not merge (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it": "fold was just for major builds"). A change going onto main is "landing".\n\n- No reflow without input (Cara, 2026-11-16: "UI reflowing without a user input should be avoided").\n- Fable only for the hardest work (Josh, 2026-11-13: "only for really complex or high risk things").\n';
+      const ship = land.replace(/^Land, not merge \([^\n]*/, 'Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020\'s card, picked `Ship` over keeping "land"; for `fold` she picked "Retire it": "fold was just for major builds"). A change going onto main is "shipping".');
+      c.store.setAppInstructions(land, c.who);
+      c.store.setAppInstructions(ship, 'Taskmaster');
+      return `#/p/${c.project.id}/decisions (Settings → Decisions in "${c.project.name}")`;
     },
   },
   ci: {

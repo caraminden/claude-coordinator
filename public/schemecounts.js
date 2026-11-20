@@ -7,9 +7,9 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 /** A chat event that opens or settles a card (a typed answer settles one too). */
 export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && !!JSON.parse(event.data).answer);
 
-/** A minion moved into or out of ready/complete/try, offered or lost its replies, was dismissed or reopened, changed hands, or raised or cleared a spend alert (or is new to us). */
+/** A minion moved into or out of ready/complete/try, offered or lost its replies, was dismissed or reopened, changed hands, raised or cleared a spend alert, or had the loop guard hold or release messages (or is new to us). */
 export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
-  || before.properties?.assigned !== after.properties?.assigned || before.spend_alert?.event !== after.spend_alert?.event;
+  || before.properties?.assigned !== after.properties?.assigned || before.spend_alert?.event !== after.spend_alert?.event || !before.loop_hold !== !after.loop_hold;
 
 /**
  * A minion or Taskmaster whose turn is doing work, for the spinner and its number (#248, #278). A turn
@@ -95,5 +95,5 @@ export function otherSchemes(refetch) {
 /** Where a minion's Needs-you row takes you (#236): the oldest thing it waits on you for, as a jump target (an event id, or 'latest' for a ready, try or replies item: the minion's latest reply); null for none. */
 export function rowTarget(items) {
   const oldest = items.reduce((a, b) => (b.at < a.at ? b : a));
-  return oldest.eventId ?? (oldest.kind === 'state' || oldest.kind === 'replies' ? 'latest' : null);
+  return oldest.eventId ?? (['state', 'replies', 'loop'].includes(oldest.kind) ? 'latest' : null);
 }

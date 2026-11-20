@@ -190,6 +190,17 @@ export async function within(repo: string, ref: string, tip: string): Promise<st
   return (await marks('--left-only')).find((m) => m.startsWith('='))?.slice(1) ?? null;
 }
 
+/**
+ * A red's fix minion (#1074): its branch's tip once commits it made since `since` (unix seconds) are in `sha` (the
+ * default branch's tip on GitHub), by hash or as patch twins after a rebase; else null, as for a minion with no commits
+ * of its own, or a tip that only caught up to main.
+ */
+export async function fixShipped(repo: string, branch: string, since: number, sha: string): Promise<string | null> {
+  if (!(await madeCommits(repo, branch, since))) return null;
+  const tip = await git(repo, ['rev-parse', '-q', '--verify', `refs/heads/${branch}^{commit}`]);
+  return tip && (await within(repo, sha, tip)) ? tip : null;
+}
+
 /** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
 async function runs(repo: string | null, head: string | null): Promise<boolean> {
   return !!repo && !!head && (await git(repo, ['cat-file', '-e', `${head}^{commit}`])) !== null;

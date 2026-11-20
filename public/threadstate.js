@@ -176,6 +176,7 @@ export function askWhy(item, t, now = Date.now()) {
     case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
     case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
     case 'state': return `${STATES[t?.state]?.label ?? 'Waiting on you'} since ${since}, assigned to you or no one. It stops counting once you open it.`;
+    case 'loop': return `The loop guard has held ${card.n === 1 ? 'a message' : `${card.n} messages`} since ${since} ("${card.text}"). Continue in its chat sends ${card.n === 1 ? 'it' : 'them'}.`;
     case 'replies': return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
     default: return `Waiting on you since ${since}.`;
   }

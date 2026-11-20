@@ -3,6 +3,7 @@
 // back at once (settings.js's saveProject: optimistic, a toast with Retry on a refusal); typed entry stays as "Add by hand".
 import { toast } from './ui/status.js';
 import { account, h, icon, listGroupsOf, view } from './base.js';
+import { kindLabel, NEVER_HOLD_KINDS } from './heldmsg.js';
 import { GO_FROM, label, MERGE_RULES, shippingGate, SHIP_PATHS, TRY_FIRST } from './shipping.js';
 
 export const lines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -80,6 +81,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const save = (fields, label) => {
     const body = { ...fields };
     if ('list_groups' in fields) body.list_groups = JSON.parse(fields.list_groups);
+    if ('msg_never_hold' in fields) body.msg_never_hold = fields.msg_never_hold.split(',').filter(Boolean);
     return saveProject(p, fields, body, label, refreshAll);
   };
   /** `disabled` is true, false, or a test of each option's value. */
@@ -337,7 +339,20 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     number({ icon: 'spark', hue: 'running', title: 'Hold at most' },
       settingsHelp('The longest cold mail waits before it wakes its recipient anyway.', 'Longer saves wakes but news arrives later; shorter delivers sooner, each wake re-reading the whole context.'),
       'msg_hold_h', 'Cold hold', 'hours'),
+    neverHold(),
   ];
+  /** Never hold (#1067; Josh, 2026-11-19, "this kind of message should not wait"): kinds of mail that wake their reader at once. */
+  const neverHold = () => live({ icon: 'spark', hue: 'running', title: 'Never hold' },
+    settingsHelp('Kinds of message that always wake their reader, even a fyi or a cold chat. The held-mail card in a chat sets these too.', 'Each wake re-reads the whole context, so turn on only what can\'t wait. A parked minion and the loop guard still hold everything.'),
+    (mount) => {
+      const on = new Set((stored().msg_never_hold ?? '').split(',').filter(Boolean));
+      mount.replaceChildren(h('div', { class: 'rules-seg', role: 'group', 'aria-label': 'Never hold' }, NEVER_HOLD_KINDS.map((k) => h('button', { type: 'button', 'aria-pressed': String(on.has(k)), onclick: () => {
+        const next = new Set(on);
+        if (!next.delete(k)) next.add(k);
+        save({ msg_never_hold: [...next].sort().join(',') }, `${on.has(k) ? 'hold' : 'never hold'} ${kindLabel(k)}`);
+      } }, kindLabel(k)))));
+      return on.size ? [...on].map(kindLabel).join(', ') : 'None';
+    });
 
   return { approvals, plugins, listGroups, ci, effort, fable, builds, grill, ghRunners, messages, shots, ship, go, tryFirst, data, refreshAll };
 }

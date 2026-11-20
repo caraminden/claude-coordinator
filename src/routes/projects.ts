@@ -1,6 +1,6 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
-import { cleanMsgSettings } from '../msg-settings.ts';
+import { cleanMsgSettings, cleanNeverHold } from '../msg-settings.ts';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { checkNeed } from '../needs.ts';
 import { basename, join } from 'node:path';
@@ -30,7 +30,9 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { deleteNote, memoryFolders, noteFile, readFolder, saveNote, type MemoryLogin } from '../memory-files.ts';
+import { deleteNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
+import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
+import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { relayFile } from '../taskmaster-files.ts';
@@ -657,13 +659,6 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // What the scheme's messaging is holding (#1059): loop-guard holds and held mail, for the Held list.
-    method: 'GET', path: '/api/projects/:project/held', who: ['person'], everyScheme: true,
-    async handler({ res, app, project }) {
-      return json(res, 200, { items: app.runner.heldList(project) });
-    },
-  },
-  {
     method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
     // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
     // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
@@ -704,12 +699,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from and try_first; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from, try_first, the msg_* settings and msg_never_hold; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'repo_url', 'skills_off'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'msg_never_hold', 'repo_url', 'skills_off'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'rules_review' | 'skills_off'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -738,6 +733,7 @@ export const projectRoutes: Route[] = [
       // Message settings (#1059): whole numbers inside src/msg-settings.ts's bounds.
       try {
         Object.assign(settings, cleanMsgSettings(body));
+        if (body.msg_never_hold !== undefined) settings.msg_never_hold = cleanNeverHold(body.msg_never_hold);
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
@@ -868,6 +864,7 @@ export const projectRoutes: Route[] = [
       }
       if (instructions !== project.instructions) {
         store.setProjectInstructions(project.id, instructions, session.name);
+        recheckDecisions(app, [store.getProject(project.id)!]);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { everyone: true,
@@ -960,6 +957,7 @@ export const projectRoutes: Route[] = [
       }
       if (text !== store.appInstructions().text) {
         store.setAppInstructions(text, session.name);
+        recheckDecisions(app, store.listProjects());
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
           const coordinator = store.getOverlord(p.id);
@@ -1012,6 +1010,7 @@ export const projectRoutes: Route[] = [
       const by = `#${ticket.id} for ${(askerId === null ? undefined : store.getUser(askerId))?.name ?? 'nobody'}`;
       if (citadel) store.setAppInstructions(text, by);
       else store.setProjectInstructions(project.id, text, by);
+      recheckDecisions(app, citadel ? store.listProjects() : [store.getProject(project.id)!]);
       const where = citadel ? `${APP_NAME}-wide` : 'scheme';
       const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);
       const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
@@ -1150,12 +1149,7 @@ export const projectRoutes: Route[] = [
   {
     method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
     async handler({ req, res, url, app, project }) {
-      // Each login's own config dir; a container login mounts the server's copy, so it is the same folder.
-      const logins: MemoryLogin[] = app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
-        const configDir = app.claude.configDir(u.id, a.n);
-        return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
-      }) : []));
-      const folders = memoryFolders(project.repo_dir, logins);
+      const folders = memoryFolders(project.repo_dir, memoryLogins(app));
       const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
       if (req.method !== 'GET') {
         const body = req.method === 'PUT' ? await readJson(req) : {};
@@ -1204,6 +1198,22 @@ export const projectRoutes: Route[] = [
     },
   },
 
+  // Every dated decision this scheme can see, parsed live from where it is written (the Scheme → Decisions page and
+  // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
+  {
+    method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],
+    async handler({ res, url, app, project }) {
+      const scope = url.searchParams.get('scope') ?? 'all';
+      if (!['scheme', 'citadel', 'all'].includes(scope)) throw new HttpError(400, 'scope must be scheme, citadel or all');
+      const q = (url.searchParams.get('q') ?? '').slice(0, 200);
+      const { decisions, counts } = await loadDecisions(app, project);
+      const shown = decisions.filter((d) => inScope(d, scope));
+      const found = q.trim() ? searchDecisions(shown, q) : shown;
+      // The decisions the rows point at (what reversed them, what they reverse), so a reader can name them.
+      const ids = new Set(found.flatMap((d) => [d.reversed?.by ?? '', ...d.reverses]));
+      json(res, 200, { decisions: found, counts, all: decisions.length, linked: decisions.filter((d) => ids.has(d.id)) });
+    },
+  },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
     method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],
@@ -1442,13 +1452,13 @@ export const projectRoutes: Route[] = [
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
-      const { held, left, cold } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
+      const { held, left, cold, woke } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
       // A reply from that scheme comes back to this Taskmaster, not to whichever of its scheme's is default (#919).
       if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { need, text: `${wake && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
-      return json(res, 202, { scheme: project.name, held, left, ...(cold ? { cold } : {}), ...(file ? { file: file.path } : {}) });
+      if (!held) runner.emit(from.id, 'note', { need, text: `${(wake || woke) && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      return json(res, 202, { scheme: project.name, held, left, ...(cold ? { cold } : {}), ...(woke ? { woke } : {}), ...(file ? { file: file.path } : {}) });
     },
   },
 ];

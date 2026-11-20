@@ -8,7 +8,7 @@ import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, rea
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
-import { Relay, clip, coldKey, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
+import { Relay, clip, coldKey, loopHolds, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { fableMeter } from './costs.ts';
@@ -51,7 +51,7 @@ import { readGrunts } from './grunts.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
-import { clockTime, pacific, parseResetTime } from './pacific.ts';
+import { clockTime, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -790,6 +790,9 @@ export class Runner {
       activity: this.activityOf(ticket.id),
       // The running turn's unanswered spend alert (#723), for the list row's badge.
       spend_alert: this.spendAlert(ticket),
+      // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
+      loop_hold: closed ? null : once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null,
+      held_mail: this.heldMail(ticket),
       step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: limit?.at ?? null,
@@ -1155,6 +1158,13 @@ export class Runner {
       this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
       return false;
     }
+    const held = this.ciHold?.(ticketId);
+    if (held) {
+      this.store.updateTicket(ticketId, { state: 'outside', note: 'live; waiting on the CI re-run on main' });
+      this.broadcastTicket(ticketId);
+      this.emit(ticketId, 'note', { text: `The deploy is live, but ${held}, so this minion stays open.` });
+      return false;
+    }
     this.store.updateTicket(ticketId, { state: null });
     this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
     return true;
@@ -1187,7 +1197,35 @@ export class Runner {
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
     if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
-    return null;
+    return this.ciHold?.(ticketId) ?? null;
+  }
+
+  /**
+   * #1074: why CI health keeps this minion open (a red's fix minion, until its workflow is green on the default branch
+   * again), or null. Set by the server; CI health's ciGreen lets it go.
+   */
+  ciHold?: (ticketId: number) => string | null;
+
+  /**
+   * #1074: the red this minion fixed is green again, so dismiss it as its live deploy would have: after a running
+   * turn, and not past a card or a state that keeps it open for people.
+   */
+  ciGreen(ticketId: number, text: string) {
+    const t = this.store.getTicket(ticketId);
+    if (!t || t.status === 'closed') return;
+    if (this.isRunning(ticketId) || this.queued(ticketId)) {
+      if (!this.closeAfterTurn(ticketId, text)) this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open for the work still under way.` });
+      return;
+    }
+    const kept = this.keptOpen(ticketId);
+    if (kept) {
+      if (t.state === 'outside') this.store.updateTicket(ticketId, { state: null, note: null });
+      this.broadcastTicket(ticketId);
+      this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open: ${kept}.` });
+      return;
+    }
+    this.store.updateTicket(ticketId, { state: null });
+    void this.close(ticketId, text);
   }
 
   /**
@@ -1869,30 +1907,24 @@ export class Runner {
   }
 
   /**
-   * Everything held in a scheme (#1059), for the Held list: messages a loop guard holds for a person to continue, and mail
-   * waiting for its recipient's next turn (cold, or sent as a fyi). `continueId` is the chat whose Continue releases a loop's.
+   * The mail waiting for this chat's next turn (#1067), for its inbox card: held as a fyi or wake: false, for a cold session,
+   * or for a parked one. `until` is when a cold hold's cap sends it anyway. Null when nothing waits.
    */
-  heldList(project: Project) {
-    const cfg = msgSettings(project);
-    const mine = new Set(this.store.listTickets(project.id).map((t) => t.id));
-    const label = (id: number) => { const t = this.store.getTicket(id); return t ? (t.kind === 'coordinator' ? `the ${AGENT_NAME}` : `#${t.number}`) : `#${id}`; };
-    const items: { kind: 'loop' | 'cold' | 'mail'; ticket: number; from: string; to: string; text: string; why: string; delivers: string; since?: number }[] = [];
-    for (const key of this.store.settingKeys('loop:')) {
-      const loop = this.store.getSetting<LoopState>(key);
-      const ids = key.split(':').slice(1).map(Number).filter((n) => Number.isInteger(n));
-      if (!loop?.held.length || !ids.some((id) => mine.has(id))) continue;
-      for (const m of loop.held) items.push({ kind: 'loop', ticket: ids.find((id) => mine.has(id))!, from: m.from ? label(m.from) : m.author, to: label(m.to), text: clip(m.text), why: `the loop guard (${cfg.loopLimit} messages in ${cfg.loopMin} minutes)`, delivers: 'when a person continues' });
-    }
-    for (const id of mine) {
-      const mail = this.store.getSetting<QueuedMessage[]>(mailKey(id)) ?? [];
-      if (!mail.length) continue;
-      const since = this.store.getSetting<number>(coldKey(id));
-      for (const m of mail) {
-        const cold = !!m.cold && !!since;
-        items.push({ kind: cold ? 'cold' : 'mail', ticket: id, from: m.author.replace(/^Held mail from |, sent .*$/g, ''), to: label(id), text: clip(m.text), since: since ?? undefined, why: cold ? `${label(id)} is cold (idle over ${cfg.coldMin} minutes)` : 'sent as held mail (a fyi, or wake: false)', delivers: cold ? `at its next turn, or by ${pacific(since! + cfg.holdH * 3_600_000)}` : 'at its next turn' });
-      }
-    }
-    return items;
+  heldMail(t: Ticket): { until: number | null; items: { id: number | null; author: string; from: number | null; need: string | null; note: boolean; parked: boolean; at: number; text: string }[] } | null {
+    const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
+    if (!mail.length) return null;
+    const since = this.store.getSetting<number>(coldKey(t.id));
+    const p = this.store.getProject(t.project_id);
+    return {
+      until: since && p ? since + msgSettings(p).holdH * 3_600_000 : null,
+      items: mail.map((m) => {
+        const e = m.id ? this.store.getEvent(m.id) : undefined;
+        const d = e ? JSON.parse(e.data) : {};
+        // The chat event's text, its tokens hidden as the log shows them, not the queue's raw copy.
+        const text: string = typeof d.text === 'string' ? d.text : hideTokens(m.text);
+        return { id: m.id ?? null, author: d.author ?? m.author.replace(/^Held mail from |, sent .*$/g, ''), from: m.from ?? d.from ?? null, need: d.need ?? null, note: !!d.note, parked: !!d.parked, at: e?.created_at ?? 0, text: text.length > 600 ? `${text.slice(0, 600)}…` : text };
+      }),
+    };
   }
 
   /**
@@ -1968,6 +2000,8 @@ export class Runner {
       const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
       // A minion's note is keyed by the minion in both chats; a Taskmasters' or two minions' note by each chat's own.
       for (const id of chats()) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
+      // The rows' loop badges go (#1067): a chat that gets a held message is broadcast by its send; the rest that showed one, here.
+      for (const id of pair || ticket.kind === 'coordinator' ? chats() : [ticketId]) if (!loop.held.some((m) => m.to === id)) this.broadcastTicket(id);
       // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
       for (const m of loop.held) {
         if (pair) this.relays.copyToTaskmaster(m.to, m.author, m.text);

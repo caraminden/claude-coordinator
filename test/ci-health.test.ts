@@ -202,6 +202,10 @@ function world({ delve = false } = {}) {
     runs: [] as Run[],
     jobs: new Map<number, Job[]>(),
     mainRuns: [] as Run[],
+    // GitHub's main tip, for the re-run after a red's fix ships (#1074).
+    mainHead: 'aaaa000fff',
+    // The repo's CI_RUNNER variable (the kit's switch onto GitHub's runners); null: unset (404).
+    ciRunner: null as string | null,
     scheduled: [] as Run[],
     dispatched: [] as Run[],
     // A check run's annotations by job id; Peek's billing one for the rest.
@@ -225,6 +229,8 @@ function world({ delve = false } = {}) {
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
     else if (path.includes('/actions/workflows/7/runs?branch=main')) body = { workflow_runs: gh.mainRuns };
+    else if (path.endsWith('/branches/main')) body = { name: 'main', commit: { sha: gh.mainHead } };
+    else if (path.endsWith('/actions/variables/CI_RUNNER') && gh.ciRunner != null) body = { name: 'CI_RUNNER', value: gh.ciRunner };
     // Peek's own; any other repo has none.
     else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.scheduled : [] };
     else if (path.endsWith('/actions/runs?event=workflow_dispatch&per_page=50')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.dispatched : [] };
@@ -914,6 +920,190 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
   w.gh.mainRuns = [{ ...red(9003, 0), conclusion: 'success', created_at: new Date(closedAt + 2 * MIN).toISOString() }, ...w.gh.mainRuns];
   await health.tick(NOW + 2 * HOUR + 10 * MIN);
   assert.equal(item('ci.open'), null);
+});
+
+test("a red whose first fix minion closed names the open one fixing it now (the first open), else the newest (#1074, Josh 2026-11-19)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  w.gh.mainRuns = [runOf({ id: 9601, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'bad0601fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  const first = w.minion(w.peek.id, 'ticket/7-fix');
+  w.store.addEvent(first.id, 'user_message', { text: 'Fix the red tests run 9601 on main' });
+  w.store.updateTicket(first.id, { status: 'closed' });
+  // Its fix didn't hold: a later run is red too, and a second minion is on it.
+  const closedAt = w.store.getTicket(first.id)!.updated_at;
+  w.gh.mainRuns = [runOf({ id: 9602, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'bad0602fff', conclusion: 'failure', created_at: new Date(closedAt + MIN).toISOString() }), ...w.gh.mainRuns];
+  const now = w.minion(w.peek.id, 'ticket/8-fix-again');
+  w.store.addEvent(now.id, 'user_message', { text: 'Run 9601 is still red after the first fix: fix it' });
+  await health.tick(NOW + 2 * HOUR);
+  assert.match(item()!, new RegExp(`: fix minion #${now.number} started\\.`), 'the open fix minion, not the closed first one');
+  assert.equal(item('ci.open') ?? null, null, 'an open fix minion keeps it from ringing');
+  assert.match(health.hold(now.id)!, /run 9601/);
+  assert.equal(health.hold(first.id), null);
+  // A later minion that only quotes the run doesn't take the hold from the open fix minion.
+  const review = w.minion(w.peek.id, 'ticket/9-review');
+  w.store.addEvent(review.id, 'user_message', { text: 'Review what went wrong in run 9601' });
+  assert.match(health.hold(now.id)!, /run 9601/);
+  assert.equal(health.hold(review.id), null);
+  w.store.updateTicket(review.id, { status: 'closed' });
+  w.store.updateTicket(now.id, { status: 'closed' });
+  await health.tick(NOW + 2 * HOUR + 5 * MIN);
+  // All closed: the newest (9602 came after they closed, so it rings, naming it).
+  assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${review.number} closed`));
+});
+
+test("a red's fix minion is held open; once its fix is on main the workflow is dispatched once per fix, and green dismisses it (#1074)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const posts: [string, Record<string, string> | undefined][] = [];
+  const dismissed: [number, string][] = [];
+  const held: [number, string | null][] = [];
+  // Which of the fix minion's tips each main commit holds: fix0001 has its first fix, oth0001 another land on top, fix0002 its second.
+  const has: Record<string, string> = { fix0001fff: 'tip1', oth0001fff: 'tip1', fix0002fff: 'tip2' };
+  const deps = {
+    ...w.outside, tell: () => true,
+    post: async (path: string, _as: unknown, fields?: Record<string, string>) => (posts.push([path, fields]), { status: 204 }),
+    shipped: async (_p: unknown, _t: unknown, sha: string) => has[sha] ?? null,
+    held: (id: number, note: string | null) => void held.push([id, note]),
+    dismiss: (id: number, text: string) => void dismissed.push([id, text]),
+  };
+  const health = new CiHealth(w.store, deps);
+  const run = (id: number, fields: Partial<Run>) => runOf({ id, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', ...fields });
+  w.gh.jobs.set(9201, [job({ run_id: 9201, name: 'test', conclusion: 'failure', labels: ['self-hosted', 'citadel-ci-linux'], steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainHead = 'bad0001fff';
+  w.gh.mainRuns = [run(9201, { head_sha: 'bad0001fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const fix = w.minion(w.peek.id, 'ticket/2-fix');
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix the red tests run 9201 on main' });
+  const other = w.minion(w.peek.id, 'ticket/3-other');
+  const item = () => w.puts.filter(([, key]) => key === 'ci.red:7').at(-1)?.[2];
+  const dispatches = () => posts.filter(([path]) => path === 'repos/caraminden/peek-auras/actions/workflows/7/dispatches');
+
+  // Held from the start: neither the deploy nor close_self dismisses it while main is red. Others aren't.
+  assert.match(health.hold(fix.id)!, /run 9201/);
+  assert.equal(health.hold(other.id), null);
+
+  // Its fix isn't on GitHub's main yet: nothing is dispatched.
+  await health.tick(NOW + 5 * MIN);
+  assert.deepEqual(dispatches(), []);
+
+  // It is: one dispatch of the red workflow on main, and the minion shows it waits on it.
+  w.gh.mainHead = 'fix0001fff';
+  await health.tick(NOW + 10 * MIN);
+  assert.deepEqual(dispatches(), [['repos/caraminden/peek-auras/actions/workflows/7/dispatches', { ref: 'main' }]]);
+  assert.deepEqual(held.at(-1), [fix.id, 'waiting on the desktop.yml re-run on main (fix0001)']);
+  assert.match(item()!, new RegExp(`: fix minion #${fix.number} shipped; re-running on fix0001\\.`));
+
+  // Not again for that commit: not while it's unseen, queued or running, nor after a restart.
+  await health.tick(NOW + 15 * MIN);
+  w.gh.mainRuns = [run(9202, { event: 'workflow_dispatch', head_sha: 'fix0001fff', status: 'in_progress', conclusion: null, created_at: iso(-11 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 20 * MIN);
+  await new CiHealth(w.store, deps).tick(NOW + 25 * MIN);
+  assert.equal(dispatches().length, 1);
+  assert.match(item()!, /actions\/runs\/9202/, 'the item links the re-run');
+  assert.deepEqual(dismissed, []);
+
+  // Red again: the fix minion is woken with the new run, the item points at it, and it stays held.
+  w.gh.jobs.set(9202, [job({ run_id: 9202, name: 'test', conclusion: 'failure', labels: ['self-hosted', 'citadel-ci-linux'], steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [{ ...w.gh.mainRuns[0], status: 'completed', conclusion: 'failure', updated_at: iso(-20 * MIN) }, ...w.gh.mainRuns.slice(1)];
+  await health.tick(NOW + 30 * MIN);
+  const wakes = w.woken.filter(([id]) => id === fix.id);
+  assert.equal(wakes.length, 1);
+  assert.match(wakes[0][1], /re-run .*failed.*actions\/runs\/9202/s);
+  assert.equal(wakes[0][2], false, 'work to do, not news');
+  assert.deepEqual(held.at(-1), [fix.id, null]);
+  assert.match(item()!, /re-run 9202 on fix0001 failed too/);
+  assert.match(health.hold(fix.id)!, /run 9201/);
+  await health.tick(NOW + 35 * MIN);
+  assert.equal(w.woken.filter(([id]) => id === fix.id).length, 1, 'woken once');
+
+  // Someone else's land moves main with no new fix from it: nothing is dispatched.
+  w.gh.mainHead = 'oth0001fff';
+  await health.tick(NOW + 40 * MIN);
+  assert.equal(dispatches().length, 1);
+
+  // Its second fix ships: one more dispatch, then green dismisses it and clears the red.
+  w.gh.mainHead = 'fix0002fff';
+  await health.tick(NOW + 45 * MIN);
+  assert.equal(dispatches().length, 2);
+  w.gh.mainRuns = [run(9203, { event: 'workflow_dispatch', head_sha: 'fix0002fff', conclusion: 'success', created_at: iso(-46 * MIN), updated_at: iso(-55 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 60 * MIN);
+  assert.deepEqual(dismissed.map(([id]) => id), [fix.id]);
+  assert.match(dismissed[0][1], /green on main/);
+  assert.equal(health.hold(fix.id), null);
+  assert.equal(item(), null);
+});
+
+test("a re-run that's cancelled wakes the fix minion; with CI_RUNNER=github none is dispatched; a green before any re-run still lets a held minion go (#1074)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const posts: string[] = [];
+  const dismissed: number[] = [];
+  let shipped: string | null = 'tip1';
+  const health = new CiHealth(w.store, {
+    ...w.outside, tell: () => true, held: () => {},
+    post: async (path: string) => (posts.push(path), { status: 204 }), shipped: async () => shipped, dismiss: (id: number) => void dismissed.push(id),
+  });
+  const run = (id: number, fields: Partial<Run>) => runOf({ id, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', ...fields });
+  w.gh.jobs.set(9401, [job({ run_id: 9401, name: 'test', conclusion: 'failure', labels: ['self-hosted'] })]);
+  w.gh.mainRuns = [run(9401, { head_sha: 'bad0401fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const fix = w.minion(w.peek.id, 'ticket/4-fix');
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix the red tests run 9401 on main' });
+  const item = () => w.puts.filter(([, key]) => key === 'ci.red:7').at(-1)?.[2];
+
+  // Dispatched; GitHub cancels the run, on a newer tip than the one read: the minion still hears.
+  w.gh.mainHead = 'fix0401fff';
+  await health.tick(NOW + 5 * MIN);
+  assert.equal(posts.length, 1);
+  w.gh.mainRuns = [run(9402, { event: 'workflow_dispatch', head_sha: 'fix0402fff', conclusion: 'cancelled', created_at: iso(-6 * MIN), updated_at: iso(-7 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 10 * MIN);
+  const wakes = w.woken.filter(([id]) => id === fix.id);
+  assert.equal(wakes.length, 1);
+  assert.match(wakes[0][1], /ended cancelled/);
+  assert.match(item()!, /re-run 9402 on fix0402 failed too/);
+
+  // A second fix, with the scheme switched onto GitHub's runners: left for a person.
+  w.gh.ciRunner = 'github';
+  shipped = 'tip2';
+  w.gh.mainHead = 'fix0403fff';
+  await health.tick(NOW + 15 * MIN);
+  assert.equal(posts.length, 1);
+  assert.match(item()!, /re-run desktop\.yml on main by hand/);
+
+  // A minion its deploy held before any re-run was recorded is let go by the green too.
+  const w2 = outsideWorld();
+  w2.quietDelve();
+  const gone: number[] = [];
+  const h2 = new CiHealth(w2.store, { ...w2.outside, tell: () => true, shipped: async () => null, dismiss: (id: number) => void gone.push(id) });
+  w2.gh.mainRuns = [run(9501, { head_sha: 'bad0501fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await h2.tick(NOW);
+  const held = w2.minion(w2.peek.id, 'ticket/5-fix');
+  w2.store.addEvent(held.id, 'user_message', { text: 'Fix the red tests run 9501 on main' });
+  const busy = w2.minion(w2.peek.id, 'ticket/6-also-9501');
+  w2.store.addEvent(busy.id, 'user_message', { text: 'Look into run 9501' });
+  w2.store.updateTicket(held.id, { state: 'outside', note: 'live; waiting on the CI re-run on main' });
+  w2.gh.mainRuns = [run(9502, { event: 'push', head_sha: 'fix0501fff', conclusion: 'success', created_at: iso(-1 * MIN), updated_at: iso(-5 * MIN) }), ...w2.gh.mainRuns];
+  await h2.tick(NOW + 10 * MIN);
+  assert.deepEqual(gone, [held.id]);
+});
+
+test("a red whose jobs ran on GitHub's own runners isn't re-run by Citadel: the item says to re-run it by hand (#1074)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const posts: string[] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true, post: async (path: string) => (posts.push(path), { status: 204 }), shipped: async () => 'tip1' });
+  w.gh.jobs.set(9301, [job({ run_id: 9301, name: 'test', conclusion: 'failure', labels: ['ubuntu-latest'] })]);
+  w.gh.mainRuns = [runOf({ id: 9301, event: 'schedule', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'bad0301fff', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const fix = w.minion(w.peek.id, 'ticket/4-fix');
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix run 9301' });
+  w.gh.mainHead = 'fix0301fff';
+  await health.tick(NOW + 5 * MIN);
+  assert.ok(!posts.some((p) => p.endsWith('/dispatches')), 'no Actions minutes spent');
+  assert.match(w.puts.filter(([, key]) => key === 'ci.red:7').at(-1)![2]!, /re-run desktop\.yml on main by hand/);
 });
 
 test('quieting a workflow after it went red clears its open red on the next poll, with no back-to-green message', async () => {

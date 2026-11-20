@@ -78,7 +78,7 @@ test('saving instructions says what they cost, the same in the settings page and
 // next to the built-in prompt, so they get a budget too. Characters of name + description, today's size
 // plus about 5% on 2026-11-14. This never asks for shorter text: a skill with a longer description is a
 // deliberate decision, made by raising the number with the reason in the commit message.
-const KIT_BUDGET = 9_600;
+const KIT_BUDGET = 9_850; // +250 on 2026-11-19 for citadel:briefing (#1108)
 
 /** A skill's or agent's `name` and `description` frontmatter, a folded or plain description joined on one line. */
 function listing(file: string): string {

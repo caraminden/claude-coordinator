@@ -35,6 +35,7 @@ import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
+import { briefWarning, namedFiles } from '../brief-lint.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
@@ -1141,6 +1142,12 @@ export const projectRoutes: Route[] = [
         notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
       } else {
         runner.send(id, session.name, message, [], { brief: true });
+      }
+      // A brief an agent wrote (the Taskmaster's, or a handoff a person starts) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
+      // A person's Start already carries its brief's text, and naming the file must not let another section of it count.
+      if (caller || brief) {
+        const warning = briefWarning(brief ? message : `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
+        if (warning) notes.push(warning);
       }
       // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
       void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);

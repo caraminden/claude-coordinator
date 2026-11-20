@@ -1,0 +1,21 @@
+id	expected	prompt
+1	briefing	[Taskmaster]: Josh just picked three of the handoffs on #1092's ideas page. Start a minion for the first one, the retry button on failed uploads.
+2	briefing	[Cara]: write a handoff for the token-refresh bug we found in #1040 so a fresh minion can pick it up tomorrow
+3	briefing	[Josh]: Turn the three takes you made for the scheme picker into handoffs in the shared folder, one per minion, and give me the card to pick which to start.
+4	briefing	[Cara]: Spin up a minion to move the ci-health page onto the new table part. Sonnet's fine.
+5	briefing	[Taskmaster]: You're the idea minion for the Mandate onboarding flow. Wrap up: write up what each of the four directions would take so the Taskmaster can start them.
+6	briefing	[Josh]: can you write a brief for the Android update banner work and start it after #1077 is live
+7	briefing	[Cara]: We need someone on the flaky land-handoff test. Get a minion going on it and tell it what we already tried.
+8	briefing	[Taskmaster]: Research is done on #1001 (the GPU queue). Write the follow-up work as handoffs in handoffs/ and tell me their paths.
+9	briefing	[Josh]: the spec for the scheme-wide search is in my head, write it down as a spec in the shared folder so whoever builds it has it
+10	briefing	[Cara]: start a feature minion on per-person themes, Opus high, and make sure it knows I said no dark-mode-only shortcut
+11	none	[Cara]: Tell #1093 that the card text is fine and it can ship.
+12	none	[Josh]: /fresh — your context is huge, hand off to a fresh session
+13	subagents	[Cara]: this review is getting big, should you hand the lens reads to Grunts or keep them inline?
+14	none	[Cara]: Reply to the Delve Taskmaster's relay: yes, we'll take the APK signing fix.
+15	grilling	[Josh]: grill me on the per-person themes idea before anyone writes a brief for it
+16	none	[Cara]: summarise what #1080 did and whether it shipped
+17	research	[Josh]: look into whether we should move CI caching to R2 and write up the report
+18	none	[Cara]: message #1102 with the screenshot I just dropped and ask it to fix the padding
+19	docs-and-mocks	[Josh]: make me a mock page with three takes on the new rail before we brief anything
+20	none	[Cara]: what's in the briefs folder from last week? anything not started yet?

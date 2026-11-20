@@ -146,9 +146,9 @@ while it runs. The session trusts the summary and CI; it does not re-run what th
 
 ## Writing the brief
 
-- Put the critical constraints at the start of the brief and again at the end; the middle is
-  what a long prompt loses.
-- Pass file paths between agents, not pasted content: the next agent reads the file itself.
+The parts and their order are `citadel:briefing` ("Briefing a Grunt"): goal, done-when as what to
+hand back, what is ruled out, files to read; critical constraints first and again at the end. Pass
+file paths between agents, not pasted content: the next agent reads the file itself.
 
 ## Reviewer Grunts and fix loops
 

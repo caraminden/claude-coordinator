@@ -60,7 +60,7 @@ export const SECURITY_HEADERS = {
   // blob: lets the composer preview pasted images before they are sent. frame-ancestors 'self': a
   // contraption's installed window shows Citadel's page in a frame over its own (rail.js, #311). frame-src
   // citadel-firefox: lets "Open links in Firefox" launch its protocol through a hidden frame (public/extlinks.js, #988).
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-src 'self' citadel-firefox:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob: data:; frame-src 'self' citadel-firefox:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };

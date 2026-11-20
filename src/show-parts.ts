@@ -17,6 +17,7 @@ export const PARTS: Part[] = [
   // Any chat
   { name: 'message-box', label: 'The message box', page: CHAT, where: 'the bottom of every chat', words: 'composer type write send' },
   { name: 'attach', label: 'Attach images or files', page: CHAT, where: 'beside the message box', words: 'upload picture image file paperclip' },
+  { name: 'point-at', label: 'Point at something', page: CHAT, where: 'the 🎯 beside Attach (Alt+Shift+P on any page; on a phone also the Overview drawer)', words: 'pick report this screenshot target point crop' },
   { name: 'more-ways-to-send', label: 'More ways to send', page: CHAT, where: 'the arrow beside Send', words: 'send menu later queue' },
   { name: 'usage-meter', label: 'The usage meter', page: CHAT, where: 'the top bar', words: 'usage limit spend weekly bar' },
   { name: 'minion-list', label: 'The minions list', page: CHAT, where: 'the Minions panel on the left', words: 'minions threads sidebar list' },

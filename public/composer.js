@@ -13,6 +13,7 @@ import { optimistic } from './ui/optimistic.js';
 import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
+import { startPick } from './pick.js';
 import { chatCommandList, matchCommands, menuQuery, parseCommand } from './slash-commands.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
@@ -301,6 +302,9 @@ export function composer(chatId, ticket) {
   row.replaceChildren(
     h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'attach', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
       h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
+    // Point at something (#1141, Josh picked "🎯 beside the paperclip"): in the row's empty middle, so no taller.
+    h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'point-at', title: 'Point at something on the page, to ask about it (Alt+Shift+P)', 'aria-label': 'Point at something', onclick: () => startPick() },
+      h('span', { 'aria-hidden': 'true' }, '🎯'), h('span', { class: 'wide-only' }, ' Point')),
     h('span', { class: 'spacer' }),
     modelPicker(chatId), sideBtn || '', sendGroup);
   const pasteFiles = (e) => {
@@ -343,6 +347,8 @@ export function composer(chatId, ticket) {
    * the ones after it still go. The promise settles as optimistic()'s does.
    */
   const send = (text, sent = [], queue = false, unpark = false) => {
+    // What was pointed at (#1141) goes as text after the message.
+    text = [text, ...sent.filter((i) => i.note).map((i) => i.note.text)].filter(Boolean).join('\n\n');
     const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
@@ -565,6 +571,14 @@ export const cardAttachments = (chatId, onChange) => createAttachments(chatId, o
 /** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
 export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })], true);
 
+/** What a person pointed at (#1141, pick.js): its chip, then its crop if there is one, in the chat's message box. */
+export function pointAt(chatId, crop, note) {
+  const attachments = chatAttachments(chatId);
+  attachments.addNote(note);
+  if (crop) attachments.add([new File([crop], 'pointed.png', { type: crop.type })], true);
+  if (chatOpen(chatId)) document.querySelector('.composer textarea')?.focus();
+}
+
 /** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
 export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.busy || a.uploading);
 
@@ -583,9 +597,11 @@ function createAttachments(chatId, onChange) {
   };
   const removeButton = (item) => h('button', { type: 'button', class: 'remove', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
-    onChange(state.items.filter((i) => i.data || i.upload?.name).map(({ mediaType, data, upload }) => (upload ? { upload } : { mediaType, data })));
+    onChange(state.items.filter((i) => i.data || i.upload?.name || i.note).map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { mediaType, data })));
     el.hidden = !state.items.length;
-    el.replaceChildren(...state.items.map((item) => item.upload
+    el.replaceChildren(...state.items.map((item) => item.note
+      ? h('div', { class: 'file-chip point-chip', title: item.note.text }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📍'), h('span', { class: 'name' }, item.note.label), removeButton(item))
+      : item.upload
       ? h('div', { class: 'file-chip' }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
         h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`), removeButton(item))
       : h('div', { class: 'thumb' },
@@ -641,6 +657,11 @@ function createAttachments(chatId, onChange) {
       else addFile(file);
     }
   };
+  /** A chip naming what was pointed at (#1141); its text goes with the message. */
+  state.addNote = (note) => {
+    state.items.push({ note });
+    render();
+  };
   state.remove = (items) => {
     for (const item of items) {
       if (item.url) URL.revokeObjectURL(item.url);
@@ -655,7 +676,7 @@ function createAttachments(chatId, onChange) {
   /** Put saved attachments back in front; returns the items it added, for remove(). */
   state.restore = (saved) => {
     if (!saved.length) return [];
-    const restored = saved.map(({ mediaType, data, upload }) => (upload ? { upload } : { url: base64Url(mediaType, data), mediaType, data }));
+    const restored = saved.map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { url: base64Url(mediaType, data), mediaType, data }));
     state.items = [...restored, ...state.items];
     render();
     return restored;

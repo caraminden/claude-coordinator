@@ -4,6 +4,10 @@
 .shelf .account .foot > :is(a, button) { display: inline-flex; align-items: center; gap: 0.35rem; min-height: var(--control-h); padding: 0; background: none; border: 0; font: inherit; text-decoration: none; cursor: pointer; }
 .shelf .account .foot .who { display: inline-flex; align-items: center; min-height: var(--control-h); min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 .shelf .account .foot .sign-out { color: var(--muted); }
+/* Point at something (#1141): the overview drawer's line on a phone; desktops have Alt+Shift+P and the 🎯 by Attach. */
+.shelf .account .point-entry { display: none; align-items: center; gap: 0.4rem; min-height: var(--control-h); color: var(--ink); text-decoration: none; }
+.shelf .account .point-entry:is(:hover, :focus-visible) { text-decoration: underline; }
+@media (max-width: 800px) { .shelf .account .point-entry { display: inline-flex; } }
 .shelf .account .foot > :is(a, button):is(:hover, :focus-visible) { text-decoration: underline; }
 .shelf .account .foot .sign-out:is(:hover, :focus-visible) { color: var(--ink); }
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }

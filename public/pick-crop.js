@@ -27,14 +27,10 @@ export async function cropPart(target) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject x="0" y="0" width="100%" height="100%">${outer}</foreignObject></svg>`;
     const img = new Image();
     img.decoding = 'sync';
-    // A blob: URL, as the page's CSP allows no data: images; the markup is a string, as it allows no style="" either.
-    const url = globalThis.__cropData ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-    img.src = url;
-    try {
-      await img.decode();
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    // A data: URL (src/http.ts's img-src allows it for this): Chrome won't read back a canvas that drew a blob: one.
+    // The markup is a string, as the CSP allows no style="" on elements.
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    await img.decode();
     const scale = Math.min(devicePixelRatio || 1, 2, MAX_SIDE / Math.max(w, h));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(w * scale);
@@ -44,8 +40,7 @@ export async function cropPart(target) {
     ctx.drawImage(img, 0, 0);
     // Safari marks a canvas that drew a foreignObject as unreadable: toBlob throws, and the pick goes without a crop.
     return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  } catch (err) {
-    globalThis.__cropErr = String(err?.stack || err);
+  } catch {
     return null;
   }
 }

@@ -6,6 +6,7 @@ import { statusPage } from './status.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, isOrdersPage, myInstructionsEditor, notificationsPage, ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { machinesPage } from './settings-machines.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
+import { startPick } from './pick.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead, tmViewMode } from './thread.js';
@@ -227,6 +228,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'account' },
       // The CI chip moved beside Releases over the scheme list (#1019, Cara 2026-11-18: "move the CI button with the dot next to the Releases button").
       h('div', { class: 'meter-row' }, usageMeter()),
+      // Point at something (#1141, Josh picked "Yes, in the drawer"): phones only, as their pages without a chat have
+      // no 🎯 and no keyboard. A link, so the drawer puts itself away on the tap (drawers.js).
+      h('a', { href: '#', class: 'point-entry', 'data-part': 'point-at-drawer', onclick: (e) => { e.preventDefault(); startPick(); } },
+        h('span', { 'aria-hidden': 'true' }, '🎯'), 'Point at something'),
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
         h('span', { class: 'who' }, me),

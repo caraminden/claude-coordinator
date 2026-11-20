@@ -336,6 +336,13 @@ body.navigating::after { content: ''; pointer-events: none; position: fixed; z-i
 .part-show.part-show-in { --show-off: -7px; } /* a box that clips (a settings row in its rows box): drawn inside */
 @keyframes part-pulse { 50% { outline-color: color-mix(in srgb, var(--accent) 25%, transparent); outline-offset: calc(var(--show-off) + 4px); } }
 @media (prefers-reduced-motion: reduce) { .part-show { animation: none; } }
+/* Point at something (#1141, pick.js): a light dim over everything that takes the pick, the picked thing outlined, a hint
+   that sits top centre (bottom while the pointer is up there). All fixed and over the page: nothing in it moves. */
+.pick-dim { position: fixed; inset: 0; z-index: 2147483100; background: rgb(0 0 0 / 0.12); cursor: crosshair; touch-action: none; }
+.pick-box { position: fixed; z-index: 2147483101; pointer-events: none; border: 2px solid var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.pick-hint { position: fixed; z-index: 2147483102; left: 50%; top: calc(0.75rem + var(--top-inset, 0px)); transform: translateX(-50%); display: flex; align-items: center; gap: 0.6rem;
+  max-width: calc(100vw - 1.5rem); padding: 0.4rem 0.45rem 0.4rem 0.8rem; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18); font-size: 0.92em; }
+.pick-hint.low { top: auto; bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); }
 .route-error { max-width: 40rem; margin: 2rem auto; }
 .route-error > p { margin: 0.25rem 0; }
 

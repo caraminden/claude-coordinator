@@ -1,5 +1,6 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
+import { gloss } from './help-words.js';
 import { account, ago, pacificDay, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
@@ -169,7 +170,7 @@ export function renderSidebar() {
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project), releaseOrder()).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
-      h('h3', {}, s.build ? buildHeading(s) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
+      h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? gloss('parked', REST.parked) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));

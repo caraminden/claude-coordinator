@@ -5,6 +5,7 @@
 // whatever it wants"). "New skill" starts a minion with a brief the person edits first; a kit skill only for the
 // Citadel scheme's members, and their Start is the go.
 import { ago, api, h, icon, threadHref, view, me } from './base.js';
+import { gloss } from './help-words.js';
 import { emptyCard, hueRow, meter, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
 import { settingsTabs, settingsTitle } from './settings.js';
 import { openDialog } from './ui/dialog.js';
@@ -96,7 +97,7 @@ function list() {
     return [emptyCard(`${view.project?.name ?? 'This scheme'} has no skills or Grunt types of its own yet`, 'They live in its repo\'s .claude/skills and .claude/agents. + New skill starts a minion that writes one.', { mark: '+', hue: 'accent' })];
   }
   const intro = tab === 'kit' ? h('p', { class: 'muted small sk-intro' }, 'Every scheme gets these by default, and they are recommended. A scheme can turn any of them off; its minions stop seeing it from their next turn. What judges work (critics and reviewers) lives on ', h('a', { href: `#/p/${view.projectId}/reviews` }, 'Reviewers and critics'), '.')
-    : tab === 'agents' ? h('p', { class: 'muted small sk-intro' }, 'Grunts are the helpers a minion starts for a side job. These types come with the kit; they have no switch.') : null;
+    : tab === 'agents' ? h('p', { class: 'muted small sk-intro' }, [gloss('grunt', 'Grunts'), ' are the helpers a minion starts for a side job. These types come with the kit; they have no switch.']) : null;
   const max = Math.max(1, ...items.map((i) => usageOf(i)?.runs ?? 0));
   // Grouped by health only when the counts were there at the first draw: counts that fill in later keep one list in the
   // order the person is looking at (no reflow without input) until they switch tab or scope.

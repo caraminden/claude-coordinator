@@ -1,5 +1,6 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
+import { gloss } from './help-words.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { firefoxControls, settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { hideButton } from './hidden.js';
@@ -155,7 +156,7 @@ export function peoplePage() {
     return personRow(`u:${u.id}`, { icon: 'user', hue, title: `${u.name}${u.admin ? ' · admin' : ''}`, summary: `${word} · ${u.login}` },
       h('p', { class: 'muted small', title: tip }, [state, claude, u.week && `week ${Math.round(u.week.utilization * 100)}%`, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · ')),
       h('span', { class: 'settings-row-actions' },
-      turns && h('label', { class: 'small turns-toggle', title: 'Your messages start and steer turns on the server\'s Claude login. Off: they run on the Claude you link in Your account.' }, turns, 'Turns'),
+      turns && h('label', { class: 'small turns-toggle' }, turns, gloss('turn', 'Turns', "On: your messages run on this server's Claude login. Off: they run on the Claude you link in Your account.")),
       h('button', {
         type: 'button', class: 'secondary small',
         onclick: async () => {

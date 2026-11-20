@@ -24,6 +24,8 @@ import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
 import { releasesPage, setReleasesPage } from './releases.js';
 import { reviewsPage } from './reviews.js';
+import { helpPage } from './help.js';
+import { gloss } from './help-words.js';
 import { toast } from './ui/status.js';
 
 /**
@@ -118,6 +120,7 @@ function renderCrumbs(main) {
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'notifications' ? [projectLink, ' / ', settingsLink, ' / ', 'Notifications']
+      : main.kind === 'help' ? [projectLink, ' / ', settingsLink, ' / ', 'How Citadel works']
       : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
       : main.kind === 'skills' ? [projectLink, ' / ', settingsLink, ' / ', 'Skills']
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
@@ -233,7 +236,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     // Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): Orders swaps the list for its pages.
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
-      panelTab('minions', h('span', { class: 'tab-name' }, 'Minions')), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true })))),
+      panelTab('minions', h('span', { class: 'tab-name' }, gloss('minion', 'Minions'))), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true })))),
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
@@ -276,6 +279,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'notifications' ? notificationsPage()
+    : main.kind === 'help' ? helpPage()
     : main.kind === 'usage' ? usagePage()
     : main.kind === 'skills' ? skillsPage()
     : main.kind === 'releases' ? releasesPage()

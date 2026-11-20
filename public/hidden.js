@@ -3,6 +3,7 @@
 // lives on the scheme's Members tab, not on the list's rows (Cara, 2026-11-12: "Lets move the hide button to just
 // a setting, its not worth the cost of making the scheme button look weird and short").
 import { account, api, h, me, schemeIcon, view } from './base.js';
+import { gloss } from './help-words.js';
 import { schemeSwitchHash } from './scheme-switch.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
@@ -135,7 +136,7 @@ export function renderSchemesShelf() {
   // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
-  el.replaceChildren(h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesLink()),
+  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesLink()),
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),

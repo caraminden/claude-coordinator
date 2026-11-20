@@ -4,7 +4,7 @@
 
 const ADMIN_ONLY = new Set(['app-instructions', 'people', 'contraptions']);
 const KEEP = new Set(['artifacts', 'shared', 'instructions', 'settings', 'orders', 'skills', 'approvals', 'properties', 'members', 'memory', 'decisions', 'reviews', 'machines',
-  'my-instructions', 'account', 'notifications', 'usage', 'app-instructions', 'people', 'contraptions']);
+  'my-instructions', 'account', 'notifications', 'usage', 'help', 'app-instructions', 'people', 'contraptions']);
 
 /** The hash to open for scheme `id` when you click it while on `hash`. `isAdmin` gates the admin Settings tabs. */
 export function schemeSwitchHash(hash, id, isAdmin = false) {

@@ -5,6 +5,7 @@ import { app, goLive, reloadNow, renderInvite, renderUsage, start, startKept, us
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 import { mountDialogs } from './ui/dialog.js';
+import { mountGloss } from './help-words.js';
 import { wcoHint } from './wco-hint.js';
 
 // ---------- boot ----------
@@ -20,6 +21,7 @@ new ResizeObserver(() => {
 }).observe(topbar);
 // A click on a dialog's backdrop closes it (the kit's cui-dialog).
 mountDialogs();
+mountGloss();
 // Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers. Views redraw
 // the panels, so they're found afresh each time; the chat (the split's last child) is held still.
 initDrawers({

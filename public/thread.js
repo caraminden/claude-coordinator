@@ -1,5 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
+import { gloss } from './help-words.js';
 import { account, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView } from './mine.js';
 import { toast } from './ui/status.js';
@@ -555,7 +556,7 @@ export function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${working ? 'running' : t.status}` }),
-      h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
+      h('h2', coord ? { 'data-gloss': 'taskmaster' } : { title: threadFullName(t) }, threadTitleParts(t)),
       presenceHead(t),
       coord && view.merged ? tmViewSwitch() : '',
       phone ? h('span', { class: 'spacer' }) : '',
@@ -716,8 +717,8 @@ function pinButton(t) {
 function shipLine(t) {
   const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
   if (!stage) return '';
-  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` },
-    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, stage.badge || 'on branch'));
+  return h('span', { class: `ship f-${stage.fam}` },
+    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch', `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}`)));
 }
 
 /**

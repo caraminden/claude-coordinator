@@ -9,6 +9,7 @@ import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
 import { hueRow, meter, pips, statTiles, toneChip } from './look.js';
 import { elsewhereRows, pickers } from './minion-rules.js';
+import { gloss } from './help-words.js';
 import { HOME_SCHEME } from './schemes.js';
 import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping.js';
 
@@ -393,7 +394,7 @@ export const isOrdersPage = (kind) => ORDERS_PAGES.has(kind);
 const SETTINGS_GROUPS = [
   ['Scheme', 'running', [['members', 'Members', 'users', 'Who works in this scheme'], ['orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
-    ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend']]],
+    ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend'], ['help', 'How Citadel works', 'doc', 'Schemes, minions, cards and shipping in two minutes']]],
   ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
 ];
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
@@ -404,10 +405,10 @@ export function settingsTabs() {
   if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
   const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
     settingsGroups().map(([label, hue, items]) =>
-      h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label),
+      h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label === 'Scheme' ? gloss('scheme', label) : label),
         items.map(([kind, text, ic]) =>
           h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null },
-            icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
+            icon(ic), h('span', { class: 'label' }, kind === 'contraptions' ? gloss('contraption', text) : text), propsCount(kind))))));
   return nav;
 }
 

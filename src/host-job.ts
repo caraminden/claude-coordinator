@@ -1,5 +1,5 @@
 // Jobs the server runs on the host that must outlive it (#508): landings (src/land.ts) and ultra reviews
-// (src/ultrareview.ts). Each runs in a transient unit of its own under the turns' slice, as host turns do,
+// (src/ultrareview.ts). Each runs in a transient unit of its own, in the builds' slice (ultra reviews: the turns' slice),
 // so a restart of the server neither kills it nor waits for it. A job keeps everything in a folder of its
 // own (its pid, output and exit code), so whichever server runs next reads how it went. Without units
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would cut
@@ -9,6 +9,9 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSy
 import { join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
 import { TURN_SLICE } from './turn-launch.ts';
+
+/** Ships, kit-sync ships and checks, fast-verify and rollbacks (#1280): beside the turns, not crowding their MemoryHigh. */
+export const BUILD_SLICE = 'citadel-builds.slice';
 
 export interface JobState {
   /** The tail of what it printed so far. */
@@ -42,10 +45,12 @@ export class HostJobs {
   /** Jobs whose systemd-run hasn't answered yet, by folder. */
   private starting = new Set<string>();
   private readonly units: () => boolean;
+  private readonly slice: string;
 
-  /** `units`: whether to start each job in a unit of its own (the runner's `units`, read at each start). */
-  constructor(units: () => boolean = () => false) {
+  /** `units`: whether to start each job in a unit of its own (the runner's `units`, read at each start); `slice`: where. */
+  constructor(units: () => boolean = () => false, slice: string = BUILD_SLICE) {
     this.units = units;
+    this.slice = slice;
   }
 
   /**
@@ -65,7 +70,7 @@ export class HostJobs {
     const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', join(dir, 'wrapper.sh'), dir, job.cwd];
     if (!this.units()) return this.child(wrapper, dir, job.onChildEnd);
     this.starting.add(dir);
-    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077', `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
+    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
       if (!err) return fallbacks.started();
       fallbacks.record(job.ticketId, job.description, String(stderr).trim() || err.message);

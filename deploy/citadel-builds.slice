@@ -1,0 +1,11 @@
+# Ships (tools/land.sh), kit-sync ships and checks, fast-verify and rollbacks (src/host-job.ts BUILD_SLICE) run
+# here, under citadel.slice, beside citadel-turns.slice instead of inside it (#1280). On 2026-11-20 a 2.25G land
+# shared the turns' 10G MemoryHigh with 18 turns and the slice stalled for minutes (the Status page's Memory
+# limits tile records these). Turns keep their 10G and builds get 10G of their own, so no one's memory shrinks;
+# citadel.slice's MemoryMax stays the hard stop. No MemoryMax here on purpose: past it a land slows, never dies.
+# Ultra reviews stay in the turns' slice. Not installed yet, the slice still works, with no limit of its own.
+[Unit]
+Description=Ships, checks and builds of Citadel
+
+[Slice]
+MemoryHigh=10G

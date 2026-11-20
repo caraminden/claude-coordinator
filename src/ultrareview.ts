@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { AUTH_VARS, resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
 import { HostJobs, type JobState } from './host-job.ts';
+import { TURN_SLICE } from './turn-launch.ts';
 
 const run = promisify(execFile);
 
@@ -150,7 +151,7 @@ export class UltraReviews {
 
   constructor(deps: Deps) {
     this.deps = deps;
-    this.jobs = new HostJobs(deps.units);
+    this.jobs = new HostJobs(deps.units, TURN_SLICE);
   }
 
   /** Reviews a restart would cut off (runner.hostJobs): ones still cloning, and ones whose CLI fell back to the server's child. */

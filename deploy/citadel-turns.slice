@@ -1,4 +1,5 @@
-# Host turns (src/turn-launch.ts TURN_SLICE), lands and fast-verify (src/host-job.ts) run here, under
+# Host turns (src/turn-launch.ts TURN_SLICE) and ultra reviews run here; since #1280 lands, kit-sync and fast-verify
+# run beside it in citadel-builds.slice. Both are under
 # citadel.slice (MemoryMax=22G for everything Citadel runs). MemoryHigh makes the kernel reclaim from and
 # throttle these before they crowd out the server and the containers (2026-11-10: load ~100 with 19 GiB
 # swapped out). Measured 2026-11-19/20 (#1214): peak 19.8G + 11.2G swap, land units up to 4.3G each with up to

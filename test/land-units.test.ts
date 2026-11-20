@@ -54,7 +54,7 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
   await until('land.sh starts', () => first.get(1)!.output.includes('token:'));
   assert.equal(first.running(), 0, 'a restart would leave it running, so it does not hold one up');
   const call = readFileSync(calls, 'utf8').slice(before.length);
-  assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-turns\.slice -p UMask=0077 /);
+  assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-builds\.slice -p UMask=0077 /);
   assert.doesNotMatch(call, /7\.s/, "the token stays off the command line, where anyone on the box could read it");
   assert.equal(existsSync(join(s.data, 'run', 'landings', '1', 'env')), false, 'the env file with the token is gone once read');
 

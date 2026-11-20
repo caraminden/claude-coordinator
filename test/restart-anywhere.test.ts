@@ -17,7 +17,8 @@
 //
 // To cover a new flow, add one entry to FLOWS: a name, an optional setup (accounts, say), and steps. Each step does one
 // thing from outside the runner (a message, a turn's end, a timer firing) and waits for the runner to go quiet.
-// RESTART_ANYWHERE_ONLY=<flow name> runs one flow; RESTART_ANYWHERE_DEBUG=1 prints each flow's cuts and what it sent.
+// RESTART_ANYWHERE_STRICT=1 cuts after every single write as well, a hard crash's points: it lists the gaps only a crash
+// (not a restart) can reach, and is expected to fail. RESTART_ANYWHERE_ONLY=<flow name> runs one flow; RESTART_ANYWHERE_DEBUG=1 prints each flow's cuts and what it sent.
 // On the server the write worker drains its queue before a restart exits (src/db-writer.ts), so a task's writes land
 // whole there too; only a hard crash (power, the OOM killer) can stop between two writes of one task, which this skips.
 import assert from 'node:assert/strict';
@@ -29,6 +30,7 @@ import { gzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { coldKey, mailKey } from '../src/minion-relay.ts';
+import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -78,7 +80,7 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
-type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
+type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
 type Flow = {
   name: string;
   /** Hooks both the flow's runner and every restarted one get (a person's Claude accounts, say). */
@@ -162,7 +164,7 @@ const FLOWS: Flow[] = [
     name: 'held mail released',
     steps: [
       { name: 'a relay is held as mail for the cold session', run: async (c) => {
-        c.runner.relays.mail(c.id, 'Taskmaster', 'held: build 3 merged', undefined, true);
+        c.mail('Taskmaster', 'held: build 3 merged');
         await sleep(30);
       } },
       { name: 'the cold sweep releases it into a turn', run: async (c) => {
@@ -259,6 +261,17 @@ class Recorder {
     this.changes = () => Number((q.get() as { n: number }).n);
     this.last = this.changes();
     this.describe(); // the starting point, so the first cut's label says only what changed
+    if (process.env.RESTART_ANYWHERE_STRICT) {
+      const s = store as any;
+      for (const name of [...WRITES, ...VALUE_WRITES, 'putClaudeState'].filter((n) => typeof s[n] === 'function')) {
+        const write = s[name].bind(store);
+        s[name] = (...args: unknown[]) => {
+          const out = write(...args);
+          this.boundary();
+          return out;
+        };
+      }
+    }
   }
 
   start() {
@@ -348,6 +361,10 @@ async function record(flow: Flow) {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
       ctx.runner.send(t.id, author, text);
     },
+    mail: (from, text) => {
+      rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
+      ctx.runner.relays.mail(t.id, from, text, undefined, true); // held for a cold session
+    },
     quiet: async (what, also = () => true) => {
       await until(what, () => !ctx.runner.isRunning(t.id) && !(ctx.runner as any).lanes.busy(t.id) && also(), 15_000);
       await sleep(30); // anything it set off on its way out
@@ -404,6 +421,9 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     const mail = store.getSetting<Msg[]>(mailKey(id)) ?? [];
     const queue: Msg[] = (r as any).queues.get(id) ?? [];
     const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && store.getSetting(coldKey(id)) ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : null;
+    // A saved wait is only a wait if its timer is armed (the cold sweep and an unpark come from outside the runner).
+    if (limit && !(r as any).limitTimer) problems.push('its usage-limit wait is saved, but no timer is armed to resume it');
+    if (net && !(r as any).netTimer) problems.push('its network wait is saved, but no probe is armed');
     const carried = new Set([...started.flat(), ...queue, ...(limit?.queued ?? []), ...(net?.queued ?? []), ...mail].map((m) => m.text));
     for (const text of rec.held(cut.n)) if (!carried.has(text)) problems.push(`lost "${text}": no turn, queue, wait or held mail has it`);
     if (!started.length && !waiting) {

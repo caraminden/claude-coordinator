@@ -49,11 +49,12 @@ else if (url.endsWith('/dispatches')) {
   const f = {}; for (let i = 0; i < a.length; i += 2) { const [k, ...v] = a[i + 1].split('='); f[k] = v.join('='); }
   fs.writeFileSync(state, JSON.stringify(f));
 } else if (url.includes('/workflows/citadel-heavy.yml/runs')) out({ workflow_runs: fs.existsSync(state) ? [{ id: 7, display_title: 'heavy ' + id() }] : [] });
+else if (url.includes('/actions/runs?status=in_progress')) out({ total_count: mode === 'busy' ? 1 : 0, workflow_runs: [] });
 else if (url.endsWith('/runs/7/cancel')) fs.writeFileSync(path.join(dir, 'cancelled'), '');
 else if (url.endsWith('/runs/7')) {
   const n = Number(fs.existsSync(path.join(dir, 'polls')) ? fs.readFileSync(path.join(dir, 'polls'), 'utf8') : 0) + 1;
   fs.writeFileSync(path.join(dir, 'polls'), String(n));
-  const status = mode === 'queued' ? 'queued' : ['queued', 'in_progress'][n - 1] ?? 'completed';
+  const status = mode === 'queued' || (mode === 'busy' && n < 12) ? 'queued' : mode === 'busy' ? 'completed' : ['queued', 'in_progress'][n - 1] ?? 'completed';
   out({ id: 7, status, conclusion: status === 'completed' ? 'failure' : null, html_url: 'https://github.com/o/r/actions/runs/7' });
 } else if (url.endsWith('/runs/7/jobs')) out({ jobs: [{ id: 9, runner_name: mode === 'queued' ? null : 'ci-r-1' }] });
 else if (url.endsWith('/jobs/9/logs') && !escapes) { process.stderr.write('the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway\\n'); process.exit(1); }
@@ -84,8 +85,8 @@ function repo(workflow = true) {
   mkdirSync(gh);
   return { d, bare, gh };
 }
-const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv = {}) => spawnSync(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
-  cwd: r.d, encoding: 'utf8', timeout: 30_000,
+const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv = {}, cwd = r.d) => spawnSync(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
+  cwd, encoding: 'utf8', timeout: 30_000,
   env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, FAKE_GH_MODE: mode, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_CI_POLL: '0.05', CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'), CITADEL_HEAVY_WHO: 'Peek #9', ...extra },
 });
 
@@ -131,4 +132,27 @@ test('without the workflow, or when GitHub refuses the dispatch, it runs here an
   assert.equal(git(r.bare, 'for-each-ref'), '', 'the snapshot ref is deleted');
   const here = run(repo(), 'ok', { CITADEL_HEAVY_HERE: '1' });
   assert.equal(here.stdout, 'ran here\n', 'CITADEL_HEAVY_HERE keeps it on perigee');
+});
+
+test('busy runners keep the job waiting on CI: it never comes back to perigee', () => {
+  const r = repo();
+  const res = run(r, 'busy', { CITADEL_HEAVY_CI_QUEUE: '0.1' });
+  assert.equal(res.status, 3, res.stderr);
+  assert.equal(res.stdout, 'hello from CI\n');
+  assert.ok(!existsSync(join(r.gh, 'cancelled')));
+});
+
+test('from a subfolder it runs there on CI, with every edit in the repo and no untracked secrets', () => {
+  const r = repo();
+  mkdirSync(join(r.d, 'sub dir'));
+  writeFileSync(join(r.d, 'sub dir', 'b.txt'), 'b\n');
+  writeFileSync(join(r.d, '.env'), 'TOKEN=x\n');
+  writeFileSync(join(r.d, 'sub dir', 'deploy.pem'), 'key\n');
+  const res = run(r, 'ok', {}, join(r.d, 'sub dir'));
+  assert.equal(res.status, 3, res.stderr);
+  const sent = JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'));
+  assert.equal(sent['inputs[command]'], `cd 'sub dir/' && sh -c 'echo ran here; exit 5'`);
+  assert.equal(git(r.bare, 'show', `${sent['inputs[sha]']}:a.txt`), 'edited, not committed', 'an edit outside the folder goes too');
+  assert.equal(git(r.bare, 'show', `${sent['inputs[sha]']}:sub dir/b.txt`), 'b');
+  assert.equal(git(r.bare, 'ls-tree', '-r', '--name-only', sent['inputs[sha]']).split('\n').filter((f) => /\.env|\.pem/.test(f)).length, 0, 'no .env or key file pushed');
 });

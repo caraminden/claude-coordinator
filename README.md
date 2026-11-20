@@ -572,8 +572,8 @@ a run (the defaults are set for perigee; each script's comments say more):
 | `CITADEL_HEAVY_HEAD_STALE` | 60 s | `citadel-heavy`: a head of the line silent this long is stopped, and jobs go past it |
 | `CITADEL_HEAVY_HERE` | unset | `citadel-heavy`: `1` keeps a job on perigee (as `--here`), never on the repo's CI |
 | `CITADEL_HEAVY_CI_SLOTS` | 1 | `citadel-heavy`: heavy jobs one repo may have on its CI at once; the rest wait on perigee |
-| `CITADEL_HEAVY_CI_QUEUE` | 600 s | `citadel-heavy`: a CI job no runner takes this long is cancelled and runs on perigee |
-| `CITADEL_HEAVY_PLAIN_SLOTS` | 1 | `citadel-heavy`: perigee slots a plain job may use; the rest are for deploy and APK builds |
+| `CITADEL_HEAVY_CI_QUEUE` | 600 s | `citadel-heavy`: a CI job no runner takes this long, while nothing else runs on the repo's CI either (the desktop is off), is cancelled and runs on perigee; while the runners are busy it keeps waiting |
+| `CITADEL_HEAVY_PLAIN_SLOTS` | 1 | `citadel-heavy`: perigee slots plain jobs share, at nice 19; deploy and APK builds get one more of their own |
 
 ## Permissions
 

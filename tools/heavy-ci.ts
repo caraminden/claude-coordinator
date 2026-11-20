@@ -5,10 +5,11 @@
 // .github/workflows/citadel-heavy.yml (the kit's scheme-setup/templates/citadel-heavy.yml) on GitHub's default branch and an
 // origin on github.com. The job runs the minion's working copy as it is, uncommitted files included: a snapshot
 // commit (the branch and index are left alone) pushed to refs/citadel-heavy/<id>, which no push trigger sees, and
-// deleted again at the end. The workflow prints the command's output between two markers; GitHub only hands a
+// deleted again at the end. It runs in the same folder of the repo, but the caller's environment doesn't go along;
+// untracked key and .env files are left out of the snapshot. The workflow prints the command's output between two markers; GitHub only hands a
 // job's log over once the job ends, so the output comes then, all at once.
 // When nothing ran on CI (no workflow, no gh login, a push or dispatch refused, or no runner took the job within
-// CITADEL_HEAVY_CI_QUEUE s, default 600: the desktop is off) it says why, writes the reason to the file
+// CITADEL_HEAVY_CI_QUEUE s, default 600, while nothing else on the repo's CI ran either: the desktop is off) it says why, writes the reason to the file
 // CITADEL_HEAVY_FALLBACK_FILE names and exits FALLBACK, and citadel-heavy runs it in perigee's small slot instead.
 // Once a run has started it never falls back: a stop or a lost run is reported, not run twice.
 import { execFileSync } from 'node:child_process';
@@ -74,6 +75,9 @@ function repo(): string {
   return slug;
 }
 
+// Files a snapshot leaves out: an untracked secret pushed to GitHub would outlive the scratch ref.
+const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/*.p12', '**/*.jks', '**/*.keystore', '**/id_rsa*', '**/id_ed25519*'];
+
 /** A commit of the working copy as it is (tracked and untracked files, .gitignore kept), on top of HEAD. */
 function snapshot(): string {
   const tmp = mkdtempSync(join(tmpdir(), 'heavy-ci-'));
@@ -83,7 +87,7 @@ function snapshot(): string {
     try { copyFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'index'), index); } catch { /* none yet */ }
     const env = { ...process.env, GIT_INDEX_FILE: index };
     const run = (...args: string[]) => execFileSync('git', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
-    run('add', '-A', '.');
+    run('add', '-A', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`));
     const tree = run('write-tree');
     return run('commit-tree', tree, '-p', 'HEAD', '-m', 'citadel-heavy snapshot');
   } finally {
@@ -95,6 +99,8 @@ async function main(argv: string[]): Promise<number> {
   const poll = Number(process.env.CITADEL_HEAVY_CI_POLL) || 10;
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
   const slug = repo();
+  const prefix = git('rev-parse', '--show-prefix');
+  const command = prefix ? `cd ${commandLine([prefix])} && ${commandLine(argv)}` : commandLine(argv);
   const id = `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
@@ -107,7 +113,13 @@ async function main(argv: string[]): Promise<number> {
   const unref = () => { try { git('push', '-q', 'origin', `:${ref}`); } catch { /* a stray ref costs nothing */ } };
   let runId: number | null = null;
   let started = false;
-  const cancel = () => { if (runId) try { gh(['-X', 'POST', `repos/${slug}/actions/runs/${runId}/cancel`], 'cancel'); } catch { /* already over */ } };
+  let cancelled = false;
+  /** False when a run exists and GitHub refused to cancel it: it may still run, so nothing runs here too. */
+  const cancel = () => {
+    if (!runId || cancelled) return true;
+    try { gh(['-X', 'POST', `repos/${slug}/actions/runs/${runId}/cancel`], 'cancel'); return (cancelled = true); }
+    catch { try { return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed'; } catch { return false; } }
+  };
   const stop = (signal: number) => { say(`stopped; cancelling the CI run`); cancel(); unref(); process.exit(128 + signal); };
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
@@ -115,7 +127,7 @@ async function main(argv: string[]): Promise<number> {
     try {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
       gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`,
-        '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${commandLine(argv)}`, '-f', `inputs[id]=${id}`], 'starting the workflow');
+        '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow');
     } catch (e: any) {
       throw new Fallback(`${e.message} (is ${WORKFLOW} on the default branch yet?)`);
     }
@@ -126,7 +138,8 @@ async function main(argv: string[]): Promise<number> {
       if (!runId && i * 2 >= 60) throw new Fallback('GitHub took the workflow but showed no run for it in a minute');
       if (!runId) await sleep(2);
     }
-    const queued = Date.now();
+    let queued = Date.now();
+    const asked = queued;
     // A blip in GitHub's answers is waited out: three misses in a row end it.
     const read = async () => {
       for (let miss = 1; ; miss++) {
@@ -145,10 +158,16 @@ async function main(argv: string[]): Promise<number> {
         say(`a runner took it${job?.runner_name ? ` (${job.runner_name})` : ''}; its output comes when it ends`);
       }
       if (!started && Date.now() - queued >= queueLimit * 1000) {
-        cancel();
-        throw new Fallback(`no runner took the job in ${Math.round(queueLimit / 60)} min (the desktop may be off), so the CI run is cancelled`);
+        // Busy runners mean wait (Josh: "things slow down, but perigee is fine"); only a CI running nothing at all,
+        // the desktop off, sends the job back here. Reading the runners themselves needs admin, so other runs tell.
+        if (gh([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
+          queued = Date.now();
+        } else {
+          if (!cancel()) { say(`no runner took the job and GitHub wouldn't cancel the run (${run.html_url}); nothing runs here`); return 1; }
+          throw new Fallback(`no runner took the job in ${Math.round(queueLimit / 60)} min and nothing else ran on CI (the desktop may be off), so the CI run is cancelled`);
+        }
       }
-      if (Date.now() - told >= 300_000) { if (told) say(`still ${started ? 'running' : 'waiting for a runner'} (${Math.round((Date.now() - queued) / 60000)} min)`); told = Date.now(); }
+      if (Date.now() - told >= 300_000) { if (told) say(`still ${started ? 'running' : 'waiting for a runner'} (${Math.round((Date.now() - asked) / 60000)} min)`); told = Date.now(); }
       await sleep(poll);
       run = await read();
     }
@@ -167,7 +186,8 @@ async function main(argv: string[]): Promise<number> {
     return out.code;
   } catch (e) {
     if (e instanceof Fallback || !started) {
-      cancel(); // a run still queued must not start after this runs here
+      // A run still queued must not start after this runs here.
+      if (!cancel()) { say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run; nothing runs here`); return 1; }
       throw e instanceof Fallback ? e : new Fallback(String((e as Error).message));
     }
     say(`${(e as Error).message}; the CI run is cancelled and nothing more runs here`);
@@ -182,7 +202,7 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const fallback = (why: string) => {
     if (process.env.CITADEL_HEAVY_FALLBACK_FILE) writeFileSync(process.env.CITADEL_HEAVY_FALLBACK_FILE, `${why}\n`);
-    process.exit(FALLBACK);
+    process.exitCode = FALLBACK;
   };
   if (argv[0] === '--repo') {
     try { process.stdout.write(repo() + '\n'); } catch (e) { say(`not on CI: ${(e as Error).message}`); fallback((e as Error).message); }
@@ -190,7 +210,8 @@ if (import.meta.main) {
     say('usage: heavy-ci.ts --repo | <command> [args...]');
     process.exit(2);
   } else {
-    main(argv).then((code) => process.exit(code), (e) => {
+    // exitCode, not exit(): a long log piped to the caller is written out in full first.
+    main(argv).then((code) => { process.exitCode = code; }, (e) => {
       say(`not on CI: ${(e as Error).message}; running it here in perigee's small slot`);
       fallback((e as Error).message);
     });

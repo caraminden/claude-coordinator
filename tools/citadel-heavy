@@ -140,7 +140,10 @@ plain=${CITADEL_HEAVY_PLAIN_SLOTS:-1}
 limit() {
   local n
   n=$(slots)
-  [ -n "$first" ] || [ "$n" -le "$plain" ] || n=$plain
+  # Plain jobs share $plain slots; deploy and APK builds get one more of their own (#1160's plan).
+  local cap=$plain
+  [ -z "$first" ] || cap=$((plain + 1))
+  [ "$n" -le "$cap" ] || n=$cap
   echo "$n"
 }
 

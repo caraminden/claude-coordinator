@@ -470,6 +470,7 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
     // Share the worktree's target/: only the workspace's own crates rebuild, not every dependency.
     env.CARGO_TARGET_DIR ??= join(root, 'target');
     const heavy = onPath('citadel-heavy');
+    env.CITADEL_HEAVY_HERE = '1'; // the shared target/ is here, not on the scheme's CI
     argv = [...(heavy ? [heavy] : []), cargo, 'test', ...args];
   }
   const r = spawnSync(argv[0], argv.slice(1), { cwd, env, encoding: 'utf8', timeout: limit * 1000, killSignal: 'SIGKILL', maxBuffer: 64 << 20 });

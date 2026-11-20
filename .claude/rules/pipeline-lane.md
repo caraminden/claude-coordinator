@@ -8,6 +8,8 @@ paths:
   - "tools/run-tests.sh"
   - "tools/citadel-wait"
   - "tools/citadel-heavy"
+  - "tools/heavy-ci.ts"
+  - ".github/workflows/citadel-heavy.yml"
   - "tools/boot-check.ts"
   - "tools/failed-files-reporter.ts"
   - "tools/progress-reporter.ts"

@@ -366,7 +366,6 @@ export function elsewhereRows(scheduleCount) {
     h('span', { class: 'settings-row-chev' }, icon('forward')));
   return [
     link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}`, () => setTimeout(() => { const b = document.querySelector('.schedules-btn'); if (b && b.getAttribute('aria-pressed') !== 'true') b.click(); }, 300)),
-    link('check', 'done', 'Reviewers and critics', 'What judges work: critics, reviewers, audits', `#/p/${id}/reviews`),
     link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/${Number(id) === 2 ? 'all' : id}`),
     link('users', 'running', 'Members', 'Who works in this scheme', `#/p/${id}/members`),
     link('bell', 'held', 'Notifications', 'You: push, and what pings you', `#/p/${id}/notifications`),

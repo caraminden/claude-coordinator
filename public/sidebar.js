@@ -203,6 +203,11 @@ export function revealActiveRow() {
     view.showClosed = true;
     renderSidebar();
     row = box.querySelector('#threads .thread-row.active');
+    // The property filter hides it: the list stays shut.
+    if (!row) {
+      view.showClosed = false;
+      renderSidebar();
+    }
   }
   if (!row) return;
   const dismissed = row.closest('details.g-closed');

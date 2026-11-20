@@ -56,7 +56,11 @@ try {
   if (scheme.dismissed) await until(`!!document.querySelector('#threads details.g-closed')`, 'the dismissed list');
   if (!scheme.running.length) throw new Error('no running minion to update: seed busy-scheme first');
   await page.evaluate(`window.__running = ${JSON.stringify(scheme.running)}`);
-  if (process.argv.includes('--dismissed-open')) await page.do('click #threads details.g-closed summary');
+  if (process.argv.includes('--dismissed-open')) {
+    // A phone's minions drawer starts shut: open it, then the list, and see its rows before measuring.
+    await page.evaluate(`document.querySelector('details.sidebar').open = true; document.querySelector('#threads details.g-closed summary').click()`);
+    await until(`!!document.querySelector('#threads details.g-closed .thread-row')`, 'the dismissed rows');
+  }
   await page.do('click .composer textarea');
   if (throttle > 1) await page.s('Emulation.setCPUThrottlingRate', { rate: throttle });
   if (profile) {
@@ -92,6 +96,10 @@ try {
   console.log(`  worst input delay: ${lag.delay} ms`);
   console.log(`  worst key-to-paint: ${lag.paint} ms`);
   console.log(`  long tasks (>50 ms): ${lag.tasks.length}, ${total} ms in all, worst ${Math.max(0, ...lag.tasks)} ms`);
+  if (!lag.keys) {
+    console.log('  FAILED: no key reached the page, so nothing was measured');
+    failed = true;
+  }
   if (maxDelay && lag.delay > maxDelay) {
     console.log(`  FAILED: worst input delay ${lag.delay} ms is over ${maxDelay} ms`);
     failed = true;

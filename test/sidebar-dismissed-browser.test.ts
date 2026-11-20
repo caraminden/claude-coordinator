@@ -49,17 +49,13 @@ after(async () => {
 
 const closedRows = `document.querySelectorAll('#threads details.g-closed .thread-row').length`;
 
-test('a shut Dismissed list builds no rows, so twenty minion updates redraw in well under a frame each', { skip }, async () => {
+test('a shut Dismissed list builds no rows, at first or when minion updates redraw the list', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the Dismissed list', `document.querySelector('#threads details.g-closed')`);
   assert.equal(await page.eval(closedRows), 0);
-  const ms = await page.eval<number>(`(() => {
-    const t0 = performance.now();
-    for (let n = 1; n <= 20; n++) es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'Running commands ' + n, updated_at: Date.now() } }) });
-    return performance.now() - t0;
-  })()`);
-  // Before the fix: about 250 ms each, 5 s in all, on perigee. After: about 1 ms each.
-  assert.ok(ms < 500, `twenty minion updates took ${Math.round(ms)} ms of main thread`);
+  // No timing here (a slow runner would flake it): tools/typing-lag.ts measures the redraws. Before the fix each update took about 250 ms.
+  await page.eval(`(() => { for (let n = 1; n <= 20; n++) es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'Running commands ' + n, updated_at: Date.now() } }) }); })()`);
+  assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row.s-running').textContent`), /Running commands 20/);
   assert.equal(await page.eval(closedRows), 0);
 });
 

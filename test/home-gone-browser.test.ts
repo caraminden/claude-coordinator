@@ -49,7 +49,7 @@ after(async () => {
 });
 
 const rows = `[...document.querySelectorAll('.home-panel .thread-row .name')].map((n) => n.textContent.trim()).join('|')`;
-const heads = `[...document.querySelectorAll('.home-panel .home-group > h3')].map((n) => n.textContent.trim()).join('|')`;
+const heads = `[...document.querySelectorAll('.home-panel .home-group > h3')].map((n) => n.firstChild.textContent.trim()).join('|')`;
 
 test('a row that leaves Home goes at once, its scheme heading with the last one, and nothing is ticked off', { skip }, async () => {
   const page = await browser.page(`${app.base}#/home`, { width: 1280, height: 800 });

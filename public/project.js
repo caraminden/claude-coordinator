@@ -57,7 +57,33 @@ export async function showTicket(ticketId) {
 }
 
 /** A tab in the Minions panel's header; it switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
-const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, onclick: (e) => showPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+
+/** Per scheme, the last chat hash and the last Orders hash you were on, so a tab click goes back to where you were. */
+const lastHash = new Map();
+function noteHash() {
+  const m = location.hash.match(/^#\/p\/(\d+)(?:\/(t\/\d+|[a-z-]+))?(?:[?/].*)?$/);
+  if (!m) return;
+  const slot = lastHash.get(m[1]) ?? {};
+  if (!m[2] || m[2].startsWith('t/')) slot.chat = location.hash.split('?')[0];
+  else if (m[2] === 'orders' || isOrdersPage(m[2])) slot.orders = location.hash.split('?')[0];
+  else return;
+  lastHash.set(m[1], slot);
+}
+addEventListener('hashchange', noteHash);
+noteHash();
+
+/** A tab click: the tab that's already selected does nothing; the other swaps the panel and the main pane. */
+function clickPanelTab(sidebar, name) {
+  const orders = name === 'orders';
+  if (sidebar.classList.contains('show-orders') === orders) return;
+  showPanelTab(sidebar, name);
+  const id = view?.projectId;
+  if (id == null) return;
+  const slot = lastHash.get(String(id)) ?? {};
+  const to = orders ? slot.orders ?? `#/p/${id}/orders` : slot.chat ?? `#/p/${id}`;
+  if (location.hash.split('?')[0] !== to) location.hash = to;
+}
 
 /** Show the minions or the Orders pages in the panel; Orders closes the schedules list first. */
 function showPanelTab(sidebar, name) {

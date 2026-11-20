@@ -1,6 +1,7 @@
 // Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
+import type { TurnPlace } from './claude-link.ts';
 import type { Machine, Project, Store, Ticket, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { storedCheck } from './machines.ts';
@@ -51,6 +52,16 @@ export function turnRefusal(store: Store, ticket: Ticket, author: string, linked
   const who = store.getUser(id ?? -1);
   if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";
   return claudeRefusal(who, linked, who.id === ownerId);
+}
+
+/**
+ * Where `person`'s turn runs (src/runner.ts placeFor), or why it can't: sender pays (#213), so the server login's owner
+ * runs on the host and everyone else in their own container. No person (a scheme with no owner) runs on the host.
+ */
+export function turnPlace(store: Store, link: { place(uid: number, warm?: string): TurnPlace | null; linked: ClaudeLinked }, person: number | null, warm?: string): TurnPlace | { refused: string } {
+  const user = person ? store.getUser(person) : undefined;
+  if (!user) return { host: true };
+  return link.place(user.id, warm) ?? { refused: claudeRefusal(user, (uid) => link.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 }
 
 /** Whether a person has linked their own Claude (src/claude-link.ts): linked, expired, or not at all. */

@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { adminOwned, lendsMachine, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
+import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPlace, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
+import { mailKey } from '../src/minion-relay.ts';
+import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'people-'));
@@ -17,8 +19,8 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function world() {
-  const store = new Store(':memory:');
+function world(file = ':memory:') {
+  const store = new Store(file === ':memory:' ? file : join(root, file));
   const auth = new Auth(PASSWORD, 'x'.repeat(40), undefined, store);
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
@@ -153,6 +155,72 @@ test("a message from no person is checked against the person its turn would run 
   assert.equal(turnRefusal(store, none, 'Pats Taskmaster', linked([josh.id]), patsTm.id), null);
   // A person's own message is still theirs, whatever the minion's person.
   assert.match(turnRefusal(store, hers, 'Josh', linked([olive.id]))!, /Turns for Josh start/);
+});
+
+// One rule for who pays (#1270): resumes, held mail, queued starts and the refusal check all ask runner.turnPerson's rule
+// (access.ts turnPayer), so none of them runs on, or checks, a different person's Claude than the turn would use.
+const payerWorld = (file: string) => {
+  const w = world(file);
+  w.store.addMember(w.games.id, w.olive.id);
+  const made = w.store.createTicket({ project_id: w.games.id, title: 'T', permission_mode: 'default', created_by: 'Olive' });
+  w.store.updateTicket(made.id, { person_id: w.olive.id });
+  const runner = new Runner(w.store, () => {}, () => ({}), '/bin/false');
+  runner.personOf = messagePerson(w.store);
+  const asked: (number | null)[] = [];
+  return { ...w, runner, asked, hers: w.store.getTicket(made.id)! };
+};
+const notes = (store: Store, id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+
+test("a member taken out of a scheme stops paying for their old minions' automatic turns; its owner does (#1270 C1)", async () => {
+  const { store, runner, asked, hers, josh, olive, games } = payerWorld('payer-removed.db');
+  const linked = (ids: number[]) => (uid: number) => (ids.includes(uid) ? ('linked' as const) : null);
+  runner.placeFor = (person) => (asked.push(person), { refused: 'held for the test' });
+  store.removeMember(games.id, olive.id);
+  // The check before a CI result queues asks the owner's link, as the turn will run on it.
+  assert.equal(turnRefusal(store, hers, 'GitHub', linked([josh.id])), null, "the owner's link lets a CI result through");
+  assert.match(turnRefusal(store, hers, 'GitHub', linked([olive.id]))!, /its owner, Josh, links/, "her link no longer counts");
+  // A CI result's queued start, held mail and a restart resume each run on the owner's Claude.
+  runner.send(hers.id, 'GitHub', 'CI passed');
+  await until('the queued start asks for a place', () => asked.length === 1);
+  store.setSetting(mailKey(hers.id), [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }]);
+  assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0);
+  (runner as any).resume(hers.id, 1);
+  await until('the resume asks for a place', () => asked.length === 3);
+  assert.deepEqual(asked, [josh.id, josh.id, josh.id]);
+  // Back in the scheme, her minion's turns are hers again.
+  store.addMember(games.id, olive.id);
+  assert.match(turnRefusal(store, hers, 'GitHub', linked([josh.id]))!, /Turns for Olive start/);
+});
+
+test("the refusal check asks the person a personal Taskmaster's or the Overlord's turn runs for (#1270 C2)", () => {
+  const { store, cara, josh, olive, games } = payerWorld('payer-taskmasters.db');
+  const linked = (ids: number[]) => (uid: number) => (ids.includes(uid) ? ('linked' as const) : null);
+  store.createTicket({ project_id: games.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const olives = store.splitScheme(games.id, olive.id);
+  const overlord = store.getOverlord(games.id)!;
+  // Olive's own Taskmaster runs a wake or a relay on her Claude, whoever answered there last.
+  store.updateTicket(olives.id, { person_id: cara.id });
+  assert.equal(turnRefusal(store, store.getTicket(olives.id)!, 'GitHub', linked([olive.id])), null, "her own Taskmaster's wake runs on her link");
+  assert.match(turnRefusal(store, store.getTicket(olives.id)!, 'GitHub', linked([cara.id, josh.id]))!, /Turns for Olive start/);
+  // The Overlord is nobody's own: its wakes run on the owner's Claude, not on whoever wrote to it last.
+  store.updateTicket(overlord.id, { person_id: olive.id });
+  assert.equal(turnRefusal(store, store.getTicket(overlord.id)!, 'GitHub', linked([josh.id])), null, "the Overlord's wake runs on the owner's link");
+  assert.match(turnRefusal(store, store.getTicket(overlord.id)!, 'GitHub', linked([olive.id]))!, /its owner, Josh, links/);
+});
+
+test("a disabled person's minion runs no turn on any start path, not only a new message (#1270 C3)", async () => {
+  const { store, runner, hers, olive, games } = payerWorld('payer-disabled.db');
+  // Her Claude is linked and ready: only her disabled login stops it.
+  const link = { place: () => ({ host: true as const }), linked: () => 'linked' as const };
+  runner.placeFor = (person, warm) => turnPlace(store, link, person, warm);
+  store.updateUser(olive.id, { disabled_at: Date.now() });
+  store.setSetting(mailKey(hers.id), [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }]);
+  assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0, 'held mail stays held');
+  assert.ok(notes(store, hers.id).some((n) => /Olive's login is disabled/.test(n)));
+  assert.equal(runner.isRunning(hers.id), false);
+  (runner as any).resume(hers.id, 1);
+  await until('the resume is refused', () => notes(store, hers.id).filter((n) => /Olive's login is disabled/.test(n)).length === 2);
+  assert.equal(runner.isRunning(hers.id), false);
 });
 
 test('a machine goes to exactly the schemes on its list, even a non-admin\'s, and a new one to none (#303, #438)', () => {

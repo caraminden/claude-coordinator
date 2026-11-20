@@ -217,10 +217,23 @@ test('unlinking one of several accounts removes its sign-in and meters, keeps th
   assert.equal(store.getSetting(`usage:user:${uid}:account:2`) ?? null, null);
   assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [1, 3]);
   assert.equal(link.accounts(uid)?.inUse, 1, 'turns move off the account that went');
+  // Account 1's meter keeps the key it had before there were several (account-pick.ts accountUsageKey), and goes too (#1270 C4).
+  store.setSetting(`usage:user:${uid}`, { weekly: null, session: null, updatedAt: 1 });
   await link.unlink(uid, 1);
+  assert.equal(store.getSetting(`usage:user:${uid}`) ?? null, null, "account 1's meter goes with it");
   assert.equal(existsSync(join(home, '.claude', '.credentials.json')), false, "account 1's login goes");
   assert.ok(existsSync(join(home, '.claude', 'settings.json')), "the container's other Claude files stay");
   assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [3]);
+});
+
+test("unlinking every account clears each one's meter, so a fresh account linked in its place starts at zero (#1270 C4)", async () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  store.setSetting(`usage:user:${uid}`, { weekly: null, session: null, updatedAt: 1 });
+  store.setSetting(`usage:user:${uid}:account:2`, { weekly: null, session: null, updatedAt: 1 });
+  await link.unlink(uid);
+  assert.equal(link.linked(uid), null);
+  assert.equal(store.getSetting(`usage:user:${uid}`) ?? null, null);
+  assert.equal(store.getSetting(`usage:user:${uid}:account:2`) ?? null, null);
 });
 
 test("the server login's extra account runs on the host with its own config folder; account 1 is the host's (#779)", () => {

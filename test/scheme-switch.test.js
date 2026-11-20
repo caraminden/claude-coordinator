@@ -25,3 +25,9 @@ test('a chat or the Taskmaster goes to the new Taskmaster', () => {
   assert.equal(schemeSwitchHash('#/t/42', 5), '#/p/5');
   assert.equal(schemeSwitchHash('', 5), '#/p/5');
 });
+test('an Orders page stays open for the clicked scheme', () => {
+  assert.equal(schemeSwitchHash('#/p/3/reviews', 5), '#/p/5/reviews');
+  assert.equal(schemeSwitchHash('#/p/3/orders', 5), '#/p/5/orders');
+  assert.equal(schemeSwitchHash('#/p/3/schedules/9', 5), '#/p/5/schedules');
+  assert.equal(schemeSwitchHash('#/p/3/memory/notes.md', 5), '#/p/5/memory');
+});

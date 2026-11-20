@@ -3,7 +3,7 @@
 // schemes settings pages"). A minion's chat is the exception: it opens the new scheme's Taskmaster.
 
 const ADMIN_ONLY = new Set(['app-instructions', 'people', 'contraptions']);
-const KEEP = new Set(['artifacts', 'shared', 'instructions', 'settings', 'orders', 'skills', 'approvals', 'properties', 'members', 'memory', 'decisions', 'machines',
+const KEEP = new Set(['artifacts', 'shared', 'instructions', 'settings', 'orders', 'skills', 'approvals', 'properties', 'members', 'memory', 'decisions', 'reviews', 'machines',
   'my-instructions', 'account', 'notifications', 'usage', 'app-instructions', 'people', 'contraptions']);
 
 /** The hash to open for scheme `id` when you click it while on `hash`. `isAdmin` gates the admin Settings tabs. */
@@ -17,6 +17,9 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   if (page === 'releases') return `${home}/releases/${Number(id) === 2 ? 'all' : id}`;
   // A schedule's page opens the other scheme's Schedules list: its schedules are its own.
   if (page === 'schedules') return `${home}/schedules`;
+  // A page tied to one item (a memory file) opens the other scheme's list for that page.
+  if (KEEP.has(page) && rest && /^(memory|skills|reviews|decisions)$/.test(page)) return `${home}/${page}`;
+  if (page === 'orders' && !rest) return `${home}/orders`;
   if (!KEEP.has(page) || rest) return home;
   if (ADMIN_ONLY.has(page) && !isAdmin) return `${home}/instructions`;
   return `${home}/${page}`;

@@ -332,14 +332,17 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         // that poll for the file failed under CI load (#1293): it is held off until the test has read the folder.
         const [id, live] = [...(runner as any).turns.entries()].find(([, l]: any) => l.dir === dir)!;
         clearInterval(live.timer);
-        const [node, ...wrapper] = spawned[0].wrapper;
-        const w = spawn(node, wrapper, { stdio: 'ignore' });
-        for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
-        w.kill();
-        exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
-        if (spec.pool) pool = readPool(spec.pool.dir);
-        seen = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
-        live.timer = setInterval(() => (runner as any).poll(id), runner.pollMs);
+        try {
+          const [node, ...wrapper] = spawned[0].wrapper;
+          const w = spawn(node, wrapper, { stdio: 'ignore' });
+          for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
+          w.kill();
+          exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
+          if (spec.pool) pool = readPool(spec.pool.dir);
+          seen = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
+        } finally {
+          live.timer = setInterval(() => (runner as any).poll(id), runner.pollMs).unref();
+        }
       },
     });
   } finally {

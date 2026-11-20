@@ -39,7 +39,10 @@ export function startPick() {
     for (const [k, v] of Object.entries({ left: r.left - 3, top: r.top - 3, width: r.width + 6, height: r.height + 6 })) box.style.setProperty(k, `${v}px`);
   };
   const onMove = (e) => {
-    if (e.pointerType === 'mouse') show(under(e.clientX, e.clientY));
+    if (e.pointerType === 'mouse') {
+      show(under(e.clientX, e.clientY));
+      hint.firstChild.textContent = 'Click the thing you mean';
+    }
     // Keep the hint off what the pointer is near: top unless the pointer's up there.
     hint.classList.toggle('low', e.clientY < 96);
   };
@@ -119,6 +122,7 @@ function pageName() {
   if (!view) return 'Citadel';
   if (view.main === 'chat') return view.id === view.coordinator?.id ? `${taskmasterName()}'s chat` : `#${view.ticket?.number ?? view.id}'s chat`;
   const main = typeof view.main === 'string' ? view.main : view.kind;
+  if (main === 'ci') return 'CI page';
   return `${String(main ?? 'Citadel').replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase())} page`;
 }
 

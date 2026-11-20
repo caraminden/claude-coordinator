@@ -25,7 +25,8 @@ button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opa
 .attachments[hidden] { display: none; }
 .attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
 .attachments .thumb { position: relative; }
-.attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+/* Contain, not cover: a wide picture (a pointed-at heading's strip, #1141) shows whole rather than its empty middle. */
+.attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: contain; background: var(--code-bg); border-radius: 6px; border: 1px solid var(--line); }
 .attachments .thumb button.remove { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 .attachments { align-items: center; }
 /* Clicking a thumbnail shows it full size (#654), ready to draw on (#946, public/annotate.js). */

@@ -62,7 +62,6 @@ skill step is skipped or uses its default.
 - **Decisions log (ADRs):** `docs/adr/`.
 - **Retros:** none yet; the first goes in `docs/retros/`.
 - **Bug classes of its own:** none beyond the bug-fixing skill's.
-- **Rubrics:** docs/rubrics/
 - **Numbered things:** none: `MIGRATIONS` in `src/db.ts` is keyed by table and column, and the
   version in `package.json` never moves. `tools/land.sh` has no collision check; the kit's
   template does.

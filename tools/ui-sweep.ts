@@ -1,6 +1,6 @@
 // The whole-app UI sweep (#471): every screen and common state of Citadel, shot at desktop and phone
 // widths on a dev copy of the live data, with the ui-measure numbers beside each shot, for the
-// citadel:critic Grunts (docs/rubrics/ui-screenshots.md) to judge. Re-run it after a batch of fixes.
+// citadel:critic Grunts (the UI screenshots critic) to judge. Re-run it after a batch of fixes.
 //
 //   node tools/ui-sweep.ts [--out <dir, default $TMPDIR/ui-sweep-out>] [--db <copy>] [--only name,name] [--list] [--keep]
 //

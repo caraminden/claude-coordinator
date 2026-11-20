@@ -37,4 +37,4 @@ part there (and to the design-system home), so every page gets it.
    `settingsRow` and `showFirst`, so what a person opened stays open.
 
 Screenshot it closed and opened, at desktop and phone (`.claude/rules/ui-checks.md`); the rubric's "First look"
-checks (`docs/rubrics/ui-screenshots.md`) are what a review looks for.
+checks (the UI screenshots critic on the Reviewers and critics page) are what a review looks for.

@@ -293,6 +293,7 @@ test("a failure that repeats is said once, and said again when it changes or aft
     writeFileSync(broken, good);
     await w.tick();
     assert.ok(said.some((m) => /works again|recovered/.test(m)), 'it says when it recovers');
+    await w.finish(GREEN);
     writeFileSync(broken, 'garbage\n');
     await w.tick();
     assert.equal(said.filter((m) => /failed/.test(m)).length, 2, 'a new failure after a recovery is said');

@@ -1,0 +1,29 @@
+# Builds the Citadel desktop app's Windows zip (#1269) and keeps it in the CI store as a release. Citadel's own
+# release target for it (citadel-app.json, "desktop") then publishes each run to the update feed once it has shipped.
+# Runs only when desktop/ changes on main (deploy.sh pushes main after each deploy); by hand with workflow_dispatch.
+# desktop/build.sh runs on Linux and compiles nothing.
+name: desktop
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the Windows zip
+        run: desktop/build.sh "$RUNNER_TEMP/citadel-desktop.zip"
+      - name: Keep the zip as a release
+        run: tools/ci-upload.sh --kind release --name citadel-desktop.zip "$RUNNER_TEMP/citadel-desktop.zip"

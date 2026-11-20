@@ -261,7 +261,7 @@ export function jobsOf(text: string): Map<string, string> {
   return jobs ? children(jobs.body) : new Map();
 }
 
-const PUBLISHES = /gh release (create|upload)|action-gh-release|actions\/create-release|actions\/upload-release-asset/;
+const PUBLISHES = /gh release (create|upload)|action-gh-release|actions\/create-release|actions\/upload-release-asset|ci-upload\.sh\s+--kind\s+release/;
 const RELEASE_JOB = /release|package|dist|publish|bundle|installer/i;
 
 /** A job's own `name:` (not a step's or an input's), unquoted, or null. */

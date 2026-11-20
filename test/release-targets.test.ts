@@ -183,6 +183,12 @@ test('shipsOn: a push to the default branch, a tag or a release ships; another b
   assert.deepEqual(ids(facts({ workflows: [{ path: '.github/workflows/ship.yml', text: wide }] })), ['ci ci:ship:release Windows']);
 });
 
+test('a job that keeps its build with ci-upload.sh --kind release ships a package, a build or report upload does not (#1269)', () => {
+  const wf = (kind: string) => `on:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: tools/ci-upload.sh --kind ${kind} out.zip\n`;
+  assert.deepEqual(ids(facts({ workflows: [{ path: '.github/workflows/desktop.yml', text: wf('release') }] })), ['ci ci:desktop:build Linux']);
+  assert.deepEqual(ids(facts({ workflows: [{ path: '.github/workflows/desktop.yml', text: wf('build') }] })), ['main main Main']);
+});
+
 test('the finder reads a scheme clone: a new scheme whose repo has a release workflow gets its row with no other step', async () => {
   const store = new Store(join(root, `f-${++n}.db`));
   const repo = join(root, `repo-${n}`);

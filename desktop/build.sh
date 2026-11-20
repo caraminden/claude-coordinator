@@ -3,8 +3,9 @@
 # its app (resources/app) and electron.exe renamed Citadel.exe. The zip is what #1148's feed takes (publish_desktop,
 # exe "Citadel.exe", started "file"). Runs on Linux with curl, unzip and zip; nothing is compiled.
 #   desktop/build.sh [out.zip]     (default: $TMPDIR/citadel-desktop.zip)
-# After a change here, publish the zip by hand: publish_desktop app "citadel", exe "Citadel.exe" (Citadel has no Windows
-# CI target to publish it). PCs pick it up on their next start but one; the page itself updates with every deploy.
+# A change under desktop/ that ships is built by .github/workflows/desktop.yml, which keeps the zip in the CI store as a
+# release; Citadel's "desktop" target (citadel-app.json) publishes it to the feed. PCs pick it up on their next start but
+# one; the page itself updates with every deploy. publish_desktop is only for a build made by hand.
 set -euo pipefail
 VERSION=45.4.1
 SHA256=2ba6223afa9121f42831fefe92c434334907540165294fc56697449d12e7cfe9

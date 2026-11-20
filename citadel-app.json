@@ -1,0 +1,5 @@
+{
+  "targets": [
+    { "id": "ci:desktop:release", "name": "Desktop app", "desktop": { "app": "citadel", "exe": "Citadel.exe", "started": "file", "title": "Citadel" } }
+  ]
+}

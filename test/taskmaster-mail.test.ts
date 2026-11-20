@@ -116,7 +116,7 @@ test('the route: wake: false leaves held mail, and a file goes into the receiver
   const theirs = await call('Cara', '/api/projects', { name: 'Theirs' });
   const { coordinator: tmMine } = await call('Cara', `/api/projects/${mine.id}`);
   const tm = `agent:${tmMine.id}`;
-  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'Theirs', text: 'see the write-up', need: 'ask', ...body });
+  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'Theirs', saw: 'see the write-up', checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask', ...body });
 
   const mineShared = projectSharedDir(data, mine.id);
   const theirShared = projectSharedDir(data, theirs.id);
@@ -132,7 +132,7 @@ test('the route: wake: false leaves held mail, and a file goes into the receiver
   assert.equal(got.length, 1);
   assert.equal(got[0].mail, true);
   // The path is Citadel's own line, outside the quoted text.
-  assert.match(got[0].text, /^> see the write-up\n\(Quoted from Taskmaster of Mine[^)]*\)\nCitadel copied a file it attached into your scheme's shared folder, where your minions can read it too: .*inbox\/Mine\/write-up\.md \(18 bytes\)$/);
+  assert.match(got[0].text, /^> What I saw: see the write-up\n> What I checked on my side: my own logs and repro\n> What I need: help\n> By when: today\n\(Quoted from Taskmaster of Mine[^)]*\)\nCitadel copied a file it attached into your scheme's shared folder, where your minions can read it too: .*inbox\/Mine\/write-up\.md \(18 bytes\)$/);
 
   // The same name again never overwrites the first copy; an absolute path in the sender's folder works too.
   assert.equal((await send({ wake: false, file: join(mineShared, 'reports', 'write-up.md') })).file, join(theirShared, 'inbox', 'Mine', 'write-up-2.md'));
@@ -179,7 +179,7 @@ test('need (#851): a fyi is held mail even with wake: true, is stored on the eve
   const { coordinator: tmMine } = await call('Cara', `/api/projects/${mine.id}`);
   const { coordinator: tmTheirs } = await call('Cara', `/api/projects/${theirs.id}`);
   const tm = `agent:${tmMine.id}`;
-  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'NeedTheirs', text: 'it is live', ...body });
+  const send = (body: object) => call(tm, '/api/taskmaster', { scheme: 'NeedTheirs', text: 'it is live', saw: 'it is live', checked: 'my own logs and repro', wanted: 'help', by: 'today', ...body });
   const events = async () => (await call('Cara', `/api/tickets/${tmTheirs.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
 
   await send({ need: 'fyi', wake: true });

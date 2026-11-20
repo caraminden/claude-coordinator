@@ -176,7 +176,7 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
       assert.match(r.body.error, new RegExp(`^Only a turn a Citadel admin asked for may do this, and this one is ${name}'s ask\\. Ask a Citadel admin or a member of the Citadel scheme to send the request in this chat\\.$`));
     }
     // Rachel isn't in Delve: her ask reaches Citadel's schemes no further than she could.
-    if (who === Rachel) assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', text: 'hi', need: 'ask' })).status, 404);
+    if (who === Rachel) assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', saw: 'hi', checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' })).status, 404);
     // Service status isn't anyone's chat: any turn reads it.
     assert.equal((await as('POST', '/api/host-check', { what: 'units', unit: 'citadel-*' })).status, 200, `units for ${name}`);
   }
@@ -195,5 +195,5 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
     for (const [method, path, body] of admin) assert.equal((await as(method, path, body)).status, 200, `${method} ${path} for ${who.name}`);
   }
   assert.equal(store.appInstructions().text, 'Be nice.');
-  assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', text: 'hi', need: 'ask' })).status, 202);
+  assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', saw: 'hi', checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' })).status, 202);
 });

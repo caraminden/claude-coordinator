@@ -1,5 +1,6 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
+import { checkAsk, formatAsk } from '../ask-form.ts';
 import { cleanMsgSettings, cleanNeverHold } from '../msg-settings.ts';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -1549,11 +1550,20 @@ export const projectRoutes: Route[] = [
       const from = caller!;
       const { store, runner } = app;
       const body = await readJson(req);
-      const text = str(body.text, 'Message', 10_000);
+      if (body.need == null && !body.saw) str(body.text, 'Message', 10_000); // an empty send is still told the message is missing
       // Held mail (#405): wake: false waits for the other Taskmaster's next turn instead of starting one.
       const checked = checkNeed(body);
       if ('error' in checked) throw new HttpError(400, checked.error);
       const { need } = checked;
+      // An ask (anything but a fyi) takes the four-part form (#1165); a fyi stays free text.
+      let text: string;
+      if (need === 'fyi') text = str(body.text, 'Message', 10_000);
+      else {
+        const form = checkAsk(body);
+        if ('error' in form) throw new HttpError(400, form.error);
+        text = formatAsk(form.ask);
+        if (text.length > 10_000) throw new HttpError(400, 'Message is too long: at most 10,000 characters, a longer one goes in file');
+      }
       const wake = body.wake !== false && need !== 'fyi';
       const { own, person, who, project } = schemeTarget(app, from, body.scheme);
       const to = await taskmasterTo(app, from, own, project, body.person);

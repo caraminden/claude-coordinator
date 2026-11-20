@@ -2,7 +2,7 @@
 // module shares without needing the shell (state, api, h, helpers) is base.js.
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
-import { onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { renderCost } from './cost.js';
 import { homeScheme, openStartScheme, renderSidebar } from './sidebar.js';
@@ -334,6 +334,17 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') keepOpenChat();
 });
 
+/** A ping for this desktop app's device (#1186; Electron has no Web Push), shown as sw.js shows one; a click opens its thread. */
+function desktopNotify({ endpoint, msg }) {
+  if (!window.citadelDesktop || endpoint !== `desktop:${localStorage.getItem(DESKTOP_PUSH)}`) return;
+  const n = new Notification(msg.title || 'Citadel', { body: msg.body || '', tag: msg.tag, renotify: !!msg.tag && !msg.silent, silent: !!msg.silent, icon: 'icon-192.png' });
+  n.onclick = () => {
+    window.citadelDesktop.show();
+    const hash = new URL(msg.url || '/c/', location.href).hash;
+    if (hash) openHash(hash);
+  };
+}
+
 function connectStream(catchUp = false) {
   if (stream || !me || keptOpen) return;
   clearTimeout(streamTimer);
@@ -376,6 +387,7 @@ function connectStream(catchUp = false) {
       if (view?.kind === 'project') renderSidebar();
     }
     if (msg.type === 'turn') renderCost();
+    if (msg.type === 'notify') desktopNotify(msg);
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'person_note') onPersonNote(msg);
     if (msg.type === 'ticket_pin') onTicketPin(msg);

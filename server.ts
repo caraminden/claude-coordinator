@@ -565,6 +565,11 @@ runner.secretsFor = (project, person) => secrets.forTurn(project, person);
 const pusher = new Pusher(store, loadVapidKeys(DATA_DIR));
 // Push services may contact the sender at this address; set from the first subscribe if not given.
 pusher.subject = process.env.PUSH_SUBJECT ?? store.getSetting<string>('push_subject') ?? pusher.subject;
+// A desktop app's ping (#1186) goes to its person's open pages; the page whose device it names shows it.
+pusher.local = (sub, msg) => {
+  const data = `data: ${JSON.stringify({ type: 'notify', endpoint: sub.endpoint, msg })}\n\n`;
+  for (const [res, who] of clients) if (who.name === sub.name && res.writableLength <= MAX_CLIENT_BACKLOG) res.write(data);
+};
 
 /** Ping everyone subscribed to the ticket's project (but `except`) if the trigger warrants it. */
 function notify(ticketId: number, trigger: PushTrigger, except: string | null = null) {

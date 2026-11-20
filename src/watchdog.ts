@@ -115,12 +115,13 @@ export interface Recipient {
  * push_subscriptions keeps them.
  */
 export function recipients(db: DatabaseSync): Recipient[] {
+  // Not a desktop app's device (#1186): hears through Citadel's own stream, down with it.
   const admins = db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
-    WHERE name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`).all() as any[];
+    WHERE endpoint NOT LIKE 'desktop:%' AND name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`).all() as any[];
   const owners = db.prepare(`SELECT s.name, s.endpoint, s.p256dh, s.auth, 'app:' || c.name AS key FROM contraptions c
     JOIN projects p ON p.id = c.home_scheme JOIN users u ON u.id = p.owner_id
     JOIN push_subscriptions s ON s.name = u.name COLLATE NOCASE
-    WHERE u.admin = 0 AND u.disabled_at IS NULL AND EXISTS (SELECT 1 FROM contraption_users cu
+    WHERE s.endpoint NOT LIKE 'desktop:%' AND u.admin = 0 AND u.disabled_at IS NULL AND EXISTS (SELECT 1 FROM contraption_users cu
       JOIN contraptions m ON m.id = cu.contraption_id WHERE m.name = 'mandate' AND cu.user_id = u.id)
     ORDER BY s.id, c.name`).all() as any[];
   const out: Recipient[] = admins.map((s) => ({ ...s, only: null }));

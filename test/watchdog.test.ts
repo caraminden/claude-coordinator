@@ -119,6 +119,8 @@ test('targets and recipients come from the database', () => {
   store.createUser({ name: 'Josh', login: 'josh', admin: true });
   store.createUser({ name: 'Pat', login: 'pat' });
   for (const n of ['Cara', 'Josh', 'Pat']) store.savePushSubscription(n, `https://push.example/${n}`, 'k', 'a');
+  // A desktop app's device hears through Citadel, down with it: never a watchdog recipient (#1186).
+  for (const n of ['Cara', 'Pat']) store.savePushSubscription(n, `desktop:00000000-0000-4000-8000-00000000000${n.length}`, '', '');
   const db = new DatabaseSync(join(dir, 'coordinator.db'));
   db.prepare(`INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at, folder)
     VALUES ('mandate', 'Mandate', 3001, 'p', 'q', 'h1', 0, 0, NULL), ('peek', 'Peek Auras', 3002, 'p', 'q', 'h2', 0, 0, ?)`).run(join(dir, 'peek'));

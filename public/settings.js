@@ -17,9 +17,17 @@ import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping
 
 // Web Push reaches this device with the app closed, for decisions, blockers and results only
 // (question cards, failed turns, threads set ready, try or blocked); see src/push.ts.
-const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+// The desktop app (#1186) has no Web Push: its device is `desktop:<id>`, the id kept under DESKTOP_PUSH, and its pings
+// come down the live stream while it runs (core.js shows them).
+export const DESKTOP_PUSH = 'citadel-desktop-push';
+const desktop = !!window.citadelDesktop;
+const pushSupported = desktop ? 'Notification' in window : 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
 async function pushSubscription() {
+  if (desktop) {
+    const id = localStorage.getItem(DESKTOP_PUSH);
+    return id && { endpoint: `desktop:${id}`, unsubscribe: async () => localStorage.removeItem(DESKTOP_PUSH) };
+  }
   const reg = await navigator.serviceWorker.ready;
   return reg.pushManager.getSubscription();
 }
@@ -33,6 +41,12 @@ function keyBytes(b64) {
 /** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
 async function pushOn() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
+  if (desktop) {
+    const id = localStorage.getItem(DESKTOP_PUSH) ?? crypto.randomUUID();
+    const state = await api('api/push/subscription', { method: 'PUT', body: { desktop: id } });
+    localStorage.setItem(DESKTOP_PUSH, id);
+    return state;
+  }
   const { publicKey } = await api('api/push/key');
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
@@ -163,7 +177,7 @@ export function notificationsPage() {
 }
 
 // Clicking a notification while the app is open: the service worker asks this tab to show the thread.
-if (pushSupported) {
+if (pushSupported && !desktop) {
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type !== 'open' || typeof e.data.url !== 'string') return;
     const hash = new URL(e.data.url, location.href).hash;

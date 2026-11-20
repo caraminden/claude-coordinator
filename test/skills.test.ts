@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { KIT_DIR, listSkills, skillTimeline, skillUsage, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
+import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
@@ -108,10 +108,82 @@ test('skillTimeline reads Skill and Agent calls, edits, errors, ships and turn e
   assert.ok(mine.tickets[0].shipped! > mine.events.at(-1)!.id);
   assert.deepEqual(Object.keys(usageFrom(skillTimeline(store.db, null, 0), 0).skills).sort(), ['citadel:grilling', 'citadel:self-review']);
   assert.equal(skillTimeline(store.db, a.id, Date.now() + 1000).events.length, 0, 'only the window');
-  const [one, two] = await Promise.all([skillUsage(store, a.id), skillUsage(store, a.id)]);
+  const [one, two] = await Promise.all([refreshUsage(store, a.id), refreshUsage(store, a.id)]);
   assert.equal(one, two, 'one scan for both');
   assert.deepEqual(Object.keys(one.skills), ['citadel:grilling']);
   assert.deepEqual(one.agents['Explore'].types, { feature: 1 });
+});
+
+test('an incremental refresh counts exactly what a fresh full scan and the old per-scheme query count', () => {
+  forgetUsage();
+  const store = new Store(join(root, 'parity.db'));
+  const a = store.createProject('PA', null);
+  const b = store.createProject('PB', null);
+  const mk = (p: number, title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara', kind: 'ticket' });
+  const t = mk(a.id, 'T'), u = mk(a.id, 'U'), v = mk(b.id, 'V');
+  store.props.set('minion', t.id, a.id, { type: 'bug' }, 'Cara');
+  const use = (name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu', name, input }] } });
+  const result = { type: 'result', subtype: 'success' };
+  const ev = (id: number, d: object) => store.addEvent(id, 'claude', d);
+  ev(t.id, use('Skill', { skill: 'citadel:self-review' }));
+  ev(t.id, use('Edit', { file_path: '/x' }));
+  ev(u.id, use('Skill', { skill: 'citadel:grilling' }));
+  ev(v.id, use('Agent', { subagent_type: 'Explore' }));
+  const old = ev(v.id, use('Skill', { skill: 'citadel:subagents' }));
+  ev(t.id, result);
+  const now = Date.now();
+  const stamp = () => store.db.prepare('UPDATE events SET created_at = ? + id * 1000 WHERE kind = ?').run(now - 100_000_000, 'claude');
+  stamp();
+  const first = scanSkills(store.db, 0, null, now);
+  const sees = (since: number, scan: ReturnType<typeof scanSkills>, project: number | null) => reportFor(scan.scan, scan.tickets, project, since);
+  // Later events: a skill after the edit, then a ship in the same turn turns it (and the earlier run) into "before a ship"; a note of a ship; a new minion.
+  ev(t.id, use('Edit', { file_path: '/y' }));
+  ev(t.id, use('Skill', { skill: 'citadel:bug-fixing' }));
+  ev(t.id, use('mcp__thread__hand_off_land', { summary: 's' }));
+  store.addEvent(t.id, 'note', { text: 'Shipped abc' });
+  ev(t.id, result);
+  ev(u.id, use('Skill', { skill: 'citadel:grilling' }));
+  const w = mk(b.id, 'W');
+  ev(w.id, use('Skill', { skill: 'citadel:grilling' }));
+  stamp();
+  const inc = scanSkills(store.db, 0, first.scan, now + 1000);
+  const full = scanSkills(store.db, 0, null, now + 1000);
+  assert.deepEqual(inc.scan.events, full.scan.events);
+  for (const p of [null, a.id, b.id]) {
+    assert.deepEqual(sees(0, inc, p), sees(0, full, p));
+    assert.deepEqual(sees(0, full, p), usageFrom(skillTimeline(store.db, p, 0), 0), 'the same counts as the per-scheme query');
+  }
+  assert.equal(sees(0, inc, a.id).skills['citadel:self-review'].phases['before a ship'], undefined, 'self-review ran before the edit, in an earlier turn');
+  assert.equal(sees(0, inc, a.id).skills['citadel:bug-fixing'].phases['before a ship'], 1);
+  assert.equal(sees(0, inc, a.id).skills['citadel:bug-fixing'].shipped, 1);
+  // A window that slides: the run at `old` falls out of it, and the incremental walk drops it as a fresh one never reads it.
+  const since = (store.db.prepare('SELECT created_at FROM events WHERE id = ?').get(old.id) as { created_at: number }).created_at;
+  const slid = scanSkills(store.db, since, inc.scan, now + 2000);
+  const slidFull = scanSkills(store.db, since, null, now + 2000);
+  assert.deepEqual(slid.scan.events, slidFull.scan.events);
+  assert.deepEqual(sees(since, slid, null), sees(since, slidFull, null));
+  assert.equal(sees(since, slid, null).skills['citadel:subagents'], undefined);
+  // A full re-read after FULL_SCAN_MS drops what a rewrite or a delete took out of the database.
+  store.db.prepare('DELETE FROM events WHERE ticket_id = ? AND kind = ?').run(u.id, 'claude');
+  assert.ok(scanSkills(store.db, 0, inc.scan, now + 3000).scan.events.some((e) => e.ticket_id === u.id), 'incremental keeps what it has seen');
+  assert.ok(!scanSkills(store.db, 0, inc.scan, now + 7 * 3_600_000).scan.events.some((e) => e.ticket_id === u.id), 'a full re-read does not');
+});
+
+test('cachedUsage answers from the last report at once and never waits on a scan', async () => {
+  forgetUsage();
+  const store = new Store(':memory:');
+  const a = store.createProject('CU', null);
+  const t = store.createTicket({ project_id: a.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind: 'ticket' });
+  store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'x', name: 'Skill', input: { skill: 'citadel:grilling' } }] } });
+  const t0 = Date.now();
+  assert.equal(cachedUsage(store, a.id, t0), null, 'no report before the first scan');
+  const first = await refreshUsage(store, a.id, t0);
+  assert.equal(cachedUsage(store, a.id, t0), first);
+  // Stale: the old report is served and a refresh starts behind it.
+  assert.equal(cachedUsage(store, a.id, t0 + 11 * 60_000), first);
+  const next = await refreshUsage(store, a.id, t0 + 11 * 60_000);
+  assert.notEqual(next, first);
+  assert.deepEqual(next.skills['citadel:grilling'].runs, 1);
 });
 
 let base = '';

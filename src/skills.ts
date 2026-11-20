@@ -18,6 +18,8 @@ export const KIT_DIR = join(import.meta.dirname, '..', 'kit');
 export const USAGE_DAYS = 14;
 /** How long a scheme's counts are reused: the walk reads two weeks of events. */
 const CACHE_MS = 10 * 60_000;
+/** A full re-read this often, so an event rewritten or deleted since the incremental scan's last look can't stay counted for long. */
+const FULL_SCAN_MS = 6 * 3_600_000;
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 export interface SkillItem {
@@ -192,15 +194,25 @@ export function usageFrom(t: SkillTimeline, since: number): UsageReport {
 /**
  * The events the Skills page (#1062, src/skills.ts) walks, in order: one scheme's (or every scheme's, `projectId` null) Claude
  * events since `since` that call a skill or a Grunt, edit a file, fail a tool, hand off a ship or end a turn; everything else
- * is left out in SQL. Its minions (number, title, type) and each one's newest "Shipped" note come with it.
+ * is left out in SQL. Its minions (number, title, type) and each one's newest "Shipped" note come with it. `range` reads only
+ * the ids after `range.after` up to `range.upTo`, for the incremental scan below.
  */
-export function skillTimeline(db: DatabaseSync, projectId: number | null, since: number): SkillTimeline {
-  // Event ids grow with time: start after the last turn that ended by `since`, so the rowid range skips everything older.
+export function skillTimeline(db: DatabaseSync, projectId: number | null, since: number, range?: { after: number; upTo: number }): SkillTimeline {
+  const from = windowStart(db, since);
+  const events = skillEvents(db, projectId, since, Math.max(from, range?.after ?? 0), range?.upTo ?? Number.MAX_SAFE_INTEGER);
+  return { events, tickets: skillTickets(db, events, from) };
+}
+
+/** Event ids grow with time: start after the last turn that ended by `since`, so the rowid range skips everything older. */
+function windowStart(db: DatabaseSync, since: number): number {
   const before = db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
-  const from = before?.event_id ?? 0;
+  return before?.event_id ?? 0;
+}
+
+function skillEvents(db: DatabaseSync, projectId: number | null, since: number, after: number, upTo: number): SkillEvent[] {
   const tools = (name: string, field: string, fallback: string) => `CASE WHEN e.data LIKE '%"name":"${name}"%' THEN (SELECT group_concat(coalesce(json_extract(c.value, '$.input.${field}'), '${fallback}'), ' ')
       FROM json_each(e.data, '$.message.content') c WHERE json_extract(c.value, '$.type') = 'tool_use' AND json_extract(c.value, '$.name') = '${name}') END`;
-  const events = db.prepare(`
+  return db.prepare(`
     SELECT * FROM (SELECT e.id, e.ticket_id, e.created_at AS at,
         ${tools('Skill', 'skill', '')} AS skills,
         ${tools('Agent', 'subagent_type', 'general-purpose')} AS agents,
@@ -210,53 +222,133 @@ export function skillTimeline(db: DatabaseSync, projectId: number | null, since:
         (e.data LIKE '{"type":"result"%') AS result,
         (e.data LIKE '%"parent_tool_use_id":"%') AS grunt
       FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE e.id > ?1 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
+      WHERE e.id > ?1 AND e.id <= ?4 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
     WHERE skills IS NOT NULL OR agents IS NOT NULL OR edit OR error OR ship OR result
-    ORDER BY ticket_id, id`).all(from, since, projectId) as unknown as SkillEvent[];
+    ORDER BY ticket_id, id`).all(after, since, projectId, upTo) as unknown as SkillEvent[];
+}
+
+function skillTickets(db: DatabaseSync, events: SkillEvent[], from: number): SkillTicket[] {
   const ids = [...new Set(events.map((e) => e.ticket_id))];
-  if (!ids.length) return { events, tickets: [] };
-  const tickets = db.prepare(`
+  if (!ids.length) return [];
+  return db.prepare(`
     SELECT k.id, k.project_id, k.number, k.title, k.kind,
       (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
         WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
       (SELECT max(n.id) FROM events n WHERE n.ticket_id = k.id AND n.kind = 'note' AND n.id > ?1 AND n.data LIKE '{"text":"Shipped %') AS shipped
     FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`).all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
-  return { events, tickets };
 }
 
-const cache = new Map<string, { at: number; report: UsageReport }>();
-const running = new Map<string, Promise<UsageReport>>();
+/** Every scheme's walked events (the rows `skillEvents` keeps) up to event id `hi`, kept between refreshes. */
+export interface SkillScan { hi: number; events: SkillEvent[]; fullAt: number }
 
 /**
- * A scheme's usage over the last USAGE_DAYS (`projectId` null: every scheme's), reused for CACHE_MS. The scan reads every
- * Claude event in the window (live: 555k rows, 800 MB of JSON, about a second), so it runs on a worker thread with its own
- * read-only connection, as the session worker does (#612); an in-memory store (tests) runs it here.
+ * Bring `prev` up to date: read only the Claude events after its `hi` (all of them, with no `prev` or when `prev` is older than
+ * FULL_SCAN_MS, which catches events a maintenance pass rewrote or a deleted minion took with it), drop the kept ones that
+ * fell out of the window, and keep the rest. The counts are then `usageFrom` over the whole list, never a running total, so
+ * they equal a fresh full scan (a later ship still turns an earlier run's phase into "before a ship").
  */
-export function skillUsage(store: Store, projectId: number | null, now = Date.now()): Promise<UsageReport> {
-  const key = String(projectId ?? 'all');
-  const hit = cache.get(key);
-  if (hit && now - hit.at < CACHE_MS) return Promise.resolve(hit.report);
-  const pending = running.get(key);
-  if (pending) return pending;
-  const since = now - USAGE_DAYS * 86_400_000;
-  const job: Promise<UsageReport> = store.path === ':memory:'
-    ? Promise.resolve(usageFrom(skillTimeline(store.db, projectId, since), since))
-    : new Promise((resolve, reject) => {
-        const worker = new Worker(new URL(import.meta.url), { workerData: { skillUsage: { path: store.path, projectId, since } } });
-        worker.once('message', resolve);
-        worker.once('error', reject);
-        worker.once('exit', (code) => reject(new Error(`the skill usage worker stopped (exit code ${code}) before it finished`)));
-      });
-  const done = job.then((report) => (cache.set(key, { at: now, report }), report)).finally(() => running.delete(key));
-  running.set(key, done);
+export function scanSkills(db: DatabaseSync, since: number, prev: SkillScan | null, now = Date.now()): { scan: SkillScan; tickets: SkillTicket[] } {
+  const full = !prev || now - prev.fullAt >= FULL_SCAN_MS;
+  db.exec('BEGIN');
+  try {
+    const hi = (db.prepare("SELECT max(id) AS hi FROM events").get() as { hi: number | null }).hi ?? 0;
+    const from = windowStart(db, since);
+    const fresh = skillEvents(db, null, since, full ? from : Math.max(from, prev!.hi), hi);
+    const events = full ? fresh : [...prev!.events.filter((e) => e.at > since), ...fresh].sort((a, b) => a.ticket_id - b.ticket_id || a.id - b.id);
+    return { scan: { hi, events, fullAt: full ? now : prev!.fullAt }, tickets: skillTickets(db, events, from) };
+  } finally {
+    db.exec('COMMIT');
+  }
+}
+
+/** One scheme's report from every scheme's walk (`projectId` null: all of it). */
+export function reportFor(scan: SkillScan, tickets: SkillTicket[], projectId: number | null, since: number): UsageReport {
+  if (projectId == null) return usageFrom({ events: scan.events, tickets }, since);
+  const mine = tickets.filter((k) => k.project_id === projectId);
+  const ids = new Set(mine.map((k) => k.id));
+  return usageFrom({ events: scan.events.filter((e) => ids.has(e.ticket_id)), tickets: mine }, since);
+}
+
+/** A scan's result: the scan to keep and a report per key asked for ("all" or a scheme's id). */
+interface Refreshed { scan: SkillScan; reports: Record<string, UsageReport> }
+const keyOf = (projectId: number | null) => String(projectId ?? 'all');
+function refresh(db: DatabaseSync, since: number, prev: SkillScan | null, keys: string[], now: number): Refreshed {
+  const { scan, tickets } = scanSkills(db, since, prev, now);
+  return { scan, reports: Object.fromEntries(keys.map((k) => [k, reportFor(scan, tickets, k === 'all' ? null : Number(k), since)])) };
+}
+
+const reports = new Map<string, { at: number; report: UsageReport }>();
+const wanted = new Set<string>();
+let kept: SkillScan | null = null;
+let running: Promise<void> | null = null;
+
+/**
+ * A scheme's usage over the last USAGE_DAYS (`projectId` null: every scheme's), straight from the last report and however old
+ * it is, or null before the first scan has finished. A report older than CACHE_MS (or none for this scheme) starts a refresh in
+ * the background: nobody waits on the scan.
+ */
+export function cachedUsage(store: Store, projectId: number | null, now = Date.now()): UsageReport | null {
+  const hit = reports.get(keyOf(projectId));
+  if (!hit || now - hit.at >= CACHE_MS) void refreshUsage(store, projectId, now).catch(() => {});
+  return hit?.report ?? null;
+}
+
+/**
+ * Refresh the reports (all that were asked for so far, plus this one) and resolve with this scheme's. Sessions asking at once
+ * share one scan. The scan reads only the events since the last one, on a worker thread with its own read-only connection, as
+ * the session worker does (#612); an in-memory store (tests) runs it here. The live volume is 562k events, 850 MB of JSON: a
+ * full scan is about 2 s, an incremental one a few ms.
+ */
+export function refreshUsage(store: Store, projectId: number | null, now = Date.now()): Promise<UsageReport> {
+  const key = keyOf(projectId);
+  wanted.add(key);
+  const answer = () => reports.get(key)!.report;
+  const go = (): Promise<void> => {
+    const keys = [...wanted];
+    const since = now - USAGE_DAYS * 86_400_000;
+    const job: Promise<Refreshed> = store.path === ':memory:'
+      ? Promise.resolve(refresh(store.db, since, kept, keys, now))
+      : new Promise((resolve, reject) => {
+          const worker = new Worker(new URL(import.meta.url), { workerData: { skillUsage: { path: store.path, since, prev: kept, keys, now } } });
+          worker.once('message', resolve);
+          worker.once('error', reject);
+          worker.once('exit', (code) => reject(new Error(`the skill usage worker stopped (exit code ${code}) before it finished`)));
+        });
+    return job.then((r) => {
+      kept = r.scan;
+      for (const [k, report] of Object.entries(r.reports)) reports.set(k, { at: now, report });
+    });
+  };
+  const fresh = reports.get(key);
+  if (fresh && now - fresh.at < CACHE_MS) return Promise.resolve(fresh.report);
+  // A refresh already running started before this key was asked for: when it ends, a missing key gets its own.
+  const done = (running ??= go().finally(() => (running = null))).then(() => (reports.has(key) ? answer() : refreshUsage(store, projectId, now)));
   return done;
 }
 
+/** Forget every report and the kept scan (tests; the reports are keyed by scheme id, which every test database reuses). */
+export function forgetUsage(): void {
+  reports.clear();
+  wanted.clear();
+  kept = null;
+}
+
+/** Warm the reports at boot, then keep them fresh, so the page never meets a cold cache. */
+export function warmUsage(store: Store): void {
+  if (store.path === ':memory:') return;
+  const warm = () => {
+    for (const p of store.listProjects()) wanted.add(keyOf(p.id));
+    refreshUsage(store, null).catch((err) => console.error('skill usage warm-up:', err.message));
+  };
+  setTimeout(warm, 5_000).unref();
+  setInterval(warm, CACHE_MS / 2).unref();
+}
+
 if (!isMainThread && workerData?.skillUsage) {
-  const { path, projectId, since } = workerData.skillUsage as { path: string; projectId: number | null; since: number };
+  const { path, since, prev, keys, now } = workerData.skillUsage as { path: string; since: number; prev: SkillScan | null; keys: string[]; now: number };
   const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
   try {
-    parentPort!.postMessage(usageFrom(skillTimeline(db, projectId, since), since));
+    parentPort!.postMessage(refresh(db, since, prev, keys, now));
   } finally {
     db.close();
   }

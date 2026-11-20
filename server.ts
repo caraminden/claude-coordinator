@@ -98,6 +98,7 @@ import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { skillRoutes } from './src/routes/skills.ts';
+import { warmUsage } from './src/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
 import { writeOffThread } from './src/db-writer.ts';
@@ -567,6 +568,7 @@ try {
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
+if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
 // Waiting minions' prompt caches stay warm in working hours (#862, src/keepalive.ts).
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('keepalives', () => runner.keepaliveSweep()), 60_000).unref();

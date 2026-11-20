@@ -57,7 +57,7 @@ export async function pushOff() {
 let pushState = { subscribed: false, muted: [] };
 
 /**
- * "Open links in Firefox" (#988): this device sends external links to Firefox through Windows (extlinks.js), for an
+ * "Open links in Firefox" (#988): this device sends external links and downloads (#1184) to Firefox through Windows (extlinks.js), for an
  * installed Chrome or Edge app that would open them in its own browser. Off until turned on; null where it can't work
  * (anything but a Windows desktop).
  */
@@ -66,9 +66,9 @@ export function firefoxControls() {
   const on = h('input', { type: 'checkbox', checked: firefoxOn() });
   on.addEventListener('change', () => { setFirefoxOn(on.checked); hint.hidden = !on.checked; });
   const hint = h('span', { class: 'hint', hidden: !on.checked }, 'Needs a one-time setup on this PC: ',
-    h('a', { href: 'citadel-firefox-link.ps1', download: '' }, 'download the setup script'), ', run it in PowerShell, and tick "Always allow" when the browser asks.');
+    h('a', { href: 'citadel-firefox-link.ps1', download: '', 'data-here': '' }, 'download the setup script'), ', run it in PowerShell, and tick "Always allow" when the browser asks.');
   return h('div', { class: 'account-card' }, h('h3', {}, 'Links on this device'),
-    h('label', { class: 'toggle', title: 'Send links to other websites to Firefox, not this browser. Needs a one-time setup on this PC' }, on, 'Open links in Firefox'), hint);
+    h('label', { class: 'toggle', title: 'Send links to other websites, and downloads, to Firefox, not this browser. Needs a one-time setup on this PC' }, on, 'Open links in Firefox'), hint);
 }
 
 /**

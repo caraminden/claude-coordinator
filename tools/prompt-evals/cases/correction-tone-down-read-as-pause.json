@@ -1,0 +1,36 @@
+{
+  "id": "correction-tone-down-read-as-pause",
+  "kind": "correction",
+  "source": "Citadel Taskmaster, event 423848, 2026-11-10 17:32 PST (Cara: \"I didnt want to pause fable, just go back to our normal system where it is used when it makes sense (higher complexity tasks)\" around 438060)",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "7973f94b",
+  "from": "Cara",
+  "history": "This week was a Fable burst: Cara bought Fable resets and asked for more hard work on Fable 5.2 than usual, so several Citadel minions (#470 flaky tests, #475 the server.ts refactor, #476 ultra review follow-up, #492 the walls-of-text design) and other schemes' hard work ran on Fable. The standing policy outside a burst: Fable at medium for hard-tier work only (design, hard bugs, big refactors, risk reviews), Opus or Sonnet for the rest, Fable under about 30% of the week. Cara has one Fable reset left.",
+  "message": "ok, I used a fable reset, lets tone down the fable usage for a bit now so we can save the last fable reset for next week?",
+  "facts": [
+    {
+      "tool": "list_tickets",
+      "match": "",
+      "result": "Running on Fable: #470 flaky tests (hard), #475 server.ts refactor (hard), #476 ultra review follow-up (hard), #492 walls-of-text design (hard), #480 docs sweep (routine), #483 test renames (routine), #486 settings copy edits (routine).",
+      "why": "which minions were on Fable"
+    }
+  ],
+  "right": "End the burst and go back to the standing policy: move routine work off Fable, keep Fable for the hard-tier minions, and tell other Taskmasters the burst is over (or ask Cara if \"tone down\" is unclear), not that Fable is off.",
+  "wrong": "Read \"tone down\" as \"pause\": told six Taskmasters (urgent) and its minions to move every Fable minion to Opus and use no Fable Grunts until a person turns Fable back on.",
+  "checks": [
+    {
+      "noCall": "message_taskmaster|message_minion|message_ticket|update_ticket|create_ticket",
+      "input": "(no|stop using) fable grunts|until (a person|someone|cara)[^\"]{0,60}(says|turns)|fable (is )?paused|pause fable|every fable minion",
+      "why": "toning down is the normal policy, not a Fable ban"
+    },
+    {
+      "noText": "\\bfable (is|stays) (now )?paused|start nothing on fable",
+      "why": "the claim Cara took back"
+    }
+  ]
+}

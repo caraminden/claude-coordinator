@@ -457,6 +457,8 @@ export interface TurnFacts {
   homeContraptions: string[];
   /** Machines this minion may queue jobs on (#857): queue_job, job_status and stop_job are offered only with one. */
   jobMachines?: string[];
+  /** It is in the seam trial's fresh group (#1129): offered fresh_session, from its enrolment on so its tool list stays put. */
+  seamTrial?: boolean;
   /** It is the run of its scheme's app turns check working now: offered contraption_turns (#844). */
   appTurnsRun?: boolean;
   /** For the Citadel scheme's Taskmaster on a Citadel member's ask, what it may read in every scheme (#656); else null. */
@@ -593,6 +595,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
   args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
   env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+  // The kit's title check (kit/hooks/answer-check.ts, #1154) compares the title the turn starts with to its prompt. Not
+  // COORDINATOR_: those count toward the cached prefix's fingerprint (src/keepalive.ts), which a rename doesn't change.
+  if (ticket.kind !== 'coordinator') env.CITADEL_MINION_TITLE = ticket.title;
   // The server login's extra Claude account (#779): its own config folder, so nothing of the host's own login may win over it.
   if (place.host && place.env) {
     for (const v of AUTH_VARS) delete env[v];
@@ -649,6 +654,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // A minion may propose new notes for the machines its turn got (#617).
   if (ticket.kind !== 'coordinator' && machines.length) env.COORDINATOR_MACHINES = machines.map((m) => m.name).join(',');
   if (facts.jobMachines?.length) env.COORDINATOR_JOB_MACHINES = facts.jobMachines.join(',');
+  if (facts.seamTrial && ticket.kind !== 'coordinator') env.COORDINATOR_SEAM_TRIAL = '1';
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {

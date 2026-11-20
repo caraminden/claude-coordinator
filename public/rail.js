@@ -13,7 +13,7 @@
 
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { optimistic } from './ui/optimistic.js';
-import { appHash, appLink, classifyLink, firefoxLink, firefoxOn, launchFirefox, mirrorFirefox, mirroredOn, mountLinkHandler, onFirefoxChange } from './extlinks.js';
+import { appHash, appLink, classifyLink, firefoxDownload, firefoxLink, firefoxOn, launchFirefox, mirrorFirefox, mirroredOn, mountLinkHandler, onFirefoxChange } from './extlinks.js';
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -789,8 +789,9 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 }
 
 // "Open links in Firefox" (#988): Citadel's own pages act on a click; a framed contraption sends the address up to Citadel.
+// Downloads go to Firefox from Citadel's own pages only (#1184): a contraption's files need its own login, which a link can't carry.
 if (typeof document !== 'undefined' && !inContraption) {
-  mountLinkHandler({ on: firefoxOn, own: ownHosts, apps: appHosts, domain: appsDomain, self: () => null, open: launchFirefox, openWindow: (url) => location.assign(url), openApp: (link) => { location.hash = appHash(link); } });
+  mountLinkHandler({ on: firefoxOn, own: ownHosts, apps: appHosts, domain: appsDomain, self: () => null, open: launchFirefox, download: (address) => firefoxDownload(address), openWindow: (url) => location.assign(url), openApp: (link) => { location.hash = appHash(link); } });
   onFirefoxChange(() => tellFrames());
 }
 if (typeof document !== 'undefined' && host) {

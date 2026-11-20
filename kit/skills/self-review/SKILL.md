@@ -25,9 +25,17 @@ line: everything is on, as written here.
 - **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (see "Fresh eyes" in 2). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
 - **Additions:** add `Also read <file>, this scheme's additions to the review` to the brief.
 
+## Facts at load
+
+These ran when the skill loaded; don't fetch them again unless they say UNCOMMITTED, say a piece is
+missing, show the stat or file list cut (more than about 40 files), or you commit or change files after this point (then re-run the section 1 commands).
+
+!`${CLAUDE_SKILL_DIR}/scripts/arrive.sh`
+
 ## 1. Size the diff
 
-Commit first, then `git diff --stat main...HEAD` (three dots: only what this branch changed).
+Commit first (the facts above already cover it when nothing says UNCOMMITTED), then
+`git diff --stat main...HEAD` (three dots: only what this branch changed) when you need it again.
 
 - **Skip** when under about 20 changed lines and every change is docs (`docs/`, `README.md`) or
   user-visible text in the front end with no logic touched. Label it `low: docs/copy only` and go
@@ -133,7 +141,7 @@ reason. Record the run with `review_set` (slug `fresh-eyes`).
 ## 3. Fix what's real
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
-and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
+(the files you touched, plus the repo's affected-tests command if its Project facts name one) and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
 list with a reason, not silently away. Comments from a person, a GitHub review or Codex go
 through "Receiving review" in `references/lenses.md` part 2. On a UI change, also check your own
 desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,

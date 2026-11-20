@@ -64,13 +64,16 @@ export function mergeCard(app: App, chat: Ticket, asker: Ticket, card: Card): { 
 /** The Taskmaster that last wrote to a minion (#919): its next message_coordinator goes there, once. */
 export const replyToKey = (ticketId: number) => `minion_reply_to:${ticketId}`;
 
-/** Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. */
-export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string) {
+/**
+ * Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. `notice`: the server's
+ * own word about the minion (its budget, #1114), which goes to the owner's and leaves the minion's reply routing for its reply.
+ */
+export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string, notice = false) {
   const { store, runner } = app;
   await ensureCoordinator(app, store.getProject(ticket.project_id)!);
   // A reply goes to the Taskmaster that asked, else its owner's gets it as sent (#919); every other touched person's own gets held mail.
-  const asked = store.getTicket(store.getSetting<number>(replyToKey(ticket.id)) ?? 0);
-  store.deleteSetting(replyToKey(ticket.id));
+  const asked = notice ? undefined : store.getTicket(store.getSetting<number>(replyToKey(ticket.id)) ?? 0);
+  if (!notice) store.deleteSetting(replyToKey(ticket.id));
   const owner = store.ownerCoordinator(ticket)!;
   const coordinator = asked?.kind === 'coordinator' && asked.project_id === ticket.project_id ? asked : owner;
   const author = `#${ticket.number} ${ticket.title}`;

@@ -8,7 +8,9 @@ import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
+import { ShipLessons } from './ship-lessons.ts';
 import { Memory } from './memory.ts';
+import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 
@@ -1249,6 +1251,22 @@ CREATE TABLE IF NOT EXISTS flake_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
+-- Three lines after every ship (src/ship-lessons.ts, #1119): what a minion had to find out that its brief or the docs
+-- didn't say, queued per scheme for the weekly Ship lessons pass. lines '' is a ship that said nothing. No foreign keys:
+-- the lines outlive the minion.
+CREATE TABLE IF NOT EXISTS ship_lessons (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  ticket_id INTEGER,
+  number INTEGER,
+  lines TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'land',
+  at INTEGER NOT NULL,
+  taken_at INTEGER,
+  taken_note TEXT
+);
+CREATE INDEX IF NOT EXISTS ship_lessons_scheme ON ship_lessons(project_id, at);
 -- Who touched a minion (#919): requested, assigned, wrote in its chat or answered its card. It only grows;
 -- left_at is set when the person leaves it, and a later touch rejoins. Updates reach each touched person's Taskmaster.
 CREATE TABLE IF NOT EXISTS ticket_touches (
@@ -1494,8 +1512,10 @@ export const SCHEMA_HISTORY = [
   [84, 'events_errors index (#1178)'],
   [85, 'ticket_picks (#1061)'],
   [86, 'memory_proposals (#1111)'],
-  [87, 'contraptions.subdir (#1136)'],
-  [88, 'contraption_push_devices (#1138)'],
+  [87, 'ship_lessons (#1119)'],
+  [88, 'minion_index and handoff_index, full-text (#1156)'],
+  [89, 'contraptions.subdir (#1136)'],
+  [90, 'contraption_push_devices (#1138)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1540,8 +1560,12 @@ export class Store {
   reviews: ReviewSet;
   /** Single-holder duties such as the pipeline lane (src/claims.ts, #921). */
   claims: Claims;
+  /** Three lines after every ship, per scheme (src/ship-lessons.ts, #1119). */
+  lessons: ShipLessons;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
+  /** Past minions and handoffs, full-text, for search_minions and the scout (src/minion-index.ts, #1156). */
+  minionIndex: MinionIndex;
   /** The memory curator's proposals, waiting on a member (src/memory-curator.ts, #1111). */
   memoryProposals: MemoryProposals;
   /** The database file; the runner keeps its turn folders beside it. */
@@ -1567,13 +1591,15 @@ export class Store {
       this.schedules = new Schedules(this.db);
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
+    this.lessons = new ShipLessons(this.db);
       this.memory = new Memory(this);
+      this.minionIndex = new MinionIndex(this);
       this.memoryProposals = new MemoryProposals(this.db);
       return;
     }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} ${MINION_INDEX_SCHEMA} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
     this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
@@ -1594,7 +1620,9 @@ export class Store {
     this.schedules = new Schedules(this.db);
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
+    this.lessons = new ShipLessons(this.db);
     this.memory = new Memory(this);
+    this.minionIndex = new MinionIndex(this);
     this.memoryProposals = new MemoryProposals(this.db);
     this.serverLoginOwnerOnly();
     this.groupByType();
@@ -2542,6 +2570,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
+    this.minionIndex.deleteTicket(id);
     this.claims.releaseHeldBy(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
@@ -3479,6 +3508,18 @@ export class Store {
   /** What a ticket's turns have cost so far; `hostOnly`: the server login's turns only. */
   ticketCost(ticketId: number, hostOnly = false): number {
     return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c;
+  }
+
+  /**
+   * Every closed minion created since `since` that cost anything (open ones are still short of their final cost), every scheme (#1114): its `type` property (null untyped),
+   * the model it was set to or last ran on, and what its turns cost. src/minion-budget.ts takes the usual cost from these.
+   */
+  minionCosts(since: number): { type: string | null; model: string | null; cost: number }[] {
+    return this.db.prepare(`SELECT (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
+          WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
+        coalesce(k.model, k.last_model) AS model, c.cost
+      FROM tickets k JOIN (SELECT ticket_id, SUM(cost_usd) AS cost FROM turns GROUP BY ticket_id) c ON c.ticket_id = k.id
+      WHERE k.kind = 'ticket' AND k.status = 'closed' AND k.created_at >= ? AND c.cost > 0`).all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
   }
 
   /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */

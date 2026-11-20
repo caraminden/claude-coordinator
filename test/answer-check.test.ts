@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { answerCheck, answerHook, liveClaimCheck, liveClaims, placeholderInCommand, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
+import { answerCheck, answerHook, liveClaimCheck, liveClaims, placeholderInCommand, processLine, proposalLine, readTurn, shipReviewCheck, statusLineCheck, titleCheck } from '../kit/hooks/answer-check.ts';
 
 // Fixture transcripts in Claude Code's JSONL shape: the prompt carries promptId, assistant entries don't.
 const prompt = (text: string, promptId = 'p1') => ({ type: 'user', promptId, message: { role: 'user', content: [{ type: 'text', text }] } });
@@ -103,8 +103,9 @@ test('answer hook: logs each hit as a would-refuse line and refuses nothing; the
     }
   };
   // Claude Code's last_assistant_message wins over the transcript.
-  assert.deepEqual(answerHook(input, env), ['thin last message · 5 tool calls · "Now the tests."']);
-  assert.equal(lines().length, 1);
+  // A minion's reply with no status line is a hit too (#1154).
+  assert.deepEqual(answerHook(input, env), ['thin last message · 5 tool calls · "Now the tests."', 'no status line · "…Now the tests."']);
+  assert.equal(lines().length, 2);
   assert.match(lines()[0], / · would refuse · thin last message · 5 tool calls · "Now the tests\."$/);
   assert.deepEqual(answerHook(input, { COORDINATOR_SHARED_DIR: shared }), [], 'not a Citadel turn');
   assert.equal(answerHook(input, { ...env, COORDINATOR_ROLE: 'coordinator' }).length, 1, 'Taskmasters keep the rule too');
@@ -122,14 +123,14 @@ test('answer hook: logs each hit as a would-refuse line and refuses nothing; the
   const last = run({ ...job, stop_hook_active: true });
   assert.equal(last.status, 0);
   assert.equal(last.stdout, '', 'the trial prints no block');
-  assert.equal(lines().length, before + 1, 'the stop that ends the turn is judged');
+  assert.equal(lines().length, before + 2, 'the stop that ends the turn is judged');
   const plain = script({});
   assert.equal(plain.stdout, '');
-  assert.equal(lines().length, before + 2);
+  assert.equal(lines().length, before + 4);
   // #1031: a stop with a Grunt still running goes through, but the Grunt's result wakes the turn: not its end yet.
   const grunt = script({ prompt_id: 'p9', background_tasks: [{ id: 'a7', status: 'running', type: 'subagent', description: 'review' }] });
   assert.equal(grunt.stdout, '', 'a Grunt never blocks the stop');
-  assert.equal(lines().length, before + 2, 'and its interim reply is not judged');
+  assert.equal(lines().length, before + 4, 'and its interim reply is not judged');
   assert.equal(script({ transcript_path: '/nonexistent/t.jsonl', last_assistant_message: undefined }).status, 0, 'fails open');
 });
 
@@ -267,4 +268,67 @@ test('a stop sent back for a proposal logs no would-refuse line: the stop that e
   const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
   assert.match(log, /refused stop · proposal without a card/);
   assert.doesNotMatch(log, /would refuse/);
+});
+
+// The minion checks (#1154): count only, minions only.
+const tool = (name: string, input: object, i: number) => [
+  { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `u${i}`, name, input }] } },
+  { type: 'user', promptId: 'p1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `u${i}`, content: 'ok' }] } },
+];
+
+test('status line check: none, or one Citadel would ignore, is a hit; a readable one, plain null included, is not', () => {
+  const turn = (text: string) => readTurn(jsonl(prompt('go'), say(text)), 'p1');
+  assert.deepEqual(statusLineCheck(turn('Shipped it.')), ['no status line · "…Shipped it."']);
+  assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {state: ready} -->')), ['unreadable status line · "{state: ready}"']);
+  assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {"colour":"red"} -->')), ['unreadable status line · "{"colour":"red"}"']);
+  assert.deepEqual(statusLineCheck(turn('')), [], 'a turn with no closing text is the thin-message check\'s');
+  assert.match(statusLineCheck(turn('Quoted `<!-- status: {"state":"ready"} -->` mid-reply, then more words.'))[0], /^no status line/, 'only a trailer at the very end counts');
+  for (const ok of ['Done.\n<!-- status: {"state":"ready","note":"shipped"} -->', 'Card below.\n<!-- status: null -->', 'Done.\n`<!-- status: {"note":"x"} -->`\n'])
+    assert.deepEqual(statusLineCheck(turn(ok)), [], ok);
+  assert.deepEqual(statusLineCheck(readTurn(jsonl(prompt('go'), say('Half'), steer('[Cara]: stop')), 'p1')), [], 'a steered turn is skipped');
+});
+
+test('title check: a first turn that ends with the title still its prompt\'s opening words is a hit; setting a title or a later turn is not', () => {
+  const first = '[System]: You are a minion.\n[Josh]: Fix the sidebar so it shows the phases of a turn and the counts';
+  const title = 'Fix the sidebar so it shows the phases…';
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt(first), calls(['Read']), say('Done.')), 'p1'), title), [`title still the opening words · "${title}"`]);
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt('Fix the sidebar so it shows the phases of a turn'), say('Done.')), 'p1'), title).length, 1, 'a prompt with no sender tag');
+  const renamed = readTurn(jsonl(prompt(first), tool('mcp__thread__set_thread_status', { title: 'Sidebar shows phases' }, 1), say('Done.')), 'p1');
+  assert.deepEqual(titleCheck(renamed, title), []);
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt(first), tool('mcp__thread__set_thread_status', { note: 'x' }, 1), say('Done.')), 'p1'), title).length, 1, 'a note alone renames nothing');
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt('[Josh]: looks good, ship it'), say('Done.')), 'p1'), title), [], 'a later turn');
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt(first), say('Done.')), 'p1'), 'Sidebar shows phases'), [], 'a title someone gave');
+  assert.deepEqual(titleCheck(readTurn(jsonl(prompt(first), say('Done.')), 'p1'), undefined), [], 'no title in the env (an older server)');
+});
+
+test('ship check: a hand-off with no self-review in the session is a hit; a review before, after or in an earlier turn is not', () => {
+  const ship = (n: number) => tool('mcp__thread__hand_off_land', { summary: 'x' }, n);
+  const skill = (n: number) => tool('Skill', { skill: 'citadel:self-review' }, n);
+  const grunt = (n: number) => tool('Agent', { subagent_type: 'citadel:reviewer', prompt: 'review' }, n);
+  const check = (...entries: any[]) => {
+    const t = jsonl(...entries);
+    return shipReviewCheck(readTurn(t, 'p1'), t);
+  };
+  assert.deepEqual(check(prompt('go'), calls(['Edit', 'Bash']), ship(9), say('Handed off.')), ['ship with no self-review']);
+  assert.deepEqual(check(prompt('go'), tool('mcp__thread__land', {}, 9), say('Shipped.')), ['ship with no self-review'], 'the land tool too');
+  assert.deepEqual(check(prompt('go'), skill(1), ship(9), say('Handed off.')), []);
+  assert.deepEqual(check(prompt('go'), ship(9), grunt(2), say('Handed off, reviewed alongside.')), [], 'a low-risk ship reviewed while it ships');
+  assert.deepEqual(check(prompt('first', 'p0'), skill(1), say('Reviewed.'), prompt('ship it'), ship(9), say('Handed off.')), [], 'a review in an earlier turn');
+  assert.deepEqual(check(prompt('go'), tool('Agent', { subagent_type: 'Explore' }, 1), ship(9), say('x')), ['ship with no self-review'], 'any other Grunt is no review');
+  assert.deepEqual(check(prompt('go'), calls(['Edit']), say('No ship.')), [], 'a turn that shipped nothing');
+});
+
+test('the minion checks run for minions only, and only count', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
+  const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
+  writeFileSync(path, jsonl(prompt('[Josh]: Fix the sidebar so it shows the phases of a turn'), tool('mcp__thread__hand_off_land', {}, 1), say('Handed off.')));
+  const input = { hook_event_name: 'Stop', session_id: 'm1', prompt_id: 'p1', transcript_path: path };
+  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared, CITADEL_MINION_TITLE: 'Fix the sidebar so it shows the phases…' };
+  const out = { } as { block?: string };
+  assert.deepEqual(answerHook(input, env, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out }), [
+    'no status line · "…Handed off."', 'title still the opening words · "Fix the sidebar so it shows the phases…"', 'ship with no self-review']);
+  assert.equal(out.block, undefined, 'none sends the stop back');
+  const logged = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  assert.equal(logged.split('\n').filter((l) => l.includes(' · would refuse · ')).length, 3);
+  assert.deepEqual(answerHook(input, { ...env, COORDINATOR_ROLE: 'coordinator' }), [], 'a Taskmaster has no status line, title or ship of its own');
 });

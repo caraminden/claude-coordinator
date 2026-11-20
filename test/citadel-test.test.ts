@@ -129,3 +129,12 @@ test('the real list names files that exist', () => {
     if (l && !l.startsWith('#')) assert.ok(existsSync(join(repo, l)), l);
   }
 });
+
+test('--affected with nothing changed is not a failure: it says so and runs only the repo-wide list', async (t) => {
+  const dirty = await new Promise<string>((res) => { let o = ''; const c = spawn('git', ['status', '--porcelain'], { cwd: repo }); c.stdout.on('data', (b) => (o += b)); c.on('close', () => res(o)); });
+  if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
+  const r = await run(['--affected', '--base', 'HEAD']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /affected: nothing has changed from HEAD/);
+  assert.match(r.out, /affected: nothing to run/);
+});

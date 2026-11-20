@@ -464,6 +464,18 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  budget: {
+    about: 'a minion past twice its budget, beside five past features at $5 each: the header chip reads "$14 of about $5.00" in amber (#1114)',
+    seed(c) {
+      for (let i = 0; i < 5; i++) {
+        const done = minion(c, `Past feature ${i + 1}`, { status: 'closed' });
+        c.store.recordTurn(done.id, { session_id: `budget-${done.id}`, ended_at: Date.now(), session_cost_usd: 5 });
+      }
+      const t = minion(c, 'Costs more than usual');
+      c.store.recordTurn(t.id, { session_id: `budget-${t.id}`, ended_at: Date.now(), session_cost_usd: 14 });
+      return route(c, t);
+    },
+  },
   board: {
     about: 'the minions list with a minion in each state, types, notes and a build',
     seed(c) {

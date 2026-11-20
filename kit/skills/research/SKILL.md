@@ -76,6 +76,18 @@ date, so the earlier report stays:
 3. **Not known:** what stayed open, each with what would settle it.
 4. **Sources:** every page used, linked, with its date.
 
+## Numbers carry their query
+
+Every number in a report (a count, price, percentage, duration, cost) gets a numbered footnote
+holding the query or command that produced it, and the date it ran: "[1] `sqlite3 -readonly … 'select count(*) …'`, ran
+2026-11-19". A number from a page cites that page's link and date. A number with no footnote is
+marked "my guess" in the text.
+
+Before the report is linked, a Sonnet Grunt (medium) re-runs five footnotes picked at random (all
+of them when there are fewer) and reports each as reproduced or not, with the value it got. A miss
+is fixed in the report, and the footnotes the same way of working produced are re-run, before
+anyone reads it. The ready note names the five footnotes checked and each result.
+
 A choice between options people see (looks, layouts, several takes) gets a page instead
 (`citadel:docs-and-mocks`). Links are markdown links, never bare domains.
 
@@ -89,5 +101,5 @@ URL. Its model and effort are in that rubric's frontmatter. Fix or label what it
 A choice the report leaves people gets a card; the minion stays open in state complete, its note
 naming the report.
 
-*Done when* every question from step 1 is in Findings or Not known, and every claim has a link
-and a date.
+*Done when* every question from step 1 is in Findings or Not known, every claim has a link
+and a date, every number has its footnote or "my guess", and the five re-runs are done.

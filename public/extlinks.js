@@ -7,6 +7,10 @@
 // Citadel's own pages use mountLinkHandler directly. A framed contraption's click can't be seen from here, so rail.js
 // (every app loads it) catches its external links when Citadel's state message says the switch is on, and posts the
 // address up; rail.js launches it through launchFirefox, which checks the address again.
+//
+// Downloads too (#1184), on Citadel's own pages only: a click on a download (downloadAddress) goes to Firefox. Citadel's
+// own file addresses need a login Firefox doesn't have, so firefoxDownload asks the server for a short-lived link to that
+// one file (src/download-links.ts) and hands Firefox that. A framed contraption's own downloads stay in Chrome.
 
 export const SCHEME = 'citadel-firefox:';
 const KEY = 'citadel-open-in-firefox';
@@ -117,6 +121,59 @@ export function launchFirefox(address) {
   return true;
 }
 
+/** Files a click should save, not show: installers, add-ons and archives (base.js's download kinds, plus Windows installers). */
+const SAVE_FILE = /\.(zip|7z|tar|gz|tgz|apk|aab|xpi|crx|exe|msi|msix|msixbundle|appx|appinstaller|dmg)$/i;
+
+/**
+ * The absolute address of a link that downloads, else null: a `download` attribute (`attr`), an address asking for
+ * `?download` (Citadel's file routes), or one naming an installer, add-on or archive. Web addresses only: a blob: or
+ * data: download is the page's own and stays in the browser.
+ */
+export function downloadAddress(href, base, attr = false) {
+  let url;
+  try {
+    url = new URL(href, base);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return null;
+  return attr || url.searchParams.has('download') || SAVE_FILE.test(url.pathname) ? url.href : null;
+}
+
+/** A path under Citadel's API (a /c/ or preview prefix allowed), which needs the person's login to load. */
+const API_PATH = /^(?:\/c|\/preview\/(?:build\/)?\d+)?\/api\//;
+
+/**
+ * Hand a download to Firefox. A Citadel API address (on `origin`) is login-gated, so `post` asks the server for a
+ * short-lived link to that one file and Firefox gets that; anything else (an app's open path such as a release APK,
+ * an outside address) goes as it is. If the server gives no link, `fallback` downloads it here, as Chrome did before.
+ */
+export async function firefoxDownload(address, { origin = location.origin, post = mintDownload, launch = launchFirefox, fallback = saveHere } = {}) {
+  const url = new URL(address);
+  if (url.origin !== origin || !API_PATH.test(url.pathname)) return void launch(url.href);
+  try {
+    const { path } = await post(url.pathname + url.search);
+    if (!launch(new URL(path, origin).href)) throw new Error('not a web address');
+  } catch {
+    fallback(url.href);
+  }
+}
+
+async function mintDownload(path) {
+  const res = await fetch(new URL('api/download-links', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+  if (!res.ok) throw new Error(`download link: ${res.status}`);
+  return res.json();
+}
+
+/** Download in this browser after all, through a hidden frame (a file served as an attachment saves; the page stays). */
+function saveHere(address) {
+  const frame = document.createElement('iframe');
+  frame.hidden = true;
+  frame.src = address;
+  document.body.append(frame);
+  setTimeout(() => frame.remove(), 60_000);
+}
+
 /**
  * What a click on `href` (at `base`) should do, the one rule every handler uses. `ctx`: `own` Citadel's hosts, `apps`
  * app host -> name, `domain` the apps domain (APPS_DOMAIN: every host on it is Citadel's), `self` the app this page is (null on Citadel's own pages), `firefox` the switch. Answers
@@ -146,16 +203,25 @@ export function classifyLink(href, base, { own = [], apps = {}, domain = null, s
 
 /**
  * Catch clicks (and middle clicks) on external links before anything else sees them. `on()` says whether the switch is
- * on, `own()` lists Citadel's own hosts, `apps()` maps each app's own host to its name, `domain()` the apps domain, `openWindow(address)` goes there in this window, `openApp({ name, to }, address)` shows an app, `open(address)` takes the address. A modifier key, a
- * `download` link or a click something already handled is left to the browser.
+ * on, `own()` lists Citadel's own hosts, `apps()` maps each app's own host to its name, `domain()` the apps domain, `openWindow(address)` goes there in this window, `openApp({ name, to }, address)` shows an app, `open(address)` takes the address, `download(address)` (Citadel's own pages
+ * only) takes a download while the switch is on. A modifier key, a `download` link with no `download` handler or the
+ * switch off, or a click something already handled is left to the browser.
  */
-export function mountLinkHandler({ on, own, open, apps = () => ({}), domain = () => null, self = () => null, openApp, openWindow, base = () => location.href }) {
+export function mountLinkHandler({ on, own, open, download, apps = () => ({}), domain = () => null, self = () => null, openApp, openWindow, base = () => location.href }) {
   const handle = (e) => {
     if (e.defaultPrevented || (e.type === 'click' ? e.button !== 0 : e.button !== 1)) return;
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     const a = e.target?.closest?.('a[href]');
-    if (!a || a.hasAttribute('download')) return;
+    if (!a) return;
     const href = a.getAttribute('href');
+    // data-here: a download that must stay in this browser (the setup script, before Firefox can be reached at all).
+    const saving = download && on() && !a.hasAttribute('data-here') ? downloadAddress(href, base(), a.hasAttribute('download')) : null;
+    if (saving) {
+      e.preventDefault();
+      e.stopPropagation();
+      return void download(saving);
+    }
+    if (a.hasAttribute('download')) return;
     const c = classifyLink(href, base(), { own: own(), apps: apps(), domain: domain(), self: self(), firefox: on() });
     // A click or middle click on an app's link shows it in the app view: a new tab of Citadel's own address would be Chrome's.
     if (c.kind === 'app' && openApp) {

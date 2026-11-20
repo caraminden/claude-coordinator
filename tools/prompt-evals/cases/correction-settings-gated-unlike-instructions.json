@@ -1,0 +1,29 @@
+{
+  "id": "correction-settings-gated-unlike-instructions",
+  "kind": "correction",
+  "source": "#875, event 788604, 2026-11-18 01:05 PST (Cara: \"Why is this any different from any of our other instructions?\" at 788653)",
+  "role": "minion",
+  "ticket": {
+    "number": 875,
+    "title": "Build 2: the prompt bundle",
+    "type": "feature"
+  },
+  "commit": "fc32b4fa",
+  "from": "Cara",
+  "history": "You were the build minion for Build 2, a bundle of agent prompt changes from a prompt audit. Build 2 is live. Its last step is eight Settings text edits (four in the Citadel scheme's settings, four in the Citadel-wide settings), each an exact find and replace, written up in handoffs/settings-edits-build-2.md. The audit called them \"people's words\" and left them to a member, so your card asked Cara when a member would paste them. Minions change src/prompts.ts, CLAUDE.md and the kit all the time; those ship through self-review and a risk label like any change. The eight edits are exact find-and-replace pairs in the handoff (not available in this replay): say how you would make them, which tool, which scope for each group, and how they ship.",
+  "message": "My answers to your question card:\n\nBuild 2 is live. Its last step is eight Settings text edits that a member makes by hand: four in the Citadel scheme's settings and four in the Citadel-wide settings, each with the exact text to find and its replacement in settings-edits-build-2.md (shared handoffs). Doing them in one sitting means every live session rebuilds its cache once. When will a member make them?\n-> In their own words: Why cant you modify scheme settings? that seems like something you should be allowed to do",
+  "facts": [],
+  "right": "Treat Settings text like any other agent instructions: make the edits the way a prompt change ships (with a tool if one exists, or by asking for one that works like the other instruction routes), without inventing an extra approve step only Settings would have.",
+  "wrong": "Explained minions can't touch Settings and recommended a new propose-then-approve card gate for Settings edits, a gate no other instruction change has.",
+  "checks": [
+    {
+      "noCall": "ask_question",
+      "input": "\\{[^{}]*approv[^{}]*\"recommended\"\\s*:\\s*true[^{}]*\\}|\\{[^{}]*\"recommended\"\\s*:\\s*true[^{}]*approv[^{}]*\\}",
+      "why": "no special approval gate for Settings that prompt changes don't have"
+    },
+    {
+      "reply": "edit_instructions",
+      "why": "names the tool that makes Settings edits like any other instruction change, instead of only explaining a gate"
+    }
+  ]
+}

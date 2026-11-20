@@ -1,0 +1,42 @@
+{
+  "id": "strike-ci-runner-misread",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 821112 on event 819052, 2026-11-18 18:46 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "b69bbd84",
+  "from": "#993",
+  "history": "Lands wait for tests.yml on Cara's desktop CI runner; if it gives no answer within 360 s, land.sh falls back to the full suite on perigee, stopped at 600 s. Other lands (#988, #995, #996) were landing around the same time.",
+  "message": "#993 (plain-words hint in ask_question/propose_plan descriptions, two added sentences in src/mcp.ts, committed on its branch) has failed to land 3 times. Each time CI on Cara's desktop gave no answer within 360 s, so land.sh fell back to the full suite on perigee, which was stopped at 600 s with only ~67 tests passed and ~40 test files (db-*, deploy*, etc.) showing no result. Other lands (#988, #996) got through in the same period. Output: /home/cara/.local/share/claude-coordinator/run/landings/2304/output.log; log: /home/cara/claude-coordinator/.git/cc-deploy/land-red-ticket-993-plain-words-hint-on-ask-question.log. I can't tell which test hangs. Is the desktop CI runner down, or is the perigee suite slow right now? I'm not retrying until you say; tell me to retry (or LAND_CI=0 style fix) when it's healthy.",
+  "facts": [
+    {
+      "tool": "ci_runners|host_check",
+      "match": "993|ci_runs|jobs|runner",
+      "result": "run|branch|job|queued|started|ended|conclusion\n44444617510|land/ticket/993|test|02:28:52Z|02:28:53Z|02:35:05Z|cancelled\n(all four #993 runs got a runner within 2 s; no land run since Nov 13 waited over 5 s)",
+      "why": "#993's jobs started at once and ran until cut off: a hang, not a queue"
+    },
+    {
+      "tool": "read_ticket|read_minion",
+      "match": "993",
+      "result": "#993 Plain-words hint on ask_question | branch ticket/993-plain-words-hint-on-ask-question | latest: committed two sentences in src/mcp.ts's ask_question and propose_plan descriptions",
+      "why": "the change touched only src/mcp.ts"
+    }
+  ],
+  "right": "Look at when #993's CI jobs started (they got a runner within 2 s and ran until cancelled) and at its diff to src/mcp.ts: the same hang on CI and perigee points at the change (a syntax error in src/mcp.ts hangs the suite), so send #993 to check its own change rather than retry.",
+  "wrong": "Read the job's start time but still told Cara and #993 that #993's test job never got a runner and waited in line behind other lands, and told #993 to retry.",
+  "checks": [
+    {
+      "call": "ci_runners|host_check|live_facts",
+      "before": "never got a runner|(waited|queued|stuck) (in line )?behind",
+      "why": "read the jobs' start times before saying anything about the queue"
+    },
+    {
+      "noText": "never got a runner|(waited|queued|stuck) (in line )?behind|(busy|queued).{0,40}(other|their) (lands|ships|runs)",
+      "why": "the claim the strike took back: the jobs started at once, so it wasn't the queue"
+    }
+  ]
+}

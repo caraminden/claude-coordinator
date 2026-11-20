@@ -5,6 +5,19 @@ description: Writing, testing and vetting documents for agents. Use before creat
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.
 
+## First: can a check do it?
+
+Before you write a rule, ask: **can a hook, a test or the tool itself do this?** A rule in prose for a mistake that repeats failed 3 times in 5 in Citadel's week to 2026-11-19 (#425, #789); the one that was a check held (#1031).
+
+1. Say the mistake as something a program can see: a tool call and its input, the final reply's text, a file written, a test result.
+2. If a program can see it, build the check instead of the rule: extend the closest shape in [`HOOKS.md`](HOOKS.md) (every hook and in-tool check we run, with its file, mode and cost), add a test that goes red on the old behaviour, or make the tool refuse or repair the bad input.
+3. A new check *counts* first: a few days of `would refuse` lines in the retro log, until the weekly process digest shows under one false alarm in five; only then does it send anything back.
+4. Prose is for what no program can see (a judgement, a person's taste), and for the one line that tells the agent what the check asks for.
+
+*Done when* the change is a check with a test that is red on the old behaviour, or you can say why no program could see the mistake.
+
+## Before you write
+
 Before you write or change a prompt, tool description, skill, rule or instruction, skim [`anthropic-guidance.md`](anthropic-guidance.md): Anthropic's current guidance on it, dated and linked (a minute's read; self-review checks such diffs against it).
 
 When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills. Every document gets tested before it ships, and a skill from outside gets vetted first: the last two sections.

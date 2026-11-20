@@ -47,6 +47,7 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   assert.equal(p.env.COORDINATOR_TOKEN, 'tok');
   assert.equal(p.env.COORDINATOR_ROLE, 'thread');
   assert.equal(p.env.COORDINATOR_TICKET, String(minion.id));
+  assert.equal(p.env.CITADEL_MINION_TITLE, minion.title, "the kit's title check reads it (#1154)");
   // The turn's pinned tools come first on PATH (the Android toolchain may follow, when this machine has one).
   assert.ok(p.env.PATH.startsWith(`${join(dir, 'pin', 'bin')}:/usr/bin`), p.env.PATH);
   assert.equal(p.configDir, '/srv/claude');
@@ -107,6 +108,7 @@ test("a minion's approval rules become asks and it gets the approval tool; a Tas
   assert.equal(t.env.COORDINATOR_APPROVALS, undefined);
   assert.equal(t.env.MCP_TOOL_TIMEOUT, undefined);
   assert.equal(t.env.COORDINATOR_ROLE, 'coordinator');
+  assert.equal(t.env.CITADEL_MINION_TITLE, undefined);
   assert.deepEqual(Object.keys(file(t, 'mcp.json').mcpServers), ['coordinator']);
 });
 

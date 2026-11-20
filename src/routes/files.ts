@@ -8,6 +8,7 @@ import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
 import { DocPreviews } from '../doc-preview.ts';
+import { downloadLinks, downloadTarget } from '../download-links.ts';
 import { commentMessage, fileTitle, fileType, isArtifact, resolveFile, resolveLink, sharedListable, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
@@ -440,6 +441,16 @@ export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ 
 }
 
 export const fileRoutes: Route[] = [
+  {
+    // A short-lived link to one file, for Firefox, which has no Citadel login (#1184, src/download-links.ts): its
+    // GET at /api/dl/<token> (server.ts) replays the file's own route as this person.
+    method: 'POST', path: '/api/download-links', who: ['person'], refuse: 'Only people make download links',
+    async handler({ req, res, session }) {
+      const target = downloadTarget((await readJson(req, 10_000))?.path);
+      if (!target || session.uid === undefined) throw new HttpError(400, 'Not a file Citadel can link to');
+      return json(res, 200, { path: `${target.prefix}/api/dl/${downloadLinks.mint(session.uid, target.path)}` });
+    },
+  },
   {
     method: 'POST', path: '/api/tickets/:ticket/mark-image', who: ['minion'],
     async handler({ req, res, app, ticket }) {

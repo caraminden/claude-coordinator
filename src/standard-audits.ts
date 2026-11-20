@@ -139,6 +139,10 @@ export const addAppTurnsCheck = (store: Store, dataDir: string, projectId: numbe
 export const addMemoryCurator = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
   addOnce(store, dataDir, projectId, 'memory-curator', `memory_curator:${projectId}`, templates, now);
 
+/** The weekly ship lessons pass (kit/schedules/ship-lessons.md, #1119), added on a scheme's first real ship lines. */
+export const addShipLessons = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
+  addOnce(store, dataDir, projectId, 'ship-lessons', `ship_lessons_check:${projectId}`, templates, now);
+
 /** At boot: every scheme gets its memory curator (once each, as above). */
 export function addMemoryCurators(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();

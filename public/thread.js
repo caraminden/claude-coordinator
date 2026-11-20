@@ -548,7 +548,7 @@ export function renderTicketHead() {
     renderTicketHead();
   } }, '⋯');
   // ‹ › × sit right of Find (Josh, 2026-11-13); on phones × stays on the title's line.
-  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
+  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t), budgetChip(t),
     h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
@@ -708,6 +708,17 @@ function pinButton(t) {
   });
   return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
     icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
+}
+
+/** "$14 of about $6.50" (#1114): what the minion has cost against what its kind of work usually does; amber once past the ask. */
+function budgetChip(t) {
+  const b = !isCoordinator(t) && t.budget;
+  if (!b) return '';
+  const usd = (n) => `$${n >= 10 ? Math.round(n) : n.toFixed(2)}`;
+  const cost = t.cost ?? 0;
+  return h('span', { class: `tag-chip budget-chip${cost >= b.ask ? ' over' : ''}`,
+    title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears. Never a stop.` },
+  `${usd(cost)} of about ${usd(b.usd)}`);
 }
 
 /** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */

@@ -12,6 +12,8 @@ tools/kit-land-drift.sh
 tools/run-tests.sh
 tools/parse-check.ts
 tools/citadel-test
+tools/affected.ts
+tools/affected-map.txt
 tools/always-tests.txt
 tools/lanes
 tools/lane.sh
@@ -44,6 +46,7 @@ test/scheme-setup-land.test.ts
 test/scheme-setup-land-ci.test.ts
 test/scheme-setup-land-local.test.ts
 test/scheme-setup-land-lanes.test.ts
+test/scheme-setup-land-build.test.ts
 test/kit-land-drift.test.ts
 # Not test/run-tests.test.ts: its leak test loads the real test/leak-guard.ts, which imports src/ through helpers.ts.
 test/run-tests-scope.test.ts

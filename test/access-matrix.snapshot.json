@@ -629,6 +629,16 @@
   "m1": "404",
   "m2": "404"
  },
+ "POST /api/download-links": {
+  "anon": "401 Not logged in",
+  "person": "400 Not a file Citadel can link to",
+  "member": "400 Not a file Citadel can link to",
+  "outsider": "400 Not a file Citadel can link to",
+  "tmA": "403 Only people make download links",
+  "tmB": "403 Only people make download links",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/emulator-lease": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1793,6 +1803,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/past-minions": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
  "GET /api/projects/:p/people/999/instructions": {
   "anon": "401 Not logged in",
   "person": "403 Not for people",
@@ -2162,6 +2182,26 @@
   "tmB": "403 Only people upload to the shared folder",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/ship-lessons": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "POST /api/projects/:p/ship-lessons/take": {
+  "anon": "401 Not logged in",
+  "person": "400 ids is a list of 1 to 200 lesson ids",
+  "member": "400 ids is a list of 1 to 200 lesson ids",
+  "outsider": "404 No such scheme",
+  "tmA": "400 ids is a list of 1 to 200 lesson ids",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 ids is a list of 1 to 200 lesson ids",
+  "m2": "400 ids is a list of 1 to 200 lesson ids"
  },
  "GET /api/projects/:p/skills": {
   "anon": "401 Not logged in",
@@ -2840,6 +2880,16 @@
   "tmA": "403 Only the minion itself can ship its branch",
   "tmB": "403 Only the minion itself can ship its branch",
   "m1": "404 This worktree has no tools/land.sh: land the way the scheme instructions say",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/learned": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself logs what it learned",
+  "member": "403 Only the minion itself logs what it learned",
+  "outsider": "403 Only the minion itself logs what it learned",
+  "tmA": "403 Only the minion itself logs what it learned",
+  "tmB": "403 Only the minion itself logs what it learned",
+  "m1": "400 learned is text: up to three lines, or \"nothing\"",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/leave": {
@@ -3569,6 +3619,16 @@
   "outsider": "403 Only the minion itself can ship its branch",
   "tmA": "403 Only the minion itself can ship its branch",
   "tmB": "403 Only the minion itself can ship its branch",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/learned": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself logs what it learned",
+  "member": "403 Only the minion itself logs what it learned",
+  "outsider": "403 Only the minion itself logs what it learned",
+  "tmA": "403 Only the minion itself logs what it learned",
+  "tmB": "403 Only the minion itself logs what it learned",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

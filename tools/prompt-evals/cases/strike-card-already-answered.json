@@ -1,0 +1,43 @@
+{
+  "id": "strike-card-already-answered",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 456970 on event 456858, 2026-11-11 02:36 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "6ff32ef2",
+  "from": "#527 (minion report)",
+  "history": "Earlier that night the Taskmaster told Cara that #523 had a card waiting on her: a root step to run on perigee (event 455844). Cards are answered in the minion's own chat, so the Taskmaster doesn't see the answer arrive. Since then Cara answered #523's root-step card and then a second card about a clock fix.",
+  "message": "#527 is live on 6ff32ef (risk medium). What it found and fixed, for your tracking and for #526's owner:\n\n- Every scheme page request (GET /api/projects/:id, also used by list_tickets and friends) replayed every dismissed minion's stored Claude events after each restart to count task steps their rows never show, and scanned each open minion's whole history twice for open cards. Warm disk: 1.1 s. Cold disk on a busy box: 16-19 s, synchronous, so it held the event loop for everyone. There were 17 restarts in 2 hours tonight, so this hit often. Fixed: dismissed minions skip the replay; open cards and the recap read through a new index events(ticket_id, kind, id) (565 ms -> 3 ms cold for a Taskmaster's 11k events).\n- A chat already cached in the page still waited on two requests before drawing. Now it draws at once from the list and the cache and fetches behind (with a 1.5 s slow server: 1.7 s -> 0.16 s).\n- Relevant to #526: before my deploy the journal showed event-loop holds of 0.5-2.5 s about every 30 s after a638788. Those fit the scans above. Worth a look at the journal in a few hours to see whether they stopped.\n\nLeftovers are in /home/cara/.local/share/claude-coordinator/projects/2/shared/project/handoffs/handoff-slow-opens-leftovers.md, four items. Two are worth a minion each:\n1. Bug: citadel-dev-copy start never finishes while the live server writes. Small fix, known procedure.\n2. An open minion's task list is still replayed from its whole history on the first view after each restart. Needs a design pick, so it starts with a plan card.\nItems 3 and 4 are in the file; start them if Cara still finds switching slow.",
+  "facts": [
+    {
+      "tool": "read_ticket|read_minion|list_tickets",
+      "match": "523",
+      "result": "#523 Clock and root setup | stage: in-progress | status: working (self-review) | open cards: none | latest: Cara ran the root step and picked the clock fix; self-review is running.",
+      "why": "Cara had already answered #523's cards"
+    },
+    {
+      "tool": "list_tickets",
+      "match": "",
+      "result": "#523 Clock and root setup: working, self-review, no open card\n#527 Slow minion opens: done\n#526 Event-loop stalls: working",
+      "why": "no card open on #523"
+    }
+  ],
+  "right": "Before ending with 'still waiting on you', check #523 live (read_ticket or list_tickets): it has no open card and is in self-review, so drop the reminder.",
+  "wrong": "Closed its summary of #527 with 'Still waiting on you: the root step on #523's card', from its notes, after Cara had answered it.",
+  "checks": [
+    {
+      "call": "read_ticket|read_minion|list_tickets",
+      "input": "523|\\{\\}",
+      "before": "waiting on you.{0,80}523|523.{0,40}card",
+      "why": "check the card is still open before telling Cara it's waiting on her"
+    },
+    {
+      "noText": "waiting on you.{0,80}#?523|root step on #?523",
+      "why": "the reminder the strike took back"
+    }
+  ]
+}

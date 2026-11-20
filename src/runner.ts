@@ -33,7 +33,8 @@ import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
-import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
+import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
+import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial, trialLine } from './seam-trial.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -50,6 +51,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
+import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
@@ -240,7 +242,7 @@ const contextKey = (ticketId: number) => `context:${ticketId}`;
  * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on. `auto`: Citadel
  * asked for it by itself (turn end or idle), so a message queued meanwhile goes first.
  */
-export interface FreshState { why: string; summary?: string; compact?: true; auto?: true }
+export interface FreshState { why: string; summary?: string; compact?: true; auto?: true; seam?: { carryOn: boolean } }
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
@@ -681,7 +683,9 @@ export class Runner {
   /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
   /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
-  private spends = new Map<number, { startedAt: number; meter: SpendMeter }>();
+  private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
+  /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
+  onBudgetWake: (ticketId: number, text: string) => void = () => {};
   /** Applies a turn's status trailer (src/status-trailer.ts) as set_thread_status would; the server wires it to the PATCH route's checks. */
   onStatusTrailer: (ticketId: number, fields: StatusFields) => void = () => {};
   /** The running turn's last status trailer, applied when its result comes in. */
@@ -822,6 +826,8 @@ export class Runner {
       server_work: closed ? null : this.serverWork(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
+      // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
+      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
@@ -2172,13 +2178,17 @@ export class Runner {
     return null;
   }
 
-  /** The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends. */
-  recordHandoff(ticketId: number, summary: string): string | null {
+  /**
+   * The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends. A minion in the
+   * seam trial's fresh group (#1129) hands off the same way, and its fresh session carries on at once unless `carryOn` is false.
+   */
+  recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
     const ticket = this.store.getTicket(ticketId);
-    if (ticket?.kind !== 'coordinator') return 'Only a Taskmaster starts fresh sessions';
+    const seam = ticket?.kind !== 'coordinator';
+    if (seam && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId) !== 'fresh') return 'Only a Taskmaster, or a minion in the fresh-session trial\'s fresh group, starts its own fresh session: a person can type /fresh in your chat';
     if (!this.isRunning(ticketId)) return 'Only a running turn can hand off';
     const was = this.store.getSetting<FreshState>(freshKey(ticketId));
-    this.store.setSetting(freshKey(ticketId), { why: was?.why ?? 'the Taskmaster asked for it', summary: summary.slice(0, HANDOFF_MAX) });
+    this.store.setSetting(freshKey(ticketId), { why: was?.why ?? (seam ? SEAM_WHY : 'the Taskmaster asked for it'), summary: summary.slice(0, HANDOFF_MAX), ...(seam ? { seam: { carryOn } } : {}) });
     return null;
   }
 
@@ -2219,7 +2229,7 @@ export class Runner {
     if (!f) return;
     const ticket = this.store.getTicket(ticketId);
     const who = ticket ? roleWord(ticket) : 'Taskmaster';
-    // A minion has no fresh_session: its handoff turn's reply is its handoff (#937), the status line left out.
+    // A minion's /fresh has no fresh_session (only the seam trial's fresh group has the tool, which records the summary first): its handoff turn's reply is its handoff (#937), the status line left out.
     const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
       ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
@@ -2227,13 +2237,21 @@ export class Runner {
     const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
     if (f.summary || sheeted) {
       const sheet = ticket?.kind === 'coordinator' ? handoffSheet(this.store, this, ticket) : '';
-      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : f.summary!;
+      // A seam handoff (#1129) gets the minion's own facts sheet, people's last words verbatim, against a thin handoff.
+      const own = f.seam && ticket ? minionSheet(this.store, this, ticket) : '';
+      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : own ? `${f.summary}\n\n${MINION_SHEET_CHECK}\n\n${own}` : f.summary!;
       this.store.deleteSetting(freshKey(ticketId));
       this.store.setSetting(handoffKey(ticketId), text);
       this.store.deleteSetting(contextKey(ticketId));
       this.store.updateTicket(ticketId, { session_id: null });
       if (sheeted) this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
       this.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
+      // A seam handoff carries straight on (#1129), unless the turn failed or was stopped, closes, or waits on people.
+      const after = this.store.getTicket(ticketId);
+      if (f.seam?.carryOn && ok && !stopped && after && !this.closing.has(ticketId) && !this.parked(after)
+        && !['ready', 'try', 'complete', 'parked', 'pending-deploy'].includes(after.state ?? '') && !this.store.openCardsOf(ticketId).length) {
+        this.send(ticketId, 'System', CARRY_ON);
+      }
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.store.deleteSetting(freshKey(ticketId));
       this.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
@@ -2350,6 +2368,19 @@ export class Runner {
     const size = this.store.getSetting<number>(contextKey(ticketId));
     if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
     this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
+  }
+
+  /** Enrol a minion whose turn ended past the seam trial's mark (#1129), every scheme; the Citadel Taskmaster hears once both groups are full. */
+  private seamEnrol(ticketId: number) {
+    const t = this.store.getTicket(ticketId);
+    const p = t && this.store.getProject(t.project_id);
+    const size = this.store.getSetting<number>(contextKey(ticketId));
+    if (!t || !p || !size || !eligible(t, isCodexModel(turnSettings(t, p).model) || !!this.store.getSetting(codexThreadKey(t.id)))) return;
+    const r = enrol(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId, size, this.now());
+    if (!r) return;
+    this.store.setSetting(SEAM_TRIAL_KEY, r.trial);
+    console.log(`[seam-trial] minion ${ticketId}: enrolled in the ${r.arm} group at ${Math.round(size / 1000)}k context`);
+    if (r.filled) this.tellCitadel(fullText(r.trial));
   }
 
   private next(ticketId: number) {
@@ -2782,6 +2813,13 @@ export class Runner {
       const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
       // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
       parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts)].filter(Boolean);
+      // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
+      const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
+      if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
+      // The seam trial's fresh group (#1129), while its context is past the mark: hand off at a seam it picks.
+      const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
+      const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
+      if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
@@ -2823,6 +2861,7 @@ export class Runner {
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         jobMachines,
+        seamTrial: seamFresh,
         appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
         everyScheme,
         claudeBin: this.claudeBin,
@@ -3114,6 +3153,7 @@ export class Runner {
       this.setStatus(ticketId, status);
     }
     if (turn && status === 'idle' && !stopped && !signal && !closing) this.freshAtTurnEnd(ticketId, turn);
+    if (turn && status === 'idle' && !stopped && !signal && !closing && !turn.fresh && !turn.keepalive) this.seamEnrol(ticketId);
     // A real turn that ended well starts a keepalive series from the prefix it cached (#862); anything else ends the series.
     if (turn?.fp && turn.fpParts && status === 'idle' && !stopped && !signal && !closing) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
     else this.store.deleteSetting(keepaliveKey(ticketId));
@@ -3399,6 +3439,9 @@ export class Runner {
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
       this.recordGrunts(ticketId, turn.id, state, ev.session_id);
+      // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
+      const ticket = this.store.getTicket(ticketId);
+      if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
@@ -3423,11 +3466,17 @@ export class Runner {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     if (!turn?.startedAt || turn.codex) return;
     let spend = this.spends.get(ticketId);
-    if (spend?.startedAt !== turn.startedAt) this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend) });
+    if (spend?.startedAt !== turn.startedAt) {
+      const ticket = this.store.getTicket(ticketId);
+      // Earlier turns' cost and the budget once a turn: this runs on every assistant message.
+      const budget = ticket?.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
+      this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget });
+    }
     const { meter } = spend;
     if (!meter.add(ev)) return;
     const stage = meter.crossed(stagesFrom(this.store.getSetting(STAGES_SETTING)));
     this.saveTurn(ticketId, { spend: meter.state });
+    this.checkBudget(ticketId, spend.budget, spend.prior + meter.usd, true);
     if (stage === null) return;
     const text = spendText(meter.usd, Date.now() - turn.startedAt);
     console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
@@ -3436,6 +3485,46 @@ export class Runner {
     this.saveTurn(ticketId, { spend: meter.state });
     this.broadcastTicket(ticketId); // the list row's badge and Needs you
     this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
+  }
+
+  /**
+   * Tell the minion and its Taskmaster when its spend passes a budget mark (#1114), each mark once per minion. The ask goes
+   * into the running turn (`steer`) when it can take one; otherwise the next turn's budget line carries it. Never stops anything.
+   */
+  private checkBudget(ticketId: number, budget: Budget | null, spent: number, steer: boolean) {
+    if (!budget) return;
+    const state = this.store.getSetting<BudgetState>(budgetKey(ticketId)) ?? {};
+    const marks = passed(budget, spent, state);
+    if (!marks.length) return;
+    const now = this.now();
+    this.store.setSetting(budgetKey(ticketId), { ...state, ...(marks.includes('ask') ? { asked: now } : {}), ...(marks.includes('wake') ? { woke: now } : {}) });
+    console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
+    if (marks.includes('ask')) {
+      const row = this.emit(ticketId, 'note', { text: chatNote(budget, spent) });
+      if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
+    }
+    // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
+    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent));
+  }
+
+  /**
+   * Pass a line from Citadel into the running turn, as a steer is, when it can take one. Not kept in `steered`: one the
+   * turn never reads is dropped rather than queued to start a turn of its own.
+   */
+  private steerSystem(ticketId: number, text: string, id: number): boolean {
+    const live = this.turns.get(ticketId);
+    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!live || !turn || turn.result || turn.fresh || turn.keepalive || turn.stopped || turn.light) return false;
+    const file = join(live.dir, 'steer.jsonl');
+    if (!existsSync(file)) return false;
+    appendFileSync(file, promptMessage([{ author: 'System', text, images: [], id }]));
+    return true;
+  }
+
+  /** What the minion page shows of its budget (#1114), or null with too little history. */
+  private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
+    const b = budgetFor(this.store, ticket, Date.now(), props);
+    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE) };
   }
 
   /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */

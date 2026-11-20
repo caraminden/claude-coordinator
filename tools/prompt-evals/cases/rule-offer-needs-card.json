@@ -1,0 +1,28 @@
+{
+  "id": "rule-offer-needs-card",
+  "kind": "rule",
+  "source": "Citadel Taskmaster, event 679247, 2026-11-16 12:04 PST (Taskmaster owned the slip at 686494; Cara asked for a card audit, #803)",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "5aebe50c",
+  "from": "Cara",
+  "history": "",
+  "message": "Are schemes using TDD or writing tests after?",
+  "facts": [],
+  "right": "Answer from what the kit and the minions do, and put any offer of more work (a check that flags tests passing on main, briefs saying \"failing test first\") on a card with ask_question, not as a prose question.",
+  "wrong": "Ended with \"Want that check? Or skip it, and I'll start writing \\\"failing test first\\\" into my briefs\" in prose, no card.",
+  "checks": [
+    {
+      "call": "ask_question",
+      "why": "an offer of work (\"want me to…\") goes on a card in the same turn"
+    },
+    {
+      "noText": "\\b(want me to|should i|shall i|want that)\\b[^.\\n]*\\?",
+      "why": "no prose offer left for her to type an answer to"
+    }
+  ]
+}

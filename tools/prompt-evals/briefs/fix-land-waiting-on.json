@@ -1,0 +1,17 @@
+{
+  "id": "fix-land-waiting-on",
+  "source": "#942",
+  "ticket": {
+    "number": 942,
+    "title": "Landing shouldn't park waiting_on",
+    "type": "bug"
+  },
+  "from": "Taskmaster",
+  "message": "Bug, reported by TWIReader's Taskmaster for Cara (2026-11-17, Cara asked for it fixed). You hold the PIPELINE LANE for this (src/land.ts is in tools/pipeline-files.txt).\n\nWhat happens: hand_off_land with stay_open: true and waiting_on parks the minion when the land succeeds (src/land.ts ~line 490: `h.waitingOn ? { state: 'parked', note: 'landed; waiting on: …' }`). Nothing wakes it after a successful land. Only a failed land does. So its after-land steps never run. Four TWIReader minions hit this tonight:\n- #46 should have deleted its handoffs and asked about a backfill after landing 86ecc6b.\n- #40 should have posted a retry card after landing 04d0c1d.\n- #37 should have started its first CI run after landing f206bde.\n- #49 set waiting_on \"Cara confirming on her phone\", got parked while it waited for her to test, and Cara had to unpark it by hand and asked why.\nCara's view: none of them should have been parked.\n\nThe fix the reporter suggested (check it against the code and say if you take another shape):\n1. A land that succeeds wakes a stay_open minion that set waiting_on, giving it the shipped note (live, or merged pending deploy), so it can run its after-land steps. Don't wake it twice (merge + live): pick the one point where its work is actually done, probably live, the way wake_when_live does, and reuse that path if it fits.\n2. A waiting_on about a person (a test, a card, a confirmation) leaves the state null or `try`, never `parked`. Parking is only for waiting on another minion or another land, where something will wake it. If the server can't tell the two apart, make the default not-parked and add an explicit flag for the parked case, or drop the auto-park entirely. Pick the simplest shape and say which.\n3. Update the hand_off_land tool description (src/mcp.ts ~line 1508) and the Taskmaster prompt's line about stay_open/waiting_on (src/prompts.ts ~line 377) so they say what really happens. Check the kit skills (kit/skills/, grep waiting_on) for the same wording.\n\nUse the citadel:bug-fixing skill: a failing test that shows a successful land leaving a waiting_on minion parked and never woken, then the fix. Self-review it; the land pipeline makes it at least medium.\n\nDone when: it's live, and a minion that hands off with stay_open + waiting_on is woken with the shipped note after a successful land (a test pins it), a person-shaped wait doesn't park it, and the tool description says so.",
+  "before": "98f936b287a850440e27e95af26aff79af4f42fb",
+  "fix": "eb7e52e5675497308300d84ce1d3c88598cfb38e",
+  "tests": [
+    "test/land-handoff.test.ts"
+  ],
+  "right": "A stay_open land with waiting_on wakes the minion with the shipped line once live, and never parks it."
+}

@@ -280,7 +280,7 @@ export function templateVars(store: Pick<Store, 'getProject' | 'listProjects'>, 
 }
 
 /** A standard audit's category, by its kit template. */
-const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps', 'memory-curator': 'Process' };
+const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps', 'memory-curator': 'Process', 'ship-lessons': 'Process' };
 // First match on the name wins; a name nothing matches stays uncategorised ('', shown as Other).
 const NAME_CATEGORY: [RegExp, string][] = [
   [/read-?back/i, 'Read-backs'],
@@ -531,6 +531,16 @@ export class ScheduledRuns {
       const newest = store.schemeTurnAudit(s.project_id, { limit: 1 })[0];
       if (!newest || newest.at <= store.schedules.since(s)) {
         const skip = `Skipped ${pacific(now)}: no app turns since ${pacific(store.schedules.since(s))}`;
+        console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
+        return store.schedules.ran(s.id, { skip }, now);
+      }
+    }
+    // Ship lessons (#1119) skips, as free, a stretch with no new lines or too few open ones to repeat.
+    if (s.template === 'ship-lessons') {
+      const newest = store.lessons.newestOpen(s.project_id);
+      const open = store.lessons.list(s.project_id, { limit: 2 }, now).length;
+      if (!newest || newest <= store.schedules.since(s) || open < 2) {
+        const skip = `Skipped ${pacific(now)}: ${open < 2 ? `${open} open ship lesson${open === 1 ? '' : 's'}, too few to repeat` : `no new ship lessons since ${pacific(store.schedules.since(s))}`}`;
         console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
         return store.schedules.ran(s.id, { skip }, now);
       }

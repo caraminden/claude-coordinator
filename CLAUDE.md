@@ -38,7 +38,7 @@ skill step is skipped or uses its default.
 
 - **Check commands:** `npm test` (`node --test test/` through `tools/citadel-node`, so it escapes ananicy's idle `node` rule: `deploy/priority.md`; failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). The full suite's home is Cara's desktop, not perigee: `tools/land.sh` waits for
   `.github/workflows/tests.yml` on the commit it lands, and runs the suite on perigee only as a loud fallback (`CI FALLBACK`;
-  `LAND_CI=0` forces it when CI itself is broken). A change that adds a table or column also runs `test/host-check.test.ts` (every hash or secret column is listed in `src/db-view.ts`), `test/db-setup.test.ts` (a new database's setup is at most 15 commits: create new tables in one transaction) and `test/schema-compat.test.ts` (take the next free `SCHEMA_HISTORY` number from main's tip), and one that adds a test reading a fake's log runs `test/raw-log-read.test.ts`: a feeder's land skips them, and they refuse the build's full land (Build 1 retro). A red CI run: `tools/ci-failures` (on every turn's PATH, `--help`) prints its failing tests. Before landing, a minion runs only the test files its change touches, with `citadel-test test/<name>.test.ts ...` (leak guard, a 300 s limit, only the failures shown, the full output in `$TMPDIR/citadel-test.log`), never the full suite on perigee. No build step. A UI change is
+  `LAND_CI=0` forces it when CI itself is broken). A change that adds a table or column also runs `test/host-check.test.ts` (every hash or secret column is listed in `src/db-view.ts`), `test/db-setup.test.ts` (a new database's setup is at most 15 commits: create new tables in one transaction) and `test/schema-compat.test.ts` (take the next free `SCHEMA_HISTORY` number from main's tip), and one that adds a test reading a fake's log runs `test/raw-log-read.test.ts`: a feeder's land skips them, and they refuse the build's full land (Build 1 retro). A red CI run: `tools/ci-failures` (on every turn's PATH, `--help`) prints its failing tests. Before landing, a minion runs only the test files its change touches, with `citadel-test --affected` (the files it touched since main plus the tests `tools/affected-map.txt` maps its changed paths to, each shown with the rule that picked it; format: the shared folder's `specs/affected-tests-map.md`) or `citadel-test test/<name>.test.ts ...` (leak guard, a 300 s limit, only the failures shown, the full output in `$TMPDIR/citadel-test.log`), never the full suite on perigee. No build step. A UI change is
   also checked in a dev copy or preview (scheme instructions, "UI checks"), with `node tools/ui-shot.ts`:
   `.claude/rules/ui-checks.md` (loads when a session reads a file in `public/` or `docs/design-system/`).
 - **Front end:** `public/`, plain JS with no build step.
@@ -56,7 +56,9 @@ skill step is skipped or uses its default.
 - **Medium risk at least (self-review):** a change to `test/ui-contract.json`, Citadel UI's contract
   with every app: it means an app-visible change to `public/ui/` or theme.css. Additive only.
 - **Agent instructions:** the prompt text in `src/prompts.ts` and the MCP tool descriptions in
-  `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`.
+  `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
+  `citadel-heavy tools/prompt-eval run --base main` once before it ships; 2 or more cases fell makes it high risk
+  (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`).
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
 - **Decisions log (ADRs):** `docs/adr/`.

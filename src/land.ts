@@ -43,6 +43,10 @@ export interface Handoff {
   stayOpen?: true;
   /** With stayOpen: what it waits on next. It is never parked (#942): once its work is live it is woken with the shipped line, for its after-land steps. */
   waitingOn?: string;
+  /** Its three lines (#1119, src/ship-lessons.ts): what it had to find out; '' for nothing. Queued only on a clean land. */
+  learned?: string;
+  /** The files its branch touched, for the lines' row. */
+  touched?: string[];
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -427,6 +431,8 @@ export interface HandoffDeps {
   landed?(id: number, commit: string): void;
   /** A handed-off land that didn't go through, with classifyLandFailure's kind (the stall signals, #1139). */
   failed?(id: number, kind: string | null): void;
+  /** A clean land, wherever it went (main or a build): queue the minion's lines (#1119). Its errors are caught. */
+  learned?(id: number, h: Handoff): void;
 }
 
 /**
@@ -505,6 +511,10 @@ export class LandHandoffs {
       try { this.d.failed?.(id, cls?.kind ?? null); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
       runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
       return;
+    }
+    // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).
+    if (r.kind !== 'failed' && r.kind !== 'no-ci') {
+      try { this.d.learned?.(id, h); } catch (err: any) { console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`); }
     }
     if (r.kind === 'unpushed') {
       // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.

@@ -1,0 +1,24 @@
+{
+  "id": "correction-digest-handoffs-unsent",
+  "kind": "correction",
+  "source": "#422, event 366441, 2026-11-09 06:41 PST (Cara: \"ok, why didnt the handoffs get sent to the taskmaster? or at least you could have shown me a card for the proposals?\" at 366862)",
+  "role": "minion",
+  "ticket": {
+    "number": 422,
+    "title": "Weekly process digest",
+    "type": "chore"
+  },
+  "commit": "5f734ac4",
+  "from": "Cara",
+  "history": "A schedule started you to write the weekly process digest. You read a week of minion transcripts and found two things worth acting on: (1) the tripwire refused 8 commands in 7 minions whose target was a shell variable like $f or $(...); (2) 12 refused stops in 11 minions, mostly review or test Grunts started in the background. You wrote reports/process-digest-2026-11-09.md and two handoffs in the shared folder: handoff-tripwire-variable-paths.md (option a: one rule line, low risk; option b: let src/tripwire.ts accept $TMPDIR variables, high risk by file, needs a go) and handoff-grunts-foreground.md (one or two lines in citadel:subagents and citadel:self-review, low risk). You posted the findings and left yourself in state ready. Nobody has been told about the handoffs yet.",
+  "message": "Are you proposing any changes?",
+  "facts": [],
+  "right": "Yes: put the proposals where they get acted on. Message the Taskmaster with the two handoffs so it can start minions, and/or show Cara a card with the options (rule line first, tripwire change only on a go).",
+  "wrong": "Described both handoffs and its pick in a reply, but sent nothing to the Taskmaster and showed no card, so the proposals went nowhere.",
+  "checks": [
+    {
+      "call": "message_coordinator|ask_question",
+      "why": "the proposals have to reach the Taskmaster or a card, not just a reply"
+    }
+  ]
+}

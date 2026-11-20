@@ -25,6 +25,7 @@ import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type Tick
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
+import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -447,6 +448,21 @@ export const ticketRoutes: Route[] = [
       const { res, app, ticket } = ctx;
       const { id } = ticket;
       return json(res, 200, { status: await app.ticketBranch(id) });
+    },
+  },
+  {
+    // live_facts (#1113): a minion's live facts in one read. A minion asks as itself, for a minion of its scheme by ?number=.
+    method: 'GET', path: '/api/tickets/:ticket/facts', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    async handler({ res, url, app, caller, ticket }) {
+      let id = ticket.id;
+      if (caller && caller.kind !== 'coordinator' && url.searchParams.has('number')) {
+        const n = Number(url.searchParams.get('number'));
+        const target = Number.isInteger(n) && n > 0 ? app.store.getTicketByNumber(ticket.project_id, n) : undefined;
+        if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+        id = target.id;
+      }
+      const facts = await liveFacts(app, id);
+      return json(res, 200, { facts, text: factsText(facts) });
     },
   },
   {

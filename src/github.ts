@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { Store, Ticket } from './db.ts';
 import { asData } from './quote.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { ciState, ciVerdict } from './ci-verdict.ts';
 
 const run = promisify(execFile);
 
@@ -112,9 +113,8 @@ function during(spans: Span[], at: number): boolean {
  * or when all of them skipped: nothing was tested (#558).
  */
 export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null {
-  if (checks.some((c) => c.status === 'failed')) return 'failed';
-  if (checks.some((c) => c.status === 'pending')) return 'pending';
-  return checks.some((c) => c.status === 'passed') ? 'passed' : null;
+  const v = ciVerdict(checks.map((c) => ({ failed: 'fail', pending: 'running', skipped: 'skip', passed: 'pass' } as const)[c.status]));
+  return v === 'green' ? 'passed' : v === 'red' ? 'failed' : v === 'running' ? 'pending' : null;
 }
 
 /**
@@ -264,14 +264,13 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   }
 }`;
 
-const SKIPPED = new Set(['NEUTRAL', 'SKIPPED', 'STALE']);
 
 export function check(node: any): Check {
   if (node.__typename === 'StatusContext') {
     const s = node.state;
     return { name: node.context, url: node.targetUrl ?? null, status: s === 'SUCCESS' ? 'passed' : s === 'PENDING' || s === 'EXPECTED' ? 'pending' : 'failed' };
   }
-  const status = node.status !== 'COMPLETED' ? 'pending' : node.conclusion === 'SUCCESS' ? 'passed' : SKIPPED.has(node.conclusion) ? 'skipped' : 'failed';
+  const status = ({ running: 'pending', pass: 'passed', skip: 'skipped', cancelled: 'failed', fail: 'failed' } as const)[ciState(node.status, node.conclusion)];
   const out: Check = { name: node.name, url: node.detailsUrl ?? null, status };
   if (node.status === 'QUEUED') out.queued = true;
   // Only Actions jobs list steps; another app's check run has none even when it ran.

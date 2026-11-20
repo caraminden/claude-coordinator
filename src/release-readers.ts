@@ -15,6 +15,7 @@ import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Ch
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
+import { ciState, ciVerdict } from './ci-verdict.ts';
 
 const RECENT = 5;
 /** How many earlier releases a card lists under Previous releases (Cara, 2026-11-12: "Previous releases could have links to old builds"). */
@@ -268,7 +269,7 @@ function span(r: RunJobs): { start: number | null; started: number | null; end: 
 /** A run that shipped: completed, and its job (or the run, for a whole-workflow target) succeeded. */
 const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'success' : r.run.conclusion === 'success');
 /** A needed workflow's run (Found.needs) that ran every job and each passed: a run that skipped some (NOT RUN) still says success. */
-const allGreen = (r: RunJobs) => r.run.status === 'completed' && r.run.conclusion === 'success' && r.jobs.length > 0 && r.jobs.every((j) => j.status === 'completed' && j.conclusion === 'success');
+const allGreen = (r: RunJobs) => r.run.status === 'completed' && r.run.conclusion === 'success' && r.jobs.length > 0 && ciVerdict(r.jobs.map((j) => ciState(j.status, j.conclusion)), { skipBlocks: true }) === 'green';
 /** A needed workflow's short name, its stage on the track: "desktop.yml" → "desktop". */
 const needName = (w: string) => w.replace(/^.*\//, '').replace(/\.ya?ml$/, '');
 

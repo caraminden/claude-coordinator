@@ -5,6 +5,7 @@
 // pinned target alone until main has a newer green commit than the one that was rolled back, or a person deploys it.
 import { execFile } from 'node:child_process';
 import type { Store } from './db.ts';
+import { ciState, ciVerdict } from './ci-verdict.ts';
 
 /** A workflow run as GitHub lists it: as much of src/ci-health.ts's Run as this reads. */
 export interface GreenRun {
@@ -36,8 +37,6 @@ export interface Pin {
   code?: number;
 }
 
-const PASSED = new Set(['success', 'skipped', 'neutral']);
-
 /**
  * The commits these runs show green, newest first: every workflow's newest run on it completed and passed (a rerun's
  * verdict replaces the first one's), none still running, and at least one ran. Quiet workflows (a scheme's ci_quiet)
@@ -54,7 +53,7 @@ export function greenShas(runs: GreenRun[], quiet: Set<string> = new Set()): str
   const green: { sha: string; at: number }[] = [];
   for (const [sha, byWorkflow] of newest) {
     const list = [...byWorkflow.values()];
-    if (list.every((r) => r.status === 'completed' && PASSED.has(r.conclusion ?? '')) && list.some((r) => r.conclusion === 'success')) {
+    if (ciVerdict(list.map((r) => ciState(r.status, r.conclusion))) === 'green') {
       green.push({ sha, at: Math.max(...list.map((r) => Date.parse(r.created_at))) });
     }
   }

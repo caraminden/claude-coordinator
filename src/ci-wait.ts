@@ -9,6 +9,7 @@ import { ghGet, type GhGet, type Job } from './ci-health.ts';
 import { median } from './waits.ts';
 import type { PrSnapshot } from './github.ts';
 import type { GithubEnv } from './scheme-repo.ts';
+import { ciState, ciVerdict } from './ci-verdict.ts';
 
 export const POLL_MS = 20_000;
 /** Past this many runs in flight, each is looked at every SLOW_MS instead. */
@@ -38,7 +39,7 @@ export interface CiNow {
 }
 
 const at = (s: string | null | undefined) => (s ? Date.parse(s) : NaN);
-const PASSED = new Set(['success', 'skipped', 'neutral']);
+const passed = (j: Job) => { const s = ciState(j.status, j.conclusion); return s === 'pass' || s === 'skip'; };
 interface Step { name: string; status: string; conclusion: string | null }
 
 /** A job's place in its steps: the one running (or next), of how many. */
@@ -59,7 +60,7 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
   const done = jobs.filter((j) => j.status === 'completed');
   if (over && done.length === jobs.length) {
     const ended = Math.max(...jobs.map((j) => at(j.completed_at)).filter((t) => !Number.isNaN(t)));
-    const failed = jobs.filter((j) => !PASSED.has(j.conclusion ?? ''));
+    const failed = jobs.filter((j) => !passed(j));
     // Every job skipped or neutral (a draft's PR CI, #558) tested nothing: not green.
     const stage = !failed.length ? (jobs.some((j) => j.conclusion === 'success') ? 'passed' : 'skipped') : failed.every((j) => j.conclusion === 'cancelled') ? 'cancelled' : 'failed';
     const bad = failed.filter((j) => j.conclusion !== 'cancelled');
@@ -78,7 +79,7 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
     const s = stepOf(j);
     return `${j.name} step ${s.n} of ${s.of}${s.name ? `: ${s.name}` : ''}${j.runner_name ? ` (${j.runner_name})` : ''}`;
   });
-  const red = done.filter((j) => !PASSED.has(j.conclusion ?? '') && j.conclusion !== 'cancelled').map((j) => `${j.name} failed`);
+  const red = done.filter((j) => !passed(j) && j.conclusion !== 'cancelled').map((j) => `${j.name} failed`);
   const text = [...red, ...where].join(', ') || `${done.length} of ${jobs.length} jobs done, the next not started yet`;
   // One job says more by its steps; several, by how many are done.
   if (jobs.length === 1) {

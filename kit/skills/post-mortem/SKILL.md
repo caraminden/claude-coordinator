@@ -1,6 +1,6 @@
 ---
 name: post-mortem
-description: What went wrong with a minion, ship or chat, and how to stop it recurring: a timeline, a cause class and one fix on a card. Use for "what happened to #N", "what went wrong with", "why did it take so long". A live bug is citadel:bug-fixing.
+description: What went wrong with a minion, ship, chat or thing it made, and how to stop it happening again: a timeline, a cause class and one fix on a card. Use for "what happened to #N", "what went wrong with X", "why so long", "stop that from happening again". A live bug is citadel:bug-fixing.
 ---
 
 A person asks what went wrong. The answer they can act on has three parts: a **timeline** (what
@@ -32,13 +32,20 @@ with step 1's three lines, and ask it to show, within its 15 lines:
 - the **turn point**, with its evidence: the first event after which the work stopped converging
   (a wrong reading of the ask, a fix that didn't hold, a tool that failed, a loop on one error).
 
+An app's own agent chat (a contraption's, like an aura or a planner agent) is in the app, not the
+database. `contraption_read` reads it, as the person, only on a turn that answers their own typed
+message: send a general-purpose Grunt (Sonnet, medium) with the window and step 2's three asks.
+On any other turn, say the chat was not reached and ask them to send the question in this chat.
+
 Read its timeline, not the sources. When its turn point doesn't explain the complaint, send it one
 follow-up question about that gap; a third call means the case is two cases.
 
 ## 3. Name the cause class
 
-Ask: **what, changed before the turn point, would have kept the work on course?** Its class is the
-cause class. One class per case:
+Ask: **what, changed before the turn point, would have kept the work on course and still given the
+person what they asked for?** Its class is the cause class. A brief that asked for something the
+person wanted (a real-window repro, a test on their device) is not the cause; the missing setup
+for it is. One class per case:
 
 | Class | The thing that would have changed it |
 |---|---|
@@ -64,7 +71,8 @@ The fix stops the turn point from recurring, in this order of preference:
 
 Before proposing it, look for a twin: an open minion or a handoff in the shared folder that
 already covers it (`list_tickets`, the `handoffs/` folder). A twin means the fix is "finish #N", and
-a shipped fix that didn't hold means the next fix must be a mechanism. Done when the fix names
+a shipped fix that didn't hold means the next fix must be a mechanism. A shipped fix with no later
+case against it is the answer: report it and propose nothing new. Done when the fix names
 where it lives (which hook, test, tool or file kind) and what it would have done at the turn point.
 
 ## 5. Report and ask
@@ -77,7 +85,7 @@ Reply with:
   scheme's process digest can count them;
 - the fix, and the twin or the past fix it replaces, if any.
 
-Then one `ask_question` card, written for someone who didn't follow the case: the cause in one
+When there is a fix to build, one `ask_question` card, written for someone who didn't follow the case: the cause in one
 plain sentence, the fix in one, and three options: **Build it** (recommended), **Not now**, and
 **The cause is wrong** (its description asks what they saw). On Build it, write a handoff in the
 shared folder's `handoffs/` (why, with the timeline's evidence; the fix; done when the turn point

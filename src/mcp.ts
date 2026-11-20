@@ -9,7 +9,6 @@ import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import { planError } from '../public/progress.js';
 import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
@@ -1518,8 +1517,16 @@ export const PLAN = {
 
 /** What a plan call answers: it checks the shape and returns no state (the readout replays the calls). */
 export function planResult(args: any): string {
-  const error = planError(args);
-  if (error) throw new Error(error);
+  // public/progress.js planError's twin, since a pinned server can't import from public/ (#1043); test/mcp-always-load.test.ts holds them equal.
+  const steps = args?.steps;
+  if (!Array.isArray(steps) || !steps.length) throw new Error('steps is required: a list of { n, … }, one per step to add or change.');
+  for (const s of steps) {
+    if (!Number.isInteger(s?.n) || s.n < 1) throw new Error('Each step needs n, its number: 1, 2, 3…');
+    const bad = ['step', 'doing', 'why', 'outcome'].find((k) => s[k] != null && typeof s[k] !== 'string');
+    if (bad) throw new Error(`Step ${s.n}: ${bad} is text.`);
+    if (s.minutes != null && !(Number.isFinite(s.minutes) && s.minutes >= 0)) throw new Error(`Step ${s.n}: minutes is a number.`);
+    if (s.status != null && !['todo', 'doing', 'done', 'dropped'].includes(s.status)) throw new Error(`Step ${s.n}: status is todo, doing, done or dropped.`);
+  }
   return 'ok';
 }
 

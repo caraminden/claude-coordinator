@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
+import { planError } from '../public/progress.js';
+import { planResult } from '../src/mcp.ts';
 
 function marked(role: string) {
   const input = [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }].map((m) => JSON.stringify(m)).join('\n') + '\n';
@@ -18,4 +20,17 @@ test("a minion's always-loaded tools are these seven", () => {
 
 test("a Taskmaster's always-loaded tools are these four", () => {
   assert.deepEqual(marked('coordinator'), ['create_ticket', 'list_tickets', 'message_ticket', 'read_ticket']);
+});
+
+// The plan tool's check and the readout's are twins (#1275: the pinned server can't import public/): a call one refuses, the other ignores.
+test('the plan tool refuses exactly the calls the readout ignores, with the same words', () => {
+  const calls = [null, {}, { steps: [] }, { steps: [{ n: 1 }] }, { steps: [{ n: 0 }] }, { steps: [{ n: 1.5 }] }, { steps: [{ step: 'x' }] },
+    { steps: [{ n: 1, step: 'A', doing: 'B', why: 'C', outcome: 'D', minutes: 3, status: 'doing' }] }, { steps: [{ n: 1, doing: 42 }] },
+    { steps: [{ n: 1, minutes: 'soon' }] }, { steps: [{ n: 1, minutes: -1 }] }, { steps: [{ n: 1, status: 'started' }] }, { steps: [{ n: 1, status: 'toString' }] },
+    { steps: [{ n: 1, status: 'dropped' }, { step: 'no number' }] }];
+  for (const call of calls) {
+    let refused = '';
+    try { planResult(call); } catch (e: any) { refused = e.message; }
+    assert.equal(refused, planError(call), JSON.stringify(call));
+  }
 });

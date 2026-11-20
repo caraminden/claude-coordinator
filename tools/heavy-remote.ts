@@ -5,10 +5,13 @@
 // mcp__<machine>-ws__ tools use (src/machine-mcp.ts), with the turn's token: workspaces, git_sync to this checkout's
 // HEAD, run_task (the workspace's `heavy` task, else `build`), then job until it ends. The machine builds commits, not
 // this folder, so the branch must be pushed and clean. "desktop" means the machine named in CITADEL_HEAVY_DESKTOP,
-// else cara-desktop-heavy. The workspace is the one named after the repo (CITADEL_HEAVY_WORKSPACE overrides).
-// Exits with the command's status, or FALLBACK when nothing ran there (no such machine, offline, busy, not pushed,
-// dirty, no workspace): citadel-heavy then runs it on perigee as usual, after the reason this printed.
+// else cara-desktop-heavy. The workspace is the one named after the repo (CITADEL_HEAVY_WORKSPACE overrides), or a
+// free twin named <repo>-2, <repo>-3…: each holds one job, so a machine takes as many builds at once as it has twins.
+// Exits with the command's status. When nothing ran there (no such machine, offline, busy, not pushed, dirty, no
+// workspace) it writes the reason to the file CITADEL_HEAVY_FALLBACK_FILE names and exits FALLBACK: citadel-heavy then
+// runs it on perigee as usual. Once a job has started there it never falls back: a lost job stops it and exits 1.
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 export const FALLBACK = 120;
@@ -112,7 +115,7 @@ class Session {
               if (msg.session) {
                 this.id = msg.session;
                 ready();
-              } else if (msg.closed) break;
+              } else if (msg.closed) throw new Error('closed');
               else if (msg.message?.id !== undefined && !msg.message.method) {
                 const w = this.waiting.get(msg.message.id);
                 this.waiting.delete(msg.message.id);
@@ -181,6 +184,9 @@ function git(...args: string[]): string {
   return r.stdout.trim();
 }
 
+/** The job once run_task has started it: from then on a failure stops it rather than running the command twice. */
+let started: { s: Session; id: string; name: string } | null = null;
+
 async function run(want: string, argv: string[]): Promise<number> {
   const name = want === 'desktop' ? process.env.CITADEL_HEAVY_DESKTOP || 'cara-desktop-heavy' : want;
   const ids = new Map((process.env.CITADEL_HEAVY_MACHINES ?? '').split(',').filter(Boolean).map((p) => [p.slice(0, p.lastIndexOf('=')), Number(p.slice(p.lastIndexOf('=') + 1))] as const));
@@ -188,15 +194,18 @@ async function run(want: string, argv: string[]): Promise<number> {
   if (!machine) throw new Fallback(`${name} isn't lent to this turn with workspace tools (lent: ${[...ids.keys()].join(', ') || 'none'})`);
   if (git('status', '--porcelain')) throw new Fallback(`this checkout has uncommitted changes, and ${name} builds commits: commit and push first`);
   const head = git('rev-parse', 'HEAD');
-  const workspace = process.env.CITADEL_HEAVY_WORKSPACE || basename(git('remote', 'get-url', 'origin')).replace(/\.git$/, '');
+  let workspace = process.env.CITADEL_HEAVY_WORKSPACE || basename(git('remote', 'get-url', 'origin')).replace(/\.git$/, '');
 
   const s = new Session(machine, name);
   const list = await s.call('workspaces', {}, true);
-  const w = parseWorkspaces(list.text).find((x) => x.name === workspace);
-  if (!w) throw new Fallback(`${name} has no workspace ${workspace}`);
-  if (w.busy) throw new Fallback(`workspace ${workspace} on ${name} is busy with another job`);
-  const taskName = ['heavy', 'build'].find((t) => w.tasks.has(t));
-  if (!taskName) throw new Fallback(`workspace ${workspace} on ${name} has no heavy or build task that takes a command`);
+  const ours = parseWorkspaces(list.text).filter((x) => x.name === workspace || (x.name.startsWith(`${workspace}-`) && /^\d+$/.test(x.name.slice(workspace.length + 1))));
+  if (!ours.length) throw new Fallback(`${name} has no workspace ${workspace}`);
+  const able = ours.filter((x) => ['heavy', 'build'].some((t) => x.tasks.has(t)));
+  if (!able.length) throw new Fallback(`workspace ${workspace} on ${name} has no heavy or build task that takes a command`);
+  const w = able.find((x) => !x.busy);
+  if (!w) throw new Fallback(`${able.length === 1 ? `workspace ${workspace}` : `all ${able.length} ${workspace} workspaces`} on ${name} busy with other jobs`);
+  workspace = w.name;
+  const taskName = ['heavy', 'build'].find((t) => w.tasks.has(t))!;
   const sync = await s.call('git_sync', { workspace, ref: head });
   if (sync.error) throw new Fallback(`${name} could not check out ${head.slice(0, 8)} (pushed?): ${sync.text.split('\n')[0]}`);
 
@@ -204,6 +213,7 @@ async function run(want: string, argv: string[]): Promise<number> {
   let reply = await s.call('run_task', { workspace, task: taskName, args: [commandLine(argv, w.tasks.get(taskName)!.powershell)], wait: 50 });
   let job = parseJob(reply.text);
   if (!job.id) throw new Fallback(reply.text.split('\n')[0]);
+  started = { s, id: job.id, name };
   let stopping = false;
   const stop = (signal: number) => {
     if (stopping) return;
@@ -223,7 +233,7 @@ async function run(want: string, argv: string[]): Promise<number> {
   while (job.running) {
     print(job.lines);
     reply = await s.call('job', { id: job.id, wait: 50, lines: 400 });
-    if (!/still running|succeeded|FAILED/.test(reply.text.split('\n')[0])) throw new Fallback(`lost job ${job.id} on ${name}: ${reply.text.split('\n')[0]}`);
+    if (!/still running|succeeded|FAILED/.test(reply.text.split('\n')[0])) throw new Error(`lost job ${job.id} on ${name}: ${reply.text.split('\n')[0]}`);
     job = { ...parseJob(reply.text), id: job.id };
   }
   print(job.lines);
@@ -237,8 +247,15 @@ if (import.meta.main) {
     say('usage: heavy-remote.ts <machine> <command> [args...]');
     process.exit(2);
   }
-  run(want, argv).then((code) => process.exit(code), (err) => {
-    say(`${err instanceof Fallback ? '' : 'error: '}${err.message}; running it here instead`);
+  run(want, argv).then((code) => process.exit(code), async (err) => {
+    if (started) {
+      say(`error: ${err.message}; stopping job ${started.id} on ${started.name} (it may still be running there)`);
+      await Promise.race([started.s.call('stop_job', { id: started.id }).catch(() => {}), new Promise((r) => setTimeout(r, 10_000))]);
+      process.exit(1);
+    }
+    const why = `${err instanceof Fallback ? '' : 'error: '}${err.message}`;
+    say(`${why}; running it here instead`);
+    if (process.env.CITADEL_HEAVY_FALLBACK_FILE) writeFileSync(process.env.CITADEL_HEAVY_FALLBACK_FILE, `${why}\n`);
     process.exit(FALLBACK);
   });
 }

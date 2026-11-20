@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -73,4 +74,88 @@ test('citadel-heavy --on a machine this turn was not lent runs the command here,
   assert.match(r.stderr, /cara-desktop-heavy isn't lent to this turn with workspace tools \(lent: citadel-test-box\); running it here instead/);
   assert.match(readFileSync(join(root, 'locks', 'history'), 'utf8'), /\tnone\t\d+\t\d+\t4\t-\n$/, 'it ran in a slot here');
   assert.equal(spawnSync(heavy, ['--on', 'desktop'], { env }).status, 2);
+});
+
+// A fake Citadel with one lent machine, speaking the session route's SSE and POST the way src/routes/machines.ts does.
+async function fakeMachine(tool: (name: string, args: any) => string) {
+  const calls: { name: string; args: any }[] = [];
+  let stream: import('node:http').ServerResponse | null = null;
+  const server = createServer((req, res) => {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: {"session":"s1"}\n\n');
+      stream = res;
+      return;
+    }
+    let body = '';
+    req.on('data', (c) => (body += c)).on('end', () => {
+      const { message } = JSON.parse(body);
+      res.writeHead(202).end();
+      if (message.id === undefined) return;
+      let result: object = {};
+      if (message.method === 'tools/call') {
+        calls.push({ name: message.params.name, args: message.params.arguments });
+        result = { content: [{ type: 'text', text: tool(message.params.name, message.params.arguments) }] };
+      }
+      stream!.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: message.id, result } })}\n\n`);
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return { calls, api: `http://127.0.0.1:${(server.address() as any).port}`, close: () => { server.closeAllConnections(); server.close(); } };
+}
+
+const repo = join(root, 'proj');
+mkdirSync(repo);
+for (const args of [['init', '-q'], ['remote', 'add', 'origin', 'https://example.invalid/me/proj.git'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x']]) spawnSync('git', args, { cwd: repo });
+const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim();
+const proj = `## proj\nFolder: /w/proj\nBusy: task heavy for #3 in Citadel, 9 s (job 99)\nTasks:\n- heavy: bash -lc …takes arguments (a shell command line)\n\n## proj-2\nFolder: /w/proj-2\nBusy: no\nTasks:\n- heavy: bash -lc …takes arguments (a shell command line)\n\n## projector\nBusy: no\nTasks:\n- heavy: bash -lc …takes arguments\n`;
+
+async function heavyOn(api: string, locks: string) {
+  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, locks), CITADEL_HEAVY_MACHINES: 'box=5', COORDINATOR_API: api, COORDINATOR_TOKEN: 't', CITADEL_HEAVY_PRESSURE: join(root, 'none') };
+  const child = spawn(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), ['--on', 'box', 'sh', '-c', 'echo local-ran; exit 7'], { cwd: repo, env });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', (c) => (stdout += c));
+  child.stderr.on('data', (c) => (stderr += c));
+  const status = await new Promise<number | null>((r) => child.on('close', r));
+  return { status, stdout, stderr, history: readFileSync(join(root, locks, 'history'), 'utf8') };
+}
+
+test('a job on the machine runs in the first free workspace of the repo, streams back, and its own exit 120 is not a fallback', async () => {
+  const m = await fakeMachine((name) => ({
+    workspaces: proj,
+    git_sync: 'proj-2 is at ' + head.slice(0, 8),
+    run_task: 'heavy in proj-2 is still running after 50 s (job ab12). Call job with id "ab12" to wait for it.\n--- latest output ---\none\ntwo',
+    job: 'heavy in proj-2 FAILED (exit 120) after 60 s. Job ab12; full log on that computer: /j.log\n--- last 3 lines ---\none\ntwo\nthree',
+  })[name]!);
+  try {
+    const r = await heavyOn(m.api, 'locks-ok');
+    assert.equal(r.status, 120, r.stderr);
+    assert.equal(r.stdout, 'one\ntwo\nthree\n', 'the lines once each, and nothing ran here');
+    assert.deepEqual(m.calls.map((c) => c.name), ['workspaces', 'git_sync', 'run_task', 'job']);
+    assert.deepEqual(m.calls[1].args, { workspace: 'proj-2', ref: head }, 'proj is busy and projector is another repo');
+    assert.deepEqual(m.calls[2].args.args, [`sh -c 'echo local-ran; exit 7'`]);
+    assert.match(r.history, /\ton:box\t0\t\d+\t120\t-\n$/);
+  } finally {
+    m.close();
+  }
+});
+
+test('a job lost after it started is stopped there, not run a second time here', async () => {
+  const m = await fakeMachine((name) => ({
+    workspaces: proj.replace('Busy: task heavy for #3 in Citadel, 9 s (job 99)', 'Busy: no'),
+    git_sync: 'ok',
+    run_task: 'heavy in proj is still running after 50 s (job ab12).\n--- latest output ---\none',
+    job: 'No job ab12 on this computer.',
+    stop_job: 'Stopped.',
+  })[name]!);
+  try {
+    const r = await heavyOn(m.api, 'locks-lost');
+    assert.equal(r.status, 1, r.stderr);
+    assert.equal(r.stdout, 'one\n');
+    assert.match(r.stderr, /lost job ab12 on box.*stopping job ab12/s);
+    assert.deepEqual(m.calls.at(-1), { name: 'stop_job', args: { id: 'ab12' } });
+    assert.equal(m.calls[1].args.workspace, 'proj');
+  } finally {
+    m.close();
+  }
 });

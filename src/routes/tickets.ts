@@ -246,6 +246,8 @@ export function deliverAnswer(app: App, ticketId: number, author: string, text: 
 export async function unparkTicket(app: App, ticket: Ticket, by: string, author: string, quiet = false): Promise<void> {
   if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never parked`);
   if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
+  // A scheduled run or flaky-test fixer waiting for the box (#1302): Unpark is its "Start now", with no pressure check.
+  if (app.held?.release(ticket.id, `${by} unparked it`)) return;
   if (app.runner.heldFor(ticket.id)) {
     const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
     if (!chained) throw new HttpError(409, `#${ticket.number} is starting already`);

@@ -1,4 +1,5 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
+import type { HeldStarts } from './held-starts.ts';
 import type { Presence } from './presence.ts';
 import type { ClaudeLink } from './claude-link.ts';
 import type { CodexLink } from './codex-link.ts';
@@ -281,6 +282,8 @@ export interface App {
   runner: Runner;
   auth: Auth;
   waiters: LiveWaiters;
+  /** Briefs Citadel's own minions hold while the box is starved (#1302). */
+  held: Pick<HeldStarts, 'has' | 'release'>;
   /** wake_at's timed wakes (#722). */
   timedWakes: TimedWakes;
   /** The post-deploy watch and the beacon's limits (src/deploy-watch.ts, #724); absent in tests that build no server. */

@@ -1,5 +1,6 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
+import type { HeldStarts } from './held-starts.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -418,6 +419,11 @@ export class Schedules {
     return this.db.prepare('SELECT * FROM schedule_runs WHERE schedule_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(id, limit) as unknown as ScheduleRun[];
   }
 
+  /** A run that waited for the box (#1302): say how long, in the line the schedule's page shows beside a skip. */
+  heldNote(id: number, text: string) {
+    this.db.prepare('UPDATE schedules SET last_skip = ? WHERE id = ?').run(text, id);
+  }
+
   /** How many slots the gate skipped since `since`. */
   skipsSince(id: number, since: number): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM schedule_runs WHERE schedule_id = ? AND skip IS NOT NULL AND at >= ?').get(id, since) as { n: number }).n;
@@ -495,6 +501,8 @@ export interface ScheduledRunDeps {
   templates?: () => Map<string, ScheduleTemplate>;
   /** The memory folder the memory curator (#1111) tidies in a scheme, and its note count; none skips its run. */
   memoryTarget?: (projectId: number) => { dir: string; notes: number } | null;
+  /** Holds a run's brief while the box is starved (#1302, src/held-starts.ts); without it the brief is sent at once. */
+  held?: Pick<HeldStarts, 'start'>;
 }
 
 /**
@@ -579,7 +587,11 @@ export class ScheduledRuns {
       store.schedules.ran(s.id, { ticketId: id }, now);
       store.usage.used('schedule', s.name);
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-      runner.send(id, by, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions)), [], { brief: true, schedule: s.name });
+      const message = runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions));
+      const opts = { brief: true, schedule: s.name };
+      const send = () => runner.send(id, by, message, [], opts);
+      // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a parked row.
+      if (this.d.held) await this.d.held.start({ ticket: id, from: by, message, opts, schedule: s.id }, send); else send();
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
     } catch (err: any) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);

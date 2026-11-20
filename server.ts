@@ -49,6 +49,7 @@ import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
+import { HeldStarts } from './src/held-starts.ts';
 import { curatorTarget } from './src/memory-curator.ts';
 import { addAppTurnsChecks, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
 import { queueLesson } from './src/ship-lessons.ts';
@@ -662,8 +663,9 @@ async function newMinion(project: Project, m: NewMinionSpec, by: string) {
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
 // every half minute; a schedule that came due while the server was down runs once when it is back.
+const heldStarts = new HeldStarts({ store, runner, read: () => pressure.read(), broadcast, broadcastTicket: (id) => runner.broadcastTicket(id) });
 const scheduledRuns = new ScheduledRuns({
-  store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR,
+  held: heldStarts, store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR,
   memoryTarget: (id) => { const t = curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink })); return t && { dir: t.folder.dir, notes: t.notes }; },
 });
 // Once per database (#799): the hand-made audits follow kit/schedules/, and each scheme gets the ones its repo fits.
@@ -688,6 +690,7 @@ try {
   console.error('Review run backfill (#1095) failed; it tries again at the next start:', err);
 }
 if (!BOOT_CHECK) every('schedules', 30_000, () => scheduledRuns.runDue());
+if (!BOOT_CHECK) every('held starts', 30_000, () => heldStarts.tick());
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());
@@ -1259,7 +1262,7 @@ const flakeFixes = new FlakeFixes({
     const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' } }, APP_NAME);
     store.updateTicket(id, { person_id: project.owner_id ?? null });
     runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
-    runner.send(id, APP_NAME, brief.message, [], { brief: true });
+    await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));
     return { id };
   },
   wake: (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); },
@@ -1572,7 +1575,7 @@ const app: App = {
   get assetVersion() {
     return ASSET_VERSION;
   },
-  broadcast, notify, newMinion, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
+  broadcast, notify, newMinion, held: heldStarts, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
 };
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {

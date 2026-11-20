@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, until, type Booted } from './helpers.ts';
 
 // Settings → Contraptions as coordinator tools (#246): only the Citadel scheme's Taskmaster, only on a
 // turn an admin asked for (#255), through the same routes the settings page calls, and never showing a key.
@@ -114,17 +114,19 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   const on = await tool(CitadelTM, 'set_contraption_person', { name: 'mandate', login: 'cara', enabled: true });
   assert.equal(on.isError, false, on.text);
   assert.match(on.text, /enabled for cara/);
-  assert.equal(store.contraptionEnabled('mandate', cara.id), true);
+  // The tool's answer waits only a moment for the server's DB write worker, so this test's own Store waits for the row (#1239).
+  await until('cara enabled', () => store.contraptionEnabled('mandate', cara.id));
   assert.equal(store.db.prepare('SELECT added_by FROM contraption_users WHERE user_id = ?').get(cara.id)!.added_by, cara.id, 'enabled by the turn\'s person');
   assert.equal((await tool(CitadelTM, 'set_contraption_person', { name: 'mandate', login: '42', enabled: true })).isError, false);
-  assert.equal(store.contraptionEnabled('mandate', digits.id), true, 'an all-digit login is a login, not an id');
+  await until('an all-digit login is a login, not an id', () => store.contraptionEnabled('mandate', digits.id));
   assert.equal(store.contraptionEnabled('mandate', 42), false);
   assert.equal((await tool(CitadelTM, 'set_contraption_person', { name: 'mandate', login: '42', enabled: false })).isError, false);
-  assert.equal(store.contraptionEnabled('mandate', digits.id), false);
+  await until('42 disabled again', () => !store.contraptionEnabled('mandate', digits.id));
   assert.match((await tool(CitadelTM, 'set_contraption_person', { name: 'mandate', login: 'nobody', enabled: true })).text, /No such person/);
 
   const upd = await tool(CitadelTM, 'update_contraption', { name: 'mandate', title: 'Mandate!', turn_cap: 50, home_scheme: Citadel.id });
   assert.equal(upd.isError, false, upd.text);
+  await until('the update written', () => store.getContraption('mandate')!.title === 'Mandate!');
   assert.deepEqual([store.getContraption('mandate')!.title, store.getContraption('mandate')!.turn_cap, store.getContraption('mandate')!.port], ['Mandate!', 50, 7341]);
   assert.equal((await tool(CitadelTM, 'update_contraption', { name: 'mandate', port: 80 })).isError, true, 'the route\'s checks apply');
 

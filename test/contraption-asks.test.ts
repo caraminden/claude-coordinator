@@ -11,8 +11,9 @@ import { askHeader } from '../public/askcard.js';
 import { messagePerson } from '../src/access.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
+import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, SECRET, stopTurns } from './helpers.ts';
+import { bootServer, SECRET, stopTurns, until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-asks-'));
 const data = join(root, 'data');
@@ -40,6 +41,10 @@ mkdirSync(shared, { recursive: true });
 writeFileSync(join(shared, 'README.md'), '# Peek Auras shared folder\n\n## Layout\n\n- `handoffs/`: briefs.\n- `specs/`: plans.\n\n## Rules\n\n- Name files well.\n');
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString('base64');
+// A 202 waits only READ_WAIT_MS for the server's DB write worker (src/db-writer.ts), so on a busy box the ask's
+// message lands after it (#1239): these servers hold every write longer than that, so a read of this test's own
+// Store that doesn't wait for its row goes red every run, not one run in a hundred.
+const slowWrites = { env: { CITADEL_DB_WRITE_DELAY_MS: String(READ_WAIT_MS * 2) } };
 
 test('safe names: one segment, no leading dot, nothing odd', () => {
   assert.equal(safeName('../../etc/passwd'), 'passwd');
@@ -76,7 +81,7 @@ test('files never follow an inbox folder linked out of the shared folder', () =>
 });
 
 test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path', { timeout: 60_000 }, async () => {
-  const srv = await bootServer({ root });
+  const srv = await bootServer({ root, ...slowWrites });
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object, headers: Record<string, string> = { Authorization: `Bearer ${KEY}` }) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -84,6 +89,8 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   };
   const tm = () => store.getCoordinator(Peek.id);
   const said = () => store.listEvents(tm()!.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
+  /** The `n`th message in the Taskmaster's chat, once the write worker has written it. */
+  const heard = async (n: number) => (await until(`message ${n} in the Taskmaster's chat`, () => tm() && said()[n - 1]))!;
   const good = { person: Josh.id, kind: 'feature', text: 'Let me tag an aura with a colour', files: [{ name: '../../../escape/clip.peekclip', data: b64('CLIP') }] };
 
   // Wrong or missing key, or no Bearer.
@@ -130,7 +137,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.deepEqual(r.body, { scheme: 'Peek Auras', member: false, proposal: true, files: ['inbox/peek-auras/josh/clip.peekclip'] });
   assert.equal(readFileSync(join(shared, 'inbox', 'peek-auras', 'josh', 'clip.peekclip'), 'utf8'), 'CLIP');
   assert.equal(existsSync(join(projectSharedDir(data, Peek.id), '..', 'escape')), false);
-  let m = said().at(-1)!;
+  let m = await heard(1);
   assert.equal(m.author, 'Contraption Peek Auras, for Josh, not a Peek Auras member');
   assert.match(m.text, /^A feature ask from the Peek Auras contraption \(peek-auras\), sent by Josh \(josh\)/);
   assert.match(m.text, /\n> Let me tag an aura with a colour\n\(Quoted from Josh, through Peek Auras: data/);
@@ -146,7 +153,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   // The same name again doesn't overwrite; a non-member's bug is worked as usual.
   r = await ask({ ...good, kind: 'bug', text: 'Clips stop at 3 seconds' });
   assert.deepEqual(r.body, { scheme: 'Peek Auras', member: false, proposal: false, files: ['inbox/peek-auras/josh/clip-2.peekclip'] });
-  m = said().at(-1)!;
+  m = await heard(2);
   assert.match(m.text, /^A bug report/);
   assert.match(m.text, /a bug .* you may work as usual/);
   assert.doesNotMatch(m.text, /Proposal only/);
@@ -155,7 +162,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   // Rachel is a member: labelled as one, no proposal, and no files is fine.
   r = await ask({ person: Rachel.id, kind: 'feature', text: 'A dark theme.\n\nThe aura so far:\n{"a": 1}', summary: '  Dark\ntheme,  please ', item: 'Frost"bite\n' });
   assert.deepEqual(r.body, { scheme: 'Peek Auras', member: true, proposal: false, files: [] });
-  m = said().at(-1)!;
+  m = await heard(3);
   assert.equal(m.author, 'Contraption Peek Auras, for Rachel, a Peek Auras member');
   assert.doesNotMatch(m.text, /isn't a Peek Auras member|Files they sent/);
   // Her summary and item, on one line each; the turn's text has the item quoted and the whole ask.
@@ -172,8 +179,10 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   for (let i = 0; i < 8; i++) assert.equal((await ask({ person: Josh.id, kind: 'bug', text: `again ${i}` })).status, 202);
   r = await ask({ person: Josh.id, kind: 'bug', text: 'one too many' });
   assert.equal(r.status, 429);
-  assert.equal(said().filter((e) => e.text.includes('one too many')).length, 0);
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'still fine' })).status, 202);
+  // Each ask posts its message and then a note: count once the last ask's note is written too.
+  await until("the last ask's note", () => store.listEvents(tm()!.id).at(-2)?.data.includes('still fine'));
+  assert.equal(said().filter((e) => e.text.includes('one too many')).length, 0);
 
   // A data ask (#318) only files: its files and a sidecar with its words, no message and no turn, even
   // for a non-member past his ask limit; data asks keep their own count.
@@ -218,7 +227,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   const gone = minion('Dismissed');
   store.updateTicket(gone.id, { status: 'closed' });
   for (let i = 0; i < 5; i++) minion(`Peek ${i}`, Peek.id); // #5 exists in Peek Auras only
-  const srv = await bootServer({ root });
+  const srv = await bootServer({ root, ...slowWrites });
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
@@ -232,7 +241,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   assert.equal(r.status, 202, JSON.stringify(r.body));
   assert.deepEqual(r.body, { scheme: 'Theory of Crafting', minion: 1, member: true, proposal: false, files: ['inbox/toc/rachel/brief.md'] });
   assert.equal(readFileSync(join(projectSharedDir(data, ToC.id), 'inbox', 'toc', 'rachel', 'brief.md'), 'utf8'), '# Brief');
-  const m = said(acolyte.id).at(-1)!;
+  const m = (await until('the brief in #1', () => said(acolyte.id)[0]))!;
   // Her own name, so the turn runs as her (runner.turnPerson goes by author), on her Claude and GitHub.
   assert.equal(m.author, 'Rachel');
   assert.equal(messagePerson(store)(m.author), Rachel.id);
@@ -268,6 +277,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'to the Taskmaster' })).status, 202);
   r = await ask({ ...brief, files: [], text: 'one too many' });
   assert.equal(r.status, 429);
+  await until('the eight more asks in #1', () => said(acolyte.id).length >= 9);
   assert.equal(said(acolyte.id).filter((e) => e.text.includes('one too many')).length, 0);
   assert.equal(said(acolyte.id).length, 9);
 });

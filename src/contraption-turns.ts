@@ -710,7 +710,8 @@ export class ContraptionTurns {
             this.onToolError(c, tools.get(String(b.tool_use_id)) ?? 'tool', error);
             // Claude Code's refusal names no alternative and runs no hook; the note goes in as a message the agent reads next (not a person's steer: no `taken` event).
             const called = unknownToolName(error);
-            const note = called && !codex ? suggestTools(called, initToolNames) : null;
+            // Only the main agent's own calls, and not when tool search may have left the app's tools out of init's list (an incomplete list would name the wrong ones).
+            const note = called && !codex && !parent && (!req.toolSearch || initToolNames.some((t) => t.startsWith('mcp__'))) ? suggestTools(called, initToolNames) : null;
             if (note && !live.replied && !live.stopped && live.child?.stdin?.writable) live.child.stdin.write(userLine(note));
           }
           else emit('tool_result', { id: b.tool_use_id, ok: true, parent });

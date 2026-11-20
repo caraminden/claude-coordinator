@@ -88,12 +88,75 @@ export function hourLine(series, idx, { from, to, label }) {
     h('figcaption', { class: 'st-axis' }, h('span', {}, series.length ? `since ${when(series[0][0]).replace(/,? \d+:\d+.*$/, '')}` : 'no readings yet'), h('span', {}, 'now')));
 }
 
+// Time to ship (#1132): one chart per ship target, "asked" to "live" per day as a median (blue) and the slow tail, the p90
+// (orange), against the 10 minute line the Taskmaster's nudge fires at. A day is a button: it opens that day's ships as
+// bars split into their steps. The day with the worst tail is open until a person picks another.
+const SLOW_S = 600;
+const STAGE_ORDER = ['line', 'rebase', 'test', 'build', 'deploy', 'restart', 'live'];
+const shipPick = new Map();
+const shortDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric' });
+const dayPath = (vals, x, y) => {
+  let d = '';
+  let pen = false;
+  vals.forEach((v, i) => { if (v === null) pen = false; else { d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true; } });
+  return d;
+};
+const dotPath = (vals, x, y) => vals.map((v, i) => (v === null ? '' : `M${x(i).toFixed(1)},${y(v).toFixed(1)}h0`)).join('');
+
+export function shipChart(t, days, redraw) {
+  const n = days.length, W = 400, H = 110;
+  const peak = Math.max(SLOW_S * 1.2, ...t.p90.filter((v) => v !== null));
+  const x = (i) => ((i + 0.5) / n) * W;
+  const y = (v) => H - (v / peak) * H;
+  const worst = t.p90.reduce((w, v, i) => (v !== null && (w < 0 || v > t.p90[w]) ? i : w), -1);
+  const pick = shipPick.has(t.key) ? shipPick.get(t.key) : days[worst];
+  const choose = (day) => { shipPick.set(t.key, pick === day ? null : day); redraw(); };
+  const hits = days.map((day, i) => svg('rect', { x: (i / n) * W, y: 0, width: W / n, height: H, class: `st-hit${day === pick ? ' on' : ''}`, 'data-day': day, onclick: () => choose(day) },
+    svg('title', {}, `${dayLabel(day)}: ${t.counts[i] ? `${plural(t.counts[i], 'ship')}, median ${secs(t.median[i])}, slowest tenth ${secs(t.p90[i])}` : 'no ships'}`)));
+  const plot = h('div', { class: 'st-plot' },
+    svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': `${t.title}: median and slowest-tenth time to ship, a day each` },
+      svg('line', { x1: 0, x2: W, y1: y(SLOW_S), y2: y(SLOW_S), class: 'st-rule' }),
+      svg('path', { d: dayPath(t.p90, x, y), class: 'st-line s2' }), svg('path', { d: dotPath(t.p90, x, y), class: 'st-dot s2' }),
+      svg('path', { d: dayPath(t.median, x, y), class: 'st-line s1' }), svg('path', { d: dotPath(t.median, x, y), class: 'st-dot s1' }),
+      ...hits),
+    h('span', { class: 'st-rule-label muted' }, '10 min'));
+  plot.querySelector('.st-rule-label').style.setProperty('top', `${(y(SLOW_S) / H) * 100}%`);
+  const buttons = h('div', { class: 'st-days', role: 'group', 'aria-label': 'Pick a day to see its ships' }, ...days.map((day, i) => h('button', {
+    type: 'button', class: `st-day${day === pick ? ' on' : ''}${t.p90[i] !== null && t.p90[i] > SLOW_S ? ' slow' : ''}`, 'aria-pressed': day === pick ? 'true' : 'false', onclick: () => choose(day) },
+  h('span', {}, shortDay(day)), h('b', {}, t.counts[i] ? secs(t.p90[i]) : '–'))));
+  return h('section', { class: 'st-tile wide st-ship', 'data-key': t.key },
+    h('h4', {}, `Time to ship · ${t.title}`),
+    h('div', { class: 'st-legend' }, h('span', { class: 's1' }, 'Median'), h('span', { class: 's2' }, 'Slowest tenth (p90)'), h('span', { class: 'muted' }, 'asked to live, per day')),
+    plot, buttons, pick ? shipWaterfall(t, pick) : h('p', { class: 'muted small st-pick' }, 'Pick a day to see its ships step by step.'));
+}
+
+/** That day's ships, slowest first (at most 8), each a bar of its steps; the rest of its time, the steps don't name, is grey. */
+function shipWaterfall(t, day) {
+  const todays = t.ships.filter((s) => new Date(s.at).toLocaleDateString('en-CA', LA) === day).sort((a, b) => b.took - a.took);
+  const shown = todays.slice(0, 8);
+  const order = [...new Set(todays.flatMap((s) => Object.keys(s.stages)))].sort((a, b) => (STAGE_ORDER.indexOf(a) + 1 || 99) - (STAGE_ORDER.indexOf(b) + 1 || 99));
+  const step = (name) => Math.min(order.indexOf(name) + 1, 6);
+  const top = Math.max(1, ...shown.map((s) => s.took));
+  const row = (s) => {
+    const named = sum(Object.values(s.stages));
+    const segs = [...order.filter((k) => s.stages[k]).map((k) => [k, s.stages[k], step(k)]), ...(s.took - named > 1 ? [['other', s.took - named, 0]] : [])];
+    const bar = h('div', { class: 'st-wbar', role: 'img', 'aria-label': `${secs(s.took)}: ${segs.map(([k, v]) => `${k} ${secs(v)}`).join(', ')}` },
+      ...segs.map(([k, v, i]) => { const el = h('i', { class: 'st-seg', 'data-step': i, title: `${k}: ${secs(v)}` }); el.style.setProperty('width', `${(v / top) * 100}%`); return el; }));
+    return h('li', { class: s.took > SLOW_S ? 'slow' : '' }, h('span', { class: 'muted' }, new Date(s.at).toLocaleTimeString('en-US', { ...LA, hour: 'numeric', minute: '2-digit' })), bar, h('b', {}, secs(s.took)));
+  };
+  return h('div', { class: 'st-water' },
+    h('div', { class: 'st-water-head' }, h('b', {}, dayLabel(day)), h('span', { class: 'muted' }, todays.length ? `${plural(todays.length, 'ship')}, slowest first` : 'No ships that day')),
+    todays.length ? h('div', { class: 'st-legend' }, ...order.map((k) => h('span', { class: 'st-key', 'data-step': step(k) }, k)), h('span', { class: 'st-key', 'data-step': 0 }, 'other')) : '',
+    h('ul', { class: 'st-wlist' }, ...shown.map(row)),
+    todays.length > shown.length ? h('p', { class: 'muted small' }, `and ${todays.length - shown.length} quicker`) : '');
+}
+
 /** A tile: its name, the headline, one line under it, then a chart or a list. Fixed height, so a re-read moves nothing. */
 const tile = (name, value, sub, body = null, { tone = null, wide = false } = {}) => h('section', { class: `st-tile${wide ? ' wide' : ''}`, 'data-tone': tone },
   h('h4', {}, name), h('b', { class: 'st-value' }, value), h('div', { class: 'st-sub muted' }, sub), body ?? h('div', { class: 'st-chart st-empty' }));
 const slot = (s) => h('section', { class: 'st-tile st-slot', 'data-slot': s.key }, h('h4', {}, s.title), h('div', { class: 'st-sub muted' }, s.note));
 
-function citadelTiles(c, days, now) {
+function citadelTiles(c, days, now, ships, redraw) {
   const today = days.length - 1;
   const lastStall = c.stalls.last;
   const host = c.host.latest;
@@ -116,6 +179,7 @@ function citadelTiles(c, days, now) {
     tile('Ships', plural(c.ships.counts[today], 'ship') + ' today',
       c.ships.last ? `Median today ${secs(c.ships.median[today])} · last ${ago(c.ships.last.at)}${c.ships.last.changes[0] ? `: ${c.ships.last.changes[0]}` : ''}` : 'None this week',
       dayBars(days, c.ships.counts, { tip: (i) => `${plural(c.ships.counts[i], 'ship')}${c.ships.median[i] !== null ? `, median ${secs(c.ships.median[i])} to live` : ''}`, label: 'ships a day' })),
+    ...ships.filter((t) => t.key.startsWith('release:')).map((t) => shipChart(t, days, redraw)),
     tile('CI on main', !c.ciVisible ? 'Not yours to see' : !ci ? 'No reading yet' : red.length ? `Red: ${red.map((w) => w.name).join(', ')}` : 'Green',
       ci ? `${ci.green} of ${plural(ci.runs, 'run')} passed in the last day · read ${ago(ci.at)}` : c.ciVisible ? 'Read from GitHub every few minutes' : 'Only Citadel\'s members see its CI',
       ci ? h('ul', { class: 'st-list' }, ...ci.workflows.map((w) => h('li', {}, w.url ? h('a', { href: w.url, target: '_blank', rel: 'noopener' }, w.name) : w.name,
@@ -132,7 +196,7 @@ function citadelTiles(c, days, now) {
   ];
 }
 
-function appTiles(a, days) {
+function appTiles(a, days, ships, redraw) {
   const today = days.length - 1;
   const d = a.deploys;
   const kinds = Object.entries(a.errors.kinds).sort((x, y) => y[1] - x[1]);
@@ -144,6 +208,7 @@ function appTiles(a, days) {
       d.last ? `Last ${ago(d.last.at)} by ${d.last.by}, ${d.last.outcome}${d.last.took !== null ? ` in ${secs(d.last.took)}` : ''} · median ${secs(d.median)}, longest ${secs(d.longest)}` : 'Never deployed from Citadel',
       dayBars(days, d.counts, { bad: d.failed, tip: (i) => `${plural(d.counts[i], 'deploy')}${d.failed[i] ? `, ${d.failed[i]} failed` : ''}`, label: 'deploys a day, failed ones in red' }),
       { tone: d.last?.outcome === 'failed' ? 'bad' : sum(d.failed) ? 'warn' : null }),
+    ...ships.filter((t) => t.key === `app:${a.name}`).map((t) => shipChart(t, days, redraw)),
     tile('Errors', `${a.errors.lastDay} in the last day`, kinds.length ? kinds.map(([k, n]) => `${n} ${k}`).join(' · ') + ' this week' : 'None this week',
       dayBars(days, a.errors.counts, { tip: (i) => plural(a.errors.counts[i], 'error'), label: 'errors a day' }), { tone: a.verdict.reasons.some((r) => r.includes('errors')) ? 'warn' : null }),
     tile('Agent turns', `${plural(sum(a.turns.counts), 'turn')} this week`, `${tokens(sum(a.turns.tokens))} tokens · ${a.turns.people.length} ${a.turns.people.length === 1 ? 'person' : 'people'}`,
@@ -169,7 +234,7 @@ export function statusPage(projectId) {
     onclick: () => { picked = key; draw(); } },
   h('span', { class: `dot ${DOT[v.tone]}` }), h('span', { class: 'ci-li-name' }, name), h('span', { class: 'ci-li-state muted' }, sub ?? (v.reasons[0] ?? WORD[v.tone])));
   const draw = () => {
-    const { citadel, apps, days, now } = data;
+    const { citadel, apps, days, now, shipTimes = [] } = data;
     const sorted = [...apps].sort((x, y) => (y.scheme === projectId) - (x.scheme === projectId) || x.title.localeCompare(y.title));
     const app = sorted.find((a) => `app:${a.name}` === picked);
     if (!app) picked = 'citadel';
@@ -182,7 +247,7 @@ export function statusPage(projectId) {
         app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '',
         h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, v.reasons.length ? v.reasons.join(' · ') : app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'),
-      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days) : citadelTiles(citadel, days, now))));
+      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : citadelTiles(citadel, days, now, shipTimes, draw))));
   };
   let tried = false;
   const load = async () => {

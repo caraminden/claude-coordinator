@@ -1144,7 +1144,12 @@ mock.boards('#takes', { boards: [
         c.store.addHealthEvent('loop-lag', now - ago * HOUR, sha(3), `The event loop was held for ${s} s: sqlite`);
       for (let i = 0; i < 22; i++) {
         const start = now - (i * 8.3 + 2) * HOUR;
-        c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(i % 9), changes: JSON.stringify([{ title: `#${1100 + i}: a seeded change` }]), started_at: start, live_at: start + (240 + (i % 5) * 90) * 1000, outcome: 'live', stages: '{}' });
+        c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(i % 9), changes: JSON.stringify([{ title: `#${1100 + i}: a seeded change` }]), started_at: start, live_at: start + (240 + (i % 5) * 90) * 1000, outcome: 'live', stages: JSON.stringify({ line: 40 + (i % 3) * 20, rebase: 12, test: 130 + (i % 5) * 60, deploy: 40, restart: 18 }) });
+      }
+      // A slow day (#1132): three ships two days ago whose tail is well past 10 minutes, so the chart's spike and the waterfall show.
+      for (const [ago, line, test] of [[50, 700, 380], [48, 90, 1100], [46, 60, 200]] as const) {
+        const start = now - ago * HOUR;
+        c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(7), changes: '[]', started_at: start, live_at: start + (line + 12 + test + 58) * 1000, outcome: 'live', stages: JSON.stringify({ line, rebase: 12, test, deploy: 40, restart: 18 }) });
       }
       const mia = c.store.listUsers().find((u) => u.login === 'mia') ?? c.store.createUser({ name: 'Mia', login: 'mia' });
       const token = 'statusseedstatusseedstatusseed01'; // the about line names it
@@ -1158,7 +1163,7 @@ mock.boards('#takes', { boards: [
       const app = (name: string, title: string, home: number, port: number) => c.store.getContraption(name) ?? (c.store.createContraption({ name, title, icon: null, port, home_scheme: home, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `${name}-${hex()}`, keys_at: now }), c.store.getContraption(name)!);
       const peek = app('peek-auras', 'Peek Auras', peekScheme.id, 29_311);
       const ledger = app('ledger', 'Ledger', c.project.id, 29_312);
-      const deploy = (name: string, ago: number, took: number, outcome: string) => c.store.addContraptionDeploy({ name, from_sha: null, to_sha: hex().padEnd(40, '0'), by: 'Mia', started_at: now - ago * HOUR, finished_at: now - ago * HOUR + took * 1000, outcome, stages: '{}', changes: '[]' });
+      const deploy = (name: string, ago: number, took: number, outcome: string) => c.store.addContraptionDeploy({ name, from_sha: null, to_sha: hex().padEnd(40, '0'), by: 'Mia', started_at: now - ago * HOUR, finished_at: now - ago * HOUR + took * 1000, outcome, stages: JSON.stringify({ build: Math.round(took * 0.6), restart: Math.round(took * 0.4) }), changes: '[]' });
       for (const [ago, took, out] of [[150, 70, 'deployed'], [120, 95, 'deployed'], [74, 64, 'deployed'], [50, 180, 'failed'], [49, 88, 'deployed'], [26, 72, 'deployed'], [3, 81, 'deployed']] as const) deploy('peek-auras', ago, took, out);
       deploy('ledger', 30, 140, 'deployed');
       deploy('ledger', 2, 210, 'failed');

@@ -142,7 +142,7 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.deepEqual(c.host.series[0].slice(1), [95, 95]);
   assert.equal(c.verdict.tone, 'bad');
   assert.deepEqual(c.verdict.reasons, ['claude-coordinator-prune.timer failed', 'a 6.2 s stall in the last day', 'under 10% of memory free', 'under 10% of disk free']);
-  assert.ok(c.slots.some((s) => s.key === 'backups') && c.slots.some((s) => s.key === 'ship-time') && c.slots.some((s) => s.key === 'line'));
+  assert.ok(c.slots.some((s) => s.key === 'backups') && c.slots.some((s) => s.key === 'line'));
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {
@@ -194,4 +194,44 @@ test('boot rows outlive the row cap: only the time keep drops them', () => {
   store.addHealthEvent('boot', now - DAY, 'a', 'a ship: new code a');
   for (let i = 0; i < 5100; i++) store.addHealthEvent('client-error', now - 1000 + (i % 100), 'a', 'x');
   assert.equal(store.healthEventsSince(['boot'], 0).length, 1);
+});
+
+test('time to ship (#1132): per-day median and p90 per target, for Citadel and for an app, and a viewer sees only theirs', async () => {
+  const { store, citadel, mia, josh } = setup('shiptime');
+  const now = Date.parse('2026-11-19T20:00:00Z');
+  const rel = (took: number, ago: number) => store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v'.padEnd(40, '1'), changes: '[]', started_at: now - ago - took * 1000, live_at: now - ago, outcome: 'live', stages: '{"line":10,"test":50}' });
+  for (const t of [60, 120, 180, 240, 300, 360, 420, 480, 540, 5000]) rel(t, 1000 * t);
+  rel(100, 2 * DAY);
+  store.addContraptionDeploy({ name: 'peek-auras', from_sha: null, to_sha: 'a'.repeat(40), by: 'Mia', started_at: now - 3 * HOUR, finished_at: now - 3 * HOUR + 90_000, outcome: 'deployed', stages: '{"build":30,"restart":60}', changes: '[]' });
+  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now });
+  const all = await page.build(viewer(store, josh.id, true));
+  const main = all.shipTimes.find((t) => t.key === `release:${citadel.id}:citadel-server`)!;
+  assert.equal(main.counts.at(-2) + main.counts.at(-1) >= 10, true);
+  assert.equal(main.p90.at(-1), 540, 'nearest-rank p90 of 10 ships: the 9th');
+  assert.equal(main.ships.some((s) => s.took === 5000), true, 'the slow one is in the ships a click opens');
+  assert.deepEqual(main.ships.at(-1)!.stages, { line: 10, test: 50 });
+  const peek = all.shipTimes.find((t) => t.key === 'app:peek-auras')!;
+  assert.equal(peek.median.at(-1), 90);
+  assert.deepEqual(peek.ships[0].stages, { build: 30, restart: 60 });
+  const mine = await page.build(viewer(store, mia.id));
+  assert.deepEqual(mine.shipTimes.map((t) => t.key).filter((k) => k.startsWith('app:')), ['app:peek-auras']);
+});
+
+test('time to ship (#1132): a slow day sends exactly one nudge per target per day, none for a quick one', async () => {
+  const { store, citadel, peek } = setup('shipnudge');
+  let now = Date.parse('2026-11-19T20:00:00Z');
+  const told: [number, string][] = [];
+  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now, tell: (id, text) => told.push([id, text]) });
+  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'q'.repeat(40), changes: '[]', started_at: now - 400_000, live_at: now - 100_000, outcome: 'live', stages: '{}' });
+  assert.equal(page.nudgeSlowShips(), 0, 'a 5 minute ship is fine');
+  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 's'.repeat(40), changes: '[]', started_at: now - 4_000_000, live_at: now - 1_000_000, outcome: 'live', stages: '{}' });
+  store.addContraptionDeploy({ name: 'peek-auras', from_sha: null, to_sha: 'a'.repeat(40), by: 'Mia', started_at: now - 2_000_000, finished_at: now - 1_000_000, outcome: 'deployed', stages: '{}', changes: '[]' });
+  assert.equal(page.nudgeSlowShips(), 2, 'Citadel main and the app, one each');
+  assert.deepEqual(told.map(([id]) => id).sort(), [citadel.id, peek.home_scheme!].sort());
+  now += 5 * 60_000;
+  assert.equal(page.nudgeSlowShips(), 0, 'the same day again: nothing');
+  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 't'.repeat(40), changes: '[]', started_at: now - 5_000_000, live_at: now - 10_000, outcome: 'live', stages: '{}' });
+  assert.equal(page.nudgeSlowShips(), 0, 'one more slow ship that day: still nothing');
+  now += DAY;
+  assert.equal(page.nudgeSlowShips(), 0, 'tomorrow has no slow ship yet');
 });

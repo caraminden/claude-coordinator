@@ -1325,6 +1325,7 @@ const status = new StatusPage({
   store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
   ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
+  tell: (projectId, text) => tellHome(projectId, text),
 });
 if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT);

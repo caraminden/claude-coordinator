@@ -3518,6 +3518,16 @@ export class Store {
       .all(projectId, target, since) as unknown as ReleaseRow[];
   }
 
+  /** Every scheme's releases that went live since `since`, with a start (#1132). */
+  liveReleasesSince(since: number): ReleaseRow[] {
+    return this.db.prepare("SELECT * FROM releases WHERE outcome = 'live' AND live_at >= ? AND started_at IS NOT NULL ORDER BY id").all(since) as unknown as ReleaseRow[];
+  }
+
+  /** Every app's deploys that went live since `since`, with their stages (#1132). */
+  deployedSince(since: number): ContraptionDeployRow[] {
+    return this.db.prepare("SELECT * FROM contraption_deploys WHERE outcome = 'deployed' AND finished_at >= ? ORDER BY id").all(since) as unknown as ContraptionDeployRow[];
+  }
+
   /** An app's deploys started since `since`, oldest first (#1123). */
   appDeploysSince(name: string, since: number): { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[] {
     return this.db.prepare('SELECT started_at, finished_at, outcome, to_sha, by FROM contraption_deploys WHERE name = ? AND started_at >= ? ORDER BY started_at, id')
@@ -3541,8 +3551,8 @@ export class Store {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
-      // Boots are few and the Status page's week of restarts needs them: only the time keep drops them.
-      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind != 'boot'").run(Number(id) - HEALTH_MAX_ROWS);
+      // Boots and slow-ship nudges are few and the Status page and the once-a-day rule need them: only the time keep drops them.
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'ship-slow')").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

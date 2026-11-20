@@ -9,6 +9,7 @@ import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay } from './contraption-errors.ts';
+import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -86,6 +87,8 @@ export interface StatusDeps {
   /** systemctl --user show for these units; left out where they can't be read (a preview, a test). */
   unitStates?: (units: string[]) => Promise<UnitState[]>;
   now?: () => number;
+  /** Tell a scheme's Taskmaster (a wake): the slow-ship nudge. Left out in a preview or a test that doesn't send. */
+  tell?: (projectId: number, text: string) => void;
   mem?: () => Promise<{ total: number; avail: number }>;
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
 }
@@ -127,13 +130,35 @@ export class StatusPage {
   }
 
   start() {
-    void this.sample();
-    this.timer = setInterval(() => void this.sample(), SAMPLE_EVERY_MS);
+    const tick = () => void this.sample().then(() => this.nudgeSlowShips());
+    tick();
+    this.timer = setInterval(tick, SAMPLE_EVERY_MS);
     this.timer.unref();
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
+  }
+
+  /**
+   * #1132: the day a target's p90 of asked-to-live passes SLOW_P90_S, its scheme's Taskmaster hears once, however many
+   * ships follow; the next day's slow tail is a new nudge. Remembered as a 'ship-slow' health event, so a restart doesn't repeat it.
+   */
+  nudgeSlowShips(): number {
+    const { store, tell } = this.deps;
+    const now = this.now();
+    const day = pacificDay(now);
+    const told = new Set(store.healthEventsSince(['ship-slow'], now - 2 * DAY_MS).map((e) => e.detail.split('\n')[0]));
+    let sent = 0;
+    for (const t of shipTargets(store, lastDays(now), this.deps.ownScheme())) {
+      const p90 = t.p90.at(-1);
+      const mark = `${t.key}|${day}`;
+      if (p90 == null || p90 <= SLOW_P90_S || told.has(mark) || t.scheme == null) continue;
+      store.addHealthEvent('ship-slow', now, null, `${mark}\n${t.title}: p90 ${Math.round(p90)} s`);
+      tell?.(t.scheme, `Ships to ${t.title} are slow today: the slowest tenth took ${Math.round(p90 / 60)} min or more from asked to live (the median ${Math.round((t.median.at(-1) ?? 0) / 60)} min, ${t.counts.at(-1)} ships), over the ${SLOW_P90_S / 60} min line. The Status page's Time to ship chart shows each ship's steps. This is the one nudge for ${t.title} today.`);
+      sent++;
+    }
+    return sent;
   }
 
   /** The page for one viewer, reused for BUILD_KEEP_MS per viewer. */
@@ -171,9 +196,13 @@ export class StatusPage {
     const apps = store.listContraptions().filter((a) => (a.home_scheme === null ? viewer.admin : viewer.canSee(a.home_scheme)));
     const units = await this.unitRows(store.listContraptions());
     const unitOf = (u: string) => units?.find((r) => r.unit === u) ?? null;
+    const ownId = this.deps.ownScheme();
+    const names = new Set(apps.map((a) => `app:${a.name}`));
+    const shipTimes = shipTargets(store, days, ownId, (scheme, key) => (key.startsWith('app:') ? names.has(key) : scheme === ownId || (scheme != null && viewer.canSee(scheme))));
     return {
       now,
       days,
+      shipTimes,
       citadel: this.citadel(viewer, now, days, since, units),
       apps: apps.map((a) => appVitals(store, a, now, days, since, unitOf(`citadel-app-${a.name}.service`), this.deps.diskUse?.(a) ?? null)),
     };
@@ -261,7 +290,6 @@ export class StatusPage {
       // Tiles still to come: the minions that build them fill these in (Build 5, lane 3).
       slots: [
         { key: 'line', title: 'Ship line', note: 'Who is shipping and who waits: coming with the line panel.' },
-        { key: 'ship-time', title: 'Time to ship', note: 'How long a ship takes, step by step: coming next in Build 5.' },
         { key: 'backups', title: 'Backups', note: 'When each backup last ran and whether it worked: coming in Build 5.' },
       ],
     };
@@ -377,6 +405,8 @@ export interface StatusData {
   now: number;
   /** The Pacific days every per-day array follows, oldest first. */
   days: string[];
+  /** Time to ship (#1132): each target the viewer can see, per day, with its ships' steps. */
+  shipTimes: ShipTarget[];
   citadel: CitadelStatus;
   apps: AppStatus[];
 }

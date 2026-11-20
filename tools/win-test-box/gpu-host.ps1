@@ -15,6 +15,8 @@
   4. First time only, after asking: shuts the box down cleanly, gives it the GPU partition and starts
      it again (about 3 minutes; a job running on it then fails and is run again).
   5. Runs gpu.ps1 -Install in the box: the GPU off there, the run-gpu task in every workspace.
+  -Block switches GPU jobs off until -Unblock (Josh, 2026-11-19): no password, seconds, the box
+  keeps running. A job that asks then is refused, and one already running loses the GPU.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\gpu-host.ps1 -CheckOnly
@@ -25,11 +27,46 @@ param(
   # The most of each GPU resource (memory, encode, decode, compute) the partition asks for. GeForce
   # drivers aren't known to enforce it, so it's a request, not a cap (README.md).
   [ValidateRange(10, 100)][int]$SharePercent = 50,
-  [switch]$CheckOnly
+  [switch]$CheckOnly,
+  [switch]$Block,
+  [switch]$Unblock
 )
 $ErrorActionPreference = 'Stop'
 function Say([string]$Text) { Write-Host "`n== $Text" -ForegroundColor Cyan }
 function Stop-With([string]$Why) { Write-Host "`nStopped: $Why" -ForegroundColor Red; exit 1 }
+
+# ---------- the off switch ----------
+# A Hyper-V key-value item from here to the box (no password); gpu.ps1 reads it as
+# HKLM:\SOFTWARE\Microsoft\Virtual Machine\External\CitadelGpu.
+if ($Block -or $Unblock) {
+  if ($Block -and $Unblock) { Stop-With 'pick one: -Block or -Unblock.' }
+  $ns = 'root\virtualization\v2'
+  $svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
+  $sys = Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter "ElementName='$Name'"
+  if (-not $sys) { Stop-With "there's no VM named '$Name' on this PC (or this isn't PowerShell as administrator)." }
+  # Hyper-V takes the item as CIM-XML text.
+  $item = New-CimInstance -ClientOnly -CimClass (Get-CimClass -Namespace $ns -ClassName Msvm_KvpExchangeDataItem) -Property @{ Name = 'CitadelGpu'; Data = 'blocked'; Source = [uint16]0 }
+  $xml = [Microsoft.Management.Infrastructure.Serialization.CimSerializer]::Create().Serialize($item, [Microsoft.Management.Infrastructure.Serialization.InstanceSerializationOptions]::None)
+  $text = [Text.Encoding]::Unicode.GetString($xml)
+  function Invoke-Kvp([string]$Method, [string]$What) {
+    $r = Invoke-CimMethod -InputObject $svc -MethodName $Method -Arguments @{ TargetSystem = $sys; DataItems = @($text) }
+    if ($r.ReturnValue -eq 4096) {
+      $job = $r.Job | Get-CimInstance
+      while ($job.JobState -in 3, 4) { Start-Sleep -Milliseconds 200; $job = $job | Get-CimInstance }
+      if ($job.JobState -ne 7) { Stop-With "Hyper-V couldn't $($What): $($job.ErrorDescription)" }
+    } elseif ($r.ReturnValue) { Stop-With "Hyper-V couldn't $($What) (error $($r.ReturnValue))." }
+  }
+  $set = Get-CimInstance -Namespace $ns -ClassName Msvm_KvpExchangeComponentSettingData | Where-Object InstanceID -like "*$($sys.Name)*"
+  $was = @($set.HostExchangeItems | Where-Object { $_ -match '>CitadelGpu<' }).Count -gt 0
+  if ($Block) {
+    if (-not $was) { Invoke-Kvp AddKvpItems 'switch GPU jobs off' }
+    Write-Host "GPU jobs are switched off. A job that asks is refused; one running now loses the GPU within a few seconds. To turn them back on:`n  powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Unblock" -ForegroundColor Yellow
+  } else {
+    if ($was) { Invoke-Kvp RemoveKvpItems 'switch GPU jobs back on' }
+    Write-Host 'GPU jobs are switched on: a job that asks gets the GPU.' -ForegroundColor Green
+  }
+  exit 0
+}
 
 # ---------- 1. checks ----------
 Say 'Checking this PC'

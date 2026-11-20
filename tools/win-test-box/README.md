@@ -17,7 +17,7 @@ A Hyper-V VM on Cara's gaming PC (DESKTOP-G248IJ8) for native-app schemes (#369)
 |---|---|
 | Memory | 8 GB, held the whole time the box runs |
 | Processors | at most 6 of her 32 threads, capped at 75% and at a low weight. Used only while a CI desktop job or a minion's run is going; under 2% idle |
-| GPU | none, unless `gpu-host.ps1` has run. Then only while a `run-gpu` job runs (one at a time, 30 minutes at most): the GPU time it draws, and the graphics memory it allocates out of her 16 GB. The partition asks for at most half, but GeForce drivers aren't known to enforce that, so a heavy job could slow a game she's playing. Nothing at all between those jobs |
+| GPU | none, unless `gpu-host.ps1` has run. Then only while a `run-gpu` job runs (one at a time, 30 minutes at most): the GPU time it draws, and the graphics memory it allocates out of her 16 GB. The partition asks for at most half, but GeForce drivers aren't known to enforce that, so a heavy job could slow a game she's playing. Nothing at all between those jobs, and none while she has GPU jobs switched off (`gpu-host.ps1 -Block`) |
 | Disk | a 120 GB disk that grows as it fills: about 60–90 GB in use once a scheme's toolchain and builds are in |
 | Starting up | 2 minutes after her PC starts, taking its 8 GB at once. Nothing ever shows on her screen |
 | Games | If "Virtualization-based security" was already running (the Windows 11 default; `new-test-box.ps1` says), the hypervisor was already under her games and the box adds about nothing. If it was off, published numbers for turning the hypervisor on are 1–10% average FPS, more in the 1% lows. Those numbers come from older CPUs |
@@ -130,6 +130,18 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-b
 
 - It asks for the box's password (user `citadel`, from her password manager), copies the driver's files into the box, and asks before the one step with downtime: it shuts the box down cleanly, adds the GPU partition and starts it again (about 3 minutes; a job running then fails and is run again).
 - Running it again later (after a driver update) only copies the files again: no restart. It refuses while a GPU job is running.
+
+**Switch GPU jobs off while she plays** (Josh, 2026-11-19: "a switch I can flip that blocks all GPU jobs until unswitched"). In PowerShell as administrator on her PC; it takes seconds, needs no password and leaves the box running:
+
+```powershell-admin
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\gpu-host.ps1" -Block
+```
+
+From then on a `run-gpu` job is refused (exit 4) and one already running loses the GPU within a few seconds. Everything else on the box (CI, `run`, `build`) goes on in software. It stays off through restarts of the box and of her PC, until:
+
+```powershell-admin
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\gpu-host.ps1" -Unblock
+```
 
 **Take it off:** in PowerShell as administrator on her PC:
 

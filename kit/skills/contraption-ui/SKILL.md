@@ -269,6 +269,10 @@ finding (`citadel:self-review`, "UI findings").
   events, asks, the relay, `/app-api/read`, `citadel-app.json` and deploys, env vars, a heavy step
   through `$CITADEL_HEAVY`, your `DATA_DIR`'s disk use, limits):
   [references/api.md](references/api.md), the current spec. Prefer it over any pasted copy.
+- Testing your app's server with no Citadel running (a signed identity header, a scripted agent turn, asks,
+  spend, relay, media): `fake-citadel/fake-citadel.ts` in this skill's folder, `startFakeCitadel({ app })`. Copy
+  it into your repo's test folder; don't write your own. Citadel's `test/fake-citadel-contract.test.ts` checks it
+  against the real API.
 - Using a part from the table above: its file in the table's last column, before writing the code.
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
 - A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).

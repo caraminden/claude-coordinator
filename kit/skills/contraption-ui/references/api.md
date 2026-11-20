@@ -983,6 +983,11 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-19:** A fake Citadel for your tests: `fake-citadel/fake-citadel.ts` beside this skill's
+  `SKILL.md`. It signs the identity header and answers turns (scripted), cancel, messages, verdict,
+  sessions, media list, openrouter, spend, asks, home, minions and the relay as this file describes them;
+  `test/fake-citadel-contract.test.ts` runs the same calls on it and on the real API. Not faked: the
+  audit, caps, jobs, embeddings, secrets (404 `not_faked`).
 - **2026-11-19:** Turns take `effort` (`low`, `medium`, `high`) and `toolSearch: true` (MCP tools
   load only when the agent searches for them). Kept turns record both. Claude Code doesn't let a
   turn clear old tool results before compacting yet: Citadel has no switch for it.

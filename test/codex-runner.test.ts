@@ -97,6 +97,8 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
+// Members, as anyone writing to a minion is: a resume runs for its turn's person only while they're in the scheme (#1270).
+for (const u of [josh, cara]) store.addMember(project.id, u.id);
 const volume = join(root, 'josh-volume');
 mkdirSync(join(volume, '.claude'), { recursive: true });
 const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), home: volume, turnsDir: join(root, 'run', 'turns', `person-${josh.id}`), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude') }, ensure: async () => {} };

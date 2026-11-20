@@ -131,7 +131,7 @@ function firstDay(c: SeedCtx, done: 1 | 3 | 5) {
   for (const s of c.store.listPushSubscriptions().filter((x) => x.name === u.name)) c.store.deletePushSubscription(s.endpoint);
   c.store.setSetting(`welcome:${u.id}`, { shown: Date.now(), ...(done === 5 ? { card: CARD_OPTIONS[1] } : {}) });
   if (done > 1) c.store.savePushSubscription(u.name, `https://push.example/${hex()}`, 'seeded', 'seeded');
-  if (done === 5) c.store.addEvent(c.store.getCoordinator(c.project.id)!.id, 'user_message', { author: u.name, text: 'Hi! What are my schemes doing?' });
+  if (done === 5) c.store.addEvent(taskmaster(c).id, 'user_message', { author: u.name, text: 'Hi! What are my schemes doing?' });
   return `#/p/${c.project.id}`;
 }
 
@@ -1145,9 +1145,10 @@ mock.boards('#takes', { boards: [
       mk('a11y-checker', 'Accessibility checker', 'checker', { stage: 'ship', context: { requester: true } });
       r.ensureBuiltIns(id);
       // The scheme's own agent files (#1089): a shader critic read from its repo, its text live, and a sound one since deleted.
-      const repo = c.project.repo_dir ?? join(projectDir(c.dataDir, id), 'repo');
+      // Its own folder under the copy's data, always: it commits there, and another seed may have pointed Seeded at this repo (status).
+      const repo = join(projectDir(c.dataDir, id), 'repo');
       mkdirSync(join(repo, '.claude', 'agents'), { recursive: true });
-      if (!c.project.repo_dir) c.store.setProjectRepoDir(id, repo);
+      c.store.setProjectRepoDir(id, repo);
       writeFileSync(join(repo, '.claude', 'agents', 'shader-critic.md'), '---\nname: shader-critic\ndescription: Judges a new or changed shader in motion, against the look bible\n---\n\nYou judge shaders from a clip, never a still.\n\n## Blockers\n\n- Banding in a gradient\n- A flash brighter than the UI\n');
       writeFileSync(join(repo, '.claude', 'agents', 'sound-critic.md'), '---\nname: sound-critic\ndescription: Judges new sounds\n---\nListen.\n');
       r.ensureAgents(id, readAgentFiles(repo));

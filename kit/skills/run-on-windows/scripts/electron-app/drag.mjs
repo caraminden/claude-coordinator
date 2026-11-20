@@ -47,10 +47,9 @@ const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, r
 await send('Page.navigate', { url: `${origin}/c/${route}` }, s);
 for (let i = 0; i < 40 && !(await ev("!!document.querySelector('.split .ticket-head, .split')").catch(() => false)); i++) await sleep(500);
 await sleep(2500);
-const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.targetId });
-const home = { left: 40, top: 30, width: 1280, height: 860 };
-await send('Browser.setWindowBounds', { windowId, bounds: home });
-await sleep(800);
+// Electron's CDP has no Browser window calls: the window's place comes from the page (CSS px), and a drag that moved it
+// is undone by dragging back.
+const where = () => ev(`({ x: screenX + (outerWidth - innerWidth) / 2, y: screenY + outerHeight - innerHeight - (outerWidth - innerWidth) / 2 })`);
 console.log('page', JSON.stringify(await ev(`({ href: location.href, wco: matchMedia('(display-mode: window-controls-overlay)').matches,
   inset: getComputedStyle(document.documentElement).getPropertyValue('--top-inset'), strip: navigator.windowControlsOverlay?.getTitlebarAreaRect().toJSON(), dpr: devicePixelRatio })`)));
 
@@ -60,17 +59,17 @@ const W = await ev('innerWidth');
 const points = [[150, 4], [150, 16], [280, 16], [480, 16], [560, 16], [900, 16], [W - 220, 16], [W - 160, 8], [W - 300, 40], [480, 60]];
 for (const [x, y] of points) {
   const what = await ev(`(() => { const e = document.elementFromPoint(${x}, ${y}); return e ? (e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\\s+/).join('.') : '') + ' "' + (e.textContent || '').trim().slice(0, 20) + '" region:' + getComputedStyle(e).appRegion) : 'none'; })()`);
-  const before = (await send('Browser.getWindowBounds', { windowId })).bounds;
-  const sx = Math.round((before.left + x) * dpr), sy = Math.round((before.top + y) * dpr);
+  const before = await where();
+  const sx = Math.round((before.x + x) * dpr), sy = Math.round((before.y + y) * dpr);
   await mouse(`drag ${sx} ${sy} ${sx + 60} ${sy + 40}`);
-  await sleep(400);
-  const after = (await send('Browser.getWindowBounds', { windowId })).bounds;
-  const moved = after.left !== before.left || after.top !== before.top;
+  await sleep(500);
+  const after = await where();
+  const moved = after.x !== before.x || after.y !== before.y;
   console.log(`${moved ? 'DRAGS  ' : 'no drag'} at ${x},${y}: ${what}`);
-  if (moved) { await send('Browser.setWindowBounds', { windowId, bounds: home }); await sleep(500); }
+  if (moved) { await mouse(`drag ${sx + 60} ${sy + 40} ${sx} ${sy}`); await sleep(500); }
   await mouse('key {ESC}');
 }
-const b = (await send('Browser.getWindowBounds', { windowId })).bounds;
+const b = await ev('({ left: screenX, top: screenY, width: outerWidth, height: outerHeight })');
 await mouse(`shot ${path.join(process.env.TEMP, 'electron-drag.png')} ${[b.left, b.top, b.width, b.height].map((v) => Math.round(v * dpr)).join(' ')}`);
 console.log('shot', path.join(process.env.TEMP, 'electron-drag.png'));
 ps.stdin.end(); app.kill(); fwd.close(); ws.close();

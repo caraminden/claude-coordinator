@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS review_runs (
   verdict TEXT NOT NULL,
   -- A person disagreed with this run's verdict (record_verdict): an amber dot.
   disagreed INTEGER NOT NULL DEFAULT 0,
-  at INTEGER NOT NULL
+  at INTEGER NOT NULL,
+  -- NULL for a run a minion recorded; 'backfill' for one imported from a critic.md log (#1095), which never holds a ship.
+  source TEXT
 );
 CREATE INDEX IF NOT EXISTS review_runs_entry ON review_runs(entry_id, id);
 -- People's disagreements with an entry's verdicts (Q13, Josh: "Only the minion records it"), read by its later runs when its
@@ -432,6 +434,8 @@ export class ReviewSet {
       if (!has.has('calibration')) db.exec('ALTER TABLE review_entries ADD COLUMN calibration TEXT');
       if (!has.has('panel')) db.exec('ALTER TABLE review_entries ADD COLUMN panel TEXT');
       if (!has.has('on_fail')) db.exec('ALTER TABLE review_entries ADD COLUMN on_fail TEXT');
+      const runCols = new Set((db.prepare('PRAGMA table_info(review_runs)').all() as Row[]).map((c) => c.name));
+      if (!runCols.has('source')) db.exec('ALTER TABLE review_runs ADD COLUMN source TEXT');
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
@@ -655,7 +659,7 @@ export class ReviewSet {
       const { lastInsertRowid } = this.db.prepare('INSERT INTO review_verdicts (entry_id, person, words, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(e.id, v.person.trim(), v.words.trim(), v.ticketId, v.minion, at);
       if (v.ticketId != null) {
-        this.db.prepare('UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ?)').run(e.id, v.ticketId);
+        this.db.prepare('UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL)').run(e.id, v.ticketId);
       }
       this.db.exec('COMMIT');
       return { id: Number(lastInsertRowid), person: v.person.trim(), words: v.words.trim(), minion: v.minion, at };
@@ -685,19 +689,19 @@ export class ReviewSet {
   }
 
   /**
-   * The page's record by entry id (Q4): the last 10 runs oldest first, the first-round pass rate over the last 20 first
+   * The page's record by entry id (Q4): the last 10 runs oldest first (by date: a backfilled run, #1095, keeps its log's), the first-round pass rate over the last 20 first
    * rounds, and whether it always passes or always fails (5 first rounds or more, all the same). A teacher's rate is over
    * its last 20 runs of any round, each a fix and whether it held (#1089), with `passes` the fixes that held.
    */
   record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }> {
     const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }>();
-    const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY id`).all(projectId) as Row[];
+    const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY at, id`).all(projectId) as Row[];
     for (const r of rows) {
       if (!out.has(r.entry_id)) out.set(r.entry_id, { runs: [], rate: null, firsts: 0, passes: 0, stuck: null });
       out.get(r.entry_id)!.runs.push({ id: r.id, minion: r.minion, round: r.round, verdict: r.verdict, disagreed: !!r.disagreed, at: r.at });
     }
     // A teacher's every run is one fix and whether the critic's next round passed after it (#1089): its rate is how often a fix held.
-    const firsts = this.db.prepare(`SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
+    const firsts = this.db.prepare(`SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
     for (const f of firsts) {
       const rec = out.get(f.entry_id)!;
       rec.firsts = f.n;
@@ -714,7 +718,7 @@ export class ReviewSet {
    */
   holds(projectId: number, ticketId: number): { slug: string; name: string; verdict: string }[] {
     const all = this.list(projectId);
-    const last = (entryId: number) => this.db.prepare('SELECT id, verdict FROM review_runs WHERE entry_id = ? AND ticket_id = ? ORDER BY id DESC LIMIT 1').get(entryId, ticketId) as Row | undefined;
+    const last = (entryId: number) => this.db.prepare('SELECT id, verdict FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(entryId, ticketId) as Row | undefined;
     const out: { slug: string; name: string; verdict: string }[] = [];
     for (const e of all) {
       if (!e.enabled || e.trial || e.gate !== 'block') continue;
@@ -727,6 +731,61 @@ export class ReviewSet {
       out.push({ slug: e.slug, name: e.name, verdict: r.verdict });
     }
     return out;
+  }
+
+  /**
+   * The run backfill (#1095): each log's runs and people's verdicts, marked source 'backfill', in one transaction. A
+   * row whose entry is gone is counted and reported, never invented; an entry that already has this log's backfill
+   * (same minion) is skipped, so a second run adds nothing. Returns a line per scheme.
+   */
+  backfill(logs: BackfillLog[], now = Date.now()): string[] {
+    const per = new Map<number, { logs: number; runs: number; verdicts: number; already: number; missing: string[] }>();
+    const run = this.db.prepare("INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at, source) VALUES (?, ?, ?, ?, ?, ?, 'backfill')");
+    const had = this.db.prepare("SELECT 1 FROM review_runs WHERE entry_id = ? AND minion = ? AND source = 'backfill' LIMIT 1");
+    const verdict = this.db.prepare('INSERT INTO review_verdicts (entry_id, person, words, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)');
+    // The log's latest run of the entry by the time the person spoke turns amber, as record_verdict does it live.
+    const amber = this.db.prepare("UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT id FROM review_runs WHERE entry_id = ? AND minion = ? AND source = 'backfill' AND at <= ? ORDER BY at DESC, id DESC LIMIT 1)");
+    // The kit's professor is on every scheme's page once it's opened (ensureBuiltIns): a teacher run needs its row.
+    for (const id of new Set(logs.filter((l) => l.runs.some((r) => r.slug === 'professor')).map((l) => l.project))) {
+      if (!this.get(id, 'professor') && this.db.prepare('SELECT 1 FROM projects WHERE id = ?').get(id)) this.ensureBuiltIns(id, now);
+    }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const l of logs) {
+        const n = per.get(l.project) ?? { logs: 0, runs: 0, verdicts: 0, already: 0, missing: [] };
+        per.set(l.project, n);
+        const entries = new Map<string, ReviewEntry | null>();
+        for (const slug of new Set([...l.runs, ...l.verdicts].map((r) => r.slug))) {
+          const e = this.get(l.project, slug);
+          if (!e) n.missing.push(`${slug} (${l.log})`);
+          else if (had.get(e.id, l.minion)) n.already++;
+          entries.set(slug, e && !had.get(e.id, l.minion) ? e : null);
+        }
+        let added = 0;
+        for (const r of l.runs) {
+          const e = entries.get(r.slug);
+          if (!e) continue;
+          if (!(VERDICTS as readonly string[]).includes(r.verdict) || !Number.isInteger(r.round) || r.round < 1 || !Number.isFinite(r.at)) throw new ReviewError(`${l.log}: bad run ${JSON.stringify(r)}`);
+          run.run(e.id, l.ticketId, l.minion, r.round, r.verdict, r.at);
+          added++;
+        }
+        for (const v of l.verdicts) {
+          const e = entries.get(v.slug);
+          if (!e) continue;
+          verdict.run(e.id, v.person, v.words, l.ticketId, l.minion, v.at);
+          amber.run(e.id, l.minion, v.at);
+          n.verdicts++;
+        }
+        n.runs += added;
+        if (added) n.logs++;
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    const names = new Map((this.db.prepare('SELECT id, name FROM projects').all() as Row[]).map((p) => [p.id, p.name]));
+    return [...per].map(([id, n]) => `${names.get(id) ?? `scheme ${id}`}: ${n.runs} runs and ${n.verdicts} verdicts from ${n.logs} logs${n.already ? `; ${n.already} already in` : ''}${n.missing.length ? `; no entry today for ${n.missing.join(', ')}` : ''}`);
   }
 
   /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
@@ -847,6 +906,30 @@ export function importAllRubrics(store: { getSetting<T>(k: string): T | null; se
   // A file that failed outright tries again on the next start; the ones already in are skipped by slug then.
   if (!retry) store.setSetting(IMPORT_KEY, now);
   return done;
+}
+
+/** One minion's (or one design folder's) rounds from a critic.md log (#1095), as src/review-backfill.json holds them. */
+export type BackfillLog = {
+  project: number;
+  log: string;
+  ticketId: number | null;
+  minion: string;
+  runs: { slug: string; round: number; verdict: string; at: number }[];
+  verdicts: { slug: string; person: string; words: string; at: number }[];
+};
+
+/** The setting that says the run backfill ran (#1095), so a run someone deletes is never brought back. */
+export const BACKFILL_KEY = 'review_runs_backfill';
+
+/**
+ * Once per database (#1095): the runs and people's verdicts read from every scheme's critic.md logs go into the run
+ * record (ReviewSet.backfill). Returns a line per scheme.
+ */
+export function backfillRuns(store: { getSetting<T>(k: string): T | null; setSetting(k: string, v: unknown): void; reviews: ReviewSet }, logs: BackfillLog[], now = Date.now()): string[] {
+  if (store.getSetting(BACKFILL_KEY)) return [];
+  const lines = store.reviews.backfill(logs, now);
+  store.setSetting(BACKFILL_KEY, now);
+  return lines;
 }
 
 /** The turn's line naming its review set (Build 4): the folder renderSet wrote, or that the scheme has none on. */

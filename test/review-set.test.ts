@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { readProposals } from '../src/review-describe.ts';
-import { agentKind, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { agentKind, BACKFILL_KEY, backfillRuns, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, VERDICTS, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -317,6 +317,52 @@ test('the run record: dots, first-round pass rate, a stuck entry, and the ship h
   assert.deepEqual([ui.firsts, ui.rate, ui.stuck], [1, 0, null], 'one first round is too few to call it stuck');
   for (let i = 0; i < 4; i++) set.recordRun(3, 'ui', { ticketId: 70 + i, minion: `#${70 + i}`, round: 1, verdict: 'fail' });
   assert.equal(set.record(3).get(set.get(3, 'ui')!.id)!.stuck, 'fail', 'five first rounds, all failed');
+});
+
+test('the run backfill (#1095): history from critic logs sorts before live runs, never holds a ship, runs once and reports what it skipped', () => {
+  const { db, set } = fresh();
+  set.create(3, { slug: 'ui', name: 'UI', gate: 'block' }, 'Josh');
+  const t0 = Date.UTC(2026, 10, 1);
+  // A live run recorded today, before the backfill inserts older history with higher ids.
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' }, t0 + 30 * 86_400_000);
+  const logs = [
+    { project: 3, log: '3/shared/40/critic.md', ticketId: 40, minion: '#40', runs: [
+      { slug: 'ui', round: 1, verdict: 'fail', at: t0 }, { slug: 'ui', round: 2, verdict: 'ask', at: t0 + 60_000 },
+      { slug: 'professor', round: 2, verdict: 'pass', at: t0 + 61_000 }, { slug: 'gone', round: 1, verdict: 'pass', at: t0 }],
+      verdicts: [{ slug: 'ui', person: 'Cara', words: 'Ship as is', at: t0 + 120_000 }] },
+    { project: 3, log: '3/shared/project/design/x/critic.md', ticketId: null, minion: 'design: x', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: t0 - 86_400_000 }], verdicts: [] },
+  ];
+  const settings = new Map<string, unknown>();
+  const store = { getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null, setSetting: (k: string, v: unknown) => void settings.set(k, v), reviews: set };
+  assert.deepEqual(backfillRuns(store, logs, 5), ['Peek Auras: 4 runs and 1 verdicts from 2 logs; no entry today for gone (3/shared/40/critic.md)']);
+  assert.equal(settings.get(BACKFILL_KEY), 5);
+  assert.equal(set.get(3, 'professor')!.kind, 'teacher', "a teacher run brings the kit's professor onto the page, as opening it would");
+  assert.deepEqual(set.holds(3, 40), [], "an old log's ask doesn't hold the minion's ship: its live pass is what counts");
+  const ui = set.record(3).get(set.get(3, 'ui')!.id)!;
+  assert.deepEqual(ui.runs.map((r) => [r.minion, r.round, r.verdict, r.disagreed]), [['design: x', 1, 'pass', false], ['#40', 1, 'fail', false], ['#40', 2, 'ask', true], ['#40', 1, 'pass', false]], 'by date, the live run last; the run before the person spoke is amber');
+  assert.deepEqual([ui.firsts, ui.passes], [3, 2]);
+  assert.equal(set.record(3).get(set.get(3, 'professor')!.id)!.passes, 1);
+  assert.equal(set.verdicts(3).get(set.get(3, 'ui')!.id)![0].words, 'Ship as is');
+  // Once: a second start adds nothing, and a direct second pass finds every log already in.
+  assert.deepEqual(backfillRuns(store, logs), []);
+  const count = () => (db.prepare("SELECT count(*) AS n FROM review_runs WHERE source = 'backfill'").get() as { n: number }).n;
+  assert.equal(count(), 4);
+  assert.match(set.backfill(logs)[0], /^Peek Auras: 0 runs and 0 verdicts from 0 logs; 3 already in/);
+  assert.equal(count(), 4);
+  // A bad row rolls the whole import back.
+  assert.throws(() => set.backfill([{ project: 3, log: 'l', ticketId: 1, minion: '#1', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: 1 }, { slug: 'ui', round: 0, verdict: 'pass', at: 2 }], verdicts: [] }]), /bad run/);
+  assert.equal(count(), 4);
+});
+
+test('src/review-backfill.json: every run is well formed and in date order per log (#1095)', () => {
+  const logs = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'review-backfill.json'), 'utf8'));
+  assert.ok(logs.length > 50);
+  for (const l of logs) {
+    assert.ok(Number.isInteger(l.project) && l.log.endsWith('critic.md') && l.minion, l.log);
+    assert.ok(l.ticketId === null ? l.minion.startsWith('design: ') : /^#\d+$/.test(l.minion), l.log);
+    for (const r of l.runs) assert.ok((VERDICTS as readonly string[]).includes(r.verdict) && Number.isInteger(r.round) && r.round >= 1 && Number.isFinite(r.at), `${l.log} ${JSON.stringify(r)}`);
+    assert.deepEqual(l.runs.map((r: { at: number }) => r.at), l.runs.map((r: { at: number }) => r.at).sort((a: number, b: number) => a - b), l.log);
+  }
 });
 
 test("a teacher's record counts every round after its fix, not just first rounds, and is never stuck (#1089)", () => {

@@ -2,7 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createConnection, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -40,7 +40,7 @@ import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { addAppTurnsChecks, backfillStandardAudits } from './src/standard-audits.ts';
-import { importAllRubrics } from './src/review-set.ts';
+import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
@@ -565,6 +565,13 @@ try {
   for (const line of importAllRubrics(store)) console.log(`Review set import (#1051): ${line}`);
 } catch (err) {
   console.error('Review set import (#1051) failed; it tries again at the next start:', err);
+}
+// Once per database (#1095): the run record's history, read from every scheme's critic.md logs into src/review-backfill.json.
+try {
+  const logs = JSON.parse(readFileSync(join(import.meta.dirname, 'src', 'review-backfill.json'), 'utf8'));
+  for (const line of backfillRuns(store, logs)) console.log(`Review run backfill (#1095): ${line}`);
+} catch (err) {
+  console.error('Review run backfill (#1095) failed; it tries again at the next start:', err);
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).

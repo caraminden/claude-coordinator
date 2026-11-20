@@ -2,7 +2,7 @@
 // the Taskmaster's prompt (src/prompts.ts), create_ticket's and schedule_minion's descriptions (src/mcp.ts),
 // the server's own starts (schedules, a start with no model: src/routes/projects.ts, src/schedules.ts)
 // read it. Cara, 2026-11-14: "we should ALWAYS make an intentional choice
-// about model". The tiers follow the Citadel-wide "Usage, effort and models" summary line; change both together. Josh, 2026-11-13, on Fable: "can we tighten the fable usage a bit, maybe use it about half as often? only for really complex or high risk things?" The Fable budget and the "every Taskmaster on Opus high" rule live in the Taskmaster's prompt beside tableText().
+// about model". TIERS is the model rule's one home (src/rule-homes.ts, #1162): every minion's prompt reads tierSummary() from it, and the Citadel-wide "Usage, effort and models" line points here. Josh, 2026-11-13, on Fable: "can we tighten the fable usage a bit, maybe use it about half as often? only for really complex or high risk things?" The Fable budget and the "every Taskmaster on Opus high" rule live in the Taskmaster's prompt beside tableText().
 
 /** The Claude models a person can pick, with the names people read. */
 export const CLAUDE_MODELS = [
@@ -20,14 +20,14 @@ export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 /** The tiers, in the order the prompt reads them: the work each covers, its model and effort, and when to move off it. */
 export const TIERS = [
   // Known-shape middle work on Sonnet (Cara, 2026-11-14, "Widen to known-shape work"; "a sonnet minion can remove a link or move something somewhere I ask it to, but it cant build new screens").
-  { work: 'chores (docs, instruction edits, config, renames, setup) and known-shape work (a bug with a clear repro and a known place to look, a small spec\'d tweak with no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)', model: 'claude-sonnet-5-5', effort: 'medium', then: 'if it stalls or the fix does not hold Opus 5.5 at medium, then high' },
+  { work: 'chores (docs, instruction edits, config, renames, setup) and known-shape work (a bug with a clear repro and a known place to look, a small spec\'d tweak with no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)', model: 'claude-sonnet-5-5', effort: 'medium', then: 'if it stalls or the fix does not hold Opus 5.5 at medium, then high', short: 'for known-shape work' },
   { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
   // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
   { work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)', model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' },
-  { work: 'design, ideation, new screens or data models, the ship pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high' },
+  { work: 'design, ideation, new screens or data models, the ship pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high', short: 'for design and risky work' },
   // Research on Opus medium (Cara, 2026-11-17, picked "Research on Opus medium" on #940's card): research minions spent $236 in a week on Opus high, and the vendor's curve for research is nearly flat from medium to high.
   { work: 'research', model: 'claude-opus-5-5', effort: 'medium', then: 'high if the report is thin or sent back' },
-  { work: 'rarely: architecture of a big multi-part feature or build, security and risk reviews of a high-risk change, bugs that are intermittent or whose fix failed to hold', model: 'claude-fable-5-2', effort: 'medium' },
+  { work: 'rarely: architecture of a big multi-part feature or build, security and risk reviews of a high-risk change, bugs that are intermittent or whose fix failed to hold', model: 'claude-fable-5-2', effort: 'medium', short: 'only for the really complex or high-risk' },
 ];
 
 /**
@@ -122,6 +122,11 @@ export function tableText(fable = true) {
   const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model)).map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');
   // xhigh and max are in create_ticket's effort description, which every Taskmaster reads with the tool.
   return `${tiers}.${fable ? '' : ' Fable is off in this scheme: never pick it for a minion, a Grunt or a review; the nearest tier below it is Opus 5.5 at high.'}`;
+}
+
+/** The tiers with a `short` line, as a minion's prompt reads them: "Sonnet 5.5 medium for known-shape work, …". */
+export function tierSummary(fable = true) {
+  return TIERS.filter((t) => t.short && (fable || !/fable/.test(t.model))).map((t) => `${tierLabel(t.model, t.effort)} ${t.short}`).join(', ');
 }
 
 /** The table as rows for the Models section (#1061): what a person reads of each tier, straight from TIERS. */

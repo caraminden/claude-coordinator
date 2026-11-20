@@ -505,3 +505,7 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .tm-banner button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--held); font: inherit; text-decoration: underline; cursor: pointer; }
 .mcopies > summary .who { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .note .push-count { font-variant-numeric: tabular-nums; }
+
+/* The chat's context meter (#1193): fixed width, tabular numbers, so a changing number moves nothing. */
+.ctx-meter { display: inline-block; flex: none; min-width: 11ch; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85em; white-space: nowrap; }
+.ctx-meter.hot { color: var(--danger, #c0392b); }

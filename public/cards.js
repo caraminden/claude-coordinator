@@ -173,6 +173,15 @@ function mergeHead(m, desc, call) {
 const PLAN_RANK = { pending: 0, revising: 1, approved: 2, rejected: 2, superseded: 2 };
 
 /** "✓ Approved by Cara · Tue 14:05", "✎ Cara asked for changes", "✗ Rejected by Cara", "Superseded by a newer plan". */
+/** A held instructions edit's outcome (#1162). */
+function insOutcome(r) {
+  const when = r.at ? ` · ${new Date(r.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : '';
+  if (r.status === 'approved') return `✓ Saved anyway by ${r.by}${when}`;
+  if (r.status === 'revising') return `✎ ${r.by} sent it back to work in${when}`;
+  if (r.status === 'rejected') return `✗ Cancelled by ${r.by}${when}`;
+  return 'Superseded by a newer edit';
+}
+
 function planOutcome(r, machine) {
   const when = r.at ? ` · ${new Date(r.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : '';
   if (r.status === 'approved') return `✓ Approved by ${r.by}${when}`;
@@ -229,33 +238,37 @@ export function planCard(ticketId, card, opts = {}) {
   const t = card.hostTool;
   // A memory tidy card (#1111): decided change by change on the Memory page, so it links there and has no buttons.
   const mem = card.memory;
+  // A held instructions edit (#1162): Save anyway, Work it in (notes optional) or Cancel edit.
+  const ins = card.instructions;
   const fixed = m || k || t || mem;
-  const mayApprove = t ? !!account?.admin : !m || !!account?.admin || (m.owner != null && m.owner === me);
+  const mayApprove = t ? !!account?.admin : ins ? ins.scope !== 'citadel' || !!account?.admin : !m || !!account?.admin || (m.owner != null && m.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
-  const hint = mayApprove ? '' : t ? 'Only a member of the Citadel scheme can approve' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
+  const hint = mayApprove ? '' : t ? 'Only a member of the Citadel scheme can approve' : ins ? 'Only an admin or a Citadel scheme member can save the Citadel-wide text' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
   const status = h('span', { class: 'muted', role: 'status' });
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
-  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
-  const revise = h('button', { type: 'button', class: 'small secondary' }, fixed ? 'Reject' : 'Revise');
+  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, ins ? 'Save anyway' : 'Approve');
+  const revise = h('button', { type: 'button', class: 'small secondary' }, ins ? 'Work it in' : fixed ? 'Reject' : 'Revise');
+  const drop = h('button', { type: 'button', class: 'small secondary', hidden: !ins }, 'Cancel edit');
   if (mem) approve.hidden = revise.hidden = true;
-  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
+  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: ins ? 'Where should it go? (optional)' : fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
-  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed }, fixed ? 'Reject' : 'Send notes');
+  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed && !ins }, ins ? 'Send back' : fixed ? 'Reject' : 'Send notes');
   // Diffed against the plan before it unless that one was approved: a later plan after a go is new work, not a revision.
-  const prev = fixed || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
+  const prev = fixed || ins || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
-  if (!fixed) view.lastPlan = mine;
-  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
+  if (!fixed && !ins) view.lastPlan = mine;
+  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : 'Plan'), card.summary),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), drop, revise, approve, cancel, sendNotes));
   let rank = 0;
   const editing = (on) => {
     notes.hidden = cancel.hidden = sendNotes.hidden = !on;
     approve.hidden = revise.hidden = on;
+    drop.hidden = !ins || on;
     if (!on) return;
     notes.focus({ preventScroll: true });
     // Centre the box so its buttons clear the sticky message box at the bottom.
@@ -271,10 +284,10 @@ export function planCard(ticketId, card, opts = {}) {
       apply: () => {
         deciding = true;
         editing(false);
-        approve.hidden = revise.hidden = true;
+        approve.hidden = revise.hidden = drop.hidden = true;
         el.classList.add('answered');
         why.hidden = true;
-        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : t && t.source !== 'pacman' ? 'Installing…' : 'Approved') : fixed ? 'Rejected' : 'Revision sent';
+        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : t && t.source !== 'pacman' ? 'Installing…' : ins ? 'Saved' : 'Approved') : verdict === 'reject' ? 'Cancelled' : fixed ? 'Rejected' : 'Revision sent';
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
       undo: () => {
@@ -282,20 +295,22 @@ export function planCard(ticketId, card, opts = {}) {
         if (rank) return;
         el.classList.remove('answered');
         approve.hidden = revise.hidden = false;
+        drop.hidden = !ins;
         why.hidden = !hint;
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
   cancel.addEventListener('click', () => editing(false));
   sendNotes.addEventListener('click', () => decide('revise'));
-  notes.addEventListener('input', () => { sendNotes.disabled = !fixed && !notes.value.trim(); });
+  drop.addEventListener('click', () => decide('reject'));
+  notes.addEventListener('input', () => { sendNotes.disabled = !fixed && !ins && !notes.value.trim(); });
   notes.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || notes.value.trim())) { e.preventDefault(); decide('revise'); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || ins || notes.value.trim())) { e.preventDefault(); decide('revise'); }
   });
   const handle = {
     el,
@@ -308,8 +323,8 @@ export function planCard(ticketId, card, opts = {}) {
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
-      approve.hidden = revise.hidden = true;
-      status.textContent = planOutcome(r, fixed);
+      approve.hidden = revise.hidden = drop.hidden = true;
+      status.textContent = ins ? insOutcome(r) : planOutcome(r, fixed);
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
   };

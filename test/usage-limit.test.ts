@@ -35,8 +35,9 @@ const wait = setInterval(() => {
   clearInterval(wait);
   appendFileSync(${JSON.stringify(prompts)}, input);
   const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'm-main' }));
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result, modelUsage: { 'm-grunt': { contextWindow: 200000 }, 'm-main': { contextWindow: 1000000 } } }));
   process.exit(0);
 }, 20);
 `,
@@ -45,9 +46,11 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
+/** Each ticket broadcast's live context size (#1193). */
+const shown: [number, number | null][] = [];
 const pushes: { ticket: number; text: string }[] = [];
 function makeRunner() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(store, (m: any) => { if (m.type === 'ticket') shown.push([m.ticket.id, m.ticket.context_live]); }, () => ({}), fake);
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
@@ -202,6 +205,14 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.equal(t.state, 'limited');
     assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
     assert.equal(runner.view(t).context_tokens, 122005);
+    // The chat's size meter (#1193): the window is the main model's, not a Grunt's; mid-turn the live size shows, and it drops with a smaller one.
+    assert.ok(shown.some(([tid, live]) => tid === id && live === 122005), 'the size went out while the turn ran');
+    assert.equal(runner.view(t).context_window, 1000000);
+    assert.equal(runner.view(t).context_live, null);
+    // A size left over from a turn that never sent a result isn't live once no turn runs.
+    (runner as any).contextSizes.set(id, 90000);
+    assert.equal(runner.view(t).context_live, null);
+    (runner as any).contextSizes.delete(id);
     setRelease('ok');
     // A relay (no person of its own) waits for the payer's reset; a person's own message would try now (#477).
     runner.send(id, 'Relay', 'more from a relay');

@@ -13,7 +13,8 @@ import { mkdir } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { DatabaseSync, backup } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
+import { copyDb } from './db-copy.ts';
 import { Auth, type Session } from './auth.ts';
 import type { Project, Store, Ticket } from './db.ts';
 import { HttpError } from './http.ts';
@@ -77,12 +78,13 @@ async function end(proc: ChildProcess): Promise<void> {
 }
 
 /**
- * Copy the database for a preview that runs on it beside the live one, through the live server's own
- * connection: consistent even while it writes (WAL), and its writes don't restart the backup. Another
- * process copies with copyDb (src/db-copy.ts) and then scrubs, as tools/dev-copy.ts does (#529).
+ * Copy the live database file for a preview that runs on it beside the live one, then scrub it. The copy
+ * goes through copyDb (src/db-copy.ts): a fresh read-only connection, one backup step. A stepped backup
+ * restarts whenever another connection writes the source, and since #795 the db-writer worker writes on
+ * its own connection, so a stepped copy of the busy live database never finished (#1204).
  */
-export async function copyData(from: DatabaseSync, to: string): Promise<void> {
-  await backup(from, to);
+export async function copyData(fromFile: string, to: string): Promise<void> {
+  await copyDb(fromFile, to);
   scrub(to);
 }
 
@@ -242,7 +244,7 @@ export class Previews {
     const dir = join(this.root, key);
     rmSync(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
-    await copyData(this.store.db, join(dir, 'coordinator.db'));
+    await copyData(join(this.dataDir, 'coordinator.db'), join(dir, 'coordinator.db'));
 
     const port = await freePort();
     const password = randomBytes(16).toString('hex');

@@ -157,6 +157,14 @@ export async function deployTodo(app: Pick<App, 'store' | 'runner' | 'dataDir'>,
   lastTodo.set(at, key);
 }
 
+/** A deployed app's install check couldn't run twice over: one plain line to its home scheme's Taskmaster, not a to-do list. */
+export async function deployUnchecked(app: Pick<App, 'store' | 'runner' | 'dataDir'>, c: ContraptionRow, asker: number | null, line: string) {
+  const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
+  if (!scheme) return;
+  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? await ensureCoordinator(app as App, scheme);
+  app.runner.send(taskmaster.id, APP_NAME, line, [], { asker });
+}
+
 /**
  * The contraption a deploy call names, if the caller may deploy it: an admin; Citadel's Taskmaster on a
  * turn an admin asked for; or a Taskmaster or minion of its home scheme. Anyone else learns nothing of it.
@@ -198,6 +206,7 @@ export function startDeploy(app: App, c: ContraptionRow, by: string, caller: Ctx
     uid,
     resumed,
     to,
+    unchecked: (line: string) => void deployUnchecked(app, c, person?.id ?? null, line).catch((err) => console.error(`Couldn't send ${c.name}'s install check note to its home Taskmaster:`, err)),
     todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
   };
   return app.services.deploy(c, by, app.store.listContraptions(), identity, hooks);

@@ -129,6 +129,11 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .instructions-tools .small { font-size: 0.82em; }
 .instructions-text { width: 100%; min-height: 55vh; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; tab-size: 2; }
 .instructions-actions { margin-top: 0.6rem; }
+/* What already says a person's new words, before their save (#1162). */
+.instructions-repeats { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); }
+.instructions-repeats p { margin: 0 0 0.4rem; }
+.instructions-repeats ul { margin: 0 0 0.6rem; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.instructions-repeats li + li { margin-top: 0.3rem; }
 /* Approval rules and plugin folders: the editor's two lists */
 .instructions-text.settings-list { min-height: 7rem; }
 .settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }

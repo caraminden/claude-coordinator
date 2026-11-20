@@ -1,0 +1,9 @@
+# tools/stale-docs refs: backticked paths in the instruction files that are not repo files, on purpose. Pattern  # reason
+AGENTS.md                      # the upstream ponytail repo's file, named as its source
+specs/affected-tests-map.md    # CLAUDE.md names it as "the shared folder's" spec
+specs/build-branches.md        # README names it as the shared folder's spec
+machine-agent.json             # written beside the machine agent on a person's computer
+vapid.json                     # made on first start in the data dir
+tools/list                     # an MCP method, not a file
+.claude/worktrees/agent-*      # runtime worktrees Claude Code makes
+tools/mods/delve               # an example of a folder a scheme's setting can list

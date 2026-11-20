@@ -286,6 +286,8 @@ export interface DeployHooks {
   setStatics?: (paths: string[]) => void;
   /** What the deployed app still lacks: no rail icon, or a web manifest that won't install. Empty when it was checked and lacks nothing. */
   todo?: (todo: string[]) => void;
+  /** The install check couldn't run, even on a retry: one plain line for the home scheme, not a to-do list. */
+  unchecked?: (line: string) => void;
   /** Whom the install check reads the page as: kept in the deploy's marker, for starting it again after a restart (#847). */
   uid?: number | null;
   /** It starts again a deploy a Citadel restart cut short: cut short again, it is left for a person. */
@@ -355,6 +357,8 @@ export interface ServiceOptions {
   logDir: string;
   /** How long a started app has to answer its health check. */
   healthMs: number;
+  /** How long after a deploy an install check that couldn't run is tried again (ms). */
+  installRetryMs: number;
   /** A manifest's build_timeout minute, in ms (tests shorten it). */
   minuteMs: number;
   /** Where a repo is cloned from: GitHub, or CITADEL_GIT_BASE (tests). */
@@ -384,6 +388,7 @@ export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCh
     journalctl: env.CITADEL_JOURNALCTL || 'journalctl',
     home,
     healthMs: Number(env.CITADEL_HEALTH_MS) || 60_000,
+    installRetryMs: Number(env.CITADEL_INSTALL_RETRY_MS) || 30_000,
     minuteMs: 60_000,
     gitUrl: (repo) => `${env.CITADEL_GIT_BASE || 'https://github.com'}/${repo}.git`,
     systemdRun: env.CITADEL_SYSTEMD_RUN || (stand ? null : 'systemd-run'),
@@ -1072,18 +1077,41 @@ export class AppServices {
     // After the try, so nothing here can roll back a deploy that worked.
     const header = identity?.();
     // Without a person to read its page as, only the registry's icon is checked.
-    const found = header
-      ? await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) }))
-        .catch((err) => ({ problems: [`Couldn't check how it installs: ${err.message}`], icon: null, statics: [] as string[] }))
-      : { problems: [], icon: null, statics: [] as string[] };
-    if (found.statics.length) hooks.setStatics?.(found.statics);
-    const todo = found.problems;
-    if (!row.icon && found.icon && hooks.setIcon?.(found.icon)) await say(`Rail icon set to ${found.icon}, the first icon in its manifest.`);
-    else if (!row.icon) todo.unshift(`It has no rail icon, so the rail shows its first letter. Serve one and register it (update_contraption's icon, or Settings → Contraptions), or list 192 and 512 px PNG icons in its web manifest and deploy again: an empty icon is filled from there.`);
-    view.todo = todo;
-    for (const t of todo) await say(`To do: ${t}`);
-    // An empty list only when it was checked: that says it's all done.
-    if (header || todo.length) hooks.todo?.(todo);
+    const check = async (ms: number) => {
+      if (!header) return { problems: [] as string[], icon: null, statics: [] as string[] };
+      try {
+        return await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(ms) }));
+      } catch (err: any) {
+        return { problems: [], icon: null, statics: [] as string[], unchecked: err?.message ?? String(err) };
+      }
+    };
+    // A check that couldn't run says nothing about the app (a timeout under load is not "no manifest"): no to-dos, no
+    // "no rail icon" either, and one try again a little later with a longer wait.
+    const finish = async (found: Awaited<ReturnType<typeof check>>) => {
+      if (found.statics.length) hooks.setStatics?.(found.statics);
+      const todo = found.problems;
+      if (!row.icon && found.icon && hooks.setIcon?.(found.icon)) await say(`Rail icon set to ${found.icon}, the first icon in its manifest.`);
+      else if (!row.icon) todo.unshift(`It has no rail icon, so the rail shows its first letter. Serve one and register it (update_contraption's icon, or Settings → Contraptions), or list 192 and 512 px PNG icons in its web manifest and deploy again: an empty icon is filled from there.`);
+      view.todo = todo;
+      for (const t of todo) await say(`To do: ${t}`);
+      // An empty list only when it was checked: that says it's all done.
+      if (header || todo.length) hooks.todo?.(todo);
+    };
+    const first = await check(5000);
+    if (!first.unchecked) return finish(first);
+    await say(`Couldn't check how it installs: ${first.unchecked}. Trying again shortly.`);
+    const timer = setTimeout(async () => {
+      try {
+        const again = await check(20_000);
+        if (!again.unchecked) return await finish(again);
+        const line = `Couldn't check how ${row.name} installs: ${again.unchecked}. Nothing to do unless it repeats.`;
+        await say(line);
+        hooks.unchecked?.(line);
+      } catch (err) {
+        console.error(`${row.name}'s install check retry failed:`, err);
+      }
+    }, this.opts.installRetryMs);
+    timer.unref();
   }
 
   /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */

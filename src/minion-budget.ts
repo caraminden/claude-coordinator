@@ -75,11 +75,11 @@ export function budgetFrom(table: Map<string, { usd: number; n: number }>, type:
 const cache = new WeakMap<Store, { at: number; table: Map<string, { usd: number; n: number }> }>();
 const CACHE_MS = 3_600_000;
 
-/** A minion's budget now: its `type` property and the model it is set to or last ran on. */
-export function budgetFor(store: Store, ticket: { id: number; model: string | null; last_model?: string | null }, now = Date.now()): Budget | null {
+/** A minion's budget now: its `type` property and the model it is set to or last ran on. `props`: its properties, when the caller has read them. */
+export function budgetFor(store: Store, ticket: { id: number; model: string | null; last_model?: string | null }, now = Date.now(), props?: Record<string, unknown>): Budget | null {
   let c = cache.get(store);
   if (!c || now - c.at > CACHE_MS) cache.set(store, c = { at: now, table: medians(store.minionCosts(now - WINDOW_MS)) });
-  const type = store.props.forTarget('minion', ticket.id).type;
+  const type = (props ?? store.props.forTarget('minion', ticket.id)).type;
   return budgetFrom(c.table, typeof type === 'string' ? type : null, ticket.model ?? ticket.last_model);
 }
 

@@ -825,7 +825,7 @@ export class Runner {
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
-      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket) : null,
+      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
@@ -3486,8 +3486,8 @@ export class Runner {
   }
 
   /** What the minion page shows of its budget (#1114), or null with too little history. */
-  private budgetView(ticket: Ticket) {
-    const b = budgetFor(this.store, ticket);
+  private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
+    const b = budgetFor(this.store, ticket, Date.now(), props);
     return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE) };
   }
 

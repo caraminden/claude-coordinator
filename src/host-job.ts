@@ -1,4 +1,4 @@
-// Jobs the server runs on the host that must outlive it (#508): landings (src/land.ts) and ultra reviews
+// Jobs the server runs on the host that must outlive it (#508): landings (src/land.ts), kit sync, fast-verify, rollbacks and ultra reviews
 // (src/ultrareview.ts). Each runs in a transient unit of its own, in the builds' slice (ultra reviews: the turns' slice),
 // so a restart of the server neither kills it nor waits for it. A job keeps everything in a folder of its
 // own (its pid, output and exit code), so whichever server runs next reads how it went. Without units
@@ -8,7 +8,6 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
-import { TURN_SLICE } from './turn-launch.ts';
 
 /** Ships, kit-sync ships and checks, fast-verify and rollbacks (#1280): beside the turns, not crowding their MemoryHigh. */
 export const BUILD_SLICE = 'citadel-builds.slice';

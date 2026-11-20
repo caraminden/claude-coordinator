@@ -18,8 +18,8 @@
   A job's ask is a file C:\citadel-box\gpu-want\<pid> holding that process's start time. A job that
   is killed leaves its file, but its pid is gone, so the next look turns the GPU off; a file over 2
   hours old counts as gone too.
-  The off switch on Cara's PC (gpu-host.ps1 -Block) beats every ask: -Run refuses with exit 4, and a
-  job already running loses the GPU within a few seconds (its app may then fail or fall back).
+  The off switch is Citadel's (the Machines page's GPU jobs switch): Citadel refuses a run-gpu task
+  while it is off and stops a running one, whose ask then goes the same way.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File C:\citadel-box\gpu.ps1 -Run 'cargo test --test gpu_timing'
@@ -36,10 +36,6 @@ $box = 'C:\citadel-box'
 $wantDir = "$box\gpu-want"
 $log = "$box\gpu.log"
 $taskName = 'Citadel GPU'
-
-# The off switch on Cara's PC (gpu-host.ps1 -Block): Hyper-V hands its value to the box here.
-function Test-Blocked { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\External' -ErrorAction SilentlyContinue).CitadelGpu -eq 'blocked' }
-$blockedText = "GPU jobs are switched off on Cara's PC (gpu-host.ps1 -Block there; -Unblock turns them back on). Nothing was run."
 
 function Add-GpuLog([string]$Text) {
   Add-Content -Path $log -Value "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) $Text"
@@ -126,8 +122,6 @@ function Show-State {
   $gpu = Get-Gpu
   if (-not $gpu) { Write-Host 'GPU: none. This box has no GPU partition (gpu-host.ps1 on the host adds it), so it draws in software.' }
   foreach ($d in $gpu) { Write-Host "GPU: $($d.FriendlyName), $(if ($d.Status -eq 'OK') { 'on' } else { "off ($($d.Status))" })" }
-  if (Test-Blocked) { Write-Host "GPU jobs: switched off on Cara's PC (gpu-host.ps1 -Block)" }
-  elseif (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\External')) { Write-Host "GPU jobs: the off switch can't be read (Hyper-V's data exchange isn't running in the box), so it counts as on" }
   $want = Get-Want
   Write-Host "Asked for by: $(if ($want) { ($want | ForEach-Object { "pid $($_.Name) since $($_.LastWriteTime.ToString('HH:mm:ss'))" }) -join ', ' } else { 'no job' })"
   Write-Host 'Direct3D adapters (an app gets the first by default):'
@@ -143,7 +137,7 @@ switch ($PSCmdlet.ParameterSetName) {
     # turns it off and exits once none does. The 3 h is the task's own limit too.
     $until = (Get-Date).AddHours(3)
     while ((Get-Date) -lt $until) {
-      $want = @(Get-Want).Count -gt 0 -and -not (Test-Blocked)
+      $want = @(Get-Want).Count -gt 0
       foreach ($d in Get-Gpu) {
         try {
           if ($want -and $d.Status -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false; Add-GpuLog "on: $($d.FriendlyName) for $((Get-Want).Name -join ', ')" }
@@ -151,7 +145,7 @@ switch ($PSCmdlet.ParameterSetName) {
         } catch { Add-GpuLog "couldn't turn $($d.FriendlyName) $(if ($want) { 'on' } else { 'off' }): $_" }
       }
       # A job that asked between the look above and now gets another round instead of a dead end.
-      if (-not $want -and (@(Get-Want).Count -eq 0 -or (Test-Blocked))) { exit 0 }
+      if (-not $want -and @(Get-Want).Count -eq 0) { exit 0 }
       Start-Sleep -Seconds 3
     }
     Add-GpuLog 'gave up after 3 hours; the next ask starts it again'
@@ -218,7 +212,6 @@ console.log(names.join(', ') || 'none');
   'Run' {
     $gpu = Get-Gpu
     if (-not $gpu) { Write-Host 'This box has no GPU partition, so there is no GPU to turn on. Nothing was run.'; exit 2 }
-    if (Test-Blocked) { Write-Host $blockedText; exit 4 }
     New-Item -ItemType Directory -Force $wantDir | Out-Null
     $ask = "$wantDir\$PID"
     # Written whole, then moved in: Sync never sees it half-written.
@@ -231,7 +224,6 @@ console.log(names.join(', ') || 'none');
       # Still on 5 s later: a Sync that looked just before this ask may switch it off once more (and on
       # again a round later), and the job shouldn't start in between.
       while ($true) {
-        if (Test-Blocked) { Write-Host $blockedText; exit 4 }
         if (Test-GpuOn) { Start-Sleep -Seconds 5; if (Test-GpuOn) { break } }
         if ((Get-Date) -gt $until) {
           Write-Host "The GPU didn't come on in 90 s: $((Get-Gpu | ForEach-Object { "$($_.FriendlyName) $($_.Status)" }) -join ', '). Nothing was run. The box's C:\citadel-box\gpu.log says why."

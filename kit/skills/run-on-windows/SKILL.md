@@ -27,8 +27,9 @@ Citadel's `tools/win-test-box/README.md`.
    - **`run-gpu`**, once the box has its GPU: like `run`, with Cara's GPU switched on in the box
      for this job only, so Direct3D gets real hardware. Everything else draws in software, so
      golden pictures stay `run`'s. It prints the adapter an app gets by default; exit 2 means the
-     box has no GPU yet (use CI or a person), 3 that it didn't come on (`gpu.ps1 -Check` in `build`),
-     4 that a person switched GPU jobs off on Cara's PC: don't retry, use `run` or ask.
+     box has no GPU yet (use CI or a person), 3 that it didn't come on (`gpu.ps1 -Check` in `build`).
+     A person can switch GPU jobs off on the Machines page: then `run-gpu` is refused, and one
+     running is stopped ("Stopped by the GPU jobs switch"). Don't retry: use `run`, or ask.
 
    For example, `run_task {workspace, task: "build", args: ["cargo build --tests"]}`. Pass the
    command as one string: quoting across several args is lost on the way to PowerShell.

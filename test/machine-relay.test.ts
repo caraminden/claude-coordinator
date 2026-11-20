@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
 import { afterEach, mock, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { MachineRelay } from '../src/machines.ts';
+import { cleanLend, MachineRelay } from '../src/machines.ts';
 
 /** An event stream: what the app writes to it, parsed, and whether it was ended. */
 function stream() {
@@ -93,4 +93,56 @@ test('a second agent with the same token takes over, and the first is told so be
   assert.equal(first.ended, true);
   assert.deepEqual(first.sent.at(-1), { replaced: true, by: 'desktop' });
   assert.equal(relay.isOnline(box.id), true);
+});
+
+test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the machine and a running one is stopped', async () => {
+  const { relay, box } = world();
+  const agent = stream();
+  relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run-gpu', run: ['gpu.ps1'] }, { name: 'run', run: ['run.ps1'] }] }] });
+  relay.setLend(box.id, { server: null, workspaces: ['w'] });
+  const proxy = stream();
+  assert.equal(relay.openSession(box.id, { ticketId: 1, projectId: 1 }, 'ws', '#1', proxy), true);
+  const session = proxy.sent[0].session;
+  const task = (id: number, name: string) => relay.fromSession(session, { ticketId: 1, projectId: 1 }, { jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'run_task', arguments: { workspace: 'w', task: name } } });
+  const reached = (id: number) => agent.sent.some((m) => m.session === session && m.message?.id === id);
+
+  // On: it goes through, and the machine's answer that it outlasted the wait names the job.
+  task(5, 'run-gpu');
+  assert.ok(reached(5));
+  relay.fromAgent(box, session, { message: { jsonrpc: '2.0', id: 5, result: { content: [{ type: 'text', text: 'run-gpu in w is still running after 50 s (job ab12cd34). Call job with id "ab12cd34" to wait for it.' }] } } });
+  assert.equal(proxy.sent.at(-1).message.id, 5, 'the answer still reaches the turn');
+
+  // Off: Citadel opens a session of its own and stops that job.
+  const seen = agent.sent.length;
+  relay.setLend(box.id, { server: null, workspaces: ['w'], gpu_off: true });
+  const init = agent.sent.slice(seen).find((m) => m.message?.method === 'initialize');
+  assert.equal(init.who, 'the GPU jobs switch on the Machines page');
+  relay.fromAgent(box, init.session, { message: { jsonrpc: '2.0', id: init.message.id, result: {} } });
+  await new Promise((r) => setImmediate(r));
+  const stop = agent.sent.find((m) => m.session === init.session && m.message?.method === 'tools/call');
+  assert.deepEqual(stop.message.params, { name: 'stop_job', arguments: { id: 'ab12cd34' } });
+
+  // While off, run-gpu is answered with an error at once; other tasks go on.
+  task(6, 'run-gpu');
+  assert.equal(reached(6), false);
+  const refusal = proxy.sent.at(-1).message;
+  assert.equal(refusal.id, 6);
+  assert.equal(refusal.result.isError, true);
+  assert.match(refusal.result.content[0].text, /GPU jobs are switched off for box/);
+  task(7, 'run');
+  assert.ok(reached(7));
+
+  // A job that outlasts its call's wait after the switch went off is stopped once its id comes back.
+  relay.setLend(box.id, { server: null, workspaces: ['w'] });
+  task(8, 'run-gpu');
+  relay.setLend(box.id, { server: null, workspaces: ['w'], gpu_off: true });
+  const late = agent.sent.length;
+  relay.fromAgent(box, session, { message: { jsonrpc: '2.0', id: 8, result: { content: [{ type: 'text', text: 'run-gpu in w is still running after 50 s (job 99ff0011).' }] } } });
+  assert.ok(agent.sent.slice(late).some((m) => m.message?.method === 'initialize' && m.who === 'the GPU jobs switch on the Machines page'));
+});
+
+test('a lend keeps gpu_off only when it is true', () => {
+  assert.deepEqual(cleanLend({ server: null, workspaces: [], gpu_off: true }), { server: null, workspaces: [], gpu_off: true });
+  assert.deepEqual(cleanLend({ server: null, workspaces: [], gpu_off: 'yes' }), { server: null, workspaces: [] });
 });

@@ -674,6 +674,21 @@ if (!BOOT_CHECK) {
   setInterval(sweepTurnAudit, 24 * 60 * 60_000).unref();
 }
 
+// The ideas ledger (#1150): each scheme's pages, handoffs and starts re-read hourly, and the weekly held note to its
+// Taskmaster of Later ideas waiting over two weeks (never a wake). Not in previews or dev copies: their Taskmasters aren't real.
+if (!BOOT_CHECK && !PREVIEW) {
+  const ideasPass = () => void safely('ideas ledger', async () => {
+    for (const p of store.listProjects()) {
+      await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
+      const tm = store.getOverlord(p.id);
+      const note = tm && store.ideas.laterNote(p.id);
+      if (note) runner.leaveMail(tm.id, 'Ideas', note);
+    }
+  });
+  setTimeout(ideasPass, 15 * 60_000).unref();
+  setInterval(ideasPass, 60 * 60_000).unref();
+}
+
 // Steps' times from before step_times (#571), once, a minute after boot.
 if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runner.backfillStepTimes()), 60_000).unref();
 

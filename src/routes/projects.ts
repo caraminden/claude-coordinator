@@ -2,8 +2,10 @@
 // search, and one Taskmaster writing to another's.
 import { cleanMsgSettings, cleanNeverHold } from '../msg-settings.ts';
 import { mkdir, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { checkNeed } from '../needs.ts';
-import { basename, join } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
+import { handoffIn, LATER_STALE_MS, STATUSES as IDEA_STATUSES, type Idea } from '../ideas.ts';
 import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanShotNote, cleanShotThemes, cleanShotWidths, cleanWorkflows, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
@@ -1141,6 +1143,12 @@ export const projectRoutes: Route[] = [
         const coordinator = store.ownerCoordinator(store.getTicket(id)!);
         if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
       }
+      // The ideas ledger (#1150): a minion started from a handoff (Start, or a brief naming one) marks its idea started, a chained one too.
+      try {
+        const shared = projectSharedDir(app.dataDir, project.id);
+        const rel = brief?.path.startsWith(shared + sep) ? relative(shared, brief.path).split(sep).join('/') : handoffIn(message, shared);
+        if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
+      } catch (e) { console.error(`ideas: linking #${id}: ${(e as Error).message}`); }
       // A split scheme's other Taskmasters read it in their next turn's digest (#919).
       if (store.isSplit(project.id)) {
         const by = caller?.kind === 'coordinator' ? caller : null;
@@ -1235,6 +1243,42 @@ export const projectRoutes: Route[] = [
   },
 
   // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
+  // The ideas ledger (#1150): every idea the scheme was shown, its pick, handoff and minion. The list re-reads the
+  // scheme's pages and handoffs in the background once it is a few minutes old; ?status= and ?q= filter.
+  {
+    method: 'GET', path: '/api/projects/:project/ideas', who: ['person', 'taskmaster', 'minion'],
+    handler({ res, url, app, project }) {
+      const status = url.searchParams.get('status');
+      if (status && !(IDEA_STATUSES as readonly string[]).includes(status)) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}`);
+      json(res, 200, ideasView(app, project, status, (url.searchParams.get('q') ?? '').slice(0, 200)));
+    },
+  },
+  {
+    // A hand fix: { status: one of the statuses, or null for automatic } and/or { ticket: #N, null to unlink, or 'auto' }.
+    method: 'POST', path: '/api/projects/:project/ideas/:id', who: ['person', 'taskmaster', 'minion'],
+    async handler({ req, res, app, project, params, session, caller }) {
+      const body = await readJson(req);
+      const row = app.store.ideas.get(Number(params.id));
+      if (!row || row.project_id !== project.id) throw new HttpError(404, 'No such idea in this scheme');
+      const change: Parameters<typeof app.store.ideas.edit>[2] = {};
+      if (body.status !== undefined) {
+        if (body.status !== null && !(IDEA_STATUSES as readonly string[]).includes(body.status)) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}, or null`);
+        change.status = body.status;
+      }
+      if (body.ticket !== undefined) {
+        if (body.ticket === null || body.ticket === 'auto') change.ticket = body.ticket;
+        else {
+          const t = app.store.getTicketByNumber(project.id, Number(body.ticket));
+          if (!t) throw new HttpError(404, `No minion #${body.ticket} in this scheme`);
+          change.ticket = { id: t.id, number: t.number };
+        }
+      }
+      const by = caller ? (caller.kind === 'coordinator' ? 'Taskmaster' : `#${caller.number}`) : session.name;
+      const updated = app.store.ideas.edit(row.id, by, change);
+      app.broadcast({ type: 'ideas', projectId: project.id });
+      json(res, 200, { idea: ideaRow(app, project, updated) });
+    },
+  },
   // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
   {
     method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],
@@ -1530,3 +1574,42 @@ export const projectRoutes: Route[] = [
     },
   },
 ];
+
+/** One ledger row as the page shows it: links to its page, handoff and minion, made here so they always open. */
+function ideaRow(app: App, project: Project, r: Idea) {
+  const shared = projectSharedDir(app.dataDir, project.id);
+  const inShared = (abs: string) => (abs.startsWith(shared + sep) ? relative(shared, abs).split(sep).join('/') : null);
+  const pageRel = r.page ? inShared(r.page) : null;
+  const pageArt = r.page && !pageRel ? app.store.latestArtifact(project.id, [r.page]) : undefined;
+  const t = r.ticket_id ? app.store.getTicket(r.ticket_id) : undefined;
+  return {
+    ...r,
+    page_label: r.page ? (pageRel ?? basename(r.page)) : null,
+    page_href: pageRel ? `#/s/${project.id}/${encodeURIComponent(pageRel)}` : pageArt ? `#/a/${pageArt.id}` : null,
+    handoff_href: r.handoff && existsSync(join(shared, r.handoff)) ? `#/s/${project.id}/${encodeURIComponent(r.handoff)}` : null,
+    minion: t ? { number: t.number, title: t.title, status: t.status } : r.number ? { number: r.number, title: null, status: null } : null,
+  };
+}
+
+const IDEAS_FRESH_MS = 5 * 60_000;
+const ideasSynced = new Map<number, number>();
+
+/** The ledger for the page and the ideas tool: rows (filtered), counts by status, and the Later rows waiting over two weeks. */
+export function ideasView(app: App, project: Project, status: string | null, q: string) {
+  const shared = projectSharedDir(app.dataDir, project.id);
+  const first = !ideasSynced.has(project.id);
+  if (first || Date.now() - ideasSynced.get(project.id)! > IDEAS_FRESH_MS) {
+    ideasSynced.set(project.id, Date.now());
+    // The first look in a server's life reads everything now, so the page opens full; later ones refresh behind it.
+    if (first) app.store.ideas.sync(project.id, shared);
+    else app.store.ideas.soon(project.id, shared, 0);
+  } else app.store.ideas.restatus(project.id);
+  const all = app.store.ideas.list(project.id);
+  const counts = Object.fromEntries(IDEA_STATUSES.map((s) => [s, all.filter((r) => r.status === s).length]));
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (r: Idea) => !words.length || words.every((w) => [r.title, r.card, r.words, r.handoff, r.decided_by, r.number ? `#${r.number}` : '', r.source_number ? `#${r.source_number}` : ''].some((f) => f?.toLowerCase().includes(w)));
+  const rows = all.filter((r) => (!status || r.status === status) && hit(r));
+  const cutoff = Date.now() - LATER_STALE_MS;
+  const waiting = all.filter((r) => r.status === 'later' && (r.decided_at ?? r.created_at) < cutoff).map((r) => r.id);
+  return { ideas: rows.map((r) => ideaRow(app, project, r)), counts, total: all.length, waiting };
+}

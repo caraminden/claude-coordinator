@@ -1,0 +1,63 @@
+# Heavy jobs on the scheme's own CI (Citadel #1160). Copy to .github/workflows/citadel-heavy.yml.
+#
+# With this on the default branch, `citadel-heavy <command>` in a minion's turn runs here, on the scheme's runners,
+# instead of on perigee: Citadel's tools/heavy-ci.ts pushes the minion's working copy as a snapshot commit
+# (refs/citadel-heavy/<id>, which no push trigger sees), starts this workflow on it, waits, prints what the command
+# printed between the two markers below and exits with its status. A repo without this file runs its heavy jobs in
+# perigee's one small, low-priority slot: slow, on purpose (Josh, 2026-11-20: "perigee is fine and nothing breaks,
+# we just ship less").
+#
+# To adopt it:
+#   1. Runners: the scheme's own on the desktop (`ci_runners add`, `os: linux` for Linux ones in WSL). Swap
+#      <runner-label> below for theirs (<scheme-slug>-ci-linux, or <scheme-slug>-ci on Windows). Only one heavy job
+#      per repo runs at a time, so with two runners one always stays free for the scheme's ship tests.
+#   2. Toolchain: add the setup steps the scheme's own CI uses (setup-node, a Rust toolchain, setup-uv, mise-action...)
+#      where it says so below. Jobs that need perigee itself (data only it has, its Android emulator, Claude) stay
+#      there with `citadel-heavy --here`, so leave those out.
+#   3. Ship it: GitHub starts a dispatch only from the default branch's copy.
+# Buying compute: the repo variable CI_RUNNER=github runs it on GitHub's own runners, which cost Actions minutes, so
+# ask a person first. Keep the name, run-name, inputs and markers: heavy-ci.ts finds the run and the output by them.
+name: citadel-heavy
+run-name: heavy ${{ inputs.id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: the snapshot commit
+        required: true
+      command:
+        description: the command line, for bash
+        required: true
+      id:
+        description: names the run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  heavy:
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<runner-label>"]') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          clean: false # a self-hosted runner keeps target/, node_modules/ and the like between runs: warm builds
+
+      # The scheme's toolchain setup goes here.
+
+      - name: the command
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.command }}
+          CITADEL_HEAVY_HELD: '1' # a citadel-heavy inside the command runs straight away
+        run: |
+          set +e
+          echo '=== citadel-heavy: the command starts ==='
+          # Niced, so the scheme's ship tests on the same PC get the CPU first.
+          if command -v nice >/dev/null; then nice -n 19 bash -c "$COMMAND"; else bash -c "$COMMAND"; fi
+          rc=$?
+          echo "=== citadel-heavy: the command exited $rc ==="
+          exit $rc

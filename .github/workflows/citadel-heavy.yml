@@ -1,0 +1,68 @@
+# Heavy jobs on Citadel's own CI (#1160), from the kit's template (kit/skills/scheme-setup/templates/citadel-heavy.yml,
+# whose header says how it works). Most of Citadel's minions run a few test files with citadel-test, not this; it takes
+# a full `npm test` or the like off perigee. Prompt evals run Claude, so they stay on perigee (--here).
+name: citadel-heavy
+run-name: heavy ${{ inputs.id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: the snapshot commit
+        required: true
+      command:
+        description: the command line, for bash
+        required: true
+      id:
+        description: names the run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  heavy:
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0 # tests read the history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26 # perigee's
+      # As in tests.yml: Node 26's libatomic1 and the sqlite3 CLI from their .debs when the distro lacks them, and the
+      # runner user's systemd for the tests that start units.
+      - name: libatomic1, sqlite3 and the user's systemd
+        run: |
+          set -euo pipefail
+          if ! command -v sqlite3 >/dev/null || ! /sbin/ldconfig -p | grep -q 'libatomic\.so\.1'; then
+            dir=$HOME/.local/debs
+            if [ ! -x "$dir/usr/bin/sqlite3" ]; then
+              mkdir -p "$dir" && cd "$dir"
+              apt-get download libatomic1 sqlite3
+              for d in *.deb; do dpkg -x "$d" .; done
+            fi
+            echo "LD_LIBRARY_PATH=$dir/usr/lib/x86_64-linux-gnu" >>"$GITHUB_ENV"
+            echo "$dir/usr/bin" >>"$GITHUB_PATH"
+          fi
+          run=/run/user/$(id -u)
+          if [ -S "$run/bus" ]; then
+            echo "XDG_RUNTIME_DIR=$run" >>"$GITHUB_ENV"
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$run/bus" >>"$GITHUB_ENV"
+          fi
+
+      - name: the command
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.command }}
+          CITADEL_HEAVY_HELD: '1' # a citadel-heavy inside the command runs straight away
+        run: |
+          set +e
+          echo '=== citadel-heavy: the command starts ==='
+          # Niced, so the scheme's ship tests on the same PC get the CPU first.
+          if command -v nice >/dev/null; then nice -n 19 bash -c "$COMMAND"; else bash -c "$COMMAND"; fi
+          rc=$?
+          echo "=== citadel-heavy: the command exited $rc ==="
+          exit $rc

@@ -4,7 +4,7 @@
 //   DEPLOY_LOCKED, DEPLOY_TESTED  land.sh -> deploy.sh: "I hold the lock on fd 9" and "this commit passed the tests".
 //   DEPLOY_QUEUE_TICKET           deploy-queue.sh's exported place in line; a script in a test would remove it on exit.
 //   CITADEL_HEAVY_HELD            citadel-heavy -> its command: land.sh refuses to run with it set.
-//   CITADEL_HEAVY_FALLBACK_FILE   citadel-heavy -> heavy-remote.ts (#1160): the file it writes when nothing ran on the machine.
+//   CITADEL_HEAVY_FALLBACK_FILE   citadel-heavy -> heavy-ci.ts (#1160): the file it writes when nothing ran on CI.
 //   LAND_REBASED                  land.sh -> its rebased copy (unset again before any child, cleared in case).
 //   DEPLOY_TIMES                  land.sh -> deploy.sh: the file deploy.sh notes its "queued" and "live" times in (#565).
 //   LAND_REDO                     land.sh -> the copy that starts over after main went back (unset again before any child, like LAND_REBASED).

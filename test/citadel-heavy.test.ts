@@ -23,7 +23,9 @@ function folder(slots?: number, pressure = 5) {
   const dir = join(root, `locks-${n++}`);
   const pressureFile = `${dir}-pressure`;
   setPressure(pressureFile, psi(pressure));
-  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_WHAT: undefined };
+  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_WHAT: undefined,
+    // The slots as they were before #1160's small slot, and never the repo's CI (test/heavy-ci.test.ts has that).
+    CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PLAIN_SLOTS: '64' };
   return { dir, env, pressureFile };
 }
 type Job = { child: ChildProcess; err: () => string; done: Promise<number | null> };
@@ -389,4 +391,29 @@ test('a history write that hangs holds no slot: the next job runs', async () => 
     readFileSync(join(dir, 'history')); // a reader lets the hung write through
   }
   assert.equal(await a.done, 0);
+});
+
+// Perigee's small slot (#1160, Josh 2026-11-20: "One small slot here"): plain jobs share one slot, niced, and leave
+// the others to priority jobs, which take them from the top.
+test('plain jobs share one slot at nice 19, and a priority job takes another from the top', async () => {
+  const { dir, env } = folder(3);
+  const small = { ...env, CITADEL_HEAVY_PLAIN_SLOTS: undefined };
+  const go = join(root, 'go-small');
+  const a = job(small, 'Peek #1', `nice > '${join(root, 'small-nice')}'; ${waitFor(go)}`);
+  await until('the plain slot held', () => existsSync(join(root, 'small-nice')));
+  try {
+    const b = job(small, 'Peek #2', 'true');
+    await until('a second plain job waiting with two slots free', () => /all heavy slots \(1\) are busy/.test(b.err()));
+    const d = spawnSync(heavy, ['sh', '-c', 'nice'], { env: { ...small, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHO: 'app deploy' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(d.status, 0, d.stderr);
+    assert.equal(d.stdout.trim(), String(Number(spawnSync('nice', { encoding: 'utf8' }).stdout.trim())), 'a deploy build is not niced further');
+    writeFileSync(go, '');
+    assert.equal(await b.done, 0);
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await a.done, 0);
+  assert.equal(readFileSync(join(root, 'small-nice'), 'utf8').trim(), '19');
+  assert.ok(!existsSync(join(dir, 'slot-1')), 'the deploy took the top slot, slot 3, not the next one up');
+  assert.ok(existsSync(join(dir, 'slot-2')));
 });

@@ -22,11 +22,11 @@ Decisions (Josh, 2026-11-19, #1117's grilling cards):
 ## Running it
 
 ```sh
-citadel-heavy tools/prompt-eval run                       # today's prompt: the baseline pass rate
-citadel-heavy tools/prompt-eval run --base main           # your branch against main, with the cases that fell
-citadel-heavy tools/prompt-eval run --ref <old sha>       # an old prompt version
-citadel-heavy tools/prompt-eval run --model sonnet --effort medium --base-model opus --base-effort high   # a tier question
-citadel-heavy tools/prompt-eval briefs --model sonnet     # whole reruns of closed bug fixes on a tier
+citadel-heavy --here tools/prompt-eval run                       # today's prompt: the baseline pass rate
+citadel-heavy --here tools/prompt-eval run --base main           # your branch against main, with the cases that fell
+citadel-heavy --here tools/prompt-eval run --ref <old sha>       # an old prompt version
+citadel-heavy --here tools/prompt-eval run --model sonnet --effort medium --base-model opus --base-effort high   # a tier question
+citadel-heavy --here tools/prompt-eval briefs --model sonnet     # whole reruns of closed bug fixes on a tier
 tools/prompt-eval check                                   # every case and brief file parses (no model calls)
 tools/prompt-eval check-briefs                            # each brief fails at `before` and passes at `fix`
 tools/prompt-eval snapshot <system-prompt.md>             # refresh fixture/ from a turn's system prompt
@@ -46,7 +46,7 @@ tested side at other files. `fixture/2026-11-11/` holds both as they were live a
 version the first baseline was checked against:
 
 ```sh
-citadel-heavy tools/prompt-eval run --ref 268638ee --app tools/prompt-evals/fixture/2026-11-11/citadel-wide.md \
+citadel-heavy --here tools/prompt-eval run --ref 268638ee --app tools/prompt-evals/fixture/2026-11-11/citadel-wide.md \
   --scheme tools/prompt-evals/fixture/2026-11-11/scheme.md --base HEAD
 ```
 

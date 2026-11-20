@@ -320,17 +320,30 @@ today's date; one row per copied path. If this is the file's first row and the p
 audits leave out the upstream check, get it asked for as `citadel:upstream-check` says. *Done when*
 every copied file has its row.
 
-### 8. Check the app is registered
+### 8. Week-one basics: icon, live deploy, top bar, backups
 
-Skip this step when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`).
+Nearly every scheme spent its first week on follow-up minions for these (onboarding review, 2026-11-19, section 3). Each sub-step ends in a line for the done note: done, or "not this kind of scheme".
 
-CLAUDE.md names how a change goes live ("deploys with `deploy_contraption`") only for a *registered* contraption, so confirm it is one before the setup is done:
+**8a. Icon** (closes the review's "icon done again after setup": about 14 minions across 10 schemes). One icon, drawn with code (no image generator), serves as the scheme's icon and the app's.
+1. Draw `assets/icon/icon.svg` (a simple mark in the scheme's accent colour; under 256 KB, no scripts). Citadel reads a scheme's favicon from the first existing of the paths in `ICON_PATHS` in its `src/scheme-icon.ts`, `assets/icon/icon.svg` first; commit it to the scheme's main, so shipping step 9 sets the scheme icon.
+2. A contraption also uses the same drawing as its `icon.svg`, renders the 192 and 512 PNGs and a maskable PNG from it (`citadel:contraption-ui`, `references/installing.md`), and its `manifest.webmanifest` lists them.
+*Done when* the scheme's icon shows (fetch it from the scheme's page after step 9) and, for a contraption, the manifest's icons are the same drawing.
 
+**8b. Contraption: registered and live** (closes TripPresenter #6, about 15 h with nothing live, and Mandate #23). Skip 8b to 8d's contraption parts when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`). The onboarding plan's contraption answer says whether it is one.
 1. Call `deploy_contraption` for the app. A refusal that names the app as unknown means it is not registered.
-2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon`, `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: ship it before you ask.
-3. In CLAUDE.md, write the deploy line as fact only once a `deploy_contraption` run went live. Until then leave it out and list "contraption registered and first deploy" as open in the done note.
+2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon` (`/icon.svg`), `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: ship it before you ask.
+3. Registration waits on the Citadel Taskmaster, and you wait with it: park on the relay, or call `wake_when_live`, and carry on to the first deploy when it answers. Don't close with the deploy open.
+4. Run `deploy_contraption` until one run went live, clear its **To do** lines, and take a screenshot of the live app for the done note.
+5. In CLAUDE.md, write the deploy line ("deploys with `deploy_contraption`") as fact only once a run went live.
+*Done when* one `deploy_contraption` run went live and its screenshot is in the done note. Only a Taskmaster that can't register it (it says so) lets the note list "registered and first deploy" as open, with the message you sent.
 
-*Done when* the first deploy went live, or the done note lists registration and first deploy as open with the message you sent.
+**8c. Top bar** (closes VA #57 and #66, ToC #139, Mandate #117). The contraption's page header is the kit's `<header class="cui-topbar">`, first in the page (`citadel:contraption-ui`, rule 24). *Done when* the live screenshot shows it.
+
+**8d. Nightly backup** (closes VA #51), for a contraption that keeps data (a database or files). The convention: the app writes `$DATA_DIR/backups/<day>/` before 04:00 PST, from a timer in `citadel-app.json` (`timers`, `on_calendar` before 04:00 PST; `kit/skills/contraption-ui/references/api.md`). Citadel ships them off the box and never snapshots app data itself. *Done when* the timer is in `citadel-app.json` and one run wrote a `backups/<day>/` folder, or the app keeps no data.
+
+### 8e. Pin every agent you wrote
+
+(Closes TWI #52, TP #26, VA #65, Trans #75, Delve #125.) Every agent file you adapted or wrote in step 5 or 6 (`.claude/agents/*.md`) has `model:` and `effort:` lines, never `inherit`, picked by its job from the table in `citadel:subagents` ("Model and effort per job"). *Done when* `grep -L '^model:' .claude/agents/*.md` and the same for `effort:` list nothing.
 
 ### 9. Commit and ship
 
@@ -357,5 +370,5 @@ is pushed or your note says it stays local.
 
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
 took a default; the copies recorded (and whether the scheme has the standard upstream check, or it was asked for); scrub
-hits kept; the check command and its result; whether main is pushed; a contraption's registration and first deploy, when still open (step 8); and any command Cara must
+hits kept; the check command and its result; whether main is pushed; the step 8 list, each of icon, live deploy (with its screenshot), top bar, backup and agent model lines as done or "not this kind of scheme" (the setup card reads it from here); and any command Cara must
 run by hand (a unit install). The Taskmaster's first minions start once yours ships, by themselves; nothing for you to start.

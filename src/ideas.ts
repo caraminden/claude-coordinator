@@ -136,6 +136,7 @@ export function handoffIn(text: string, sharedDir: string): string | null {
   const re = new RegExp(`(?:${esc(sharedDir)}/|(?<![\\w/.-])(?=handoffs/))([^\\s\`'")\\]]+?\\.md)(?![\\w/])`, 'g');
   for (const m of text.matchAll(re)) {
     const rel = m[1].replace(/[.,:;]+$/, '');
+    if (rel.split('/').includes('..')) continue;
     const before = text.slice(Math.max(0, m.index! - 40), m.index!);
     if (rel.startsWith('handoffs/') || /handoff/i.test(rel.split('/').pop()!) || /handoff/i.test(before)) return rel;
   }
@@ -170,6 +171,8 @@ export class Ideas {
   private db: DatabaseSync;
   /** Parsed handoff heads by path, kept while the file's mtime holds: the scan reads only what changed. */
   private heads = new Map<string, { mtime: number; head: HandoffHead }>();
+  /** Pages whose Sends were searched this server life: a page with no Later-style bar makes no rows, so "fresh" alone would search it every pass. */
+  private searched = new Set<string>();
   private pages = new Map<string, { mtime: number; colls: string[] }>();
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
   private running = new Map<number, Promise<void>>();
@@ -224,6 +227,7 @@ export class Ideas {
 
   /** Link a minion to the row its handoff made (made now if the scan hasn't seen the file yet). The newest start wins, never over a hand link or a built row. */
   linkHandoff(projectId: number, sharedDir: string, rel: string, ticket: { id: number; number: number | null }): Idea | null {
+    if (rel.split('/').includes('..')) return null; // a brief path must stay inside the shared folder
     let row = this.byHandoff(projectId, rel) ?? this.fromHandoff(projectId, sharedDir, rel) ?? this.fromChat(projectId, sharedDir, rel, ticket.id);
     if (!row) return null;
     if (row.link_manual || row.ticket_id === ticket.id || (row.ticket_id && row.ticket_id > ticket.id) || row.status === 'built') return row;
@@ -251,8 +255,12 @@ export class Ideas {
 
   /** A handoff's row: its page's card when it names one that has no other handoff yet, else a row of its own. */
   private join(projectId: number, rel: string, head: HandoffHead): Idea {
-    const { page, card, title, source } = head;
-    const onPage = page && card ? this.find(projectId, page, card) : undefined;
+    const { card, title, source } = head;
+    // A handoff that names its card and the minion whose page it was ("#1093's ideas, idea A1") but not the page's path.
+    const onPage = head.page && card ? this.find(projectId, head.page, card)
+      : card && source ? this.db.prepare("SELECT * FROM ideas WHERE project_id = ? AND source_number = ? AND card = ? AND page != '' ORDER BY id LIMIT 1").get(projectId, source, card) as unknown as Idea | undefined
+      : undefined;
+    const page = head.page ?? onPage?.page;
     if (page && card && (!onPage || !onPage.handoff)) {
       return this.upsert(projectId, page, card, { handoff: rel, title: onPage?.title || title, source_number: onPage?.source_number ?? source });
     }
@@ -398,7 +406,9 @@ export class Ideas {
       // Titles the page's Sends named: read from the chats it was sent to, once per page while a row lacks one.
       const untitled = this.db.prepare("SELECT 1 FROM ideas WHERE project_id = ? AND page = ? AND title = '' LIMIT 1").get(projectId, file);
       const fresh = !this.db.prepare('SELECT 1 FROM ideas WHERE project_id = ? AND page = ? LIMIT 1').get(projectId, file);
-      if (!untitled && !fresh) { this.readPage(projectId, file, src?.number ?? null); continue; }
+      const key = `${projectId}\0${file}`;
+      if ((!untitled && !fresh) || this.searched.has(key)) { this.readPage(projectId, file, src?.number ?? null); continue; }
+      this.searched.add(key);
       const sends = this.sendsOf(projectId, file);
       this.readPage(projectId, file, src?.number ?? sends.source, [], sends.text);
       // A row no Send named keeps its card id as its title, so this chat search runs once per page, not every pass.

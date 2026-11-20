@@ -54,6 +54,7 @@ test('handoffIn finds the handoff a first message starts from, in any of the sha
   assert.equal(handoffIn('Build handoffs/platform-ship-train.md plus reports/x.md.', shared), 'handoffs/platform-ship-train.md');
   assert.equal(handoffIn(`Evidence in ${shared}/reports/r.md only.`, shared), null);
   assert.equal(handoffIn('Read /data/projects/9/shared/project/handoffs/theirs.md', shared), null, "another scheme's folder is not ours");
+  assert.equal(handoffIn(`Read ${shared}/../../../etc/handoff-x.md`, shared), null, 'a path that climbs out of the shared folder is no handoff');
 });
 
 test('derive: a link beats the pick, a ship makes it built', () => {
@@ -197,4 +198,19 @@ test('starting a minion through the API from a handoff marks its idea started at
   } finally {
     await s.stop();
   }
+});
+
+test("a handoff naming its card and source minion, but not the page's path, joins that page's card; one climbing out is refused", () => {
+  const store = newStore();
+  const p = store.createProject('Mandate', null);
+  const shared = join(root, 'src-shared');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  const page = join(shared, 'mockups', 'platform.html');
+  store.ideas.readPage(p.id, page, 1093, [], 'Picks on "Platform":\n- A1 Nightly backups: Build it');
+  store.ideas.upsert(p.id, page, 'A1', { pick: 'go', decided_by: 'Josh', decided_at: 1, source_number: 1093 });
+  writeFileSync(join(shared, 'handoffs', 'apps-nightly-backups.md'), "# Apps write nightly backups\n\nFrom #1093's platform ideas, idea A1. Josh picked Build it.\n");
+  store.ideas.sync(p.id, shared);
+  assert.equal(store.ideas.find(p.id, page, 'A1')!.handoff, 'handoffs/apps-nightly-backups.md');
+  const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
+  assert.equal(store.ideas.linkHandoff(p.id, shared, '../outside/handoff.md', t), null);
 });

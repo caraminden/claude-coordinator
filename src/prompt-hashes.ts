@@ -13,6 +13,8 @@ export interface PromptHashes {
   model: string | null;
   effort: string | null;
   payer: number | null;
+  /** The system half is the session's held prompt (#1276), older than the one this turn would build. */
+  held?: true;
   /** Claude Code's version, from the turn's init event; absent on a Codex turn. */
   claude?: string;
 }
@@ -27,7 +29,7 @@ export const hashSections = (parts: PromptSections): Record<string, string> =>
   Object.fromEntries(Object.entries(parts).filter(([, lines]) => lines.length).map(([name, lines]) => [name, shortHash(lines.join('\n'))]));
 
 /** A launch's hashes, from its prompt's two halves, its env and its settings. */
-export function promptHashes(parts: { system: PromptSections; turn: PromptSections }, env: Record<string, string>, model: string | null, effort: string | null, payer: number | null): PromptHashes {
+export function promptHashes(parts: { system: PromptSections; turn: PromptSections }, env: Record<string, string>, model: string | null, effort: string | null, payer: number | null, held = false): PromptHashes {
   const tools = Object.fromEntries(TOOL_INPUTS.filter((k) => env[k] !== undefined).map((k) => [k.replace(/^COORDINATOR_/, '').toLowerCase(), shortHash(env[k])]));
-  return { system: hashSections(parts.system), turn: hashSections(parts.turn), tools, model, effort, payer };
+  return { system: hashSections(parts.system), turn: hashSections(parts.turn), tools, model, effort, payer, ...(held ? { held: true as const } : {}) };
 }

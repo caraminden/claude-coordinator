@@ -38,9 +38,10 @@ import { gradleCacheDir } from './build-cache.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
+import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial, trialLine } from './seam-trial.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -613,6 +614,8 @@ export class Runner {
   turnsDir: string;
   /** The data dir this runner's turns use (beside the database), so a test's or dev copy's stay apart. */
   private dataDir: string;
+  /** Each warm session's held system prompt (#1276). */
+  holds: Holds;
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
@@ -805,6 +808,7 @@ export class Runner {
     this.lanes.onIdle = (ticketId) => this.next(ticketId);
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
     this.dataDir = resolve(dirname(store.path));
+    this.holds = new Holds(join(this.dataDir, 'prompt-holds'), store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
   }
 
@@ -2933,7 +2937,8 @@ export class Runner {
       this.onTurnError(ticket.id, err.message, event.id);
       return;
     }
-    const { plan, dir, system, parts, context, pins, github, unit, reviewAt } = built;
+    const { plan, dir, system, parts, pins, github, unit, reviewAt, hold } = built;
+    let { context } = built;
     if (reviewAt && !keepalive) this.wakeCodex?.(person!);
     const { command, args, env, configDir } = plan;
     // What its cached prefix is built from (#862), before --resume joins the arguments: a keepalive runs only while it is the
@@ -2954,7 +2959,7 @@ export class Runner {
         return;
       }
     }
-    const hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person));
+    let hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person), !!hold?.decision.held);
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     // A keepalive changes nothing of the minion's: who it runs for, its state, note and replies stay as the last real turn left them.
@@ -3034,6 +3039,23 @@ export class Runner {
       }
     }
 
+    if (hold && !keepalive) {
+      let d = hold.decision;
+      // A session that turned out lost starts a new one: on the current prompt, with no note.
+      if (lost) {
+        d = decideHold({ record: null, held: null, current: hold.current, session: null, lastEnd: null, now: this.now() });
+        if (hold.decision.held) {
+          parts.system = hold.current;
+          delete parts.turn.rulesChanged;
+          writeFileSync(join(dir, 'system-prompt.md'), promptText(parts.system));
+          context = promptText(parts.turn);
+          hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person));
+        }
+      }
+      // A /compact step carries no note, so it has delivered none.
+      this.holds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
+      if (d.reload) console.log(`[prompt-hold] minion ${ticket.id}: takes the current prompt (${d.reload})`);
+    }
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
       : keepalive ? promptMessage(batch)
       : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...digestLine, ...batch]);
@@ -3101,6 +3123,12 @@ export class Runner {
     return live.ended;
   }
 
+  /** Which system prompt a turn runs with (src/prompt-hold.ts): the one its session last ran with while it is warm. */
+  private holdFor(ticket: Ticket, current: PromptSections): HoldDecision {
+    const record = this.holds.record(ticket.id);
+    return decideHold({ record, held: record && this.holds.sections(record.hash), current, session: ticket.session_id, lastEnd: this.store.lastTurnEnd(ticket.id), now: this.now() });
+  }
+
   /**
    * A launch from the facts a turn was given (src/turn-launch.ts), in a folder of its own named `name`. A side
    * question's fork (#932, src/side-ask.ts) builds its own here too, so its tools and prompt, the cached prefix,
@@ -3143,6 +3171,11 @@ export class Runner {
       // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
       const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
       const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines, ticket.kind === 'coordinator' && fableMeter(this.store).over);
+      // A warm session keeps the prompt it last ran with (#1276): a changed byte would re-write its whole cached conversation.
+      // Codex has no such cache to keep.
+      const current = parts.system;
+      const hold = codex ? null : this.holdFor(ticket, current);
+      if (hold) parts.system = hold.system;
       const system = promptText(parts.system);
       writeFileSync(join(dir, 'system-prompt.md'), system);
       // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
@@ -3160,6 +3193,8 @@ export class Runner {
       const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
       if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
+      // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
+      if (hold?.note && !f.side) parts.turn.rulesChanged = [hold.note];
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
@@ -3209,7 +3244,7 @@ export class Runner {
         claudeBin: this.claudeBin,
         ...(f.side ? { side: true } : {}),
       });
-      return { plan, dir, system, parts, context, pins, github, unit, reviewAt };
+      return { plan, dir, system, parts, context, pins, github, unit, reviewAt, hold: hold && { decision: hold, current } };
     } catch (err) {
       rmSync(dir, { recursive: true, force: true });
       throw err;
@@ -3768,6 +3803,9 @@ export class Runner {
     if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
+    // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
+    if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.holds.compacted(ticketId);
+    if (ev.type === 'result') this.holds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
     if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
     if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) ev = this.stripStatus(ticketId, ev);
     if (ev.type === 'result') {

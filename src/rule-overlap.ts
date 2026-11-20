@@ -2,7 +2,7 @@
 // instruction edit, every paragraph elsewhere that already speaks to the same thing. Pure functions over texts, so the
 // repo test (test/rule-homes.test.ts) and the server's Settings check run the same code.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
 
@@ -54,6 +54,7 @@ export function statement(text: string, anchor: string): string | null {
 /** The rule's full text where its home is, or null when the home isn't among the texts given. */
 export function homeText(rule: RuleHome, read: (file: string) => string | null, citadel: string | null): string | null {
   const h = rule.home;
+  if (h.kind === 'scheme') return null;
   if (h.kind === 'citadel') return citadel === null ? null : section(citadel, h.section);
   const text = read(h.file);
   if (text === null) return null;
@@ -182,19 +183,42 @@ export function settingsSources(o: { root: string; citadelUrl: string | null; pi
     { label: mine[0], text: o.text, href: `#/p/${o.pid}/${mine[1]}` },
     { label: theirs[0], text: o.other, href: `#/p/${o.pid}/${theirs[1]}` },
     ...fileSources(o.root, [...CITADEL_FILES, ...mdFiles(o.root, 'kit')], gh(o.citadelUrl)),
-    ...(o.repo ? fileSources(o.repo, ['CLAUDE.md', 'AGENTS.md', ...mdFiles(o.repo, '.claude/rules')], gh(o.repoUrl)).map((s) => ({ ...s, label: `Scheme repo: ${s.label}` })) : []),
+    ...(o.repo ? fileSources(o.repo, [...new Set(['CLAUDE.md', 'AGENTS.md', ...mdFiles(o.repo, '.claude/rules'), ...schemeRules(o.repo).flatMap((r) => (r.home.kind === 'repo' ? [r.home.file] : []))])], gh(o.repoUrl)).map((s) => ({ ...s, label: `Scheme repo: ${s.label}` })) : []),
   ];
 }
 
-/** Whether a paragraph of a Settings text sits under its `## ` heading for a Citadel-wide home. */
+/** Whether a paragraph of a Settings text sits under the `## ` heading of a rule's home in that same text. */
 export function inSettingsHome(scope: 'citadel' | 'scheme', text: string) {
   const lines = text.split('\n');
   return (rule: RuleHome, p: Para): boolean => {
-    if (scope !== 'citadel' || rule.home.kind !== 'citadel') return false;
+    if (rule.home.kind !== scope) return false;
     const want = norm(rule.home.section);
     for (let i = p.line - 1; i >= 0; i--) if (/^#{1,6}\s/.test(lines[i])) return norm(lines[i]).includes(want);
     return false;
   };
+}
+
+/**
+ * A scheme's own registered rules (#1211): its repo's .claude/rule-homes.json, a list shaped like RULE_HOMES whose homes
+ * are a `scheme` Settings section or a `repo` file inside that repo. An entry that doesn't fit is skipped, and a missing
+ * or broken file is no rules: a scheme's typo never blocks its saves.
+ */
+export function schemeRules(repo: string | null): RuleHome[] {
+  if (!repo) return [];
+  let list: unknown;
+  try { list = JSON.parse(readIn(repo, '.claude/rule-homes.json') ?? '[]'); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  const text = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+  return list.flatMap((r: any): RuleHome[] => {
+    if (!r || !text(r.id) || !text(r.title) || !text(r.pointer) || !Array.isArray(r.phrases)) return [];
+    const h = r.home;
+    const home = h?.kind === 'scheme' && text(h.section) ? { kind: 'scheme' as const, section: h.section }
+      // Inside the repo only: no absolute path and no `..` (readIn already refuses a link).
+      : h?.kind === 'repo' && text(h.file) && !isAbsolute(h.file) && !h.file.split(/[\\/]/).includes('..') ? { kind: 'repo' as const, file: h.file, ...(text(h.section) ? { section: h.section } : text(h.anchor) ? { anchor: h.anchor } : {}) }
+      : null;
+    const phrases = r.phrases.filter((p: unknown) => typeof p === 'string' && norm(p) !== '').slice(0, 40);
+    return home && phrases.length ? [{ id: r.id, title: r.title, home, pointer: r.pointer, phrases }] : [];
+  });
 }
 
 /** Each rule's home text as the repo holds it (Citadel-wide homes are null here: they live in Settings). */

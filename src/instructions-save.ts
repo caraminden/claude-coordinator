@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { recheckDecisions } from './decisions-load.ts';
 import { GLOBAL_OWNER } from './properties.ts';
-import { added, inSettingsHome, overlapsFor, settingsSources, type Overlap } from './rule-overlap.ts';
+import { RULE_HOMES } from './rule-homes.ts';
+import { added, inSettingsHome, overlapsFor, schemeRules, settingsSources, type Overlap } from './rule-overlap.ts';
 import type { App } from './http.ts';
 import type { Project } from './db.ts';
 
@@ -40,7 +41,7 @@ export function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit
 }
 
 /**
- * What already speaks to an edit's new words: a registered rule outside its home, or a paragraph elsewhere sharing a
+ * What already speaks to an edit's new words: a registered rule (Citadel's or the scheme's own) outside its home, or a paragraph elsewhere sharing a
  * run of words. The sections of the edited text that the edit touches are left out, so a new
  * bullet isn't flagged against its own neighbours.
  */
@@ -53,7 +54,8 @@ export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scop
   const rest = lines.map((l, i) => (touched.has(sectionStart(lines, i + 1)) ? '' : l)).join('\n');
   const other = scope === 'citadel' ? project.instructions ?? '' : store.appInstructions().text;
   const sources = settingsSources({ root: ROOT, citadelUrl: store.getProject(GLOBAL_OWNER)?.repo_url ?? null, pid: project.id, repo: project.repo_dir, repoUrl: project.repo_url, scope, text: rest, other });
-  return overlapsFor(news, sources, inSettingsHome(scope, text));
+  // The shared rules, then the scheme's own (#1211), read fresh on every save.
+  return overlapsFor(news, sources, inSettingsHome(scope, text), [...RULE_HOMES, ...schemeRules(project.repo_dir)]);
 }
 
 /** The line of the heading a 1-based line sits under (0 above the first heading). */

@@ -2,9 +2,12 @@
 // copy in the prompt, the tool descriptions, the kit or the rule files fails here; turn it into a pointer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { settingsOverlaps } from '../src/instructions-save.ts';
 import { RULE_HOMES } from '../src/rule-homes.ts';
-import { added, findCopies, overlapsFor, paragraphs, repoHomes, repoSources, type Source } from '../src/rule-overlap.ts';
+import { added, findCopies, overlapsFor, paragraphs, repoHomes, repoSources, schemeRules, type Source } from '../src/rule-overlap.ts';
 
 const root = join(import.meta.dirname, '..');
 
@@ -55,4 +58,52 @@ test('sharing most words without a run of them is not a repeat', () => {
   const news = added('', 'Session context size times model calls is the cost, so jobs stay small and noisy work stays outside.');
   const others: Source[] = [{ label: 'kit/skills/x/SKILL.md', href: null, text: 'Cost is model calls times context size: keep big jobs in small contexts and keep noisy work out of the session.\n' }];
   assert.deepEqual(overlapsFor(news, others, () => false), []);
+});
+
+// #1211: another scheme registers its own rules in its repo's .claude/rule-homes.json; every save of its text (Settings,
+// edit_instructions, its Taskmaster's set_project_instructions) runs them through settingsOverlaps.
+test("a scheme's own registered rule is checked on its saves, outside its home section", () => {
+  const repo = mkdtempSync(join(tmpdir(), 'scheme-rules-'));
+  try {
+    mkdirSync(join(repo, '.claude'));
+    mkdirSync(join(repo, 'docs'));
+    writeFileSync(join(repo, 'docs', 'art.md'), '# Art\n\n## Palette\n\nEvery sprite uses the sixteen colour dusk palette, outlined in deep plum, with no pure black anywhere in a frame.\n');
+    writeFileSync(join(repo, '.claude', 'rule-homes.json'), JSON.stringify([
+      { id: 'lunch', title: 'Lunch on Fridays', home: { kind: 'scheme', section: 'Lunch' }, pointer: 'the Lunch section', phrases: ['pizza from marios', 'noon sharp'] },
+      { id: 'palette', title: 'The sprite palette', home: { kind: 'repo', file: 'docs/art.md', section: 'Palette' }, pointer: 'the palette (docs/art.md)', phrases: ['dusk palette', 'deep plum'] },
+      { id: 'bad', title: 'Escapes the repo', home: { kind: 'repo', file: '../outside.md' }, pointer: 'nowhere', phrases: ['dusk palette', 'deep plum'] },
+      { id: 'empty', title: 'No phrases', home: { kind: 'scheme', section: 'X' }, pointer: 'x', phrases: ['', '  '] },
+      'not a rule',
+    ]));
+    const project = { id: 7, name: 'Delve', instructions: '', repo_dir: repo, repo_url: null } as any;
+    const store = { appInstructions: () => ({ text: '' }), getProject: () => undefined } as any;
+    const check = (text: string, scope: 'scheme' | 'citadel' = 'scheme') => settingsOverlaps({ store }, project, scope, '', text);
+
+    const lunch = check('## Food\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.');
+    assert.deepEqual(lunch.map((o) => o.label), ['Registered rule: Lunch on Fridays']);
+    assert.match(lunch[0].why, /one home is the Lunch section/);
+    // In its own home section, the same words are the rule itself.
+    assert.deepEqual(check('## Lunch\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.'), []);
+    // A Citadel-wide save repeating it is still a repeat: its home is the scheme's.
+    assert.equal(check('## Lunch\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.', 'citadel').length, 1);
+
+    // A repo home: its phrases, and a run of words from the home file itself; the bad entries are skipped, not thrown.
+    const art = check('## Art\n\nDraw it in the dusk palette with a deep plum outline.\n\nRemember every sprite uses the sixteen colour dusk palette, outlined in deep plum, with no pure black.');
+    assert.deepEqual(art.map((o) => o.label).sort(), ['Registered rule: The sprite palette', 'Registered rule: The sprite palette', 'Scheme repo: docs/art.md']);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('a scheme with no rule file, or a broken one, gets only the shared rules', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'scheme-rules-'));
+  try {
+    assert.deepEqual(schemeRules(repo), []);
+    assert.deepEqual(schemeRules(null), []);
+    mkdirSync(join(repo, '.claude'));
+    writeFileSync(join(repo, '.claude', 'rule-homes.json'), '{ not json');
+    assert.deepEqual(schemeRules(repo), []);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

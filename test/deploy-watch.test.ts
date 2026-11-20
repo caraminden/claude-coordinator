@@ -421,3 +421,33 @@ test('report: an alert ends the watch, later checks show as not run, and no erro
   assert.ok(d.checks.every((c) => c.readings.every((r) => r.first === null && r.top.length === 0)));
   void store;
 });
+
+test('report: a window already read is not read again, and a deploy that left the watch leaves the cache (#1178)', () => {
+  const { store, clock, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  const at = clock.now;
+  deploy(sha('1'));
+  errors(14, at + 5 * MIN);
+  clock.now = at + 25 * MIN;
+  let reads = 0;
+  const turnOutcomes = store.turnOutcomes.bind(store);
+  store.turnOutcomes = (from, to) => (reads++, turnOutcomes(from, to));
+  const first = w.report();
+  const once = reads;
+  assert.ok(once > 0);
+  clock.now += 5 * MIN; // a poll later: the same +20 min window, nothing new due
+  assert.deepEqual(w.report(), first);
+  assert.equal(reads, once, 'the second report read no rows');
+  clock.now = at + 61 * MIN; // +1 h came due: only its window is new
+  w.report();
+  assert.equal(reads, once + 2);
+});
+
+test('turnOutcomes finds error events through their own index, not by walking every event of the window (#1178)', () => {
+  const { file } = setup();
+  const db = new DatabaseSync(file, { readOnly: true });
+  const plan = db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'").all(0, 1).map((r: any) => r.detail).join(' | ');
+  db.close();
+  assert.match(plan, /USING INDEX events_errors/);
+});

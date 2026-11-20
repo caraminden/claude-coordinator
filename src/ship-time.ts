@@ -6,8 +6,8 @@ import type { Store } from './db.ts';
 import { pacificDay } from './contraption-errors.ts';
 
 export const SLOW_P90_S = 10 * 60;
-/** Kept per target, newest: the waterfall's rows. */
-const SHIPS_KEPT = 80;
+/** Kept per target and day, slowest first: the waterfall's rows. */
+const SHIPS_PER_DAY = 8;
 
 export interface ShipRow { at: number; took: number; stages: Record<string, number>; label: string }
 export interface ShipTarget {
@@ -51,15 +51,16 @@ function ships(store: Store, since: number, ownScheme: number | null): Ship[] {
   for (const r of store.liveReleasesSince(since)) {
     const citadel = r.target === 'citadel-server';
     out.push({
-      key: `release:${r.project_id}:${r.target}`, title: citadel ? 'Citadel main' : r.target, scheme: r.project_id,
+      key: `release:${r.project_id}:${r.target}`, title: citadel ? 'Citadel main' : `${store.getProject(r.project_id)?.name ?? 'Scheme'}: ${r.target}`, scheme: r.project_id,
       at: r.live_at!, took: (r.live_at! - r.started_at!) / 1000, stages: parseStages(r.stages), label: r.version.slice(0, 8),
     });
   }
   const home = new Map(store.listContraptions().map((a) => [a.name, a]));
   for (const d of store.deployedSince(since)) {
     const a = home.get(d.name);
+    if (!a) continue; // a deleted app: nobody can see it or act on it
     out.push({
-      key: `app:${d.name}`, title: a?.title ?? d.name, scheme: a?.home_scheme ?? ownScheme,
+      key: `app:${d.name}`, title: a.title, scheme: a.home_scheme ?? ownScheme,
       at: d.finished_at!, took: (d.finished_at! - d.started_at) / 1000, stages: parseStages(d.stages), label: d.to_sha?.slice(0, 8) ?? '',
     });
   }
@@ -73,7 +74,7 @@ export function shipTargets(store: Store, days: string[], ownScheme: number | nu
   for (const s of ships(store, since, ownScheme)) if (visible(s.scheme, s.key)) (by.get(s.key) ?? by.set(s.key, []).get(s.key)!).push(s);
   return [...by.values()].map((list) => {
     const per = days.map((d) => list.filter((s) => pacificDay(s.at) === d).map((s) => s.took));
-    const kept = list.filter((s) => days.includes(pacificDay(s.at))).sort((a, b) => a.at - b.at).slice(-SHIPS_KEPT);
+    const kept = days.flatMap((d) => list.filter((s) => pacificDay(s.at) === d).sort((a, b) => b.took - a.took).slice(0, SHIPS_PER_DAY));
     return {
       key: list[0].key, title: list[0].title, scheme: list[0].scheme,
       counts: per.map((p) => p.length), median: per.map(med), p90: per.map((p) => percentile(p, 0.9)),

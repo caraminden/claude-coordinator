@@ -109,7 +109,8 @@ export function shipChart(t, days, redraw) {
   const x = (i) => ((i + 0.5) / n) * W;
   const y = (v) => H - (v / peak) * H;
   const worst = t.p90.reduce((w, v, i) => (v !== null && (w < 0 || v > t.p90[w]) ? i : w), -1);
-  const pick = shipPick.has(t.key) ? shipPick.get(t.key) : days[worst];
+  const picked = shipPick.get(t.key);
+  const pick = picked !== undefined && (picked === null || days.includes(picked)) ? picked : days[worst];
   const choose = (day) => { shipPick.set(t.key, pick === day ? null : day); redraw(); };
   const hits = days.map((day, i) => svg('rect', { x: (i / n) * W, y: 0, width: W / n, height: H, class: `st-hit${day === pick ? ' on' : ''}`, 'data-day': day, onclick: () => choose(day) },
     svg('title', {}, `${dayLabel(day)}: ${t.counts[i] ? `${plural(t.counts[i], 'ship')}, median ${secs(t.median[i])}, slowest tenth ${secs(t.p90[i])}` : 'no ships'}`)));

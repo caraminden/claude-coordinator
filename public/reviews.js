@@ -756,7 +756,7 @@ function lessonList(e, removable) {
   const counting = e.lessons.length - read.length;
   const note = h('p', { class: 'muted' }, read.length
     ? `Findings the finding checker refuted here in 3 minions' reviews or more. The reviewer reads why each was wrong, and still raises one when a change makes that reason untrue.${counting ? ` ${counting} more kind${counting === 1 ? ' is' : 's are'} counting toward 3.` : ''}`
-    : counting ? `None yet: ${counting} kind${counting === 1 ? '' : 's'} of refuted finding ${counting === 1 ? 'is' : 'are'} counting toward 3, when the reviewer starts reading it.` : 'None yet. When the finding checker refutes the same kind of finding in 3 minions' reviews here, the reviewer reads why it was wrong.');
+    : counting ? `None yet: ${counting} kind${counting === 1 ? '' : 's'} of refuted finding ${counting === 1 ? 'is' : 'are'} counting toward 3, when the reviewer starts reading it.` : "None yet. When the finding checker refutes the same kind of finding in 3 minions' reviews here, the reviewer reads why it was wrong.");
   if (!read.length) return [note];
   return [note, h('ul', { class: 'rv-verdicts' }, read.map((l) => h('li', {},
     h('strong', {}, l.kind), ` ${l.why}`,

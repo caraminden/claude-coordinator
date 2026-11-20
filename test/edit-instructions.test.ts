@@ -102,7 +102,8 @@ const lastCard = () => JSON.parse(store.eventsOfKinds(ticket.id, ['plan']).at(-1
 const verdict = async (verdict: string, as = cookie, notes?: string) => {
   const n = turns().length;
   const res = await fetch(`${base}/api/tickets/${ticket.id}/verdict`, { method: 'POST', headers: { Cookie: as, 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: lastCard().id, verdict, notes }) });
-  if (res.status === 202) await until('the answer\'s turn', () => turns().length > n);
+  // and for it to end, so the test's own writes don't race the server's.
+  if (res.status === 202) await until('the answer\'s turn', () => turns().length > n && store.getTicket(ticket.id)!.status !== 'running');
   return { status: res.status, body: await res.json() };
 };
 

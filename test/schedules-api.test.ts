@@ -143,6 +143,6 @@ test("the Taskmaster's schedule tools", async () => {
   assert.match(await tool('update_schedule', { schedule_id: aid, notes: 'again' }), /notes go with a standard audit: pass template too/);
   // Swapping a hand-written copy back keeps its pause.
   await tool('update_schedule', { schedule_id: aid, paused: true });
-  assert.match(await tool('update_schedule', { schedule_id: aid, template: 'test-audit', notes: 'vitest.' }), /Test audit: .*standard audit test-audit with notes; paused;/);
+  assert.match(await tool('update_schedule', { schedule_id: aid, template: 'test-audit', notes: 'vitest.' }), /Test audit \(Tests\): .*standard audit test-audit with notes; paused;/);
   mcp.kill();
 });

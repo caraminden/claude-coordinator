@@ -22,6 +22,7 @@ line: everything is on, as written here.
   from its verdict, and ship with that label as usual.
 - **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
 - **Finding checker off:** skip it on deep reviews.
+- **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (see "Fresh eyes" in 2). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
 - **Additions:** add `Also read <file>, this scheme's additions to the review` to the brief.
 
 ## 1. Size the diff
@@ -112,13 +113,14 @@ goes under the Risk line in 5.
 reviewer doesn't. A run costs about $1 (its pinned Opus at high), so the cut is strict
 (Josh, 2026-11-19: "Only on medium or larger features, not small ones"):
 
-- **Runs** when the work is a feature (its `type` property, or the brief's kind) and it is not
+- **Runs** when the work is a feature (the minion's `type` property, or the kind the brief names) and it is not
   small. Medium is the size of the feature, not its risk label.
-- **Small, so it skips:** touches three files or fewer (tests and docs not counted) and changes
-  under about 150 lines, and adds no new screen, flow or table. Any one of those three broken
+- **Small, so it skips:** touches three files or fewer (test and doc files not counted) and changes
+  under about 150 lines (`git diff --stat main...HEAD`, all files), and adds no new screen, flow or table. Any one of those three broken
   makes it not small. A doubt means it runs.
 - **Never runs** for bugs, chores, research, docs or art.
 - **Off** when the turn's "Kit reviewers" line says fresh eyes is switched off: no Grunt.
+- **Its own step:** it runs even when the pre-ship review is off (then start it alone, no reviewer to share a message with), and whether the retro is written yet doesn't matter.
 
 Brief it as in the reviewer's brief (the Grunt line, branch, worktree, `<kit>`), with
 `Follow <kit>/agents/fresh-eyes.md`, the requester's own words verbatim with their times (or the
@@ -179,7 +181,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 - **Alongside the ship:** the steps, in one turn:
   1. `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`.
-  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check and Codex in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
+  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check, Codex and any fresh eyes in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
   3. Nothing real found: end the turn with the report line below. The server dismisses you once the ship is clean.
   4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
   5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
@@ -197,7 +199,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`ui-screenshots critic: pass (round 1)`) and the base check's
   (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
-- **Fresh eyes (features that ran it):** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
+- **Fresh eyes (features), a common line, High route included:** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
 - **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything

@@ -736,9 +736,14 @@ export class ReviewSet {
   /**
    * The run backfill (#1095): each log's runs and people's verdicts, marked source 'backfill', in one transaction. A
    * row whose entry is gone is counted and reported, never invented; an entry that already has this log's backfill
-   * (same minion) is skipped, so a second run adds nothing. Returns a line per scheme.
+   * (same minion) is skipped, so a second run adds nothing. A log whose scheme isn't in this database under its name
+   * (a new install, a dev copy) is left out whole, so one scheme's history never lands on another that took its id.
+   * Returns a line per scheme.
    */
-  backfill(logs: BackfillLog[], now = Date.now()): string[] {
+  backfill(all: BackfillLog[], now = Date.now()): string[] {
+    const names = new Map((this.db.prepare('SELECT id, name FROM projects').all() as Row[]).map((p) => [p.id as number, p.name as string]));
+    const logs = all.filter((l) => names.get(l.project) === l.scheme);
+    const away = [...new Set(all.filter((l) => !logs.includes(l)).map((l) => l.scheme))];
     const per = new Map<number, { logs: number; runs: number; verdicts: number; already: number; missing: string[] }>();
     const run = this.db.prepare("INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at, source) VALUES (?, ?, ?, ?, ?, ?, 'backfill')");
     const had = this.db.prepare("SELECT 1 FROM review_runs WHERE entry_id = ? AND minion = ? AND source = 'backfill' LIMIT 1");
@@ -747,7 +752,7 @@ export class ReviewSet {
     const amber = this.db.prepare("UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT id FROM review_runs WHERE entry_id = ? AND minion = ? AND source = 'backfill' AND at <= ? ORDER BY at DESC, id DESC LIMIT 1)");
     // The kit's professor is on every scheme's page once it's opened (ensureBuiltIns): a teacher run needs its row.
     for (const id of new Set(logs.filter((l) => l.runs.some((r) => r.slug === 'professor')).map((l) => l.project))) {
-      if (!this.get(id, 'professor') && this.db.prepare('SELECT 1 FROM projects WHERE id = ?').get(id)) this.ensureBuiltIns(id, now);
+      if (!this.get(id, 'professor')) this.ensureBuiltIns(id, now);
     }
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -784,8 +789,7 @@ export class ReviewSet {
       this.db.exec('ROLLBACK');
       throw err;
     }
-    const names = new Map((this.db.prepare('SELECT id, name FROM projects').all() as Row[]).map((p) => [p.id, p.name]));
-    return [...per].map(([id, n]) => `${names.get(id) ?? `scheme ${id}`}: ${n.runs} runs and ${n.verdicts} verdicts from ${n.logs} logs${n.already ? `; ${n.already} already in` : ''}${n.missing.length ? `; no entry today for ${n.missing.join(', ')}` : ''}`);
+    return [...[...per].map(([id, n]) => `${names.get(id)}: ${n.runs} runs and ${n.verdicts} verdicts from ${n.logs} logs${n.already ? `; ${n.already} already in` : ''}${n.missing.length ? `; no entry today for ${n.missing.join(', ')}` : ''}`), ...(away.length ? [`not in this database, so left out: ${away.join(', ')}`] : [])];
   }
 
   /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
@@ -911,6 +915,8 @@ export function importAllRubrics(store: { getSetting<T>(k: string): T | null; se
 /** One minion's (or one design folder's) rounds from a critic.md log (#1095), as src/review-backfill.json holds them. */
 export type BackfillLog = {
   project: number;
+  /** The scheme's name, checked against the project row so another database's scheme with this id is left alone. */
+  scheme: string;
   log: string;
   ticketId: number | null;
   minion: string;

@@ -326,15 +326,17 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   // A live run recorded today, before the backfill inserts older history with higher ids.
   set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' }, t0 + 30 * 86_400_000);
   const logs = [
-    { project: 3, log: '3/shared/40/critic.md', ticketId: 40, minion: '#40', runs: [
+    { project: 3, scheme: 'Peek Auras', log: '3/shared/40/critic.md', ticketId: 40, minion: '#40', runs: [
       { slug: 'ui', round: 1, verdict: 'fail', at: t0 }, { slug: 'ui', round: 2, verdict: 'ask', at: t0 + 60_000 },
       { slug: 'professor', round: 2, verdict: 'pass', at: t0 + 61_000 }, { slug: 'gone', round: 1, verdict: 'pass', at: t0 }],
       verdicts: [{ slug: 'ui', person: 'Cara', words: 'Ship as is', at: t0 + 120_000 }] },
-    { project: 3, log: '3/shared/project/design/x/critic.md', ticketId: null, minion: 'design: x', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: t0 - 86_400_000 }], verdicts: [] },
+    { project: 3, scheme: 'Peek Auras', log: '3/shared/project/design/x/critic.md', ticketId: null, minion: 'design: x', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: t0 - 86_400_000 }], verdicts: [] },
   ];
   const settings = new Map<string, unknown>();
   const store = { getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null, setSetting: (k: string, v: unknown) => void settings.set(k, v), reviews: set };
-  assert.deepEqual(backfillRuns(store, logs, 5), ['Peek Auras: 4 runs and 1 verdicts from 2 logs; no entry today for gone (3/shared/40/critic.md)']);
+  // A log for a scheme this database doesn't have under that name (here: id 3 is Peek Auras) is left out whole.
+  const elsewhere = { ...logs[1], scheme: 'Delve', minion: 'design: y' };
+  assert.deepEqual(backfillRuns(store, [...logs, elsewhere], 5), ['Peek Auras: 4 runs and 1 verdicts from 2 logs; no entry today for gone (3/shared/40/critic.md)', 'not in this database, so left out: Delve']);
   assert.equal(settings.get(BACKFILL_KEY), 5);
   assert.equal(set.get(3, 'professor')!.kind, 'teacher', "a teacher run brings the kit's professor onto the page, as opening it would");
   assert.deepEqual(set.holds(3, 40), [], "an old log's ask doesn't hold the minion's ship: its live pass is what counts");
@@ -350,7 +352,7 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   assert.match(set.backfill(logs)[0], /^Peek Auras: 0 runs and 0 verdicts from 0 logs; 3 already in/);
   assert.equal(count(), 4);
   // A bad row rolls the whole import back.
-  assert.throws(() => set.backfill([{ project: 3, log: 'l', ticketId: 1, minion: '#1', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: 1 }, { slug: 'ui', round: 0, verdict: 'pass', at: 2 }], verdicts: [] }]), /bad run/);
+  assert.throws(() => set.backfill([{ project: 3, scheme: 'Peek Auras', log: 'l', ticketId: 1, minion: '#1', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: 1 }, { slug: 'ui', round: 0, verdict: 'pass', at: 2 }], verdicts: [] }]), /bad run/);
   assert.equal(count(), 4);
 });
 
@@ -358,7 +360,7 @@ test('src/review-backfill.json: every run is well formed and in date order per l
   const logs = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'review-backfill.json'), 'utf8'));
   assert.ok(logs.length > 50);
   for (const l of logs) {
-    assert.ok(Number.isInteger(l.project) && l.log.endsWith('critic.md') && l.minion, l.log);
+    assert.ok(Number.isInteger(l.project) && l.scheme && l.log.endsWith('critic.md') && l.minion, l.log);
     assert.ok(l.ticketId === null ? l.minion.startsWith('design: ') : /^#\d+$/.test(l.minion), l.log);
     for (const r of l.runs) assert.ok((VERDICTS as readonly string[]).includes(r.verdict) && Number.isInteger(r.round) && r.round >= 1 && Number.isFinite(r.at), `${l.log} ${JSON.stringify(r)}`);
     assert.deepEqual(l.runs.map((r: { at: number }) => r.at), l.runs.map((r: { at: number }) => r.at).sort((a: number, b: number) => a - b), l.log);

@@ -402,6 +402,8 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   assert.equal((await call(url, { method: 'POST', body: { slug: 'src-critic', name: 'Src critic', kind: 'critic', when: 'diff: src/**', body: '## Rules\nTidy.' } })).status, 201);
   const a = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'one', properties: { type: 'chore' } } })).data;
   const b = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'two', properties: { type: 'chore' } } })).data;
+  // The fake claude fails each new minion's first turn, which writes status 'error' when it ends: let both finish before closing them by hand, or the late write undoes the close (a flake under load).
+  for (const m of [a, b]) for (let i = 0; i < 100 && (await call(`/api/tickets/${m.id}`)).data.ticket.status !== 'error'; i++) await new Promise((r) => setTimeout(r, 100));
   const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
   db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
   db.prepare('UPDATE projects SET owner_id = NULL WHERE id = ?').run(away.id);

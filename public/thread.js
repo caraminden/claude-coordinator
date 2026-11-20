@@ -550,7 +550,7 @@ export function renderTicketHead() {
     renderTicketHead();
   } }, '⋯');
   // ‹ › × sit right of Find (Josh, 2026-11-13); on phones × stays on the title's line.
-  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
+  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen, 'data-part': phone ? null : 'minion-menu', 'data-part-opener': phone ? 'minion-menu' : null }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
     h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },

@@ -26,7 +26,7 @@ export const PARTS: Part[] = [
   { name: 'model-picker', label: "A minion's model", page: MINION, where: "beside Send in the minion's chat (the gear on a phone)", words: 'model opus sonnet fable haiku picker' },
   { name: 'effort-picker', label: "A minion's effort", page: MINION, where: "beside Send in the minion's chat (the gear on a phone)", words: 'effort thinking low medium high picker' },
   { name: 'ask-on-the-side', label: 'Ask on the side', page: MINION, where: "beside Send in a minion's chat", words: 'aside btw side question' },
-  { name: 'minion-menu', label: "A minion's More menu", page: MINION, where: "the top right of a minion's chat", words: 'more menu stop dismiss reopen close leave' },
+  { name: 'minion-menu', label: "A minion's More menu", page: MINION, where: "the line of buttons under a minion's title (the ⋯ on a phone)", words: 'more menu stop dismiss reopen close leave' },
   { name: 'minion-note', label: "A minion's note", page: MINION, where: "the top of a minion's chat", words: 'note people only' },
   { name: 'pin-minion', label: 'Pin a minion', page: MINION, where: "the top of a minion's chat", words: 'pin top list' },
   // Orders → Minion rules

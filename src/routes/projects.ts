@@ -243,7 +243,7 @@ const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an effort, p
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
 function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean } = {};
+  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean; category?: string } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
@@ -264,6 +264,12 @@ function scheduleFields(app: App, projectId: number, body: any, all: boolean, ta
   if (body.once !== undefined) {
     if (typeof body.once !== 'boolean') throw new HttpError(400, 'once must be true or false');
     out.once = body.once;
+  }
+  // Its group on the Schedules page (#1083); '' is Other, and left out of a create it is guessed from the name.
+  if (body.category !== undefined && body.category !== null) {
+    if (typeof body.category !== 'string') throw new HttpError(400, 'category must be text');
+    out.category = body.category.trim().replace(/\s+/g, ' ');
+    if (out.category.length > 40) throw new HttpError(400, `category is too long: ${out.category.length} characters, at most 40`);
   }
   return out;
 }
@@ -1336,7 +1342,7 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // The scheme's scheduled minions, for the Schedules panel and the Taskmaster; each with the number
+  // The scheme's scheduled minions, for the Schedules page and the Taskmaster; each with the number
   // of the minion its last run started. People and the Taskmaster add them; minions can't.
   {
     method: 'GET', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,

@@ -13,7 +13,7 @@ import { projectSharedDir } from './workspace.ts';
 export interface Schedule {
   id: number;
   project_id: number;
-  /** Short name people see in the Schedules panel, e.g. "Nightly health check". */
+  /** Short name people see on the Schedules page, e.g. "Nightly health check". */
   name: string;
   /** Five-field cron (minute hour day-of-month month day-of-week) in the server's time zone, or @hourly/@daily/@weekly. */
   cron: string;
@@ -44,6 +44,8 @@ export interface Schedule {
   template: string | null;
   /** The scheme's own additions to its template, appended under "For <scheme>:". */
   notes: string;
+  /** The group it shows under on the Schedules page (#1083): chosen when it's made, guessed from its name if not (guessCategory). */
+  category: string;
   created_by: string;
   created_at: number;
 }
@@ -69,6 +71,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   once INTEGER NOT NULL DEFAULT 0,
   template TEXT,
   notes TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -273,15 +276,36 @@ export function templateVars(store: Pick<Store, 'getProject' | 'listProjects'>, 
   return { scheme: store.getProject(projectId)?.name ?? 'this scheme', citadelShared: citadel ? projectSharedDir(dataDir, citadel.id) : "Citadel's shared folder" };
 }
 
+/** A standard audit's category, by its kit template. */
+const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps' };
+// First match on the name wins; a name nothing matches stays uncategorised ('', shown as Other).
+const NAME_CATEGORY: [RegExp, string][] = [
+  [/read-?back/i, 'Read-backs'],
+  [/\bmodel|usage|anthropic/i, 'Models and usage'],
+  [/contraption|app turns/i, 'Apps'],
+  [/code health|architecture/i, 'Code'],
+  [/\btest/i, 'Tests'],
+  [/skill|docs?\b|upstream|\bkit\b/i, 'Skills and docs'],
+  [/idea/i, 'Ideas'],
+  [/feedback|glyph|ledger|refit|export|records/i, 'Data and feedback'],
+  [/pipeline|\bland|deploy|\bci\b|housekeeping|process|retro/i, 'Process'],
+];
+
+/** A schedule's category when none was chosen (#1083): its template's, else the first name rule that matches, else ''. */
+export function guessCategory(s: Pick<Schedule, 'name'> & { template?: string | null }): string {
+  if (s.template && TEMPLATE_CATEGORY[s.template]) return TEMPLATE_CATEGORY[s.template];
+  return NAME_CATEGORY.find(([re]) => re.test(s.name))?.[1] ?? '';
+}
+
 export class Schedules {
   private db: DatabaseSync;
 
   constructor(db: DatabaseSync) {
     this.db = db;
     db.exec(SCHEDULES_SCHEMA);
-    // Columns added after the table (#387, #745, #799), for databases created before them.
+    // Columns added after the table (#387, #745, #799, #1083), for databases created before them.
     const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
-    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''" };
+    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''", category: "TEXT NOT NULL DEFAULT ''" };
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
   }
 
@@ -305,10 +329,10 @@ export class Schedules {
     return next;
   }
 
-  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes'>> & { once?: boolean }, now = Date.now()): Schedule {
+  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category'>> & { once?: boolean }, now = Date.now()): Schedule {
     const r = this.db
-      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', this.next(s.cron, now), s.created_by, now);
+      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, category, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', s.category ?? guessCategory(s), this.next(s.cron, now), s.created_by, now);
     return this.get(Number(r.lastInsertRowid))!;
   }
 
@@ -317,7 +341,7 @@ export class Schedules {
    * templated row, without notes, detaches it into a custom copy (#799); notes come with their rendered brief, and a
    * template with its fields attaches one.
    */
-  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
+  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
     const old = this.get(id);
     if (!old) throw new ScheduleError('No such schedule');
     const detach = old.template && patch.brief !== undefined && patch.notes === undefined;
@@ -326,14 +350,23 @@ export class Schedules {
     if (patch.cron !== undefined) this.next(s.cron, now);
     const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
     this.db
-      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, template = ?, notes = ?, paused = ?, next_run_at = ? WHERE id = ?')
-      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.template, s.notes, s.paused, next, id);
+      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, template = ?, notes = ?, category = ?, paused = ?, next_run_at = ? WHERE id = ?')
+      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.template, s.notes, s.category, s.paused, next, id);
     return this.get(id)!;
   }
 
   /** Keep the last rendered brief on a templated row, for the panel, list_schedules and an older release on rollback. */
   setBrief(id: number, brief: string) {
     this.db.prepare('UPDATE schedules SET brief = ? WHERE id = ?').run(brief, id);
+  }
+
+  /** Schema 82 (#1083): every uncategorised schedule gets its guessed category, once. */
+  categorize() {
+    const set = this.db.prepare('UPDATE schedules SET category = ? WHERE id = ?');
+    for (const s of this.db.prepare("SELECT id, name, template FROM schedules WHERE category = ''").all() as unknown as Schedule[]) {
+      const c = guessCategory(s);
+      if (c) set.run(c, s.id);
+    }
   }
 
   remove(id: number): boolean {

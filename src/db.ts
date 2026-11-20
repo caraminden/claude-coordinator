@@ -1457,6 +1457,7 @@ export const SCHEMA_HISTORY = [
   [79, 'tickets.closed_at, backfilled from the close notes (#1072)'],
   [80, 'projects.msg_never_hold (#1067)'],
   [81, 'review_entries, review_versions, review_runs, review_verdicts; repo rubric files imported once (#1051, #1054)'],
+  [82, 'schedules.category, backfilled from template and name (#1083)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1557,6 +1558,7 @@ export class Store {
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
     this.closedAtFromNotes();
+    if ((this.getSetting<number>('schema_version') ?? 0) < 82) this.schedules.categorize();
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();

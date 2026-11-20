@@ -121,6 +121,7 @@ const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
   once: { type: 'boolean', description: 'Pause after the first real run (skips not counted): set it for a one-off such as a dated read-back' },
+  category: { type: 'string', description: 'The group it shows under on the Schedules page, at most 40 characters: reuse one list_schedules shows (e.g. Code, Tests, Process, Skills and docs, Models and usage, Apps, Read-backs). Left out of schedule_minion, it is guessed from the name' },
 };
 const WORKFLOW = {
   type: ['boolean', 'null'],
@@ -591,7 +592,7 @@ const TOOLS = [
   {
     name: 'schedule_minion',
     description:
-      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, from the clock in the Minions header. With min_minions set, a due slot is skipped at no cost (no minion, no note) unless that many minions were made since the last real run, so the cron says how often it may check and the gate says whether it's worth a run. A one-off (a dated cron such as a read-back) sets once, or its date comes round again next year.",
+      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, under Orders → Schedules. With min_minions set, a due slot is skipped at no cost (no minion, no note) unless that many minions were made since the last real run, so the cron says how often it may check and the gate says whether it's worth a run. A one-off (a dated cron such as a read-back) sets once, or its date comes round again next year.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2302,7 +2303,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once });
+      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'schedule_audit': {
@@ -2311,7 +2312,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
-      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes'], 'update_schedule');
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes', 'category'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
@@ -2351,7 +2352,7 @@ function scheduleLine(s: any): string {
   const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
   const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
   const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
-  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+  return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */

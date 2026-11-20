@@ -78,6 +78,12 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
   assert.deepEqual([cheap.status, cheap.data.model, cheap.data.effort], [200, 'claude-sonnet-5-5', 'medium']);
   const back = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { model: null } });
   assert.deepEqual([back.status, back.data.error], [400, 'A schedule always names its model and effort: pass one from the model table instead of null'], 'no default to go back to (#698)');
+  // Its group on the Schedules page (#1083): guessed from the name when left out, set or cleared by a PATCH, checked for length.
+  assert.equal(mine.data.category, '');
+  const named = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { category: '  Health   checks ' } });
+  assert.deepEqual([named.status, named.data.category], [200, 'Health checks']);
+  assert.equal((await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { category: 'x'.repeat(41) } })).status, 400);
+  assert.equal((await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { category: 7 } })).status, 400);
   const paused = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { paused: true } });
   assert.deepEqual([paused.status, paused.data.paused, paused.data.next_run_at], [200, 1, null]);
   assert.equal((await call(`/api/schedules/${tm.data.id}`, { method: 'DELETE', as: page.coordinator.id })).status, 200);
@@ -123,7 +129,7 @@ test("the Taskmaster's schedule tools", async () => {
 
   // The standard audits (#799): the template brings everything, notes re-render, a second copy is refused, a whole brief detaches.
   const audit = await tool('schedule_audit', { template: 'test-audit', notes: 'vitest only.' });
-  assert.match(audit, /^Scheduled\. \[\d+\] Test audit: .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; standard audit test-audit with notes; next /);
+  assert.match(audit, /^Scheduled\. \[\d+\] Test audit \(Tests\): .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; standard audit test-audit with notes; next /);
   const aid = Number(audit.match(/\[(\d+)\]/)![1]);
   const brief = async () => (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((x: any) => x.id === aid).brief;
   assert.match(await brief(), /^Test audit for Tools[\s\S]*\n\nFor Tools:\nvitest only\.$/);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { DatabaseSync } from 'node:sqlite';
-import { describeCron, nextRun, parseCron, pinForOwner, runBrief, runMinion, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
+import { describeCron, guessCategory, nextRun, parseCron, pinForOwner, runBrief, runMinion, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
 
 // Local wall-clock times, since schedules run in the server's time zone.
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -192,4 +192,31 @@ test('a schedules table from before model and effort gets both columns, its rows
   // And the activity gate's and one-off's (#745), its rows always running, in their own scheme, every time.
   assert.deepEqual([old.min_minions, old.gate_scope, old.last_skip, old.once], [null, 'scheme', null, 0]);
   new Schedules(db); // a second start finds them there
+});
+
+test('a schedule with no category chosen gets one from its template or name; the backfill fills only empty ones, once (#1083)', () => {
+  // Real names from the live schemes, and where each lands.
+  const cases: [string, string | null, string][] = [
+    ['Code health', 'code-health', 'Code'], ['Upstream skills check', 'upstream-check', 'Skills and docs'], ['App turns check', 'app-turns', 'Apps'],
+    ['Monthly retro', 'monthly-retro', 'Process'], ['Test audit', null, 'Tests'], ['Heavy-slot history read-back', null, 'Read-backs'],
+    ['Monthly model-usage review', null, 'Models and usage'], ['Anthropic guidance check', null, 'Models and usage'],
+    ['Weekly contraption error review', null, 'Apps'], ['Monthly architecture check', null, 'Code'], ['Kit docs drift run', null, 'Skills and docs'],
+    ['Quarterly skill stocktake', null, 'Skills and docs'], ['Monthly ideation from use', null, 'Ideas'], ['Weekly glyph review', null, 'Data and feedback'],
+    ['Nightly records export', null, 'Data and feedback'], ['Daily pipeline check', null, 'Process'], ['Weekly land batching check', null, 'Process'],
+    ['Housekeeping, all schemes', null, 'Process'], ['January refresh of the rules', null, ''],
+  ];
+  for (const [name, template, want] of cases) assert.equal(guessCategory({ name, template }), want, name);
+
+  const store = new Store(':memory:');
+  const p = store.createProject('One', null).id;
+  const base = { project_id: p, cron: '@daily', brief: 'b', type: 'chore', created_by: 'Cara' };
+  assert.equal(store.schedules.create({ ...base, name: 'Daily pipeline check' }).category, 'Process', 'a create with none chosen guesses');
+  const chosen = store.schedules.create({ ...base, name: 'Daily pipeline check', category: 'Ops' });
+  assert.equal(chosen.category, 'Ops', 'a chosen one is kept');
+  assert.equal(store.schedules.update(chosen.id, { name: 'Test audit' }).category, 'Ops', 'a rename keeps it');
+  // The backfill: rows from before the column, empty, get the guess; a cleared one that matches nothing stays empty.
+  const bare = store.schedules.create({ ...base, name: 'Model policy review', category: '' });
+  const odd = store.schedules.create({ ...base, name: 'January refresh', category: '' });
+  store.schedules.categorize();
+  assert.deepEqual([store.schedules.get(bare.id)!.category, store.schedules.get(odd.id)!.category, store.schedules.get(chosen.id)!.category], ['Models and usage', '', 'Ops']);
 });

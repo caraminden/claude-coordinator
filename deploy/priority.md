@@ -27,8 +27,19 @@ systemctl --user show claude-coordinator -p MemorySwapMax -p CPUWeight -p OOMSco
 
 `daemon-reload` applies the swap and CPU settings to the running server straight away.
 `OOMScoreAdjust` and swapping the server's old pages back in wait for its next restart, which the
-next deploy does. `ManagedOOMPreference=omit` (#1257) keeps systemd-oomd from ever picking the server;
-systemd marks the cgroup with the `user.oomd_omit` xattr when it sets the cgroup up, at the latest on that restart. To undo: `rm ~/.config/systemd/user/claude-coordinator.service.d/priority.conf`,
+next deploy does.
+
+`ManagedOOMPreference=omit` (#1257) keeps systemd-oomd's memory-pressure kills for `user@.service` (the
+policy that killed the server 11 times on 2026-11-20) from picking the server; a root-owned policy higher up
+ignores it. Deploys don't run `daemon-reload`, so where `priority.conf` is already linked, a change to it
+counts only after a by-hand reload. Then check that systemd marked the cgroup (at the latest on the server's
+next restart):
+
+```sh
+systemctl --user daemon-reload
+systemctl --user show claude-coordinator -p ManagedOOMPreference   # expect ManagedOOMPreference=omit
+getfattr -n user.oomd_omit /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/citadel.slice/claude-coordinator.service
+``` To undo: `rm ~/.config/systemd/user/claude-coordinator.service.d/priority.conf`,
 then `systemctl --user daemon-reload`.
 
 ## 2. ananicy-cpp: the biggest CPU problem (the server's fix needs no sudo)

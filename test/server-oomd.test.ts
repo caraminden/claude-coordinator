@@ -17,7 +17,7 @@ function serviceSettings(): Map<string, string> {
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       const s = line.trim();
       if (/^\[.+\]$/.test(s)) section = s;
-      else if (section === '[Service]' && /^\w+=/.test(s)) out.set(s.slice(0, s.indexOf('=')), s.slice(s.indexOf('=') + 1));
+      else if (section === '[Service]' && /^\w+\s*=/.test(s)) out.set(s.slice(0, s.indexOf('=')).trim(), s.slice(s.indexOf('=') + 1).trim());
     }
   }
   return out;

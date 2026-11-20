@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
@@ -1901,6 +1902,8 @@ export class Store {
     if (fields.onboarding === 'done' && was && was.onboarding !== 'done' && fields.rules_review === undefined) fields = { ...fields, rules_review: 1 };
     const keys2 = Object.keys(fields) as (keyof typeof fields)[];
     this.db.prepare(`UPDATE projects SET ${keys2.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys2.map((k) => fields[k] ?? ''), id);
+    // Setup reaching done books the first-week check, seven days out, in that scheme (#1101).
+    if (fields.onboarding === 'done' && was && was.onboarding !== 'done') scheduleFirstWeek(this, id);
   }
 
   /** When this scheme's current setup or tune-up round opened, or 0 for one opened before that was recorded. */

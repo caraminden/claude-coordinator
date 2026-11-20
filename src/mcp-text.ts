@@ -145,7 +145,7 @@ export function checkLines(results: any[]): string[] {
   return results.map((r) => `- ${r.server === 'ws' ? 'workspace tools' : 'MCP server'}: ${r.ok ? `PASS in ${r.ms} ms, ${r.tools.length} tools: ${r.tools.join(', ') || 'none'}` : `FAIL after ${r.ms} ms: ${r.error}`}`);
 }
 
-export const STATUS_WORDS: Record<string, string> = { ready: 'READY', fix: 'NEEDS A FIX', down: 'DOWN', asleep: 'ASLEEP', checking: 'CHECKING' };
+const STATUS_WORDS: Record<string, string> = { ready: 'READY', fix: 'NEEDS A FIX', down: 'DOWN', asleep: 'ASLEEP', checking: 'CHECKING' };
 
 /** A machine as list_machines shows it (#307), its status first as the Machines tab says it (#437). */
 export function machineText(m: any): string {

@@ -216,6 +216,7 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 /* A message that didn't reach the server (composer.js notSent): kept, with ↻ and ✎ in its who-line. */
 .msg.user.not-sent { border-color: var(--error); }
 .msg .who .unsent-tag { color: var(--error); }
+.msg .who .unsent-tag.waiting-tag { color: var(--muted); }
 .msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
 .msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
 .msg .files { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }

@@ -88,15 +88,42 @@ document.addEventListener('paste', (e) => {
   form.pasteAnywhere(e);
 });
 
-/** Mark a message that didn't reach the server: "not sent", with Retry and a ✎ to take it back into the box. */
-function notSent(chatId, entry) {
-  entry.state = 'failed';
+/** One fewer send of this chat's on its way: "thinking…" goes once none are. */
+function arrived(chatId) {
+  const left = onTheWay.get(chatId) - 1;
+  left ? onTheWay.set(chatId, left) : onTheWay.delete(chatId);
+  if (!left && view?.sendingTo === chatId) {
+    view.sendingTo = null;
+    renderTyping();
+  }
+}
+
+/** No connection, or Citadel restarting (Caddy's 502-504): the send waits for the network rather than failing (#1144). */
+const noConnection = (err) => err instanceof TypeError || [502, 503, 504].includes(err?.status);
+
+/** Until the device says it's back online, or `ms` pass (it can't always tell). */
+const backOnline = (ms) => new Promise((ok) => {
+  const go = () => {
+    clearTimeout(timer);
+    removeEventListener('online', go);
+    ok();
+  };
+  const timer = setTimeout(go, ms);
+  addEventListener('online', go);
+});
+
+/**
+ * Mark a message that didn't reach the server: "not sent" with Retry, or (no connection) "waiting to send", which goes
+ * by itself once the connection is back. Both have a ✎ to take it back into the box, which is also how a wait is cancelled.
+ */
+function notSent(chatId, entry, waiting = false) {
+  entry.state = waiting ? 'waiting' : 'failed';
   const { el } = entry;
-  el.classList.replace('pending', 'not-sent');
-  el.querySelector('.who')?.append(h('span', { class: 'msg-tag unsent-tag' }, 'not sent',
-    h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
-    h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit', onclick: () => {
-      if (entry.state !== 'failed') return;
+  if (!waiting) el.classList.replace('pending', 'not-sent');
+  el.querySelector('.who')?.append(h('span', { class: `msg-tag unsent-tag${waiting ? ' waiting-tag' : ''}` }, waiting ? 'waiting to send' : 'not sent',
+    waiting ? null : h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
+    h('button', { type: 'button', class: 'take-back', title: waiting ? 'Cancel and take back to edit' : 'Take back to edit', 'aria-label': 'Take back to edit', onclick: () => {
+      if (entry.state !== 'failed' && entry.state !== 'waiting') return;
       entry.state = 'taken back';
       setSending(sending - 1);
       el.remove();
@@ -349,26 +376,48 @@ export function composer(chatId, ticket) {
         }
       },
       send: async () => {
+        let counted = true; // in onTheWay: not while it waits for the network
         try {
-          const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body });
-          if (entry.state === 'sending') {
-            entry.state = 'sent';
-            setSending(sending - 1);
+          // With no connection it waits, in its place in the chat's queue, and tries again with the same sendId.
+          for (let wait = 2000; ; wait = Math.min(wait * 2, 15_000)) {
+            try {
+              const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body });
+              if (entry.state === 'sending') {
+                entry.state = 'sent';
+                setSending(sending - 1);
+              }
+              // Show the message now even if the live stream is down; duplicates are skipped by id.
+              if (chatOpen(chatId)) {
+                // You just sent something, so follow the reply.
+                scrollToBottom();
+                adoptTicket(chatId, ticket);
+              }
+              return ticket;
+            } catch (err) {
+              if (!noConnection(err) || entry.state !== 'sending') throw err;
+            }
+            notSent(chatId, entry, true);
+            arrived(chatId);
+            counted = false;
+            // Nothing is thinking while it waits, the messages queued behind it included.
+            if (view?.sendingTo === chatId) {
+              view.sendingTo = null;
+              renderTyping();
+            }
+            await backOnline(wait);
+            // Taken back to edit, or its server copy came in (its reply was lost): nothing more to send.
+            if (entry.state !== 'waiting') return null;
+            entry.state = 'sending';
+            el.querySelector('.unsent-tag')?.remove();
+            onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
+            counted = true;
+            if (chatOpen(chatId)) {
+              view.sendingTo = chatId;
+              renderTyping();
+            }
           }
-          // Show the message now even if the live stream is down; duplicates are skipped by id.
-          if (chatOpen(chatId)) {
-            // You just sent something, so follow the reply.
-            scrollToBottom();
-            adoptTicket(chatId, ticket);
-          }
-          return ticket;
         } finally {
-          const left = onTheWay.get(chatId) - 1;
-          left ? onTheWay.set(chatId, left) : onTheWay.delete(chatId);
-          if (!left && view?.sendingTo === chatId) {
-            view.sendingTo = null;
-            renderTyping();
-          }
+          if (counted) arrived(chatId);
           reloadWhenIdle();
         }
       },

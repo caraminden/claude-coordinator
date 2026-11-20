@@ -427,6 +427,8 @@ const noAccounts = () => {
 
 test('a turn that hits its account\'s limit carries on at once with the next ready account, not as a limit resume (#779)', async () => {
   const pat = store.createUser({ name: 'Pat', login: 'pat779' });
+  // A member, as anyone writing to a minion is: a resume runs for its turn's person only while they're in the scheme (#1270).
+  store.addMember(project.id, pat.id);
   const s = accountsFor(pat.id, 'ok');
   try {
     const id = minion();

@@ -721,6 +721,8 @@ export class ClaudeLink {
     await this.containers.stop(name);
     await this.containers.removeVolume(name);
     this.credentials.remove(uid, 'claude_runner');
+    // Every account's meter goes too, or the next account linked would show the old one's limit (#1270 C4).
+    for (const a of set?.accounts ?? [{ n: 1 }]) this.store.deleteSetting(accountUsageKey(uid, a.n));
   }
 
   /** Sign out one of several accounts and remove its folder; the others, and the container, stay. */
@@ -741,7 +743,7 @@ export class ClaudeLink {
     // other Claude files, so only its login goes; another account's whole folder does.
     if (dir) rmSync(n === 1 ? join(dir, '.credentials.json') : dir, { recursive: true, force: true });
     // Its meters would show on the next account linked in its place.
-    this.store.deleteSetting(`${this.serverLogin(uid) ? 'usage' : `usage:user:${uid}`}:account:${n}`);
+    this.store.deleteSetting(accountUsageKey(this.serverLogin(uid) ? null : uid, n));
     this.withAccounts(uid, (s) => {
       s.accounts = s.accounts.filter((a) => a.n !== n);
       if (s.inUse === n) s.inUse = s.accounts[0]?.n ?? 1;

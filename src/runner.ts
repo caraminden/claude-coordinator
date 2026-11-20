@@ -57,6 +57,7 @@ import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stag
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
+import { turnPayer } from './access.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -1497,13 +1498,13 @@ export class Runner {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
-    this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => ticket.person_id ?? this.turnPerson(ticket, project, this.peekQueue(ticketId)), () => {
+    this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') return this.store.deleteSetting(owedKey(ticketId));
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
-      const person = ticket.person_id ?? this.turnPerson(ticket, project, this.peekQueue(ticketId));
+      const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
         const q = this.queues.get(ticketId);
@@ -1702,7 +1703,7 @@ export class Runner {
       const t = this.store.getTicket(id);
       const project = t && this.store.getProject(t.project_id);
       if (!t || !project) return false;
-      const person = t.person_id ?? project.owner_id;
+      const person = this.turnPerson(t, project, [], true);
       const its = turnSettings(t, project).model;
       const codex = isCodexModel(its) || (person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person)));
       return !codex && this.payerOf(person) === payer && (model === undefined || its === model);
@@ -1818,7 +1819,8 @@ export class Runner {
     const q = this.queues.get(ticketId) ?? [];
     const limited = !!(ticket && this.limitWait(ticketId));
     // Waiting on its payer's usage limit, a message on another plan carries on now (sender pays): first, so the turn is its sender's.
-    const otherPlan = !!(person && limited && this.payerOf(person) !== this.payerOf(ticket!.person_id ?? this.store.getProject(ticket!.project_id)?.owner_id));
+    const project = ticket && this.store.getProject(ticket.project_id);
+    const otherPlan = !!(person && limited && project && this.payerOf(person) !== this.payerOf(this.turnPerson(ticket!, project, [], true)));
     if (otherPlan) q.unshift(msg);
     else q.push(msg);
     // A person's own message tries now too: the reset time is only Claude's word, and a reset can come sooner. Still limited, it waits again (#477).
@@ -2367,7 +2369,7 @@ export class Runner {
     if (!(t.state === null || t.state === 'ready' || t.state === 'try' || this.store.openCardsOf(t.id).length)) return false;
     if (!inWindow(now)) return false;
     // Codex keeps no Claude cache.
-    const person = t.person_id ?? p.owner_id;
+    const person = this.turnPerson(t, p, []);
     if (isCodexModel(turnSettings(t, p).model) || (person !== null && this.store.getSetting<boolean>(codexSwitchKey(person))) || this.store.getSetting(codexThreadKey(t.id))) return false;
     const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(t.id));
     if (!s || s.stopped || now - s.since >= SERIES_CAP_MS) return false;
@@ -2508,30 +2510,9 @@ export class Runner {
     return this.turnFrom.get(ticketId) ?? null;
   }
 
-  /**
-   * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
-   * (a relay counts as its sender's), else the minion's last person, else the scheme's owner. A relay
-   * from someone outside this scheme (a non-member's ask to Citadel) runs as the scheme's owner (#211).
-   * A split scheme's Overlord has no last person (Cara's R4, "Starter, else owner", #921): it is nobody's own.
-   */
-  private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
-    // A person's own Taskmaster (#919) runs for its person, but never on someone else's request: a turn another person
-    // starts there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail
-    // name no person, so they leave it on the owner's.
-    if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
-      const starter = batch.find((m) => !m.from && this.personOf?.(m.author));
-      const p = (starter && this.personOf?.(starter.author)) || ticket.coordinator_of;
-      // #211: someone taken out of the scheme (or deleted) no longer pays for its turns; its owner does.
-      const user = this.store.getUser(p);
-      return user && this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
-    }
-    for (const m of batch) {
-      const p = this.personOf?.(m.author, m.from);
-      if (!p) continue;
-      const user = m.from ? this.store.getUser(p) : null;
-      return user && !this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? project.owner_id : p;
-    }
-    return (this.isOverlord(ticket) ? null : ticket.person_id) ?? project.owner_id;
+  /** Who a turn runs for (its GitHub login, and #177's Claude plan): src/access.ts turnPayer, the one rule (#1270). */
+  private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[], resuming = false): number | null {
+    return turnPayer(this.store, ticket, project, batch, (author, from) => this.personOf?.(author, from) ?? null, resuming);
   }
 
   /** Whether `ticket` is a split scheme's Overlord (#919, #921): the Taskmaster that is nobody's own, beside one per person. */
@@ -3891,7 +3872,8 @@ export class Runner {
     if (!on) return null;
     const mine = (w: LimitResume) => {
       const t = this.store.getTicket(w.ticket);
-      return !!t && (t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === uid;
+      const p = t && this.store.getProject(t.project_id);
+      return !!p && this.turnPerson(t!, p, [], true) === uid;
     };
     // Due now, on Codex, spaced limitGapMs apart like any limit resume.
     const list = this.limitResumes();

@@ -30,28 +30,52 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
 }
 
 /**
+ * Who pays for a turn: whose Claude login it runs on, and whose GitHub login it pushes as. The one rule every start path
+ * asks (#1270): src/runner.ts turnPerson (a queued start, held mail, a keepalive, a resume) and turnRefusal below.
+ * Sender pays: the first person in its messages. A relay counts as its sender's asker, a person's own Taskmaster (#919)
+ * runs for its person unless someone else wrote there, and a split scheme's Overlord is nobody's own (Cara's R4,
+ * "Starter, else owner", #921). A resume (`resuming`) carries on the interrupted turn, so it runs for that turn's person.
+ * With none of those, the minion's last person, else the scheme's owner. Anyone picked by a fallback rather than by
+ * their own message (a relay's asker, a Taskmaster's person, the minion's last person) must still be in the scheme:
+ * someone taken out of it (or deleted) no longer pays for its turns, its owner does (#211, #1270). A disabled person
+ * is still picked, so their turn is refused (turnPlace) rather than moved onto someone else's plan.
+ */
+export function turnPayer(store: Store, ticket: Ticket, project: Project, batch: { author: string; from?: number }[], personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
+  const inScheme = (p: number | null) => {
+    const user = p === null ? undefined : store.getUser(p);
+    return user && store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
+  };
+  if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);
+  // A person's own Taskmaster runs for its person, but never on someone else's request: a turn another person starts
+  // there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail name
+  // no person, so they leave it on its person's.
+  if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
+    const starter = batch.find((m) => !m.from && personOf(m.author));
+    return inScheme((starter && personOf(starter.author)) || ticket.coordinator_of);
+  }
+  for (const m of batch) {
+    const p = personOf(m.author, m.from);
+    if (p) return m.from ? inScheme(p) : p;
+  }
+  const overlord = ticket.kind === 'coordinator' && ticket.coordinator_of == null && store.isSplit(ticket.project_id);
+  return !overlord && ticket.person_id != null ? inScheme(ticket.person_id) : project.owner_id;
+}
+
+/**
  * Why a message can't start or steer a turn yet, or null when it can. Until people link their own
  * Claude accounts, turns run on the server's login, which only people an admin allowed may use (Pro
- * and Max plans are per person). A message from no person is checked against whoever its turn would
- * run for, as src/runner.ts turnPerson picks them: a relay (`from`, the sending thread) as the asker
- * of the turn that sent it, or the scheme owner when that asker isn't in this scheme (#211); GitHub
- * or a wake as the minion's last person, else the scheme owner (#468 S02-2).
+ * and Max plans are per person). A message is checked against whoever its turn would run for, by turnPayer's rule
+ * (#468 S02-2, #1270); a disabled person's own message is refused as theirs.
  */
 export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null, from?: number): string | null {
-  const ownerId = store.getProject(ticket.project_id)?.owner_id ?? null;
-  let id: number | null = null;
-  if (from) {
-    const asker = store.turnAsker(from);
-    const user = asker !== null ? store.getUser(asker) : undefined;
-    id = user && !store.canSee({ uid: user.id, admin: !!user.admin }, ticket.project_id) ? ownerId : asker;
-  } else {
-    const person = store.findUser('name', author);
-    if (person) return claudeRefusal(person, linked);
-  }
-  id ??= ticket.person_id ?? ownerId;
+  const project = store.getProject(ticket.project_id);
+  const named = from ? undefined : store.findUser('name', author);
+  if (named?.disabled_at) return claudeRefusal(named, linked);
+  const id = project ? turnPayer(store, ticket, project, [{ author, from }], messagePerson(store)) : null;
   const who = store.getUser(id ?? -1);
   if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";
-  return claudeRefusal(who, linked, who.id === ownerId);
+  // Worded for the owner when it runs on their plan for a message they didn't write (GitHub, a schedule, a relay).
+  return claudeRefusal(who, linked, who.id === project?.owner_id && who.id !== named?.id);
 }
 
 /**
@@ -61,6 +85,8 @@ export function turnRefusal(store: Store, ticket: Ticket, author: string, linked
 export function turnPlace(store: Store, link: { place(uid: number, warm?: string): TurnPlace | null; linked: ClaudeLinked }, person: number | null, warm?: string): TurnPlace | { refused: string } {
   const user = person ? store.getUser(person) : undefined;
   if (!user) return { host: true };
+  // Disabled first (#1270 C3): a linked Claude would place the turn, and a resume, held mail or a queued start would run it.
+  if (user.disabled_at) return { refused: claudeRefusal(user, (uid) => link.linked(uid))! };
   return link.place(user.id, warm) ?? { refused: claudeRefusal(user, (uid) => link.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 }
 

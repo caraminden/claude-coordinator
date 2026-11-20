@@ -187,6 +187,10 @@ test("a member taken out of a scheme stops paying for their old minions' automat
   (runner as any).resume(hers.id, 1);
   await until('the resume asks for a place', () => asked.length === 3);
   assert.deepEqual(asked, [josh.id, josh.id, josh.id]);
+  // A usage-limit wait is on the plan its resume will run on: the owner's turn getting through releases it.
+  store.setSetting('limit-resumes', [{ ticket: hers.id, at: Date.now() + 3600_000, tries: 1 }]);
+  (runner as any).limitCleared(josh.id);
+  assert.equal(store.getSetting<any[]>('limit-resumes')![0].proven, true, "the owner's reset resumes her old minion");
   // Back in the scheme, her minion's turns are hers again.
   store.addMember(games.id, olive.id);
   assert.match(turnRefusal(store, hers, 'GitHub', linked([josh.id]))!, /Turns for Olive start/);

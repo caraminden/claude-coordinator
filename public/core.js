@@ -939,6 +939,15 @@ function onEvent(event) {
 export let routeSeq = 0;
 let routedHash = null; // the address the newest finished route opened (a "show me where" link waits for it)
 
+// The usage ledger (#1306): one count per page opened; the server drops the numbers. A failure is ignored.
+let lastCounted = '';
+function countPage(hash) {
+  const name = (hash || '#/').replace(/[?].*$/, '').replace(/\d+/g, 'n');
+  if (name === lastCounted) return;
+  lastCounted = name;
+  api('api/usage/page', { method: 'POST', body: { name } }).catch(() => {});
+}
+
 async function route() {
   if (!me) return;
   const jump = jumpParts(location.hash);
@@ -957,6 +966,7 @@ async function route() {
   }
   // A new front end is waiting: this navigation is the moment to load it (the address is already the target).
   if (reloadOnNavigate()) return;
+  countPage(location.hash);
   // Under a contraption's frame the page keeps its scroll; it's saved when you left it for the frame.
   if (!framed()) saveScroll();
   const seq = ++routeSeq;

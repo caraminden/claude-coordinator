@@ -3466,6 +3466,7 @@ export class Runner {
       if (t && t.thread !== ev.codex_thread) this.store.setSetting(codexThreadKey(ticketId), { ...t, thread: ev.codex_thread });
       if (ev.codex_resume_failed) this.emit(ticketId, 'note', { text: `Codex couldn't pick up its thread ${ev.codex_resume_failed}, so this turn starts a new one from the hand-over log.` });
     }
+    if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) this.countUse(ev.message.content);
     // Each main-thread API call re-reads the whole context: its input is the context's size.
     const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
     if (u) {
@@ -3727,6 +3728,19 @@ export class Runner {
   private contextShown = new Map<number, { size: number; at: number }>();
   /** The model each running turn's init event named. */
   private mainModels = new Map<number, string>();
+
+  /** The usage ledger (#1306): each tool, skill and Grunt type a main-thread message calls. Never throws. */
+  private countUse(blocks: any[]) {
+    try {
+      for (const b of blocks) {
+        if (b?.type !== 'tool_use' || typeof b.name !== 'string') continue;
+        const m = /^mcp__(?:thread|coordinator)__(.+)$/.exec(b.name);
+        if (m) this.store.usage.used('tool', m[1]);
+        else if (b.name === 'Skill' && typeof b.input?.skill === 'string') this.store.usage.used('skill', b.input.skill);
+        else if ((b.name === 'Agent' || b.name === 'Task') && typeof b.input?.subagent_type === 'string') this.store.usage.used('grunt', b.input.subagent_type);
+      }
+    } catch { /* counting never fails a turn */ }
+  }
 
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();

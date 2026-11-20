@@ -9,6 +9,7 @@ import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { ShipLessons } from './ship-lessons.ts';
+import { UsageLedger } from './usage-ledger.ts';
 import { Ideas } from './ideas.ts';
 import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
@@ -1337,6 +1338,15 @@ CREATE TABLE IF NOT EXISTS ship_lessons (
   taken_note TEXT
 );
 CREATE INDEX IF NOT EXISTS ship_lessons_scheme ON ship_lessons(project_id, at);
+-- The usage ledger (src/usage-ledger.ts, #1306): one row per Pacific day, kind and name; people is how many different people.
+CREATE TABLE IF NOT EXISTS usage_counts (
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  people INTEGER NOT NULL DEFAULT 0,
+  n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, kind, name)
+);
 -- The ideas ledger (src/ideas.ts, #1150): one row per idea a scheme was shown, on a choices page (page, card) or in a
 -- handoff with no page (page '', card = the handoff's path). It fills itself from picks, handoffs, starts and ships;
 -- status_manual and link_manual are hand edits the scan never undoes. No foreign keys: a row outlives its minion.
@@ -1628,6 +1638,7 @@ export const SCHEMA_HISTORY = [
   [96, 'events_notes and events_asks indexes (#1251)'],
   [97, 'project_minimizes (#1243)'],
   [98, 'host_samples.cpu_psi, mem_psi (#1301)'],
+  [99, 'usage_counts (#1306)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1678,6 +1689,8 @@ export class Store {
   lessons: ShipLessons;
   /** The ideas ledger, per scheme (src/ideas.ts, #1150). */
   ideas: Ideas;
+  /** What gets used, by day (src/usage-ledger.ts, #1306). */
+  usage: UsageLedger;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
   /** Past minions and handoffs, full-text, for search_minions and the scout (src/minion-index.ts, #1156). */
@@ -1709,6 +1722,7 @@ export class Store {
       this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
     this.ideas = new Ideas(this.db);
+    this.usage = new UsageLedger(this.db);
       this.memory = new Memory(this);
       this.minionIndex = new MinionIndex(this);
       this.memoryProposals = new MemoryProposals(this.db);
@@ -1739,6 +1753,7 @@ export class Store {
     this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
     this.ideas = new Ideas(this.db);
+    this.usage = new UsageLedger(this.db);
     this.memory = new Memory(this);
     this.minionIndex = new MinionIndex(this);
     this.memoryProposals = new MemoryProposals(this.db);

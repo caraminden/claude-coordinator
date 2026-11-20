@@ -40,6 +40,7 @@ export const SETTINGS_GROUPS = [
   ['Admin', 'teal', [
     row('app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows', 'settings.js', 'appInstructionsEditor', { crumb: 'Citadel-wide instructions' }),
     row('people', 'People', 'people', 'Who can sign in', 'people.js', 'peoplePage'),
+    row('unused', 'Unused', 'chart', 'What nobody has used in 30 days', 'unused.js', 'unusedPage'),
     row('contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel', 'contraptions.js', 'contraptionsPage'),
     row('units', 'Units', 'shield', 'Which deploy/ units are installed on this host', 'units.js', 'unitsPage')], true],
 ];

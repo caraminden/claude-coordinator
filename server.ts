@@ -103,6 +103,8 @@ import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
+import { usageRoutes } from './src/routes/usage.ts';
+import { usageName } from './src/usage-ledger.ts';
 import { memoryCuratorRoutes } from './src/routes/memory-curator.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
@@ -125,7 +127,7 @@ import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { skillRoutes } from './src/routes/skills.ts';
-import { warmUsage } from './src/skills.ts';
+import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
 import { writeOffThread } from './src/db-writer.ts';
@@ -507,6 +509,8 @@ if (!BOOT_CHECK) sideAsks.recover();
 // Who is in which chat (#695): in memory, swept for late heartbeats and old writes.
 const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
 every('presence sweep', 15_000, () => presence.sweep());
+// The usage ledger (#1306) writes its counts once a minute, and prunes once a day; a stop writes what is left.
+if (!BOOT_CHECK && !PREVIEW) { every('usage ledger flush', 60_000, () => store.usage.flush()); every('usage ledger prune', 24 * 3600_000, () => store.usage.prune()); }
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
@@ -1557,6 +1561,11 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
+  usageKnown: () => [
+    ...routes.groups().map((name) => ({ kind: 'route' as const, name })),
+    ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })),
+    ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
+  ],
   store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
@@ -1593,7 +1602,7 @@ runner.onBudgetWake = (ticketId, text) => {
   const ticket = store.getTicket(ticketId);
   if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes]);
+const routes = router([...usageRoutes, ...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;
@@ -1754,6 +1763,7 @@ process.on('SIGTERM', () => {
   services.stopping = true;
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
+  store.usage.flush();
   memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
   process.once('exit', () => ciLoad.stop()); // at the exit itself, after the last request: writes the runner-load samples it still holds
   server.close(() => process.exit(0));

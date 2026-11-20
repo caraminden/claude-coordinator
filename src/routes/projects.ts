@@ -790,6 +790,7 @@ export const projectRoutes: Route[] = [
       const body = await readJson(req);
       const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'msg_never_hold', 'repo_url', 'skills_off'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
+      for (const k of fields) if (body[k] !== undefined) store.usage.used('setting', `scheme.${k}`, session.uid ?? session.name); // the usage ledger (#1306)
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
       const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.

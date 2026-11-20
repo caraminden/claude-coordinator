@@ -276,6 +276,8 @@ export interface SharedFile {
 /** What the routes reach of the running server (built once in server.ts). */
 export interface App {
   store: Store;
+  /** Items the usage ledger lists though nothing has used them yet (#1306): route groups, schedules, kit skills and Grunt types. */
+  usageKnown?: () => { kind: 'route' | 'schedule' | 'skill' | 'grunt'; name: string }[];
   runner: Runner;
   auth: Auth;
   waiters: LiveWaiters;
@@ -499,6 +501,11 @@ function checkScope(store: Store, route: Route, caller: Ticket, method: string, 
   if (ticket === caller.id && method !== 'GET' && method !== 'HEAD') throw new HttpError(403, 'The Taskmaster cannot act on itself');
 }
 
+/** A route's group for the usage ledger (#1306): its path without the parameters, at most four segments (`/api/projects/:project/tickets` is `/api/projects/tickets`). */
+export function routeGroup(path: string): string {
+  return `/${path.split('/').filter((s) => s && !/^[:*]/.test(s)).slice(0, 4).join('/')}`;
+}
+
 /**
  * The API as one table: match the path and method, check the login and the origin, load the rows the
  * path names (404 when gone), check who may call it, then run its handler.
@@ -563,8 +570,9 @@ export function router(routes: Route[]) {
     }
     if (ctx.caller) checkScope(app.store, route, ctx.caller, method, project, ctx.ticket?.id);
     else if (route.access === 'owner' && !session.admin && app.store.getProject(project!)?.owner_id !== session.uid) throw new HttpError(403, 'Only the scheme\'s owner can do that');
+    try { app.store.usage.used('route', routeGroup(route.path), session.uid ?? session.name); } catch { /* counting never fails a request */ }
     return route.handler(ctx);
   };
   // Whether the table has a path at all, for a listener that serves more than its table.
-  return Object.assign(dispatch, { knows: (path: string) => table.some((r) => r.re.test(path)) });
+  return Object.assign(dispatch, { groups: () => [...new Set(routes.map((r) => routeGroup(r.path)))], knows: (path: string) => table.some((r) => r.re.test(path)) });
 }

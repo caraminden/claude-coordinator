@@ -312,6 +312,11 @@ export class Schedules {
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
   }
 
+  /** Every schedule's name in every scheme, for the usage ledger's list of known items. */
+  allNames(): string[] {
+    return (this.db.prepare('SELECT DISTINCT name FROM schedules').all() as { name: string }[]).map((r) => r.name);
+  }
+
   list(projectId: number): Schedule[] {
     return this.db.prepare('SELECT * FROM schedules WHERE project_id = ? ORDER BY paused, next_run_at, id').all(projectId) as unknown as Schedule[];
   }
@@ -572,6 +577,7 @@ export class ScheduledRuns {
       const pinnedFor = pinForOwner(store, id);
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
       store.schedules.ran(s.id, { ticketId: id }, now);
+      store.usage.used('schedule', s.name);
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
       runner.send(id, by, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions)), [], { brief: true, schedule: s.name });
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);

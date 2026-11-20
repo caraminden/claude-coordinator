@@ -11,6 +11,7 @@ import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
+import { scopedPageHash } from './page-scope.js';
 import { usage } from './core.js';
 import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
@@ -229,7 +230,7 @@ function overview(s, pcs, now, ui) {
 }
 
 /** The page: `projectId` is the scheme it opened from, selected first. */
-export function ciPage(projectId, startTab = 'overview') {
+export function ciPage(projectId, startTab = 'overview', all = false) {
   let picked = projectId;
   // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
   let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' ? 'health' : 'overview';
@@ -245,7 +246,10 @@ export function ciPage(projectId, startTab = 'overview') {
   const el = h('section', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail));
   const draw = () => {
     const now = data.now;
-    const schemes = data.schemes;
+    // From a scheme the list is that scheme alone (Cara, 2026-11-20); Home's link, `/ci/all`, lists every one. A scheme with no CI shows them all.
+    const mine = all ? [] : data.schemes.filter((x) => x.id === projectId);
+    const schemes = mine.length ? mine : data.schemes;
+    const scoped = mine.length > 0;
     if (!schemes.length) {
       list.replaceChildren();
       detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'), hostLoadBlock(host));
@@ -277,6 +281,7 @@ export function ciPage(projectId, startTab = 'overview') {
     list.replaceChildren(...why, ...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
       h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '', ...pcRows);
+    if (scoped) list.prepend(h('a', { class: 'ci-more', href: `#/p/${projectId}/ci/all` }, h('span', { class: 'ci-li-name' }, 'All schemes')));
     if (pcPicked) {
       detail.replaceChildren(
         h('div', { class: 'ci-head' }, h('h3', {}, pcPicked.host), h('span', { class: 'muted small' }, 'CI desktop load')),
@@ -349,7 +354,7 @@ async function readChips() {
 /** The CI chip: a dot and "CI", opening the page for the scheme on screen (or `projectId`). Hidden until a scheme with CI is there. */
 export function ciChip(projectId = null) {
   const c = h('a', { class: 'ci-chip', hidden: true, href: projectId ? `#/p/${projectId}/ci` : '#/',
-    onclick: () => { const id = projectId ?? view?.projectId ?? localStorage.getItem(LAST_SCHEME); c.href = id ? `#/p/${id}/ci` : '#/'; } },
+    onclick: () => { c.href = scopedPageHash('ci', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'CI'));
   chips.add(c);
   if (chipRead) paintChip(c, chipRead);

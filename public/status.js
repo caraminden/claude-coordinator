@@ -7,6 +7,7 @@ import { ago, api, h, view, pacificStamp, pacificIso, pacificClockBare } from '.
 import { toneChip } from './look.js';
 import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
+import { scopedPageHash } from './page-scope.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -252,7 +253,7 @@ function appTiles(a, days, ships, redraw) {
 }
 
 /** The Status page for scheme `projectId`: Citadel first, then the apps you can see, this scheme's first. */
-export function statusPage(projectId) {
+export function statusPage(projectId, all = false) {
   let picked = 'citadel';
   let data = null;
   const list = h('nav', { class: 'ci-list st-list-nav', 'aria-label': 'Citadel and your apps' });
@@ -263,12 +264,14 @@ export function statusPage(projectId) {
   h('span', { class: `dot ${DOT[v.tone]}` }), h('span', { class: 'ci-li-name' }, name), h('span', { class: 'ci-li-state muted' }, sub ?? (v.reasons[0] ?? WORD[v.tone])));
   const draw = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
-    const sorted = [...apps].sort((x, y) => (y.scheme === projectId) - (x.scheme === projectId) || x.title.localeCompare(y.title));
+    const shown = all ? apps : apps.filter((a) => a.scheme === projectId);
+    const sorted = [...shown].sort((x, y) => (y.scheme === projectId) - (x.scheme === projectId) || x.title.localeCompare(y.title));
     const app = sorted.find((a) => `app:${a.name}` === picked);
     if (!app) picked = 'citadel';
     list.replaceChildren(row('citadel', 'Citadel', citadel.verdict),
       h('div', { class: 'ci-list-head' }, 'Your apps'),
-      ...(sorted.length ? sorted.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, 'No app in a scheme you\'re in.')]));
+      ...(sorted.length ? sorted.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, all ? 'No app in a scheme you\'re in.' : 'No app in this scheme.')]),
+      ...(all ? [] : [h('a', { class: 'ci-more', href: `#/p/${projectId}/status/all` }, h('span', { class: 'ci-li-name' }, 'All schemes\' apps'))]));
     const v = app ? app.verdict : citadel.verdict;
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, app ? app.title : 'Citadel'), toneChip(CHIP[v.tone], WORD[v.tone]),
@@ -328,7 +331,7 @@ async function readChips() {
 /** The Status chip: a dot and "Status", opening the page for the scheme on screen (or `projectId`). */
 export function statusChip(projectId = null) {
   const c = h('a', { class: 'ci-chip status-chip', href: projectId ? `#/p/${projectId}/status` : '#/',
-    onclick: () => { const id = projectId ?? view?.projectId ?? localStorage.getItem(LAST_SCHEME) ?? 2; c.href = `#/p/${id}/status`; } },
+    onclick: () => { c.href = scopedPageHash('status', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'Status'));
   c.dataset.placed = '1';
   chips.add(c);

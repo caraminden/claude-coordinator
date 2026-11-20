@@ -319,8 +319,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'releases' ? releasesPage()
     : main.kind === 'reviews' ? reviewsPage()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
-    : main.kind === 'ci' ? ciPage(projectId, main.tab)
-    : main.kind === 'status' ? statusPage(projectId)
+    : main.kind === 'ci' ? ciPage(projectId, main.tab, main.all)
+    : main.kind === 'status' ? statusPage(projectId, main.all)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

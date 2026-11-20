@@ -190,7 +190,7 @@ second copy of the runner agent that runs inside that distro.
 |---|---|
 | Where | the WSL distro `citadel-ci`, which belongs to the Windows account that installed it (Cara's) |
 | Folder | `/opt/actions-runner-<repo>`, then `-2` … (up to 4), the scheme's user's alone, with a `.citadel-runner` marker for people (`"mode": "linux"`) |
-| Label | `<scheme-slug>-ci-linux` (`theory-of-crafting-ci-linux`); GitHub adds `self-hosted`, `Linux`, `X64` |
+| Label | `<scheme-slug>-ci-linux` (`theory-of-crafting-ci-linux`); GitHub adds `self-hosted`, `Linux`, `X64`. Every runner but the first also gets `<scheme-slug>-ci-linux-side`, for long jobs that must leave the first one free |
 | Name | `<PC>-linux`, then `<PC>-linux-2` … |
 | Runs as | the scheme's own user `ci-<repo>-<6 hex>` (no sudo), so one scheme's jobs can't touch another's runners; one job at a time |
 | Service | `citadel-runner-<owner>-<repo>[-n].service`, which `add-runner.sh` writes itself from the runner's `svc.sh` template; its first line `# citadel-repo=<owner>/<repo>` is Citadel's record of whose it is |
@@ -378,7 +378,12 @@ For Linux jobs, `runs-on: [self-hosted, <scheme-slug>-ci-linux]`; they need no `
 ## Citadel's own tests (#523)
 
 Citadel's suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one land's suite
-run at a time: two at once on that PC failed in a different file every run, 2026-11-11).
+run at a time: two at once on that PC failed in a different file every run, 2026-11-11). Only the lands' runs may take
+the first runner: flake proofs (`flake-proof.yml`), the nightly and runs started by hand ask for the side label
+`citadel-ci-linux-side`, which only `-linux-2` carries (#1240: on 2026-11-20 proofs held both runners for three hours and
+every land fell back to perigee). Runners added before #1240 got the side label by hand, as the repo's admin:
+`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-side'`.
+Without a runner carrying it, proofs and the nightly wait in GitHub's queue (up to a day) while lands go on.
 `.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
 thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the

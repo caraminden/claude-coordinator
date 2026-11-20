@@ -146,11 +146,15 @@ EOF
     token=${reg[2]:-}
     [[ -n $token ]] || { undo 'no token'; die 'Citadel gave no registration token (the line above says why).'; }
   fi
-  echo "Registering $runner on $repo with label $label"
+  # The first runner carries the scheme's label alone; the others also <label>-side, for jobs that hold a runner long
+  # (Citadel's flake proofs, #1240), so one runner is always left for the jobs that can't wait.
+  labels=$label
+  [[ -z $suffix ]] || labels+=",$label-side"
+  echo "Registering $runner on $repo with labels $labels"
   # As the scheme's user, without the machine token, and with the registration token in its environment
   # (ACTIONS_RUNNER_INPUT_TOKEN is config.sh's --token), never in any command line `ps` shows. -m keeps that HOME.
   if ! (cd "$dir" && unset CC_MACHINE_TOKEN && export HOME=$dir/home ACTIONS_RUNNER_INPUT_TOKEN=$token &&
-    runuser -m -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --name "$runner" --labels "$label" --work _work); then
+    runuser -m -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --name "$runner" --labels "$labels" --work _work); then
     undo 'config.sh failed'; continue
   fi
   # 6. Started now and at every start of the distro; a service that dies at once (enable still says yes) is a failure.
@@ -161,6 +165,6 @@ EOF
 done
 
 echo
-echo "  label  $label  (runs-on: [self-hosted, $label])"
+echo "  label  $label  (runs-on: [self-hosted, $label]); every runner but the first also has $label-side"
 echo "  check  https://github.com/$repo/settings/actions/runners should list them as Idle."
 [[ $failed == 0 && $taken == 0 ]] || die "$((failed + taken)) runner(s) weren't added; the lines above say why."

@@ -20,9 +20,11 @@ concurrency:
 permissions:
   contents: read
 
+# Only on the runner that carries the side label (#1240): a proof holds its runner up to 90 minutes, and on 2026-11-20
+# proofs on both runners sent every land for three hours to the suite on perigee. The other runner stays the lands'.
 jobs:
   proof:
-    runs-on: ${{ fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    runs-on: ${{ fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]') }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4

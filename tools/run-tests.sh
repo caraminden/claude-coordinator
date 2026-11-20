@@ -22,6 +22,10 @@
 # The reruns hold the deploy lock too, and a waiting land gives up after 15 minutes: DEPLOY_RERUN_TIMEOUT limits
 # each in seconds (default 120, or 1.5 times the file's time in the full run when that is longer: test/land-overlap.test.ts takes
 # about 190 s alone), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
+# DEPLOY_RERUN_DEADLINE (epoch seconds, set by tests.yml on a land's run) is when land.sh stops waiting for CI (#1240): no
+# rerun goes past it, and after the first real failure the rest are not rerun, since one already makes the run a real
+# red. A file not rerun has no label, so land.sh reads the run as red and refuses before its limit, instead of
+# cancelling it at the limit and running the whole suite again on perigee to learn the same thing.
 #
 # Landing tests win over routine checks (#503): the run and its reruns get their own systemd scope in citadel.slice
 # with CPUWeight=500, beside the host turns' slice and each person's container (100 each) and under the server's
@@ -41,6 +45,7 @@ limit=${DEPLOY_TEST_TIMEOUT:-600}
 rerun_limit=${DEPLOY_RERUN_TIMEOUT:-120}
 test_limit=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) # each test, in ms (#999); a test's own { timeout } wins
 budget=${DEPLOY_RERUN_BUDGET:-300}
+deadline=${DEPLOY_RERUN_DEADLINE:-}
 concurrency=${CITADEL_TEST_CONCURRENCY:-$((($(nproc 2>/dev/null || echo 2) + 1) / 2))}
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -177,22 +182,40 @@ if [ -f "$tools/deploy-queue.sh" ]; then
   queue_phase "rerunning ${#files[@]} failed test file$([ "${#files[@]}" = 1 ] || echo s) since $(date +%H:%M)"
 fi
 SECONDS=0
+real=
 for i in "${!files[@]}"; do
   f=${files[$i]}
-  left=$((budget - SECONDS))
+  left=$((budget - SECONDS)) due=
+  [ -z "$deadline" ] || due=$((deadline - $(date +%s)))
+  if [ -n "$due" ] && [ -n "$real" ]; then
+    say "$f: not rerun: a real failure already makes this run red"
+    continue
+  fi
+  if [ -n "$due" ] && [ "$due" -le 0 ]; then
+    say "$f: not rerun: CI's answer is due (land.sh stops waiting then), so the run counts as a real red"
+    continue
+  fi
   if [ "$left" -le 0 ]; then
     say "$f: not rerun: the reruns' ${budget}s ran out"
     continue
   fi
-  # A long file gets 1.5 times its own full-run time, never less than the flat limit, and never more than the budget left.
+  # A long file gets 1.5 times its own full-run time, never less than the flat limit, and never more than the budget
+  # or the time to the deadline left.
   want=$((took[i] * 3 / 2 > rerun_limit ? took[i] * 3 / 2 : rerun_limit))
   this=$((left < want ? left : want))
+  [ -z "$due" ] || [ "$due" -ge "$this" ] || this=$due
   echo "== $f" >>"$rerun_log"
   timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" "$f" >>"$rerun_log" 2>&1
   case $? in
     0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
-    124 | 137) say "$f: hung when rerun alone (stopped after ${this}s): a real failure" ;;
-    *) say "$f: failed again alone: a real failure" ;;
+    124 | 137)
+      real=1
+      if [ "$this" = "$due" ]; then
+        say "$f: rerun alone stopped after ${this}s, when CI's answer was due: counts as a real failure"
+      else
+        say "$f: hung when rerun alone (stopped after ${this}s): a real failure"
+      fi ;;
+    *) real=1; say "$f: failed again alone: a real failure" ;;
   esac
 done
 say "the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run"

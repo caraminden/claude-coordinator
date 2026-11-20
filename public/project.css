@@ -58,9 +58,10 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 /* Minions waiting on the server (#1294): green, apart from blue running, orange count and violet fresh. The number, then "…" that steps dot by dot. */
 .scheme-count > .ship { display: inline-flex; align-items: baseline; color: var(--done); font-weight: 600; }
 .scheme-count > .ship b { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 0.15em; }
-.scheme-count > .ship i { font-style: normal; display: inline-block; width: 1em; overflow: hidden; white-space: nowrap; animation: scheme-dots 1.4s steps(4, end) infinite; }
-@keyframes scheme-dots { from { width: 0; } to { width: 1em; } }
-@media (prefers-reduced-motion: reduce) { .scheme-count > .ship i { animation: none; width: auto; } }
+.scheme-count > .ship i { font-style: normal; display: inline-block; width: 1em; white-space: nowrap; clip-path: inset(0 100% 0 0); animation: scheme-dots 1.5s linear infinite; } /* the box keeps its width; only the dots shown change, so nothing after it moves */
+/* . then .. then ..., one step each, looping (Cara, 2026-11-20); schemeCount sets animation-delay so a redrawn pill joins the same phase */
+@keyframes scheme-dots { 0%, 33.3% { clip-path: inset(0 66.6% 0 0); } 33.4%, 66.6% { clip-path: inset(0 33.3% 0 0); } 66.7%, 100% { clip-path: inset(0 0 0 0); } }
+@media (prefers-reduced-motion: reduce) { .scheme-count > .ship i { animation: none; clip-path: none; } }
 @keyframes scheme-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .scheme-count > .busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }

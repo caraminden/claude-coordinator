@@ -28,6 +28,15 @@ let next = null; // the chat whose card you just answered, to move on from once 
 let timer = 0;
 let panel = null;
 let overview = null;
+// Schemes folded shut on Home, by id, kept in this browser (their rows stay in the list; only the drawing folds).
+const FOLDED = 'cc-home-folded';
+const folded = new Set();
+try { for (const id of JSON.parse(localStorage.getItem(FOLDED)) ?? []) folded.add(Number(id)); } catch {}
+function toggleFolded(id) {
+  folded[folded.has(id) ? 'delete' : 'add'](id);
+  try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch {}
+  drawPanel();
+}
 
 /** `#/p/…` as Home's address for the same chat: `#/home/p/…` (core.js routes both). */
 export const homeHash = (hash) => (hash.startsWith('#/p/') ? `#/home${hash.slice(1)}` : hash);
@@ -155,7 +164,9 @@ function drawPanel() {
     // A row that left Home's list (answered, a mention opened, withdrawn) is gone at once; Josh, 2026-11-20: "these should just be gone once done".
     const ids = all.filter((id) => rows.has(id));
     if (!ids.length) return null;
-    return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name), ...ids.map((id) => {
+    const shut = folded.has(s.id);
+    const fold = h('button', { type: 'button', class: 'home-fold', 'aria-expanded': String(!shut), title: shut ? `Expand ${s.name}` : `Collapse ${s.name}`, 'aria-label': shut ? `Expand ${s.name}` : `Collapse ${s.name}`, onclick: () => toggleFolded(s.id) }, shut ? '▸' : '▾');
+    return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name, shut ? h('span', { class: 'home-folded-count' }, String(ids.length)) : '', h('span', { class: 'spacer' }), fold), ...(shut ? [] : ids).map((id) => {
       const t = tickets.get(id), items = rows.get(id);
       // The row's card and spend badges open on Home too, not in the scheme.
       const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));

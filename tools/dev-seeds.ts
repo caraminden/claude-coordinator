@@ -752,6 +752,9 @@ mock.boards('#takes', { boards: [
       turn(bug1, [skill('bug-fixing'), grunt('Explore'), edit, fail, skill('diagnosing-bugs'), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
       const bug2 = minion(c, 'Login loops on Safari', { status: 'closed' }, 'bug');
       turn(bug2, [skill('bug-fixing'), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
+      // A bug minion that never opened bug-fixing though its brief named it: a miss and a "named, never opened" row (#1082).
+      const bug3 = minion(c, 'CSV import trims leading zeros', { status: 'closed' }, 'bug');
+      turn(bug3, [(w) => w.asked('Zip codes lose their leading zero on import. Open citadel:bug-fixing first and prove it with a failing test.'), edit, skill('self-review'), ship, end], true);
       const feat = minion(c, 'Dark mode toggle', { status: 'closed' }, 'feature');
       turn(feat, [skill('grilling'), end, skill('docs-and-mocks'), edit, skill('subagents'), grunt(), edit, skill('self-review'), grunt('citadel:reviewer'), ship, end], true);
       const idea = minion(c, 'Ideas for onboarding', {}, 'ideation');

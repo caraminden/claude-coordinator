@@ -1,32 +1,52 @@
-/* The Skills page (#1062, public/skills.js). */
+/* The Skills page (#1062, #1082, public/skills.js): compact rows that open, Citadel's look (take B, "Health first"). */
 .skills-main .sk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.75rem 0; }
 .skills-main .sk-count { margin-left: 0.35rem; font-variant-numeric: tabular-nums; opacity: 0.75; }
 .skills-main .sk-intro { margin: 0 0 0.75rem; }
-.skills-main .sk-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.sk-row { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.7rem 0.85rem; margin-bottom: 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.sk-row.off { border-style: dashed; }
-.sk-row p { margin: 0; }
-.sk-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; min-height: 1.6rem; }
-.sk-top .cui-chip { white-space: nowrap; }
-.sk-top .rules-switch { margin-left: auto; }
-.sk-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); font-size: 0.92rem; overflow-wrap: anywhere; min-width: 0; }
-.sk-when, .sk-what { font-size: 0.9rem; line-height: 1.4; }
-.sk-stats, .sk-detail summary { font-size: 0.85rem; line-height: 1.3; padding: 0.2rem 0; font-variant-numeric: tabular-nums; }
-.sk-ghost { display: inline-block; width: 24ch; max-width: 100%; height: 0.8em; border-radius: 4px; background: var(--muted); opacity: 0.3; vertical-align: -0.05em; }
-.sk-detail { font-size: 0.85rem; }
-.sk-detail summary { cursor: pointer; }
-.sk-detail summary::marker { color: var(--accent); }
-.sk-detail p { margin: 0.25rem 0 0; }
-.sk-last { margin: 0.2rem 0 0; padding-left: 1.2rem; }
-.sk-last li { margin: 0.1rem 0; }
-.sk-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem; }
+.skills-main .settings-section > .sk-count { font-weight: 600; }
+/* The closed line: a fixed-width health chip, the name and trigger, the calls bar and the last call, so counts that fill
+   in late never move anything (no reflow without input). */
+.sk-row > summary { gap: 0.6rem; }
+.sk-health { flex: none; width: 4.6rem; display: flex; }
+.sk-health .sk-ghost { width: 3.6rem; height: 1.3rem; border-radius: 99px; }
+.sk-name { font-family: var(--mono, ui-monospace, monospace); font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-calls { flex: none; width: 8.5rem; }
+.sk-calls .meter-text { min-width: 2.6rem; text-align: right; }
+.sk-last { flex: none; width: 4.6rem; text-align: right; font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sk-ghost { display: inline-block; width: 100%; height: 0.8em; border-radius: 4px; background: var(--muted); opacity: 0.25; vertical-align: -0.05em; }
+/* The opened row. */
+.sk-body { gap: 0.7rem; }
+.sk-itabs button { min-height: var(--control-h); }
+.sk-pane { display: flex; flex-direction: column; gap: 0.6rem; min-height: 6rem; min-width: 0; }
+.sk-loading { gap: 0.5rem; }
+.sk-loading .sk-ghost { height: 2.25rem; border-radius: 7px; }
+.sk-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.sk-rates { display: flex; flex-direction: column; gap: 0.4rem; }
+.sk-rate .meter-text { min-width: 16rem; font-size: 0.9em; }
+.sk-h { display: flex; align-items: center; margin: 0.3rem 0 0; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--h, var(--muted)); }
+.sk-title { color: var(--muted); }
+.sk-pane .hue-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-quote { display: block; margin-top: 0.15rem; font-size: 0.85em; color: var(--muted); white-space: normal; quotes: '“' '”'; }
+.sk-quote mark { background: color-mix(in srgb, var(--held) 22%, var(--panel)); color: inherit; border-radius: 3px; padding: 0 0.15rem; }
+.sk-pane .hue-row:has(.sk-quote) { align-items: flex-start; }
+.sk-pane .hue-row:has(.sk-quote) .hue-row-text { white-space: normal; }
+.sk-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.sk-switch { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.88em; }
+.sk-brief { font-family: var(--mono, ui-monospace, monospace); font-size: 0.82rem; width: 100%; box-sizing: border-box; }
+.sk-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.25rem; }
 .sk-new .sk-field { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.6rem; font-size: 0.88rem; }
 .sk-new .sk-field > span { font-weight: 600; }
-.sk-new .sk-brief { font-family: var(--mono, ui-monospace, monospace); font-size: 0.82rem; }
 .sk-new, .sk-confirm { width: min(36rem, calc(100vw - 2rem)); }
 
 @media (max-width: 600px) {
   .skills-main .sk-bar .spacer { display: none; }
   .skills-main .sk-tabs { width: 100%; }
-  .sk-stats, .sk-detail summary { padding: 0.75rem 0; }
+  /* On a phone the trigger drops and the calls bar shrinks to its number, so the line keeps one height. */
+  .sk-row .settings-row-sum { display: none; }
+  .sk-calls { width: 3.2rem; }
+  .sk-calls .meter-bar { display: none; }
+  .sk-last { width: 3.4rem; }
+  .sk-row > summary { gap: 0.4rem; padding-inline: 0.6rem; }
+  .sk-rate .meter-text { min-width: 0; flex: 1; }
+  .sk-rate .meter { flex-wrap: wrap; }
+  .sk-rate .meter-bar { flex-basis: 100%; }
 }

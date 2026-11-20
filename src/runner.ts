@@ -32,6 +32,7 @@ import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
+import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -570,6 +571,8 @@ export class Runner {
   wait: (ticketId: number) => Wait | null = () => null;
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
   serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
+  /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
+  onStreamEvent: (ticketId: number, ev: any) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -2207,8 +2210,8 @@ export class Runner {
   }
 
   /**
-   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a handoff turn without one
-   * falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
+   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a Taskmaster's handoff turn without one
+   * resets it from a server-built facts sheet (G6), a minion's falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
    */
   private endFresh(ticketId: number, turn: TurnState | null, ok: boolean, stopped: boolean) {
     let f = this.store.getSetting<FreshState>(freshKey(ticketId));
@@ -2219,12 +2222,17 @@ export class Runner {
     const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
       ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
-    if (f.summary) {
+    // A Taskmaster's failed handoff starts the fresh session from a facts sheet the server builds from the database (G6), not a compaction.
+    const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
+    if (f.summary || sheeted) {
+      const sheet = ticket?.kind === 'coordinator' ? handoffSheet(this.store, this, ticket) : '';
+      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : f.summary!;
       this.store.deleteSetting(freshKey(ticketId));
-      this.store.setSetting(handoffKey(ticketId), f.summary);
+      this.store.setSetting(handoffKey(ticketId), text);
       this.store.deleteSetting(contextKey(ticketId));
       this.store.updateTicket(ticketId, { session_id: null });
-      this.emit(ticketId, 'fresh', { summary: f.summary, why: f.why });
+      if (sheeted) this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
+      this.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.store.deleteSetting(freshKey(ticketId));
       this.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
@@ -3359,6 +3367,11 @@ export class Runner {
     if (!slim) return;
     const progress = this.progressFor(ticketId);
     const row = this.emit(ticketId, 'claude', slim);
+    try {
+      this.onStreamEvent(ticketId, slim);
+    } catch (err: any) {
+      console.error(`[stall] minion ${ticketId}: counting failed:`, err.message);
+    }
     // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
     applyEvent(progress, 'claude', slim, row.created_at);
     this.recordSteps(ticketId, progress);

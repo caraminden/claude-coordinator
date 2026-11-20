@@ -35,6 +35,7 @@ import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
+import { briefWarning, namedFiles } from '../brief-lint.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
@@ -1094,7 +1095,8 @@ export const projectRoutes: Route[] = [
       const byHand = !caller && (model !== null || effort !== null);
       model ??= table.model;
       effort ??= table.effort;
-      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort);
+      const pickBy = byHand ? session.name : caller ? 'Taskmaster' : 'table';
+      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -1117,6 +1119,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
+      store.addPick(id, model, effort, pickBy, because);
       store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(goal ? { goal } : {}), ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
@@ -1143,6 +1146,12 @@ export const projectRoutes: Route[] = [
         notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
       } else {
         runner.send(id, session.name, message, [], { brief: true });
+      }
+      // A brief an agent wrote (the Taskmaster's, or a handoff a person starts) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
+      // A person's Start already carries its brief's text, and naming the file must not let another section of it count.
+      if (caller || brief) {
+        const warning = briefWarning(brief ? message : `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
+        if (warning) notes.push(warning);
       }
       // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
       void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);

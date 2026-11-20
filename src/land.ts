@@ -425,6 +425,8 @@ export interface HandoffDeps {
   deployOps?: DeployOps;
   /** A clean land on main moved it to `commit` (fast mode's testing behind, src/fast-mode.ts, #1017). */
   landed?(id: number, commit: string): void;
+  /** A handed-off land that didn't go through, with classifyLandFailure's kind (the stall signals, #1139). */
+  failed?(id: number, kind: string | null): void;
 }
 
 /**
@@ -500,6 +502,7 @@ export class LandHandoffs {
       runner.broadcastTicket(id);
       const why = r.smoke ? `its smoke check refused it before it got in line, in seconds (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
+      try { this.d.failed?.(id, cls?.kind ?? null); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
       runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
       return;
     }

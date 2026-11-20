@@ -72,7 +72,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // The answer check's trial (answer-check.ts) judges only a stop that ends the turn: not a refused one, nor one
     // with a Grunt still running, whose result wakes the turn again.
     if (out) process.stdout.write(out);
-    else if (!runningTasks(input).some((t) => t.grunt)) answerHook(input);
+    else if (!runningTasks(input).some((t) => t.grunt)) {
+      const refusal = { out: {} as { block?: string } };
+      answerHook(input, process.env, refusal);
+      if (refusal.out.block) process.stdout.write(JSON.stringify({ decision: 'block', reason: refusal.out.block }));
+    }
   } catch (err: any) {
     process.stderr.write(`[citadel job check] skipped: ${err.message}\n`);
   }

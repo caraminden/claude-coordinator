@@ -86,6 +86,16 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   const stepped = await call(`/api/tickets/${chore.data.id}`, { method: 'PATCH', body: { model: 'claude-opus-5-5' } });
   assert.equal(stepped.status, 200);
   assert.equal((await call(`/api/tickets/${chore.data.id}`)).data.ticket.picked_because, 'set by Cara: Opus 5.5 medium');
+  // The reason in the Taskmaster's own words rides along and is kept as data with each pick (#1061, A4).
+  const why = await call(`/api/tickets/${chore.data.id}`, { method: 'PATCH', body: { effort: 'high', pick_reason: 'fix did not hold twice' } });
+  assert.equal(why.status, 200);
+  assert.equal((await call(`/api/tickets/${chore.data.id}`)).data.ticket.picked_because, 'set by Cara: Opus 5.5 high: fix did not hold twice');
+  const picks = (await call(`/api/tickets/${chore.data.id}`)).data.picks;
+  assert.deepEqual(picks.map((x) => [x.model, x.effort, x.reason]), [
+    ['claude-sonnet-5-5', 'medium', 'chore → Sonnet 5.5 medium'],
+    ['claude-opus-5-5', 'medium', 'set by Cara: Opus 5.5 medium'],
+    ['claude-opus-5-5', 'high', 'set by Cara: Opus 5.5 high: fix did not hold twice'],
+  ]);
   assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
   const nobodys = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Nobody', message: 'hi', properties: { assigned: null } } });
   assert.equal(nobodys.data.properties.assigned, undefined, 'unless it says otherwise');

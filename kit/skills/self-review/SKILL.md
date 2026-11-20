@@ -180,7 +180,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
 - **At or above the threshold (High):** stop before shipping. Post the same line, the findings you fixed in one line each,
   and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
-  Hold, with your pick marked recommended). Set state null, note `risk <label>: waiting for a go`,
+  Hold, with your pick marked recommended). A feeder's change merges into its build, so its card says Merge: header "Merge", "Merge this <label>-risk change into Build <n>?" (Merge / Hold). Set state null, note `risk <label>: waiting for a go`,
   and end the turn. Ship only on a go.
 
 ## UI findings

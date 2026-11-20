@@ -2632,6 +2632,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/facts": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/file": {
   "anon": "401 Not logged in",
   "person": "404 That file is no longer there",
@@ -3323,6 +3333,16 @@
   "m2": "403 A minion may only update itself"
  },
  "GET /api/tickets/:taskmasterA/events?before=1000&limit=5&from=1": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/facts": {
   "anon": "401 Not logged in",
   "person": "200",
   "member": "200",

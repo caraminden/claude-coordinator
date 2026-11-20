@@ -21,10 +21,12 @@ import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { offSkills } from '../skills.ts';
-import { EFFORTS, GOAL_MAX, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { buildOwnerKey, EFFORTS, GOAL_MAX, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
+import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
+import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -86,7 +88,8 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (Object.keys(fields).length) {
     // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
     if ('model' in fields || 'effort' in fields) {
-      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort);
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because);
     }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -391,7 +394,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { res, ticket, app } = ctx;
       const { store } = app;
-      return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+      return json(res, 200, { ticket, picks: store.picksOf(ticket.id), project: store.getProject(ticket.project_id) });
     },
   },
   {
@@ -448,6 +451,21 @@ export const ticketRoutes: Route[] = [
       const { res, app, ticket } = ctx;
       const { id } = ticket;
       return json(res, 200, { status: await app.ticketBranch(id) });
+    },
+  },
+  {
+    // live_facts (#1113): a minion's live facts in one read. A minion asks as itself, for a minion of its scheme by ?number=.
+    method: 'GET', path: '/api/tickets/:ticket/facts', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    async handler({ res, url, app, caller, ticket }) {
+      let id = ticket.id;
+      if (caller && caller.kind !== 'coordinator' && url.searchParams.has('number')) {
+        const n = Number(url.searchParams.get('number'));
+        const target = Number.isInteger(n) && n > 0 ? app.store.getTicketByNumber(ticket.project_id, n) : undefined;
+        if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+        id = target.id;
+      }
+      const facts = await liveFacts(app, id);
+      return json(res, 200, { facts, text: factsText(facts) });
     },
   },
   {
@@ -597,8 +615,11 @@ export const ticketRoutes: Route[] = [
       // A card asking for the go to ship says so, for the minions list's chip (#575). "ship" is the word people read
       // (Cara, 2026-11-19, picked "Ship" on #1020's card); it is stored as the older kind "merge", and "land" still counts.
       const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? 'merge' as const : null;
+      // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
+      const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
+      const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
-      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {

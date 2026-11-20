@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Skill trigger evals (#1110): which kit skill fires first on real asks. tools/skill-evals/run.ts; --help.
+exec node "$(dirname "$(readlink -f "$0")")/skill-evals/run.ts" "$@"

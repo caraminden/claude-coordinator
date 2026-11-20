@@ -7,7 +7,7 @@
 // in the scheme's known-red ledger until it passes on main: later lands and runs that fail only on those ids blame
 // nobody, and land.sh lets them through (LAND_KNOWN_RED).
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { HostJobs } from './host-job.ts';
@@ -100,6 +100,8 @@ export class FastMode {
   /** The pass that runs now; a tick meanwhile asks it to go round again, and waits for it. */
   private busy: Promise<void> | null = null;
   private again = false;
+  /** Each scheme's failure as last said: a failure that repeats is said once, not every 30 s. */
+  private said = new Map<number, string>();
   private readonly d: FastModeDeps;
   private readonly now: () => number;
   private readonly git: (cwd: string, ...args: string[]) => Promise<string>;
@@ -169,8 +171,11 @@ export class FastMode {
       for (const p of this.d.schemes()) {
         try {
           await this.step(p.id, p.repo);
+          if (this.said.delete(p.id)) console.log(`Fast mode for scheme ${p.id} works again.`);
         } catch (err: any) {
-          console.error(`Fast mode for scheme ${p.id} failed: ${err?.message ?? err}`);
+          const msg = String(err?.stderr || err?.message || err).trim();
+          if (this.said.get(p.id) !== msg) console.error(`Fast mode for scheme ${p.id} failed: ${msg}`);
+          this.said.set(p.id, msg);
         }
       }
     } while (this.again);
@@ -202,9 +207,16 @@ export class FastMode {
     const wt = join(this.d.dir(projectId), 'wt');
     mkdirSync(this.d.dir(projectId), { recursive: true, mode: 0o700 });
     // Its own detached worktree, kept between runs so what the check installs (node_modules, a venv) stays.
+    // A folder whose .git file points at an entry the repo no longer has (a prune that couldn't see the folder, as a
+    // container turn can't) is no worktree: start it over, losing only what the check installed in it.
+    if (existsSync(join(wt, '.git')) && !(await this.git(wt, 'rev-parse', '--git-dir').then(() => true, () => false))) {
+      rmSync(wt, { recursive: true, force: true });
+      console.log(`Fast mode for scheme ${projectId}: its worktree had lost its git link; rebuilding it.`);
+    }
     if (!existsSync(join(wt, '.git'))) {
       await this.git(repo, 'worktree', 'prune');
-      await this.git(repo, 'worktree', 'add', '-q', '--detach', wt, sha);
+      // Locked, so no `git worktree prune` from anywhere else drops it again.
+      await this.git(repo, 'worktree', 'add', '-q', '--detach', '--lock', '--reason', 'Citadel fast mode', wt, sha);
     } else await this.git(wt, 'checkout', '-q', '-f', '--detach', sha);
     // A pinning run checks only the ids it is pinning (land.sh reruns just their files when it can).
     const env = { ...this.d.env(projectId, this.owner(s, sha)), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: s.pin ? s.pin.ids.join('\n') : '' };

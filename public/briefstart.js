@@ -57,7 +57,7 @@ function show(slot, brief, file, number) {
     labels.set('starting');
     try {
       const type = matchType(brief.typeHint, await typeValues(file.projectId));
-      show(slot, brief, file, await start(brief, file, { title: brief.title, type }));
+      started(slot, brief, file, await start(brief, file, { title: brief.title, type }));
     } catch (ex) {
       status.textContent = ex.message;
       btn.disabled = false;
@@ -73,7 +73,15 @@ function show(slot, brief, file, number) {
   slot.replaceChildren(btn, options, status);
 }
 
-/** Start the brief as a minion: its number, or the number of the one someone else started meanwhile. */
+/** "Started as #N", and the brief check's warning (#1108) under it, for whoever pressed Start, so they can tell the minion what the handoff left out. */
+function started(slot, brief, file, { number, warning }) {
+  show(slot, brief, file, number);
+  if (!warning) return;
+  const gaps = warning.replace(/^Brief check \(citadel:briefing\): it has/, 'This handoff has').replace(/ The minion was still created:.*$/, '').replace(/ \([^)]*\)/g, '');
+  slot.append(h('p', { class: 'muted small brief-warning' }, `${gaps} Tell `, h('a', { href: `#/p/${file.projectId}/t/${number}` }, `#${number}`), ' what it left out.'));
+}
+
+/** Start the brief as a minion: its number and the brief check's warning, or the number of the one someone else started meanwhile. */
 async function start(brief, file, { title, type, after = '', when = 'live' }) {
   try {
     const t = await api(`api/projects/${file.projectId}/tickets`, { method: 'POST', body: {
@@ -81,11 +89,11 @@ async function start(brief, file, { title, type, after = '', when = 'live' }) {
       ...(type ? { properties: { type } } : {}),
       ...(after ? { start_after: Number(after), start_when: when } : {}),
     } });
-    return t.number;
+    return { number: t.number, warning: t.notes?.find((n) => n.startsWith('Brief check')) };
   } catch (ex) {
     const theirs = await api(`api/projects/${file.projectId}/briefs?path=${encodeURIComponent(file.path)}`).catch(() => []);
     const number = theirs.find((s) => s.heading === brief.heading)?.number;
-    if (number) return number;
+    if (number) return { number };
     throw ex;
   }
 }
@@ -129,9 +137,9 @@ async function openSheet(slot, brief, file) {
     btn.textContent = 'Starting…';
     err.hidden = true;
     try {
-      const number = await start(brief, file, { title: title.value, type: type.value, after: after.value.replace('#', '').trim(), when: when.value });
+      const r = await start(brief, file, { title: title.value, type: type.value, after: after.value.replace('#', '').trim(), when: when.value });
       dialog.close();
-      show(slot, brief, file, number);
+      started(slot, brief, file, r);
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;

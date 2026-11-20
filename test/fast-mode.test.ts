@@ -262,3 +262,42 @@ test("a land during a pass isn't lost; an old red escalates while a run is going
   await w.finish(red('a'));
   assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
 });
+
+test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, and the run goes on", async () => {
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(GREEN);
+  // What a `git worktree prune` run where the folder can't be seen (a container turn) leaves: the folder and its .git file, no entry.
+  rmSync(join(w.repo, '.git', 'worktrees'), { recursive: true, force: true });
+  const c2 = w.commit('two');
+  await w.tick();
+  assert.equal(w.runs.length, 2, 'the run on the new head started');
+  assert.equal(w.runs[1].sha, c2);
+  const list = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: w.repo, encoding: 'utf8' });
+  assert.match(list, /locked/, 'locked, so a prune from elsewhere leaves it alone');
+});
+
+test("a failure that repeats is said once, and said again when it changes or after it clears", async () => {
+  const w = world();
+  w.commit('one');
+  const said: string[] = [];
+  const was = [console.error, console.log];
+  console.error = console.log = (m: string) => said.push(m);
+  try {
+    const broken = join(w.repo, '.git', 'HEAD');
+    const good = execFileSync('cat', [broken], { encoding: 'utf8' });
+    writeFileSync(broken, 'garbage\n');
+    await w.tick(), await w.tick(), await w.tick();
+    assert.equal(said.filter((m) => /failed/.test(m)).length, 1, 'three ticks, one line');
+    writeFileSync(broken, good);
+    await w.tick();
+    assert.ok(said.some((m) => /works again|recovered/.test(m)), 'it says when it recovers');
+    await w.finish(GREEN);
+    writeFileSync(broken, 'garbage\n');
+    await w.tick();
+    assert.equal(said.filter((m) => /failed/.test(m)).length, 2, 'a new failure after a recovery is said');
+  } finally {
+    [console.error, console.log] = was;
+  }
+});

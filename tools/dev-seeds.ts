@@ -162,6 +162,22 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'feeder-card': {
+    about: "a Build 5 feeder's go card (kind merge, stamped into: 5): its chip and option read Merge, not Ship It",
+    seed(c) {
+      const t = minion(c, 'Feeder: board column', { note: 'risk high: needs a go to merge', state: 'ready' });
+      const w = chat(c, t, 11);
+      w.asked('Add the board column.');
+      w.init();
+      w.said('Done and reviewed: risk high. It merges into Build 5 only on a go.');
+      const e = w.put('question', { id: hex(), kind: 'merge', into: 5, questions: [{ question: 'Merge this high-risk change into Build 5?', header: 'Merge', multiSelect: false, options: [
+        { label: 'Merge', description: 'It goes into build/5, live when the build ships.', recommended: true },
+        { label: 'Hold', description: 'It waits on its branch.' },
+      ] }] });
+      w.done('Asked for the go to merge.');
+      return route(c, t, e);
+    },
+  },
   'plan-card': {
     about: 'a minion with a plan card waiting for Approve or Revise',
     seed(c) {

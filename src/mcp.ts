@@ -100,6 +100,7 @@ const EFFORT = {
   enum: EFFORT_IDS,
   description: "The effort for the minion's turns, as in its composer. Required: the effort the model table pairs with your model for this kind of work. xhigh only after a Fable run failed twice or a person asks; never max.",
 };
+const PICK_REASON = { type: 'string', maxLength: 200, description: 'Why this model and effort for this job, in your own words, one line (at most 200 characters), e.g. "known-shape fix with a clear repro". It shows on the minion as "Picked because" and is kept with the model and effort.' };
 // update_ticket can still put a minion back on Claude Code's default (Opus 5.5 at high) with null.
 const MODEL_CHANGE = { type: ['string', 'null'], enum: [...MODEL_IDS, null], description: `The model for the minion's next turns, as in its composer; null for Claude Code's default (Opus 5.5 at high). ${ADVISOR_TRIAL}` };
 const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], description: "The effort for the minion's next turns, as in its composer; null for the scheme's default effort." };
@@ -221,7 +222,7 @@ const ASK_QUESTION = {
           required: ['question', 'options'],
         },
       },
-      kind: { type: 'string', enum: ['merge', 'ship', 'land'], description: '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "Ship It". Leave out otherwise.' },
+      kind: { type: 'string', enum: ['merge', 'ship', 'land'], description: '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "Ship It", or "Merge" on a feeder\'s card (a minion in a build, which merges into `build/<n>`; header and option "Merge"). Leave out otherwise.' },
       to: DIRECT_TO,
       doc: {
         type: 'string', maxLength: 1000,
@@ -460,8 +461,16 @@ const CI_FILES = {
   },
 };
 
+/** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
+const LIVE_FACTS = {
+  name: 'live_facts',
+  description: "A minion's live facts, read now in one small call: its status and state, the cards waiting on people (with links), what it is parked on, what it waits on right now, its branch and head commit, where its change is (on its branch, on main, deploying, live, a failed deploy), its PR and its newest CI run with the result. Call it before you state any of these about a minion (whether it has shipped or is live, its CI result, that its card waits on a person), rather than answering from memory or an earlier reply.",
+  inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
+};
+
 const TOOLS = [
   LIST_TICKETS,
+  LIVE_FACTS,
   {
     name: 'usage_split',
     description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings, side questions) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
@@ -483,7 +492,7 @@ const TOOLS = [
   {
     name: 'create_ticket',
     description:
-      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained.',
+      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained: write it with citadel:briefing. The result warns when it has no quoted words from a person or no "Done when".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -504,6 +513,7 @@ const TOOLS = [
         build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and ships the build with one go card. Needs build.' },
         model: MODEL,
         effort: EFFORT,
+        reason: PICK_REASON,
         workflow: WORKFLOW,
         plugin_folders: PLUGIN_FOLDERS,
         not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, and you checked they are not' },
@@ -550,7 +560,7 @@ const TOOLS = [
     description: "Change a minion's title, goal (the line on top of its chat), state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a parked minion unparks it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, goal: GOAL, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
+      properties: { ticket_id: TICKET_ID, title: TITLE, goal: GOAL, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, reason: PICK_REASON, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
       required: ['ticket_id'],
     },
   },
@@ -1534,6 +1544,7 @@ const MARK_IMAGE = {
 };
 
 const THREAD_TOOLS = [
+  LIVE_FACTS,
   {
     name: 'set_thread_status',
     description:
@@ -1839,6 +1850,7 @@ async function runTool(name: string, args: any): Promise<string> {
         build_owner: args.build_owner === true || undefined,
         model: args.model ?? null,
         effort: args.effort ?? null,
+        pick_reason: args.reason,
         workflow: args.workflow ?? null,
         plugin_dirs: args.plugin_folders,
       });
@@ -2091,7 +2103,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_ticket':
       needOne(args, ['title', 'goal', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
       if (args.doc != null && args.questions == null) {
@@ -2222,6 +2234,17 @@ async function runTool(name: string, args: any): Promise<string> {
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
       return `Sent. ${who} runs it now, or after its current turn.`;
+    }
+    case 'live_facts': {
+      // A minion reads a minion of its own scheme through its own path; a Taskmaster by the minion's id (another scheme's for Citadel's).
+      if (ROLE === 'thread') {
+        const n = Number(args.ticket_id);
+        if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
+        return (await call('GET', `/api/tickets/${TICKET}/facts?number=${n}`)).text;
+      }
+      const at = schemeOf(args);
+      const { text, facts } = await call('GET', `/api/tickets/${await id(args, at)}/facts`);
+      return at === PROJECT ? text : `${otherScheme(facts.scheme)}\n${text}`;
     }
     case 'read_minion': {
       const n = Number(args.ticket_id);
@@ -2383,9 +2406,9 @@ function claimLine(c: any) {
   return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
 }
 
-/** list_tickets and read_ticket with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */
+/** list_tickets, read_ticket and live_facts with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */
 const SCHEME_ARG = { scheme: { type: 'integer', description: "Another scheme's number (as your instructions list them), to read its minions instead of this scheme's. Read-only, and only on a turn a Citadel member or admin asked for; leave it out for this scheme." } };
-const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
+const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' || t.name === 'live_facts' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
 
 /**
  * Tools every turn of a role uses (#710): Claude Code defers MCP tools behind ToolSearch, a whole round trip each, and again

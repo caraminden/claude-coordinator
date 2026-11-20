@@ -214,27 +214,59 @@ test('a Taskmaster that hands off on its own resets when its turn ends', async (
   assert.deepEqual(store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data).why), ['the Taskmaster asked for it']);
 });
 
-test('no handoff falls back on /compact, alone as the whole prompt, and keeps the session', async () => {
+test("a failed handoff starts the new session from a facts sheet the server builds, and its cards and parks match the database (G6)", async () => {
   const id = taskmaster();
+  const pid = store.getTicket(id)!.project_id;
+  const mk = (title: string, patch: Record<string, unknown>) => { const m = store.createTicket({ project_id: pid, title, permission_mode: 'default', created_by: 'Cara' }); store.updateTicket(m.id, patch as any); return store.getTicket(m.id)!; };
+  const parked = mk('Waits on a deploy', { status: 'idle', state: 'parked', note: 'parked for the fix' });
+  const asking = mk('Needs a pick', { status: 'idle', state: 'ready', note: 'asked Cara' });
+  store.addEvent(asking.id, 'question', { id: 'q1', questions: [{ question: 'Tabs or list?', header: 'Layout', options: [{ label: 'Tabs' }, { label: 'List' }] }] });
+  store.addEvent(id, 'user_message', { author: 'Cara', text: 'ship the sheet first' });
   const count = callCount();
   runner.requestFresh(id, 'test');
   await started(id);
   await lastCall(count);
   const before = callCount();
   await endTurn(id, 'error');
-  // The compaction starts by itself once the handoff turn ends.
+  await waitIdle(id);
+  // No compaction: the session resets and the sheet is what the fresh one starts from.
+  assert.equal(store.getTicket(id)!.session_id, null);
+  assert.equal(callCount(), before, 'no /compact turn');
+  assert.ok(notes(id).some((t) => /No handoff came back \(the turn failed\)/.test(t)));
+  const fresh = store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data));
+  assert.equal(fresh.length, 1);
+  runner.send(id, 'Cara', 'what is open?');
   await started(id);
-  const compact = await lastCall(before);
-  assert.equal(typeof compact.prompt, 'string');
-  assert.match(compact.prompt, /^\/compact /);
-  assert.ok(compact.args.includes('--resume'));
+  const first = await lastCall(before);
+  assert.ok(!first.args.includes('--resume'));
+  const text = promptText(first.prompt);
+  assert.match(text, /built by the server[\s\S]*check before relying on anything else/);
+  const view = runner.view(asking);
+  assert.equal(view.open_cards.length, 1);
+  assert.ok(text.includes(view.open_cards[0].href), 'the open card links match the database');
+  assert.match(text, new RegExp(`#${asking.number}[^\\n]*ready[^\\n]*asked Cara`));
+  assert.match(text, new RegExp(`Parked minions:\\n- #${parked.number} Waits on a deploy: idle, parked · parked for the fix \\(nothing wakes it by itself\\)`));
+  assert.match(text, /Cara: ship the sheet first/);
   await endTurn(id, 'ok');
   await waitIdle(id);
-  assert.equal(store.getTicket(id)!.session_id, 'old');
-  assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
-  assert.ok(notes(id).some((t) => /No handoff came back \(the turn failed\)/.test(t)));
-  assert.ok(notes(id).includes("Compacted the Taskmaster's session instead of a fresh start."));
-  assert.equal(store.listEvents(id).filter((e) => e.kind === 'fresh').length, 0);
+});
+
+test('a handoff that came back carries the same sheet beside it, to check it against', async () => {
+  const id = taskmaster();
+  const m = store.createTicket({ project_id: store.getTicket(id)!.project_id, title: 'Parked one', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(m.id, { status: 'idle', state: 'parked' } as any);
+  runner.send(id, 'Cara', 'go');
+  await started(id);
+  runner.recordHandoff(id, 'Nothing open, I think.');
+  await endTurn(id, 'ok');
+  await waitIdle(id);
+  const count = callCount();
+  runner.send(id, 'Cara', 'next');
+  await started(id);
+  const text = promptText((await lastCall(count)).prompt);
+  assert.match(text, /Nothing open, I think\.[\s\S]*check the handoff above against it[\s\S]*Parked minions:\n- #\d+ Parked one/);
+  await endTurn(id, 'ok');
+  await waitIdle(id);
 });
 
 test('stopping the handoff turn calls the fresh start off', async () => {
@@ -262,9 +294,7 @@ test('the idle sweep starts fresh only past the idle time and the context size',
   assert.match(notes(due).at(-1)!, /idle 55 m with 60k context/);
   assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
   assert.equal(runner.view(store.getTicket(recent)!).fresh_pending, false);
-  // Let it run out: no handoff, then the compaction.
-  await started(due);
-  await endTurn(due, 'ok');
+  // Let it run out: no handoff, so the facts sheet resets it.
   await started(due);
   await endTurn(due, 'ok');
   await waitIdle(due);
@@ -353,8 +383,6 @@ test('61k of context: an idle Taskmaster hands off, one whose turn just ended do
     assert.equal(runner.view(store.getTicket(working)!).fresh_pending, true);
     await started(working);
     await endTurn(working, 'ok');
-    await started(working);
-    await endTurn(working, 'ok');
     await waitIdle(working);
   } finally {
     contextSize(null);
@@ -429,9 +457,7 @@ test('messages queued during a big turn run first, and the last of their turns h
     await endTurn(id, 'ok');
     await started(id);
     assert.match((await prompts(count, 3))[2], /end of a turn[\s\S]*Call fresh_session/);
-    // Let it run out: no handoff, then the compaction.
-    await endTurn(id, 'ok');
-    await started(id);
+    // Let it run out: no handoff, so the facts sheet resets it.
     await endTurn(id, 'ok');
     await waitIdle(id);
   } finally {
@@ -459,7 +485,7 @@ test('a message that arrives once a fresh start Citadel asked for is pending sti
   assert.equal(store.getTicket(id)!.session_id, null);
 });
 
-test('a message sent during an automatic handoff turn that writes none goes before the compaction', async () => {
+test('a message sent during an automatic handoff turn that writes none starts the fresh session from the facts sheet', async () => {
   const id = taskmaster();
   const count = callCount();
   assert.equal(runner.requestFresh(id, 'test', true), null);
@@ -467,16 +493,16 @@ test('a message sent during an automatic handoff turn that writes none goes befo
   runner.send(id, 'Josh', 'waiting');
   await endTurn(id, 'ok');
   await started(id);
-  assert.match((await prompts(count, 2))[1], /\[Josh\]: waiting/);
-  await endTurn(id, 'ok');
-  await started(id);
-  assert.match((await prompts(count, 3))[2], /^\/compact /);
+  // The handoff turn failed: the session reset at once, so the message's turn is the fresh one, sheet first.
+  const second = (await prompts(count, 2))[1];
+  assert.match(second, /built by the server[\s\S]*\[Josh\]: waiting/);
   await endTurn(id, 'ok');
   await waitIdle(id);
+  assert.match(store.getTicket(id)!.session_id!, /^new-/, 'no compaction turn');
   assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
 });
 
-test('a handoff and compaction that leave it big do not loop; the next real turn hands off again', async () => {
+test('a failed handoff that leaves it big does not loop; the next real turn hands off again', async () => {
   const id = taskmaster();
   try {
     contextSize(FRESH_CONTEXT_TOKENS + 1);
@@ -484,19 +510,18 @@ test('a handoff and compaction that leave it big do not loop; the next real turn
     runner.send(id, 'Cara', 'hi');
     await started(id);
     await endTurn(id, 'ok');
-    // The handoff turn writes no handoff, so the compaction; both still report a big context.
-    await started(id);
-    await endTurn(id, 'ok');
+    // The handoff turn writes no handoff, so the facts sheet resets it.
     await started(id);
     await endTurn(id, 'ok');
     await waitIdle(id);
     await until('its save', () => store.getSetting(`saving:${id}`) == null); // after which another fresh start would run
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(runner.isRunning(id), false);
-    assert.equal(callCount(), count + 3, 'the turn, the handoff and the compaction, and nothing after');
+    assert.equal(callCount(), count + 2, 'the turn and the handoff, and nothing after');
+    assert.equal(store.getTicket(id)!.session_id, null);
     assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
     assert.equal(freshNotes(id).length, 1);
-    // The idle check doesn't ask again either: the compaction left its size unknown.
+    // The idle check doesn't ask again either: no session, no size.
     runner.freshSweep(Date.now() + FRESH_IDLE_MS);
     assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
     // A real turn that still ends big hands off again.
@@ -505,8 +530,6 @@ test('a handoff and compaction that leave it big do not loop; the next real turn
     await endTurn(id, 'ok');
     await started(id);
     assert.equal(freshNotes(id).length, 2);
-    await endTurn(id, 'ok');
-    await started(id);
     await endTurn(id, 'ok');
     await waitIdle(id);
   } finally {

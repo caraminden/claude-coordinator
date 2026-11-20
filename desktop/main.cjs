@@ -4,8 +4,8 @@
 // updates it: it starts this build, and this build says it started by writing the file CITADEL_STARTED_FILE names.
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
 // Closing the window keeps it in the tray, so notifications (core.js desktopNotify) still come; Quit is the tray's menu.
-const { app, BrowserWindow, Menu, Tray, nativeTheme, shell, ipcMain } = require('electron');
-const { existsSync, writeFileSync } = require('node:fs');
+const { app, BrowserWindow, Menu, Tray, nativeTheme, screen, shell, ipcMain } = require('electron');
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
 
@@ -33,16 +33,41 @@ function overlay(color) {
   return { color: color || (dark ? PLAIN.dark : PLAIN.light), symbolColor: dark ? '#e8e6e3' : '#2b2a28', height: STRIP };
 }
 
+/** Where the window was (%APPDATA%\Citadel\window.json): its size, place and whether it was maximised. */
+const PLACE = () => join(app.getPath('userData'), 'window.json');
+
+/**
+ * The window's last size and place, if it still lands on a screen; else most of the main screen (Cara, 2026-11-20:
+ * "it was just hard to grab because the window started small").
+ */
+function placement() {
+  try {
+    const p = JSON.parse(readFileSync(PLACE(), 'utf8'));
+    const a = screen.getDisplayMatching(p).workArea;
+    const overlap = Math.min(p.x + p.width, a.x + a.width) - Math.max(p.x, a.x) >= 100 && Math.min(p.y + 40, a.y + a.height) - Math.max(p.y, a.y) >= 20;
+    if (p.width >= 360 && p.height >= 400 && overlap) return p;
+  } catch {}
+  const a = screen.getPrimaryDisplay().workArea;
+  const width = Math.round(a.width * 0.9), height = Math.round(a.height * 0.9);
+  return { x: a.x + Math.round((a.width - width) / 2), y: a.y + Math.round((a.height - height) / 2), width, height };
+}
+
+function remember() {
+  if (!win || win.isDestroyed()) return;
+  try { writeFileSync(PLACE(), JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() })); } catch {}
+}
+
 function open(url = START.href) {
+  const place = placement();
   win = new BrowserWindow({
-    width: 1280, height: 860, minWidth: 360, minHeight: 400,
+    x: place.x, y: place.y, width: place.width, height: place.height, minWidth: 360, minHeight: 400,
     title: 'Citadel', icon: ICON, show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? PLAIN.dark : PLAIN.light,
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: true },
   });
   const wc = win.webContents;
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { if (place.maximized) win.maximize(); win.show(); });
   wc.once('did-finish-load', started);
   wc.setWindowOpenHandler(({ url }) => {
     const r = route(url, START, ALIASES);
@@ -58,7 +83,7 @@ function open(url = START.href) {
     else if (r.kind === 'browser') shell.openExternal(r.url);
   });
   wc.on('context-menu', (_e, p) => contextMenu(wc, p));
-  win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide(); } });
+  win.on('close', (e) => { remember(); if (!quitting) { e.preventDefault(); win.hide(); } });
   win.on('closed', () => { win = null; });
   win.loadURL(url);
 }
@@ -121,5 +146,5 @@ function shortcuts() {
 
 ipcMain.on('citadel:show', show);
 app.on('second-instance', show);
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { remember(); quitting = true; });
 app.whenReady().then(() => { open(); makeTray(); shortcuts(); });

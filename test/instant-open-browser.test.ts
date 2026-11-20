@@ -112,7 +112,7 @@ test('signing out forgets the kept chat, and what was asked, so the next person 
   assert.equal(await page.eval(asked), 0);
 });
 
-test('a ship reaches an open app by itself: the worker keeps the new version\'s files and the page reloads into it', { skip }, async () => {
+test('a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker\'s kept files', { skip }, async () => {
   // A copy of the repo to ship into, so the change to public/ stays out of this checkout.
   const repo = join(import.meta.dirname, '..');
   const copy = mkdtempSync(join(tmpdir(), 'ship-'));
@@ -134,6 +134,10 @@ test('a ship reaches an open app by itself: the worker keeps the new version\'s 
   appendFileSync(join(copy, 'public', 'style.css'), '\n/* shipped */\n');
   srv.proc.kill('SIGHUP');
   const shipped = Date.now();
+  // A page you are looking at never refreshes by itself (#1256): give the stream's hello time to land, then check it stayed.
+  await new Promise((done) => setTimeout(done, 7000));
+  assert.equal(await page.eval('window.beforeTheShip'), true, 'a visible page does not reload on its own');
+  await page.eval(`location.hash = '#/settings'`);
   await waitFor(page, 'the new version', `!window.beforeTheShip && document.querySelector('meta[name="citadel-version"]')?.content !== ${JSON.stringify(v1)}`);
   const v2 = await page.eval(version);
   console.log(`# the open app was on the new version ${Date.now() - shipped} ms after the ship`);

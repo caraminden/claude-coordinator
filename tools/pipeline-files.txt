@@ -20,7 +20,7 @@ tools/lane.sh
 tools/kit-tests.ts
 tools/citadel-wait
 tools/citadel-heavy
-tools/heavy-remote.ts
+tools/heavy-ci.ts
 tools/boot-check.ts
 tools/failed-files-reporter.ts
 tools/progress-reporter.ts
@@ -53,3 +53,4 @@ test/kit-land-drift.test.ts
 test/run-tests-scope.test.ts
 test/citadel-wait.test.ts
 test/citadel-heavy.test.ts
+.github/workflows/citadel-heavy.yml

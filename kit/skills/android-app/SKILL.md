@@ -13,7 +13,7 @@ is **read-only**.
 ## Build
 
 - From the app's `android/` folder (Capacitor: `npx cap sync android` first):
-  `citadel-heavy ./gradlew assembleDebug`. Always through citadel-heavy: a cold build takes every
+  `citadel-heavy --here ./gradlew assembleDebug` (`--here`: the APK must land on perigee, not on CI). Always through citadel-heavy: a cold build takes every
   core it can get and 2–3 GB of RAM.
 - The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 - The Gradle daemon is off (`~/.gradle/gradle.properties`, copied into container homes). Don't pass
@@ -90,7 +90,7 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   `signingConfig`, so Gradle writes `app-release-unsigned.apk` and Citadel signs it with the key.
 - A hand release (a plain Gradle app, or a one-off):
   1. Bump `versionCode` (and `versionName`) in `app/build.gradle`.
-  2. `citadel-heavy ./gradlew assembleRelease`.
+  2. `citadel-heavy --here ./gradlew assembleRelease`.
   3. Sign with `apksigner` from `$ANDROID_HOME/build-tools/36.1.0/`, then verify:
      `apksigner sign --ks <jks> --ks-pass file:<pass> --out <app>.apk app-release-unsigned.apk`,
      then `apksigner verify <app>.apk`.

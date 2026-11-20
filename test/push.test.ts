@@ -282,6 +282,8 @@ test('a minimized scheme sends its person no pushes, except a card addressed to 
   assert.deepEqual(await who(plain), ['Josh'], 'Cara minimized it: she hears nothing, Josh still does');
   const addressed = { kind: 'mention', by: 'Josh', text: 'hi', eventId: 1, to: 'Cara' } as PushTrigger;
   assert.deepEqual(await who(addressed), ['Cara'], 'a mention to her by name still reaches her');
+  const card = { kind: 'question', questions: [{ question: 'ok?' }], eventId: 2, to: 'Cara' } as PushTrigger;
+  assert.deepEqual(await who(card), ['Cara'], 'a card to her by name still reaches her');
   store.setProjectMinimized(cara.id, p.id, false);
   assert.deepEqual(await who(plain), ['Cara', 'Josh']);
   store.db.close();

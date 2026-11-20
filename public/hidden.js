@@ -160,7 +160,7 @@ export function renderSchemesShelf() {
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
   // Home (#1140): everything waiting on you across your schemes, for someone in two or more. No pill (Josh, 2026-11-20: "and the orange badge, its all duplicate honestly"; "you can just go home if you want to only see the actionables").
-  const home = shown.length >= 2 ? h('div', { class: 'home-shelf' },
+  const home = shown.length + minimized.length >= 2 ? h('div', { class: 'home-shelf' },
     h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' },
       h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'))) : null;
   rememberHomeLine(!!home);

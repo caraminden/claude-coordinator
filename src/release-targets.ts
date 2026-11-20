@@ -9,6 +9,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import type { ContraptionRow, Project, Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { git, type Target } from './releases.ts';
+import { desktopTargetOf, type DesktopTarget } from './desktop-feed.ts';
 
 /** contraption: an app at /apps/<name>/; apk: an Android app people install; ci: a package a workflow builds; file: builds minions
  * handed people as files (no CI makes them); main: the branch itself. */
@@ -36,6 +37,8 @@ export interface Found extends Target {
   /** ci: the workflow files ("desktop.yml") that must also run every job green on a build's commit before it goes out to
    * people (#1019, citadel-app.json `release.needs`): until then its changes are still on their way. */
   needs?: string[];
+  /** ci: the desktop app its release build goes out to through Citadel's feed (#1148, citadel-app.json `desktop`). */
+  desktop?: DesktopTarget;
 }
 
 export interface Override {
@@ -47,6 +50,8 @@ export interface Override {
   paths?: string[];
   /** How its releases are numbered and named (Target.numbering). */
   release?: { name?: string; number?: string; needs?: string[] };
+  /** ci: publish its release build to a desktop feed: { app, exe?, started?, title? } (src/desktop-feed.ts). */
+  desktop?: unknown;
 }
 
 /** A build a minion shared (the artifacts table): a file people install or run, and what it is for. */
@@ -339,9 +344,11 @@ export function detect(f: SchemeFacts): Found[] {
     const paths = Array.isArray(o?.paths) ? o.paths.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
     const numbering = numberingOf(o?.release);
     const needs = t.kind === 'ci' ? needsOf(o?.release) : [];
+    const desktop = t.kind === 'ci' ? desktopTargetOf(o?.desktop) : null;
     kept.push({
       ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}),
       ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}), ...(needs.length ? { needs } : {}),
+      ...(desktop ? { desktop } : {}),
     });
   }
   return kept;

@@ -50,6 +50,9 @@ import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, reques
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
+import { desktopRoutes } from './src/routes/desktop.ts';
+import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
+import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
 import { CiMirror, ghDownload } from './src/ci-mirror.ts';
 import { appRoutes } from './src/routes/app.ts';
@@ -708,7 +711,20 @@ const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Numbe
 const fcm = new Fcm(fcmKeyPath(), { api: process.env.CITADEL_FCM_API || undefined });
 const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
 // Last green and the pins come from lastGreen below, read only once refreshes run.
-const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) } });
+// Desktop apps' feeds (#1148): the launcher is built from the kit's source by perigee's .NET SDK, kept by its hash.
+const desktop = {
+  feeds: new DesktopFeeds(DATA_DIR),
+  launchers: new Launchers({ src: join(import.meta.dirname, 'kit/desktop-launcher'), cache: join(homedir(), '.cache/citadel-desktop'), dotnet: join(homedir(), '.dotnet/dotnet'), log: (m) => console.error(m) }),
+};
+// Only the live server publishes what CI ships, like the APK reader: a dev copy's feed is its own to fill by hand.
+const desktopFromCi = services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR ? undefined : ciPublisher({
+  feeds: desktop.feeds, tell: tellHome, log: (m) => console.error(m),
+  file: async (projectId, run) => {
+    const f = store.ciFiles(projectId).find((x) => x.run_id === run && x.kind === 'release' && /\.(zip|tgz|tar\.gz|exe)$/i.test(x.name));
+    return f ? ciStore.plain(f).catch(() => null) : null;
+  },
+});
+const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) }, desktop: desktopFromCi });
 ciStore.keep = () => ciPackageReader.keeps();
 const apkReader = new ApkReader({
   store, finder: targetFinder, actions, mirror: ciMirror,
@@ -1378,7 +1394,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1407,7 +1423,7 @@ runner.onStatusTrailer = (id, fields) => {
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
 github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

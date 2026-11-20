@@ -609,6 +609,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/desktop/:p/nope/1": {
+  "anon": "404 No builds of nope yet",
+  "person": "404 No builds of nope yet",
+  "member": "404 No builds of nope yet",
+  "outsider": "404 No builds of nope yet",
+  "tmA": "404 No builds of nope yet",
+  "tmB": "404 No builds of nope yet",
+  "m1": "404 No builds of nope yet",
+  "m2": "404 No builds of nope yet"
+ },
+ "HEAD /api/desktop/:p/nope/1": {
+  "anon": "404",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "404",
+  "tmB": "404",
+  "m1": "404",
+  "m2": "404"
+ },
  "GET /api/emulator-lease": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1542,6 +1562,16 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "200",
   "m2": "200"
+ },
+ "POST /api/projects/:p/desktop/publish": {
+  "anon": "401 Not logged in",
+  "person": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "member": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "m2": "400 Give path (a build you made) or ci_file (a file in the CI store)"
  },
  "GET /api/projects/:p/flake-brief": {
   "anon": "401 Not logged in",

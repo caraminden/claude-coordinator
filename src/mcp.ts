@@ -958,6 +958,25 @@ const PUBLISH_RELEASE = {
   },
 };
 
+/** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
+const PUBLISH_DESKTOP = {
+  name: 'publish_desktop',
+  description: `Publish a Windows desktop app's build to its update feed on the ${APP_NAME} server, for apps run by the kit's desktop launcher (the citadel:desktop-app skill). Give the build as path (a .zip, .tar.gz or .tgz of the app's folder that you made) or ci_file (a file id in this scheme's CI store; ci_files lists them). It gets the next build number; PCs running the app download it in the background, check its SHA-256 and switch on their next start, keeping the old build if the new one doesn't start. A ci target with "desktop" in citadel-app.json publishes its green runs by itself; this is for builds made elsewhere and for a first build. The reply has the feed's URL and the first-install zip's.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      app: { type: 'string', description: 'The app\'s name: lower case letters, digits and dashes ("peek"). Its install folder and launcher are named after it.' },
+      path: { type: 'string', description: 'The build you made, as you would link it.' },
+      ci_file: { type: 'integer', description: 'Or a file in the CI store, by id.' },
+      exe: { type: 'string', description: 'The exe to start, inside the build ("App.exe", "bin/App.exe"); found when the build has one .exe at its top.' },
+      started: { type: 'string', enum: ['file', 'alive'], description: 'How the launcher knows the build started: "file" (default) when the app writes the file named by CITADEL_STARTED_FILE once its window is up; "alive" when it is still running 30 seconds later.' },
+      title: { type: 'string', description: 'Its name on the PC, for the launcher\'s messages.' },
+      version: { type: 'string', description: 'What the scheme calls this build ("1.4.2").' },
+    },
+    required: ['app'],
+  },
+};
+
 /** A home contraption's Android release key, made on the server once a member approves (#837). */
 const MAKE_RELEASE_KEY = {
   name: 'make_release_key',
@@ -2094,6 +2113,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href } = await call('POST', `/api/tickets/${TICKET}/release-key`, { contraption: args.contraption });
       return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
+    case 'publish_desktop':
+      return (await call('POST', `/api/projects/${PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
     case 'publish_release':
       return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
@@ -2463,8 +2484,8 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

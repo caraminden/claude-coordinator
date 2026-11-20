@@ -7,6 +7,7 @@ import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
+import { desktopPaths, type DesktopTarget } from './desktop-feed.ts';
 import type { Contains, Green, Pin } from './last-green.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
@@ -530,6 +531,8 @@ export interface CiPackageDeps extends ActionsDeps {
   /** Each scheme's last green and the roll back pins (src/last-green.ts, ADR 0012). */
   lastGreen?: { get: (projectId: number) => Green | null; pinned: (projectId: number, target: string) => Pin | null };
   contains?: Contains;
+  /** Publish a run's build to the target's desktop feed (src/desktop-feed.ts ciPublisher). */
+  desktop?: (t: Found & { desktop: DesktopTarget }, run: { id: number; sha: string }) => unknown;
 }
 
 /** A CI package (Peek Auras' Windows build): a release is the newest run on main whose shipping job passed; the next is a run in flight. */
@@ -554,6 +557,10 @@ export class CiPackageReader implements Reader {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
       const cur = runs.find((r) => this.cache.released(t, r)) ?? (t.needs?.length ? runs.at(-1) : undefined);
       this.pending.set(tkey(t), await this.cache.since(t, cur?.run.head_sha ?? null));
+      // A desktop app's feed follows what is out: the pinned build in a roll back, else the newest released one (#1148).
+      const pin = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
+      const out = pin ? { id: pin.run, sha: pin.sha } : cur && this.cache.released(t, cur) ? { id: cur.run.id, sha: cur.run.head_sha } : null;
+      if (t.desktop && out) void this.d.desktop?.({ ...t, desktop: t.desktop }, out);
       await this.findGreen(t, runs);
     }
   }
@@ -601,6 +608,8 @@ export class CiPackageReader implements Reader {
       const ch = (r: RunJobs) => this.cache.changes(t, r);
       const file = (r: RunJobs) => this.cache.file(r.run.id);
       const num = this.cache.numbers(t);
+      // A desktop app's current build links its first install (the launcher and that build), not the bare build (#1148).
+      const installs = (r: RunJobs | undefined) => (r && t.desktop ? desktopPaths(t.projectId, t.desktop.app).install : r ? file(r) : null);
       const out = (r: RunJobs) => this.cache.released(t, r);
       // Held at last green's build by a roll back (ADR 0012): that build is what people get until the pin goes, and its
       // card's roll back line says what waits.
@@ -609,7 +618,7 @@ export class CiPackageReader implements Reader {
       if (held) {
         const recent = runs.filter((r) => r !== heldRun && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
         // Newer runs can push the held one out of the page GitHub lists: it is still what people get, so show it from the pin.
-        const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), file(heldRun), num.of(heldRun))
+        const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), installs(heldRun), num.of(heldRun))
           : { version: held.sha, number: null, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} };
         return { target: targetOf(t), current, next: null, line: [], recent };
       }
@@ -637,7 +646,7 @@ export class CiPackageReader implements Reader {
       // A target numbered by run knows its number once its run exists.
       const number = t.numbering?.number === 'run' ? (moving?.run.run_number ?? null) : num.total + 1;
       const track = t.needs?.length ? [...CI_TRACK.slice(0, -1), ...t.needs.map(needName), 'live'] : CI_TRACK;
-      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), file(cur), num.of(cur)) : null, next: lead ? nextOf(track, usual, lead, changes, number) : null, line: [], recent };
+      return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), installs(cur), num.of(cur)) : null, next: lead ? nextOf(track, usual, lead, changes, number) : null, line: [], recent };
     });
   }
 }

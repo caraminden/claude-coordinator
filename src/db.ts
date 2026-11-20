@@ -3506,6 +3506,11 @@ export class Store {
     return { count: Number(count), first: first ?? null, top: rows.map((r) => ({ detail: r.detail, n: Number(r.n) })) };
   }
 
+  /** The newest `kind` reading before `before` (#1135: the last stall before a watchdog restart), or null. */
+  lastHealthEvent(kind: string, before: number): { at: number; detail: string } | null {
+    return (this.db.prepare('SELECT at, detail FROM health_events WHERE kind = ? AND at < ? ORDER BY at DESC LIMIT 1').get(kind, before) as { at: number; detail: string } | undefined) ?? null;
+  }
+
   /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
   eventIdAt(at: number): number {
     // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).

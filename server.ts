@@ -16,6 +16,7 @@ import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
+import { restartDetail, startWatchdog, takeMark } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -186,6 +187,8 @@ if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DI
 }
 const BOOT_AT = Date.now();
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 300))), 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
+// systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
+startWatchdog();
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
@@ -320,6 +323,13 @@ deployWatch = new DeployWatch({
   wake: (id, text) => runner.send(id, APP_NAME, text),
   mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
 });
+// The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
+const watchdogAt = takeMark(DATA_DIR);
+if (watchdogAt) {
+  const text = restartDetail(watchdogAt, store.lastHealthEvent('loop-lag', watchdogAt));
+  console.warn(text);
+  deployWatch.record('watchdog', text);
+}
 const clientErrors = new ClientErrors();
 // Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
 const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0';

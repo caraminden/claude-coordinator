@@ -188,6 +188,7 @@ uses the built-in `node:sqlite`.
 | `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit, with drop-ins in `.service.d/`; `citadel.slice` caps it and its turns, `claude-coordinator.socket` holds the port across restarts |
 | `deploy/citadel-embed.service`, `deploy/embed-install.sh` | Semantic memory's embedding model (llama-server with Qwen3-Embedding-0.6B on localhost:21434) and its installer |
+| `deploy/host-tools.json`, `tools/host-tools.ts` | The tools minions asked for and a Citadel member approved (#1147, ADR 0016); `node tools/host-tools.ts install` puts them on a fresh box, `check` names what it lacks |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
 | `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock; `--into build/<n>` and `--build` for build branches |

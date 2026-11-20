@@ -2662,6 +2662,16 @@
   "m1": "400 Summary is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/host-tool": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can propose a host tool in its chat",
+  "member": "403 Only the minion itself can propose a host tool in its chat",
+  "outsider": "403 Only the minion itself can propose a host tool in its chat",
+  "tmA": "403 Only the minion itself can propose a host tool in its chat",
+  "tmB": "403 Only the minion itself can propose a host tool in its chat",
+  "m1": "400 source must be one of mise, npm, pypi, cargo, github, pacman",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/images/0123456789abcdef01234567.png": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -3359,6 +3369,16 @@
   "outsider": "404 No such minion",
   "tmA": "400 Summary is required",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/host-tool": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can propose a host tool in its chat",
+  "member": "403 Only the minion itself can propose a host tool in its chat",
+  "outsider": "403 Only the minion itself can propose a host tool in its chat",
+  "tmA": "403 Only the minion itself can propose a host tool in its chat",
+  "tmB": "403 Only the minion itself can propose a host tool in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

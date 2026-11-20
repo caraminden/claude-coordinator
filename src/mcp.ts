@@ -1123,6 +1123,20 @@ const SEARCH_DECISIONS = {
   },
 };
 
+/** Past minions and handoffs by words (#1156): the index src/minion-index.ts fills as minions close. */
+const SEARCH_MINIONS = {
+  name: 'search_minions',
+  description: "Search this scheme's closed minions by words: each one's title, type, brief, last replies and the files it wrote (repo paths, and $TMPDIR/ scratch scripts such as seed or page-driving scripts), plus the shared folder's handoffs. Use it before building tooling, a script or a feature, to find who already built, tried or ruled it out, and before briefing new work. Every word must match first, then any of them fill up; a file path works as words (src/memory.ts). Returns #N, title, type, closed date, the matching text and the files. Leads to check with read_ticket, not facts. For a deeper look at an area, start a citadel:scout Grunt.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Words or a path, e.g. "seed script" or "tools/land.sh queue"; empty lists the newest closed' },
+      since: { type: 'string', description: 'Optional: only minions closed on or after this date, YYYY-MM-DD (Pacific)' },
+      limit: { type: 'integer', description: 'How many minions (default 10, max 30)' },
+    },
+  },
+};
+
 /** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
 const MEDIA = process.env.COORDINATOR_MEDIA === '1';
 const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
@@ -1277,6 +1291,17 @@ function memoryText(hits: any[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   return hits.map((h) => `${h.kind === 'coordinator' ? 'Taskmaster' : `#${h.number} ${h.title}`} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
+}
+
+/** search_minions' answer: a header line per minion or handoff, then its matching text and the files it wrote. */
+function pastMinionsText(hits: any[]): string {
+  if (!hits.length) return 'No closed minion or handoff matches. Fewer words, or another word for it, may find one.';
+  const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return hits.map((h) => {
+    if (h.kind === 'handoff') return `Handoff ${h.name} · changed ${day(h.mtime)}\n${h.snippet}`;
+    const files = h.files ? h.files.split('\n') : [];
+    return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
+  }).join('\n\n');
 }
 
 /** search_decisions' answer: one block per decision, newest or best first, then what each source holds. */
@@ -2097,6 +2122,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('GET', `/api/projects/${PROJECT}/decisions?${q}`);
       return decisionsText(r, Math.min(Math.max(Number(args.limit) || 10, 1), 50));
     }
+    case 'search_minions': {
+      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', ...(args.since ? { since: String(args.since) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
+      return pastMinionsText((await call('GET', `/api/projects/${PROJECT}/past-minions?${q}`)).hits);
+    }
     case 'contraption_turns': {
       const q = new URLSearchParams();
       if (args.app) q.set('app', String(args.app));
@@ -2498,7 +2527,7 @@ function toolList() {
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
-  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
+  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS, SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];

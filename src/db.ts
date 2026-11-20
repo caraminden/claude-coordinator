@@ -10,6 +10,7 @@ import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { ShipLessons } from './ship-lessons.ts';
 import { Memory } from './memory.ts';
+import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 
@@ -1496,6 +1497,7 @@ export const SCHEMA_HISTORY = [
   [85, 'ticket_picks (#1061)'],
   [86, 'memory_proposals (#1111)'],
   [87, 'ship_lessons (#1119)'],
+  [88, 'minion_index and handoff_index, full-text (#1156)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1544,6 +1546,8 @@ export class Store {
   lessons: ShipLessons;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
+  /** Past minions and handoffs, full-text, for search_minions and the scout (src/minion-index.ts, #1156). */
+  minionIndex: MinionIndex;
   /** The memory curator's proposals, waiting on a member (src/memory-curator.ts, #1111). */
   memoryProposals: MemoryProposals;
   /** The database file; the runner keeps its turn folders beside it. */
@@ -1571,12 +1575,13 @@ export class Store {
       this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
       this.memory = new Memory(this);
+      this.minionIndex = new MinionIndex(this);
       this.memoryProposals = new MemoryProposals(this.db);
       return;
     }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} ${MINION_INDEX_SCHEMA} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
     this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
@@ -1599,6 +1604,7 @@ export class Store {
     this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
     this.memory = new Memory(this);
+    this.minionIndex = new MinionIndex(this);
     this.memoryProposals = new MemoryProposals(this.db);
     this.serverLoginOwnerOnly();
     this.groupByType();
@@ -2546,6 +2552,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
+    this.minionIndex.deleteTicket(id);
     this.claims.releaseHeldBy(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }

@@ -82,6 +82,7 @@ import { ensureCoordinatorFor, projectRoutes } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
+import { MinionIndexer } from './src/minion-index.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { memoryCuratorRoutes } from './src/routes/memory-curator.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
@@ -679,6 +680,9 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
 if (!BOOT_CHECK) setInterval(() => void safely('memory', () => memoryIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+// Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
+const minionIndexer = new MinionIndexer(store, DATA_DIR);
+if (!BOOT_CHECK) setInterval(() => void safely('minion index', () => minionIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 
 // ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 

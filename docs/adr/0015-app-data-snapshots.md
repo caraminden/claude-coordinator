@@ -16,15 +16,18 @@ failed version's migration left it, and Roll back to last green was refused past
 
 Josh picked "Build it" on #1093's choices page on 2026-11-19, with the reversal of #828's line spelled out on the card.
 
-- A deploy forward whose commit changes a path the app's `migrations` lists (old manifest's or new) stops the app after its
-  turns drain, copies its `DATA_DIR` with `cp -a --reflink=auto` to `~/.local/share/.<name>.snapshots/<time>-<commit>/data`
+- A deploy forward whose commit changes a path the app's `migrations` lists (old manifest's or new) stops the app and its
+  timers after its turns drain, copies its `DATA_DIR` with `cp -a --reflink=auto` to `~/.local/share/.<name>.snapshots/<time>-<commit>/data`
   beside a `snapshot.json`, and then starts the new code. The deploy's lines say it was taken.
 - If the new code fails its health check, the automatic roll back restores that snapshot with the old code.
-- Roll back to last green past a migration change restores the newest snapshot taken under code whose `migrations` paths match
-  the commit it goes back to; with none it is refused as before.
-- A restore never deletes: the data it replaces is moved, whole, into a snapshot of its own.
+- Roll back to last green past a migration change (the live manifest's paths or the target's) restores the newest snapshot
+  taken under code whose `migrations` paths match the commit it goes back to; with none it is refused as before.
+- A restore never deletes: the data it replaces is moved, whole, into a snapshot of its own. When that data is what a failed
+  start left, the snapshot is marked failed, and no roll back restores it.
 - Each app keeps its newest 3 snapshots, together at most 10 GB (apparent size); the ones a step just took or restored are
-  never pruned by that step, and the deploy says which went and which are kept. A `DATA_DIR` over 10 GB isn't snapshotted.
+  never pruned by that step, and the deploy says which went and which are kept. Past the cap, the ones no roll back would pick
+  go first (failed ones, then older copies of a commit that has a newer one), then the oldest; one that can't be removed is
+  named and stays. A `DATA_DIR` over 10 GB isn't snapshotted.
 - A deploy with no migration change, a first deploy and a deploy of the same commit take none.
 
 The rest of #828 stands: apps still write their nightly backups, and those are what leave the box. Snapshots are for roll backs.

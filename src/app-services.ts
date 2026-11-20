@@ -555,7 +555,7 @@ export class AppServices {
    * `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart.
    * `slot` (a deploy's): the slot to run from, which the app's folder is pointed at once its turns are drained (#801).
    */
-  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string; data?: (main: string) => Promise<void> }): Promise<string[]> {
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string; data?: () => Promise<void> }): Promise<string[]> {
     // Units run from the real folder, never through the link, so a running app never sees a deploy's flip (#801).
     const folder = opts.slot ?? await realpath(this.folder(row)).catch(() => this.folder(row));
     const manifest = await this.manifest(row, folder);
@@ -589,14 +589,17 @@ export class AppServices {
     if (quiet.said) said.push(quiet.said);
     if (opts.holds) opts.holds.push(quiet.release);
     try {
-      // Stopped for a whole copy of its data; writeAndRestart starts it again. A data step that throws starts what ran again.
+      // Stopped for a whole copy of its data, its timers and their jobs too (a running job is cut short, as by a restart); only
+      // units it has installed, so one that never got a service isn't a failure. writeAndRestart starts them again, and a data
+      // step that throws starts its service and timers again here.
       if (opts.data) {
-        const main = `${unitName(row.name)}.service`;
-        await this.must('stop', main);
+        const units = (await this.owned(row.name)).sort((a, b) => Number(b.endsWith('.timer')) - Number(a.endsWith('.timer')));
+        if (units.length) await this.must('stop', ...units);
         try {
-          await opts.data(main);
+          await opts.data();
         } catch (err) {
-          await this.systemctl('start', main);
+          const back = units.filter((u) => u === `${unitName(row.name)}.service` || u.endsWith('.timer'));
+          if (back.length) await this.systemctl('start', ...back);
           throw err;
         }
       }
@@ -895,12 +898,15 @@ export class AppServices {
       if (hooks.to) {
         // A roll back (#1016) goes to an older commit of the branch, never one off it; nor past a change to the data's shape.
         if (!(await inBranch(hooks.to, to))) throw new Error(`${short(hooks.to)} isn't on ${repo}'s ${view.branch}, so nothing changed.`);
-        const paths = (await this.manifest(row, old).catch(() => null))?.migrations ?? [];
+        // Both ends' migrations: the commit it goes back to may list a path the live one dropped.
+        const there = await git(next, 'show', `${hooks.to}:${MANIFEST}`).then(parseManifest).catch(() => null);
+        const paths = [...new Set([...((await this.manifest(row, old).catch(() => null))?.migrations ?? []), ...(there?.migrations ?? [])])];
         const moved = paths.length ? (await git(next, 'diff', '--name-only', hooks.to, prev, '--', ...paths)).split('\n').filter(Boolean) : [];
         if (moved.length) {
           // The newest snapshot whose code has the same migrations as the commit it goes back to (#1137).
           const changed = `Its migrations changed since ${short(hooks.to)} (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''})`;
           for (const snap of await listSnapshots(snapshotsDir(this.opts.home, row.name))) {
+            if (snap.failed) continue; // what a failed start left: its code ran on it, but it's the shape that failed
             const same = await git(next, 'diff', '--name-only', snap.commit, hooks.to, '--', ...paths).then((out) => !out, () => false);
             if (same) {
               restore = snap;
@@ -1028,7 +1034,7 @@ export class AppServices {
         const back: Snapshot | null = taken;
         try {
           await start(old, await this.manifest(row, old), back ? async () => {
-            for (const line of (await restoreSnapshot(dataDir, snapRoot, back, { commit: view.to!, why: `the data ${short(view.to)} left when its deploy failed and rolled back` })).said) await say(line);
+            for (const line of (await restoreSnapshot(dataDir, snapRoot, back, { commit: view.to!, why: `the data ${short(view.to)} left when its deploy failed and rolled back`, failed: true })).said) await say(line);
           } : undefined);
           view.state = 'rolled back';
           await say(`Rolled back: ${short(prev)} runs again.`);

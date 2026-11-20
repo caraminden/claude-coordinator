@@ -25,6 +25,8 @@ export interface Snapshot {
   /** Why it was taken, for the deploy line and a person reading the folder. */
   why: string;
   bytes: number;
+  /** Data a failed start left, set aside by its roll back: kept for a person, never restored by a roll back. */
+  failed: boolean;
 }
 
 /** Beside the apps' DATA_DIRs, so a reflinked copy shares their filesystem; the dot keeps it off every app's name. */
@@ -52,7 +54,7 @@ export async function listSnapshots(root: string): Promise<Snapshot[]> {
     if (id.endsWith('.part')) continue;
     const meta = await readFile(join(root, id, META), 'utf8').then((t) => JSON.parse(t), () => null);
     if (!meta || typeof meta.commit !== 'string' || typeof meta.taken_at !== 'number') continue;
-    out.push({ id, dir: join(root, id), commit: meta.commit, taken_at: meta.taken_at, why: String(meta.why ?? ''), bytes: Number(meta.bytes) || 0 });
+    out.push({ id, dir: join(root, id), commit: meta.commit, taken_at: meta.taken_at, why: String(meta.why ?? ''), bytes: Number(meta.bytes) || 0, failed: meta.failed === true });
   }
   return out.sort((a, b) => b.taken_at - a.taken_at || (b.id < a.id ? -1 : 1));
 }
@@ -89,7 +91,7 @@ export async function takeSnapshot(data: string, root: string, meta: { commit: s
     await rm(part, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
-  const snap: Snapshot = { id, dir: join(root, id), commit: meta.commit, taken_at: now, why: meta.why, bytes };
+  const snap: Snapshot = { id, dir: join(root, id), commit: meta.commit, taken_at: now, why: meta.why, bytes, failed: false };
   await writeFile(join(part, META), JSON.stringify({ commit: snap.commit, taken_at: now, why: snap.why, bytes }, null, 2));
   await rename(part, snap.dir);
   return { snap, said: [`Snapshotted its data (${human(bytes)}) as ${snap.dir}.`, ...(await prune(root, [id], cap))] };
@@ -97,9 +99,10 @@ export async function takeSnapshot(data: string, root: string, meta: { commit: s
 
 /**
  * Put `snap`'s data back as `data`. What's there now isn't deleted: it's moved, whole, into a snapshot of its own
- * (`now`: the commit that wrote it), which a later roll forward can't use but a person can. Then prune past the cap.
+ * (`current`: the commit whose code last ran on it; `failed` when that code failed its start, so no roll back restores it).
+ * Then prune past the cap.
  */
-export async function restoreSnapshot(data: string, root: string, snap: Snapshot, current: { commit: string; why: string }, cap = { keep: KEEP, maxBytes: MAX_BYTES }, now = Date.now()): Promise<{ said: string[]; kept: Snapshot | null }> {
+export async function restoreSnapshot(data: string, root: string, snap: Snapshot, current: { commit: string; why: string; failed?: boolean }, cap = { keep: KEEP, maxBytes: MAX_BYTES }, now = Date.now()): Promise<{ said: string[]; kept: Snapshot | null }> {
   const said: string[] = [];
   const protect = [snap.id];
   let kept: Snapshot | null = null;
@@ -118,10 +121,11 @@ export async function restoreSnapshot(data: string, root: string, snap: Snapshot
     const part = join(root, `${id}.part`);
     await mkdir(part, { mode: 0o700 });
     const bytes = await sizeOf(data).catch(() => 0);
-    await writeFile(join(part, META), JSON.stringify({ commit: current.commit, taken_at: now, why: current.why, bytes }, null, 2));
+    const failed = current.failed === true;
+    await writeFile(join(part, META), JSON.stringify({ commit: current.commit, taken_at: now, why: current.why, bytes, failed }, null, 2));
     await rename(data, join(part, 'data'));
     await rename(part, join(root, id));
-    kept = { id, dir: join(root, id), commit: current.commit, taken_at: now, why: current.why, bytes };
+    kept = { id, dir: join(root, id), commit: current.commit, taken_at: now, why: current.why, bytes, failed };
     protect.push(id);
     said.push(`Kept the data it had (${human(bytes)}) as ${join(root, id)}.`);
   }
@@ -130,20 +134,32 @@ export async function restoreSnapshot(data: string, root: string, snap: Snapshot
   return { said: [...said, ...(await prune(root, protect, cap))], kept };
 }
 
-/** Remove the oldest snapshots past the cap (KEEP of them, MAX_BYTES together), never one in `protect`; says what goes and what's kept. */
+/**
+ * Remove snapshots past the cap (KEEP of them, MAX_BYTES together), never one in `protect`; says what goes and what's kept.
+ * Within the cap nothing goes. Past it, the ones no roll back would pick go first: what a failed start left, then an older
+ * snapshot of a commit that has a newer one; then the oldest. Never throws: a snapshot it can't remove is named and stays.
+ */
 export async function prune(root: string, protect: string[], cap = { keep: KEEP, maxBytes: MAX_BYTES }): Promise<string[]> {
   const all = await listSnapshots(root);
   const kept: Snapshot[] = all.filter((s) => protect.includes(s.id));
   let total = kept.reduce((n, s) => n + s.bytes, 0);
+  const seen = new Set<string>();
+  const spare = (s: Snapshot) => s.failed || seen.has(s.commit) || (seen.add(s.commit), false);
+  const rest = all.map((s) => ({ s, spare: spare(s) })).filter((x) => !protect.includes(x.s.id));
+  const order = [...rest.filter((x) => !x.spare), ...rest.filter((x) => x.spare && !x.s.failed), ...rest.filter((x) => x.s.failed)].map((x) => x.s);
   const gone: Snapshot[] = [];
-  for (const s of all) {
-    if (protect.includes(s.id)) continue;
+  for (const s of order) {
     if (kept.length < cap.keep && total + s.bytes <= cap.maxBytes) {
       kept.push(s);
       total += s.bytes;
     } else gone.push(s);
   }
-  for (const s of gone) await rm(s.dir, { recursive: true, force: true });
+  const stuck = new Map<string, string>();
+  for (const s of gone) await rm(s.dir, { recursive: true, force: true }).catch((err) => stuck.set(s.id, String(err?.code ?? err?.message ?? err)));
   if (!gone.length) return [];
-  return [`Removed ${gone.length} older snapshot${gone.length > 1 ? 's' : ''} past the cap (${cap.keep} kept, ${human(cap.maxBytes)} at most): ${gone.map((s) => s.id).join(', ')}. Kept: ${kept.map((s) => s.id).join(', ')}.`];
+  const removed = gone.filter((s) => !stuck.has(s.id));
+  const byAge = (list: Snapshot[]) => [...list].sort((a, b) => b.taken_at - a.taken_at).map((s) => s.id).join(', ');
+  return [
+    `${removed.length ? `Removed ${removed.length} older snapshot${removed.length > 1 ? 's' : ''} past the cap (${cap.keep} kept, ${human(cap.maxBytes)} at most): ${byAge(removed)}.` : `Over the snapshots' cap (${cap.keep} kept, ${human(cap.maxBytes)} at most).`}${stuck.size ? ` Couldn't remove ${[...stuck].map(([id, why]) => `${id} (${why})`).join(', ')}: a person can.` : ''} Kept: ${byAge(kept)}.`,
+  ];
 }

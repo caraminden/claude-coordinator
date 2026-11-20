@@ -1027,13 +1027,26 @@ test('a roll back past a migration brings back the snapshot its code reads, and 
     services.deploy(c, 'Cara');
     await done(name);
     // v2's migration loses a row but stays healthy: only a person notices.
-    r.push({ 'migrate.sh': 'grep -q v2 db.txt || echo "v2:" > db.txt\n' });
+    const v2 = r.push({ 'migrate.sh': 'grep -q v2 db.txt || echo "v2:" > db.txt\n' });
     services.deploy(c, 'Cara');
     let d = await done(name);
     assert.equal(d.state, 'deployed', d.said.join('\n'));
     assert.match(d.said.join('\n'), /Deployed .*; its data was snapshotted first/);
     assert.equal(db(), 'v2:\n');
     writeFileSync(join(data, 'db.txt'), 'v2: carol\n');
+
+    // A bad snapshot (a person edited it): v1 fails its health check on it, and that roll back's own roll back puts v2's
+    // code and data back. The data v1 failed on is kept, marked failed, so the next roll back passes it by.
+    const snapDir = join(home, '.local/share', `.${name}.snapshots`);
+    const [first] = snapshots();
+    writeFileSync(join(snapDir, first, 'data', 'db.txt'), 'GARBLED\n');
+    services.deploy(c, 'Cara', [], undefined, { to: v1 });
+    d = await done(name);
+    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD'), v2);
+    assert.equal(db(), 'v2: carol\n', "v2's data is back with its code");
+    assert.ok(snapshots().some((s) => JSON.parse(readFileSync(join(snapDir, s, 'snapshot.json'), 'utf8')).failed === true));
+    writeFileSync(join(snapDir, first, 'data', 'db.txt'), 'v1: alice\n');
 
     services.deploy(c, 'Cara', [], undefined, { to: v1 });
     d = await done(name);
@@ -1047,7 +1060,7 @@ test('a roll back past a migration brings back the snapshot its code reads, and 
     assert.ok(kept.includes('v2: carol\n'), 'what v2 wrote is kept, not deleted');
 
     // Its snapshots gone (a person cleared them): the old refusal stands, and nothing changed.
-    const v2 = r.push({ 'migrate.sh': 'echo "v3:" > db.txt\n' });
+    const v3 = r.push({ 'migrate.sh': 'echo "v3:" > db.txt\n' });
     services.deploy(c, 'Cara');
     await done(name);
     rmSync(join(home, '.local/share', `.${name}.snapshots`), { recursive: true, force: true });
@@ -1055,7 +1068,7 @@ test('a roll back past a migration brings back the snapshot its code reads, and 
     d = await done(name);
     assert.equal(d.state, 'failed');
     assert.match(d.said.join('\n'), /no snapshot of its data matches that code/);
-    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD'), v2);
+    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD'), v3);
   } finally {
     svc.close();
   }
@@ -1080,6 +1093,14 @@ test('snapshots keep the newest few within a size cap, never the ones a step jus
   assert.match(big.said[0], /over the .* cap/);
   writeFileSync(join(snaps, 'stray.part'), 'x');
   assert.equal((await listSnapshots(snaps)).length, 1, 'a .part is no snapshot');
+
+  // Past the cap, an older snapshot of a commit that has a newer one goes before an older commit's only one: a roll back
+  // only ever picks the newest of a commit, so repeated tries of one deploy can't push out the snapshot an older commit needs.
+  const dup = join(home, 'snaps-dup');
+  const wide = { keep: 3, maxBytes: 1e9 };
+  for (const [c, t] of [['d1', 1000], ['d2', 2000], ['d2', 3000]] as const) await takeSnapshot(data, dup, { commit: c.padEnd(40, '0'), why: 'test' }, wide, t);
+  await takeSnapshot(data, dup, { commit: 'd3'.padEnd(40, '0'), why: 'test' }, wide, 4000);
+  assert.deepEqual((await listSnapshots(dup)).map((s) => `${s.commit.slice(0, 2)}@${s.taken_at}`), ['d3@4000', 'd2@3000', 'd1@1000']);
 });
 
 // #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.

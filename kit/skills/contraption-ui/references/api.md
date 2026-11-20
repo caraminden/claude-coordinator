@@ -865,8 +865,9 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 | `clipboard` | `"write"` lets your page call `navigator.clipboard.writeText` itself (the frame gets `clipboard-write`); leave it out otherwise. Without it, a framed app can't touch the clipboard on its own, as Windows Defender flags any page that copies a command with no click (#1086). Citadel UI's `copyText` needs no opt-in: called from a click, it copies the old way. Takes effect on the next page load after a deploy |
 | `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A deploy that changes one snapshots your `DATA_DIR` first, so a roll back brings the data back with the code; with no matching snapshot, a Roll back to last green past one is refused (below) |
 
-The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes
-your `DATA_DIR` beyond creating it when missing.
+The service restarts 5 s after any exit and starts with the box. Citadel creates your `DATA_DIR`
+when missing, and touches it otherwise only to snapshot and restore it around a deploy that changes
+your `migrations` ("Data snapshots", below).
 
 **Deploying.** An admin sets `repo`, `branch` and `folder` and installs the service once. After
 that your home scheme's Taskmaster and minions have `deploy_contraption`. A ship handed off
@@ -915,13 +916,14 @@ back the newest snapshot of your data taken under code with the same migrations,
 there is none.
 
 **Data snapshots** (#1137; Josh, 2026-11-19, picked "Build it"). A deploy whose commit changes a
-`migrations` path stops your app, copies its `DATA_DIR` to
+`migrations` path stops your app and its timers, copies its `DATA_DIR` to
 `~/.local/share/.<name>.snapshots/<time>-<commit>/data` (a reflinked copy on perigee's btrfs, so it
 costs little disk), then starts the new code; the deploy says "Snapshotted its data" and ends
 "its data was snapshotted first". If the new code fails its health check, the roll back restores
 that snapshot along with the old code. A restore never deletes: the data it replaces is kept as a
 snapshot of its own, so what your people wrote since is still there for a person to merge back by
-hand. Each app keeps its newest 3 snapshots within 10 GB together; a `DATA_DIR` over 10 GB isn't
+hand; the copy a failed start leaves is never restored by a roll back. Each app keeps its newest 3
+snapshots within 10 GB together, dropping first the ones no roll back would pick; a `DATA_DIR` over 10 GB isn't
 snapshotted (the deploy says so). These are for roll backs and never leave the box: keep writing
 your nightly `backups/<day>/`, which do. A deploy that changes no `migrations` path takes none.
 Once it is live, auto-deploy leaves the app there until main has a newer green commit, and a

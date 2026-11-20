@@ -223,7 +223,7 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     }));
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) + '\n');
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
-    const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model);
+    const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
     assert.ok(withModel.some((t: any) => t.name === 'create_ticket') && withModel.some((t: any) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
     for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
     for (const name of ['create_ticket', 'schedule_minion']) {

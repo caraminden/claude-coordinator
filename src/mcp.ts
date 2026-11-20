@@ -461,7 +461,7 @@ const CI_FILES = {
 /** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
 const LIVE_FACTS = {
   name: 'live_facts',
-  description: "A minion's live facts, read now in one small call: its status and state, the cards waiting on people (with links), what it is parked on, what it waits on right now, its branch and head commit, where its change is (on its branch, on main, deploying, live, a failed deploy), its PR and its newest CI run with the result. Call it before you say anything about another minion's state, CI or a deploy, or that something waits on a person, rather than answering from memory or an earlier reply.",
+  description: "A minion's live facts, read now in one small call: its status and state, the cards waiting on people (with links), what it is parked on, what it waits on right now, its branch and head commit, where its change is (on its branch, on main, deploying, live, a failed deploy), its PR and its newest CI run with the result. Call it before you state any of these about a minion (whether it has shipped or is live, its CI result, that its card waits on a person), rather than answering from memory or an earlier reply.",
   inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
 };
 

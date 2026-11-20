@@ -256,3 +256,15 @@ test('live-claim check only counts: a hit is logged as a would-refuse line and n
   const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
   assert.match(log, /would refuse · live-state claim without a read/);
 });
+
+test('a stop sent back for a proposal logs no would-refuse line: the stop that ends the turn is judged', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
+  const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
+  writeFileSync(path, jsonl(prompt('[Josh]: status?'), say(`${PROPOSAL}\n\nStill waiting on you: #441's card.`)));
+  const out: { block?: string } = {};
+  answerHook({ session_id: 's10', prompt_id: 'p1', transcript_path: path }, { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared }, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out });
+  assert.ok(out.block);
+  const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  assert.match(log, /refused stop · proposal without a card/);
+  assert.doesNotMatch(log, /would refuse/);
+});

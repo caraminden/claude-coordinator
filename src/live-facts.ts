@@ -24,8 +24,8 @@ export interface CiRun {
   url: string;
   /** When it started, ms. */
   at: number;
-  /** The run is on the branch's newest commit, not an older one. */
-  onHead: boolean;
+  /** The run is on the branch's newest commit (true), an older one (false), or can't tell (null: a land/ run is on the branch rebased onto main). */
+  onHead: boolean | null;
 }
 
 export interface Facts {
@@ -46,6 +46,8 @@ export interface Facts {
   head: string | null;
   /** Where its change is: on its branch, in a build, on main, deploying, live, a failed deploy. */
   ship: { stage: string; text: string } | null;
+  /** Its branch could be read just now. */
+  branchRead: boolean;
   pr: { number: number; state: string; url: string } | null;
   /** Its newest CI run, null when none was found, or why it couldn't be read. */
   ci: CiRun | null | { error: string };
@@ -68,8 +70,8 @@ export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branche
     conclusion: run.conclusion ?? null,
     url: String(run.html_url ?? ''),
     at: Date.parse(run.run_started_at ?? run.created_at),
-    // A land run is on the branch rebased onto main, so its commit differs: land/<branch> runs count as its head's.
-    onHead: !!tip && (String(run.head_sha ?? '').startsWith(tip) || String(run.head_branch ?? '').startsWith('land/')),
+    // A land run is on the branch rebased onto main, so its commit never matches the head: say so rather than guess.
+    onHead: String(run.head_branch ?? '').startsWith('land/') ? null : !!tip && String(run.head_sha ?? '').startsWith(tip),
   };
 }
 
@@ -103,6 +105,7 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
     branch: t.branch ?? null,
     head: status?.tip.slice(0, 8) ?? null,
     ship: v.ship ? { stage: v.ship.stage, text: v.ship.text } : null,
+    branchRead: !!status,
     pr: status?.pr ? { number: status.pr.number, state: status.pr.state, url: status.pr.url } : null,
     ci,
   };
@@ -112,7 +115,7 @@ const ciText = (ci: Facts['ci']): string => {
   if (!ci) return 'none found on its branch or land/ branch';
   if ('error' in ci) return `couldn't read (${ci.error})`;
   const result = ci.status === 'completed' ? ci.conclusion ?? 'done' : ci.status.replace('_', ' ');
-  return `${ci.workflow} on ${ci.branch} @ ${ci.sha}: ${result}, started ${pacific(ci.at)}${ci.onHead ? '' : ' (an older commit than its head)'} ${ci.url}`;
+  return `${ci.workflow} on ${ci.branch} @ ${ci.sha}: ${result}, started ${pacific(ci.at)}${ci.onHead === null ? ' (a ship run: the branch rebased onto main, so it may predate a newer commit)' : ci.onHead ? '' : ' (an older commit than its head)'} ${ci.url}`;
 };
 
 /** The facts as a few short lines, for the live_facts tool. */
@@ -124,7 +127,7 @@ export function factsText(f: Facts): string {
     f.cards.length ? f.cards.map((c) => `waiting on people: ${cardText(c)}`).join('\n') : 'cards waiting on people: none',
     f.waiting ? `waiting now: ${f.waiting}` : '',
     f.branch ? `branch: ${f.branch}${f.head ? ` @ ${f.head}` : ''}` : 'branch: none',
-    `change: ${f.ship ? f.ship.text : 'nothing committed on its branch'}`,
+    `change: ${f.ship ? f.ship.text : !f.branch ? 'none: it has no branch' : f.branchRead ? 'nothing committed on its branch' : "couldn't read its branch"}`,
     f.pr ? `PR #${f.pr.number}: ${f.pr.state.toLowerCase()} ${f.pr.url}` : '',
     f.branch ? `newest CI run: ${ciText(f.ci)}` : '',
   ].filter(Boolean).join('\n');

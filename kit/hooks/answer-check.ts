@@ -226,7 +226,7 @@ export function answerHook(input: any, env = process.env, refusal?: { stateDir?:
     if (refuse && REFUSED.test(hit)) {
       note(input, 'refused stop', hit, env);
       refusal!.out.block = refuse;
-    } else note(input, 'would refuse', hit, env);
+    } else if (!refuse) note(input, 'would refuse', hit, env); // a stop sent back is judged again when it ends
   }
   // self-review's Process: line goes to the log for the process digest, whatever the checks said.
   const process = turn.steered ? null : processLine(turn.finalText);

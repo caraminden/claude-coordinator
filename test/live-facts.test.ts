@@ -15,7 +15,7 @@ test('newestRun takes the newer of the branch and land/ runs, and says whether i
   assert.equal(asked.length, 2);
   assert.equal(r?.branch, 'land/ticket/7-x');
   assert.equal(r?.conclusion, 'failure');
-  assert.equal(r?.onHead, true, "a land run is on the rebased branch, so it counts as the head's");
+  assert.equal(r?.onHead, null, "a land run is on the branch rebased onto main: its commit can't say whether it is the head's");
   const old = await newestRun(async () => ({ status: 200, etag: null, body: { workflow_runs: [run({ head_sha: '99990000' })] } }), 'o/r', undefined, ['ticket/7-x'], 'abc12345');
   assert.equal(old?.onHead, false);
   assert.equal(await newestRun(async () => ({ status: 200, etag: null, body: { workflow_runs: [] } }), 'o/r', undefined, ['b'], null), null);
@@ -57,6 +57,9 @@ test('liveFacts says why CI could not be read, and a minion with no branch has n
   const f = await liveFacts(broken, 70, async () => { throw new Error('gh: not logged in\nmore'); });
   assert.match(factsText(f), /newest CI run: couldn't read \(gh: not logged in\)/);
   assert.match(factsText(f), /cards waiting on people: none/);
+  assert.match(factsText(f), /change: nothing committed on its branch/);
+  const unread = fakeApp({ id: 70, number: 7, title: 'T', project_id: 3, status: 'idle', state: null, branch: 'b' }, { open_cards: [] }, project, null);
+  assert.match(factsText(await liveFacts(unread, 70, async () => ({ status: 200, etag: null, body: { workflow_runs: [run({ head_branch: 'land/b' })] } }))), /change: couldn't read its branch[\s\S]*a ship run: the branch rebased onto main/);
   const none = fakeApp({ id: 70, number: 7, title: 'T', project_id: 3, status: 'idle', state: 'parked', branch: null }, { open_cards: [] }, project, null);
   const text = factsText(await liveFacts(none, 70, async () => assert.fail('no branch, no GitHub call')));
   assert.match(text, /branch: none/);

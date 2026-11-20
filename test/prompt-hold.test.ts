@@ -56,6 +56,11 @@ test('it takes the current prompt when cold, past the cap, on a new session, or 
   assert.equal(back.held, false);
   assert.equal(back.note, BACK_NOTE);
   assert.equal(back.record.pending, promptHash(old));
+  // A second edit's note is the whole change from the held prompt, and says it replaces the first.
+  const second = decide({ ...old, base: ['# Rules', 'Ship it with hand_off_land.', 'Keep notes very short.'] }, { record: recordOf(old, { sent: promptHash(edited) }) });
+  assert.match(second.note!, /replaces the earlier note/);
+  assert.doesNotMatch(second.note!, /risk label and all/);
+  assert.doesNotMatch(decide(edited).note!, /replaces the earlier note/, 'not on the first');
   // No change: nothing held, nothing to say.
   const same = decide(old);
   assert.equal(same.held, false);
@@ -71,15 +76,19 @@ test('the note lists a new section and a dropped one', () => {
 
 test('the readout counts warm turns, the ones on a changed system prompt and the held ones, per Pacific day', () => {
   const at = Date.UTC(2026, 10, 20, 20); // 12:00 PST
-  const row = (ticket_id: number, ended_at: number, system: object, extra = {}) => ({ ticket_id, ended_at, duration_ms: 1000, cache_write_tokens: 500, prompt_digest: JSON.stringify({ system, ...extra }) });
+  const row = (ticket_id: number, ended_at: number, system: object, extra = {}, session = 's') => ({ ticket_id, session_id: session, ended_at, duration_ms: 1000, cache_write_tokens: 500, prompt_digest: JSON.stringify({ system, ...extra }) });
+  const ping = (ticket_id: number, ended_at: number) => ({ ticket_id, session_id: 's', ended_at, duration_ms: 1000, cache_write_tokens: 0, prompt_digest: null, keepalive: 1 });
   const [day] = readout([
     row(1, at, { base: 'a' }),
     row(1, at + 60_000, { base: 'b' }), // warm, changed
     row(1, at + 120_000, { base: 'b' }, { held: true }), // warm, held
     row(1, at + 3 * 3600_000, { base: 'c' }), // cold: not counted
+    row(1, at + 3 * 3600_000 + 60_000, { base: 'd' }, {}, 'new'), // a new session: cold, not counted
     row(2, at, { base: 'a' }),
+    ping(2, at + 55 * 60_000),
+    row(2, at + 100 * 60_000, { base: 'a' }), // warm through its keepalive, unchanged
   ]);
-  assert.deepEqual(day, { day: '2026-11-20', warm: 2, sysChanged: 1, held: 1, changedWrites: 500 });
+  assert.deepEqual(day, { day: '2026-11-20', warm: 3, sysChanged: 1, held: 1, changedWrites: 500 });
 });
 
 const root = mkdtempSync(join(tmpdir(), 'prompt-hold-'));

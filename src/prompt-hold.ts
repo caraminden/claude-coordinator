@@ -61,7 +61,7 @@ export function decideHold(o: { record: HoldRecord | null; held: PromptSections 
   // Back to the held text: a session that read a note about a later version hears that it no longer applies.
   if (record.hash === hash) return { system: current, note: record.sent === hash ? null : BACK_NOTE, held: false, record: { ...record, pending: hash }, reload: null };
   if (now - record.since >= HOLD_CAP_MS) return take('cap');
-  const note = changeNote(held, current);
+  const note = changeNote(held, current, record.sent !== record.hash);
   if (note.length > NOTE_MAX) return take('too-long');
   // The note goes once per change: a session that read it keeps it in its conversation (a compaction clears `sent`).
   return { system: held, note: record.sent === hash ? null : note, held: true, record: { ...record, pending: hash }, reload: null };
@@ -76,7 +76,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
  * What changed from the held prompt to the current one, line by line: each new or reworded line in full under its
  * heading, and the start of each line that no longer stands. Order and repeats are ignored: rules are lines.
  */
-export function changeNote(held: PromptSections, current: PromptSections): string {
+export function changeNote(held: PromptSections, current: PromptSections, replaces = false): string {
   const linesOf = (lines: string[] | undefined) => (lines ?? []).join('\n').split('\n');
   const added: string[] = [];
   const removed: string[] = [];
@@ -100,6 +100,8 @@ export function changeNote(held: PromptSections, current: PromptSections): strin
   }
   return [
     'Your instructions changed since this conversation\'s system prompt was written. It stays as it was until your next cold start, so your prompt cache stays warm; these lines are current and win over the old wording in it.',
+    // Each note is the whole change from the system prompt, so a line an earlier note added and this one lacks is gone.
+    ...(replaces ? ['This note replaces the earlier note about changed instructions: a change listed there and not here no longer stands.'] : []),
     ...(added.length ? ['New or reworded:', ...added] : []),
     ...(removed.length ? ['No longer in force (the old lines that start):', ...removed] : []),
   ].join('\n');

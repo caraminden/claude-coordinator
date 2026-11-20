@@ -3046,7 +3046,7 @@ export class Runner {
       // A session that turned out lost starts a new one: on the current prompt, with no note.
       if (lost) {
         d = decideHold({ record: null, held: null, current: hold.current, session: null, lastEnd: null, now: this.now() });
-        if (hold.decision.held) {
+        if (hold.decision.held || hold.decision.note) {
           parts.system = hold.current;
           delete parts.turn.rulesChanged;
           writeFileSync(join(dir, 'system-prompt.md'), promptText(parts.system));
@@ -3197,7 +3197,7 @@ export class Runner {
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
       if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
-      if (hold?.note && !f.side) parts.turn.rulesChanged = [hold.note];
+      if (hold?.note) parts.turn.rulesChanged = [hold.note];
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
@@ -3808,7 +3808,8 @@ export class Runner {
     }
     // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
     if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.holds.compacted(ticketId);
-    if (ev.type === 'result') this.holds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
+    // Only a turn that ran has read its note: after an error the next turn carries it again.
+    if (ev.type === 'result' && !ev.is_error) this.holds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
     if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
     if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) ev = this.stripStatus(ticketId, ev);
     if (ev.type === 'result') {

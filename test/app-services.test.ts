@@ -68,10 +68,12 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
   assert.ok(main.includes('Environment="ODD=50%% \\"quoted\\" \\\\ back"'), 'quotes, backslashes and % escaped');
   assert.ok(main.includes(`Environment="CITADEL_HEAVY=${join(import.meta.dirname, '..', 'tools', 'citadel-app-heavy')}"`), 'apps get the heavy-slot command');
   assert.match(main, /^Restart=always$/m);
+  assert.match(main, /^Slice=contraptions\.slice$/m, 'the app unit runs in contraptions.slice (#1238)');
   assert.match(main, /^RestartSec=5$/m);
   assert.match(main, /^WantedBy=default.target$/m);
   const job = files.get('citadel-app-mandate-backup.service')!;
   assert.match(job, /^Type=oneshot$/m);
+  assert.match(job, /^Slice=contraptions\.slice$/m, 'the job unit runs in contraptions.slice (#1238)');
   assert.match(job, /^ExecStart=\/usr\/bin\/node "deploy\/backup.ts" "\$\{DATA_DIR\}"$/m, '${VAR} left for systemd to expand');
   assert.ok(job.includes('Environment="PORT=7341"'), 'jobs get the app\'s environment');
   assert.match(files.get('citadel-app-mandate-backup.timer')!, /^OnCalendar=\*-\*-\* 03:30:00$/m);
@@ -371,6 +373,7 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     assert.ok(fake.calls().includes(`--user restart citadel-app-${name}.service`));
     // Each step in its own unit, out of Citadel's cgroup, and in a heavy slot named for the app (#847).
     assert.equal(fake.calls().filter((x) => x.startsWith(`run --user --wait --collect --unit=citadel-build-${name}.service `)).length, 3);
+    assert.equal(fake.calls().filter((x) => x.startsWith('run ') && x.includes('--slice=contraptions.slice ')).length, 3, 'each build step runs in contraptions.slice (#1238)');
     assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 1, `one hold for all three steps (#885): ${heavyHistory()}`);
     assert.match(env, /^CITADEL_HEAVY_HELD=1$/m, 'a step that calls citadel-heavy itself runs in the deploy\'s slot');
     assert.ok(!existsSync(join(home, 'deploy-logs', name, 'deploying.json')), 'its marker goes when it ends');

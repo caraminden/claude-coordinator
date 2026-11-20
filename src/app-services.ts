@@ -112,6 +112,8 @@ export function parseManifest(text: string): Manifest {
 }
 
 /** The first line of every unit file Citadel writes; it touches no other. */
+// Apps run in contraptions.slice so no one app can take the box's RAM (#1214, #1238).
+const SLICE = 'Slice=contraptions.slice';
 const OWNED = (name: string) => `# Written by Citadel for contraption ${name}.`;
 const ownedBy = (text: string) => /^# Written by Citadel for contraption ([a-z0-9-]+)\./.exec(text)?.[1] ?? null;
 
@@ -190,14 +192,14 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
   files.set(`${unitName(row.name)}.service`, [
     ...head,
     '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`, 'After=network.target', 'StartLimitIntervalSec=0', '',
-    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', '',
+    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', SLICE, '',
     '[Install]', 'WantedBy=default.target', '',
   ].join('\n'));
   for (const [job, t] of Object.entries(manifest.timers)) {
     files.set(`${unitName(row.name, job)}.service`, [
       ...head,
       '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} (Citadel contraption job)`, '',
-      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, '',
+      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, SLICE, '',
     ].join('\n'));
     files.set(`${unitName(row.name, job)}.timer`, [
       ...head,
@@ -1007,7 +1009,7 @@ export class AppServices {
             const stepEnv = { ...env, CITADEL_HEAVY_HELD: '1', CITADEL_HEAVY_WHO: who };
             const unit = buildUnit(row.name);
             const argv = this.opts.systemdRun
-              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
+              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, '--slice=contraptions.slice', `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
                 `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
               : inner;
             // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).

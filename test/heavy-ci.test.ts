@@ -36,7 +36,8 @@ const git = (cwd: string, ...args: string[]) => spawnSync('git', args, { cwd, en
 const fakeGh = `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
 const dir = process.env.FAKE_GH_DIR, mode = process.env.FAKE_GH_MODE || 'ok';
-const a = process.argv.slice(2).filter((x) => x !== 'api');
+const a = process.argv.slice(2).filter((x) => x !== 'api' && x !== '--allow-escape-sequences');
+const escapes = process.argv.includes('--allow-escape-sequences');
 const post = a[0] === '-X' ? a.splice(0, 2)[1] : '';
 const url = a.shift();
 const out = (o) => process.stdout.write(typeof o === 'string' ? o : JSON.stringify(o));
@@ -55,7 +56,8 @@ else if (url.endsWith('/runs/7')) {
   const status = mode === 'queued' ? 'queued' : ['queued', 'in_progress'][n - 1] ?? 'completed';
   out({ id: 7, status, conclusion: status === 'completed' ? 'failure' : null, html_url: 'https://github.com/o/r/actions/runs/7' });
 } else if (url.endsWith('/runs/7/jobs')) out({ jobs: [{ id: 9, runner_name: mode === 'queued' ? null : 'ci-r-1' }] });
-else if (url.endsWith('/jobs/9/logs')) out(['2026-11-20T10:00:00Z setup', '2026-11-20T10:00:01Z ${BEGIN}', '2026-11-20T10:00:02Z hello from CI', '2026-11-20T10:00:03Z ${END}3 ==='].join('\\n'));
+else if (url.endsWith('/jobs/9/logs') && !escapes) { process.stderr.write('the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway\\n'); process.exit(1); }
+else if (url.endsWith('/jobs/9/logs')) out(['2026-11-20T10:00:00Z \x1b[36;1mset -e\x1b[0m', '2026-11-20T10:00:01Z ${BEGIN}', '2026-11-20T10:00:02Z hello from CI', '2026-11-20T10:00:03Z ${END}3 ==='].join('\\n'));
 else { process.stderr.write('fake gh: no ' + url + '\\n'); process.exit(1); }
 `;
 const bin = join(root, 'bin');

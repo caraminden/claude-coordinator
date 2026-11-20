@@ -29,7 +29,7 @@ function browser(network: Record<string, { version: string; body?: string; statu
     fetched.push(url);
     const hit = network[url];
     if (!hit) throw new TypeError('Failed to fetch');
-    return new Response(hit.body ?? `network ${url}`, { status: hit.status ?? 200, headers: { 'X-Front-Version': hit.version } });
+    return new Response(hit.body ?? `network ${url}`, { status: hit.status ?? 200, headers: { 'X-Front-Version': hit.version, 'X-Front-Hash': hit.body ?? `network ${url}` } });
   };
   return { stores, navigated, fetched, caches, fetch, windows };
 }
@@ -59,17 +59,19 @@ function worker(script: string, b: ReturnType<typeof browser>) {
 }
 
 const NAMES = ['index.html', 'app.js', 'style.css', 'ui/chat.js', 'icon.svg', 'sw.js', 'manifest.webmanifest', 'machine-agent.mjs', 'ui/chat.d.ts'];
+/** What the server sends the worker for a version: each name's hash (here the body `net` serves under that version). */
+const H = (version: string) => new Map(NAMES.map((n) => [n, `${version} /c/${n === 'index.html' ? '' : n}`]));
 const net = (version: string) => Object.fromEntries(['/c/', '/c/app.js', '/c/icon.svg', '/c/style.css', '/c/ui/chat.js'].map((u) => [u, { version, body: `${version} ${u}` }]));
 
 test('the off switch: the worker the server serves then drops every kept file, reloads the windows they served, and keeps nothing', async () => {
   const b = browser(net('v1'));
-  const on = worker(shellWorker(SOURCE, 'v1', NAMES, false), b);
+  const on = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b);
   await on.lifecycle('install');
   await on.lifecycle('activate');
   assert.equal(await on.request('/c/', 'navigate'), 'v1 /c/');
   assert.deepEqual(b.navigated, []);
 
-  const off = shellWorker(SOURCE, 'v1', NAMES, true);
+  const off = shellWorker(SOURCE, 'v1', H('v1'), true);
   assert.equal(off, SOURCE, 'the off worker is public/sw.js as it stands, with nothing to keep');
   const w = worker(off, b);
   await w.lifecycle('install');
@@ -89,18 +91,22 @@ test('the off switch: the worker the server serves then drops every kept file, r
 
 test('the server fills in the worker: its version and the page plus its scripts, styles and icons, nothing else', () => {
   assert.deepEqual(shellFiles(NAMES), ['app.js', 'icon.svg', 'style.css', 'ui/chat.js']);
-  const filled = shellWorker(SOURCE, 'abc123', NAMES, false);
+  const filled = shellWorker(SOURCE, 'abc123', H('abc123'), false);
   const shell = JSON.parse(/const SHELL = (\{.*\});/.exec(filled)![1]);
-  assert.deepEqual(shell, { version: 'abc123', urls: ['/c/', '/c/app.js', '/c/icon.svg', '/c/style.css', '/c/ui/chat.js'] });
+  assert.deepEqual(shell, {
+    version: 'abc123',
+    urls: ['/c/', '/c/app.js', '/c/icon.svg', '/c/style.css', '/c/ui/chat.js'],
+    hashes: { '/c/': 'abc123 /c/', '/c/app.js': 'abc123 /c/app.js', '/c/icon.svg': 'abc123 /c/icon.svg', '/c/style.css': 'abc123 /c/style.css', '/c/ui/chat.js': 'abc123 /c/ui/chat.js' },
+  });
   assert.throws(() => shellWorker('const SHELL = {};', 'v', NAMES, false), /lost its line/);
 });
 
 test('a worker keeps its version\'s files and opens the app from them with no network; anything else is left to the network', async () => {
   const b = browser(net('v1'));
-  const w = worker(shellWorker(SOURCE, 'v1', NAMES, false), b);
+  const w = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b);
   await w.lifecycle('install');
   await w.lifecycle('activate');
-  const offline = worker(shellWorker(SOURCE, 'v1', NAMES, false), { ...b, fetch: async () => { throw new TypeError('Failed to fetch'); } } as any);
+  const offline = worker(shellWorker(SOURCE, 'v1', H('v1'), false), { ...b, fetch: async () => { throw new TypeError('Failed to fetch'); } } as any);
   assert.equal(await offline.request('/c/', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/index.html', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/app.js'), 'v1 /c/app.js');
@@ -119,17 +125,17 @@ test('a worker keeps its version\'s files and opens the app from them with no ne
 
 test('a ship: the new worker keeps only files of its own version, all or none, and drops the old version once it takes over', async () => {
   const b = browser(net('v1'));
-  const v1 = worker(shellWorker(SOURCE, 'v1', NAMES, false), b);
+  const v1 = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b);
   await v1.lifecycle('install');
   await v1.lifecycle('activate');
   // The server moved on again while v2 installed: one file is v3's, so v2 keeps nothing and v1 stays in charge.
-  const mixed = { ...net('v2'), '/c/app.js': { version: 'v3' } };
+  const mixed = { ...net('v2'), '/c/app.js': { version: 'v3', body: 'v2 /c/app.js' } };
   const b2 = { ...b, fetch: browser(mixed).fetch };
-  await assert.rejects(worker(shellWorker(SOURCE, 'v2', NAMES, false), b2).lifecycle('install'), /\/c\/app\.js is not front end v2/);
+  await assert.rejects(worker(shellWorker(SOURCE, 'v2', H('v2'), false), b2).lifecycle('install'), /\/c\/app\.js is not front end v2/);
   assert.deepEqual([...b.stores.keys()], ['shell-v1']);
   // A clean install of v2 replaces v1's files when it activates, and the windows open stay as they are (the page reloads itself).
   const b3 = { ...b, fetch: browser(net('v2')).fetch };
-  const v2 = worker(shellWorker(SOURCE, 'v2', NAMES, false), b3);
+  const v2 = worker(shellWorker(SOURCE, 'v2', H('v2'), false), b3);
   await v2.lifecycle('install');
   assert.deepEqual([...b.stores.keys()].sort(), ['shell-v1', 'shell-v2']);
   await v2.lifecycle('activate');
@@ -139,6 +145,35 @@ test('a ship: the new worker keeps only files of its own version, all or none, a
   // A kept file that went missing (the browser evicted it) comes from the network.
   b.stores.get('shell-v2')!.delete('/c/style.css');
   assert.equal(await v2.request('/c/style.css'), 'v2 /c/style.css');
+});
+
+test('a ship fetches only the files whose content changed; the rest are copied from the old cache, still all or none (#1331)', async () => {
+  const b = browser(net('v1'));
+  const v1 = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b);
+  await v1.lifecycle('install');
+  await v1.lifecycle('activate');
+  // v2 changes app.js (and so the page, which names the version) only.
+  const same = (u: string) => ({ version: 'v2', body: `v1 ${u}` });
+  const n2 = { ...net('v2'), '/c/icon.svg': same('/c/icon.svg'), '/c/style.css': same('/c/style.css'), '/c/ui/chat.js': same('/c/ui/chat.js') };
+  const hashes = new Map(H('v2')); for (const n of ['icon.svg', 'style.css', 'ui/chat.js']) hashes.set(n, `v1 /c/${n}`);
+  const b2 = browser(n2);
+  const v2 = worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b, fetch: b2.fetch } as any);
+  await v2.lifecycle('install');
+  assert.deepEqual(b2.fetched.sort(), ['/c/', '/c/app.js'], 'two fetched, not five');
+  await v2.lifecycle('activate');
+  assert.equal(await v2.request('/c/app.js'), 'v2 /c/app.js');
+  assert.equal(await v2.request('/c/style.css'), 'v1 /c/style.css');
+  assert.deepEqual([...b.stores.keys()], ['shell-v2']);
+  // A ship landing mid-install: the one changed file is already v3's, so v2 keeps nothing (not even the copies) and v1's cache stays whole.
+  const b3 = browser(net('v1'));
+  const w1 = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b3);
+  await w1.lifecycle('install');
+  await w1.lifecycle('activate');
+  const raced = browser({ ...n2, '/c/app.js': { version: 'v3', body: 'v3 /c/app.js' } });
+  await assert.rejects(worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b3, fetch: raced.fetch } as any).lifecycle('install'), /\/c\/app\.js is not front end v2/);
+  assert.deepEqual([...b3.stores.keys()], ['shell-v1']);
+  assert.equal(await w1.request('/c/app.js'), 'v1 /c/app.js');
+  assert.equal(await w1.request('/c/style.css'), 'v1 /c/style.css');
 });
 
 let srv: Awaited<ReturnType<typeof bootServer>> | null = null;
@@ -154,6 +189,8 @@ test('the server serves the filled-in worker and tells the page and each file it
   const on = await (await fetch(`${srv.base}/sw.js`)).text();
   const shell = JSON.parse(/const SHELL = (\{.*\});/.exec(on)![1]);
   assert.equal(shell.version, version);
+  // Each kept file's hash is the one the server sends with it.
+  for (const url of shell.urls) assert.equal((await fetch(srv.base + url)).headers.get('x-front-hash'), shell.hashes[url], url);
   assert.ok(shell.urls.includes('/c/') && shell.urls.includes('/c/app.js') && shell.urls.includes('/c/ui/chat.js'));
   assert.ok(!shell.urls.some((u: string) => /api|sw\.js|\.mjs$|manifest/.test(u)));
   // Every file it keeps is one the server has.

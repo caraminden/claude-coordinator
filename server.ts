@@ -163,6 +163,8 @@ pinTurnFiles(DATA_DIR);
 let ASSETS = new Map<string, Buffer>();
 // Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
 let ASSET_VERSION = '';
+// Each file's content hash as served (X-Front-Hash): the service worker re-fetches only the files whose hash changed (#1331).
+let ASSET_HASHES = new Map<string, string>();
 let DARK_MANIFEST = Buffer.alloc(0);
 async function loadAssets() {
   const assets = new Map<string, Buffer>();
@@ -181,6 +183,7 @@ async function loadAssets() {
   ASSET_VERSION = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
   // The page knows its own version (#1144): one the service worker kept from before a ship reloads into the new one.
   assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', ASSET_VERSION)));
+  ASSET_HASHES = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
   DARK_MANIFEST = dark;
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
@@ -1531,7 +1534,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
   let body = ASSETS.get(name);
   if (!body) throw new HttpError(404, 'Not found');
-  if (name === 'sw.js') body = Buffer.from(shellWorker(body.toString('utf8'), ASSET_VERSION, ASSETS.keys(), shellOff(DATA_DIR)));
+  if (name === 'sw.js') body = Buffer.from(shellWorker(body.toString('utf8'), ASSET_VERSION, ASSET_HASHES, shellOff(DATA_DIR)));
   const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
   // Contraptions' pages load these on every page: a 304 until a deploy changes them.
   if (etag) {
@@ -1542,6 +1545,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   // The service worker keeps only files of the version it was made for (public/sw.js); its own copy names that version
   // and the files, or is the off switch's worker (src/shell.ts).
   headers['X-Front-Version'] = ASSET_VERSION;
+  headers['X-Front-Hash'] = ASSET_HASHES.get(name) ?? '';
   if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
   if (name === 'manifest.webmanifest') {
     if (/dark/.test(String(req.headers[COLOR_SCHEME_HINT.toLowerCase()] ?? ''))) body = DARK_MANIFEST;

@@ -24,10 +24,15 @@ export function shellOff(dataDir: string): boolean {
   return existsSync(join(dataDir, SHELL_OFF_FILE));
 }
 
-/** public/sw.js with its shell filled in: the version and the URLs to keep, or none when the switch is off. */
-export function shellWorker(source: string, version: string, names: Iterable<string>, off: boolean): string {
+/** public/sw.js with its shell filled in: the version, the URLs to keep and each one's content hash (the server sends the
+ * same hash as X-Front-Hash), so a ship fetches only the files whose hash changed (#1331); none when the switch is off. */
+export function shellWorker(source: string, version: string, hashes: Map<string, string>, off: boolean): string {
   if (!source.includes(SHELL_LINE)) throw new Error(`public/sw.js lost its line "${SHELL_LINE}"`);
   if (off) return source;
-  const shell = { version, urls: ['/c/', ...shellFiles(names).map((n) => `/c/${n}`)] };
+  const names = shellFiles(hashes.keys());
+  const urls = ['/c/', ...names.map((n) => `/c/${n}`)];
+  const kept: Record<string, string> = { '/c/': hashes.get('index.html') ?? '' };
+  for (const n of names) kept[`/c/${n}`] = hashes.get(n)!;
+  const shell = { version, urls, hashes: kept };
   return source.replace(SHELL_LINE, `const SHELL = ${JSON.stringify(shell)};`);
 }

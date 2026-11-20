@@ -3,7 +3,7 @@
 // (what a person may see is decided per request), never contraptions under /apps/ (they bring their own worker), never
 // the backup chat at /backup (it must load however broken the app's own files are) or a preview.
 //
-// The server fills SHELL in when it serves this file (src/shell.ts): { version, urls }. A ship changes the version, so
+// The server fills SHELL in when it serves this file (src/shell.ts): { version, urls, hashes }. A ship changes the version, so
 // browsers see a new worker, which keeps the new files and drops the old ones. With the server's off switch on, SHELL
 // stays null: this worker then drops every kept file, reloads the windows it served from them, and caches nothing.
 const SHELL = null; // filled in by the server (src/shell.ts)
@@ -15,11 +15,22 @@ self.addEventListener('install', (event) => {
   if (SHELL) event.waitUntil(keep());
 });
 
-/** Fetch and keep every shell file, all of this version or none: a ship landing mid-install fails it, and the next try gets the newer worker. */
+/**
+ * Keep every shell file, all of this version or none: a ship landing mid-install fails it, and the next try gets the newer
+ * worker. A file whose content hash (X-Front-Hash) is the one an older version's cache already holds is copied from it,
+ * not fetched again (#1331); the rest come from the network and must be of this very version and hash. Nothing is put
+ * in the new cache until every file is in hand, so a tab never sees half old, half new.
+ */
 async function keep() {
+  const olds = await Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-') && k !== CACHE).map((k) => caches.open(k)));
   const answers = await Promise.all(SHELL.urls.map(async (url) => {
+    const want = SHELL.hashes[url];
+    for (const old of olds) {
+      const hit = await old.match(url);
+      if (hit && want && hit.headers.get('X-Front-Hash') === want) return [url, hit];
+    }
     const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-    if (!res.ok || res.headers.get('X-Front-Version') !== SHELL.version) throw new Error(`${url} is not front end ${SHELL.version}`);
+    if (!res.ok || res.headers.get('X-Front-Version') !== SHELL.version || res.headers.get('X-Front-Hash') !== want) throw new Error(`${url} is not front end ${SHELL.version}`);
     return [url, res];
   }));
   const cache = await caches.open(CACHE);

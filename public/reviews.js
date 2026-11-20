@@ -97,6 +97,13 @@ function setTab(k) {
   if (k === 'all') loadEvery();
 }
 
+/** The headline and ghost cards again after a save: the broadcast's reload is skipped while a form is open. */
+async function glanceAgain() {
+  const at = state;
+  const fresh = await api(url()).catch(() => null);
+  if (fresh && state === at) state.glance = fresh.glance ?? null;
+}
+
 async function loadEvery() {
   try {
     every.rows = (await api('api/reviews/schemes')).schemes;
@@ -166,7 +173,7 @@ function repoGroup() {
   if (!files.length && !skills.length) return '';
   return h('section', { class: 'rv-repo is-repo', 'aria-label': "From this scheme's repo" },
     h('div', { class: 'rv-repo-head' }, h('h3', {}, "From this scheme's repo"), h('a', { class: 'small', href: `#/p/${view.projectId}/skills` }, 'See them on Skills')),
-    h('div', { class: 'rv-repo-items' }, ...files.map(card),
+    h('div', { class: 'rv-repo-items' }, ...files.map(withTeachers),
       ...skills.map((k) => h('div', { class: 'rv-card rv-skill', title: 'A review skill in the repo: read-only here, a minion loads it when its work needs it' },
         h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, k.name)),
         k.what ? h('div', { class: 'rv-card-when' }, k.what) : null,
@@ -682,6 +689,7 @@ function editForm(e) {
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';
       draw();
+      glanceAgain().then(() => { if (state.mode === 'view') draw(); });
     } catch (x) {
       err.textContent = x.message;
       err.hidden = false;
@@ -720,6 +728,7 @@ function kitForm(e) {
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';
       draw();
+      glanceAgain().then(() => { if (state.mode === 'view') draw(); });
     } catch (x) {
       err.textContent = x.message;
       err.hidden = false;
@@ -817,6 +826,7 @@ function newForm() {
       const made = await api(url(), { method: 'POST', body });
       state.entries.push(made);
       state.newWhen = '';
+      await glanceAgain();
       select(made.slug, 'edit');
     } catch (x) {
       err.textContent = x.message;

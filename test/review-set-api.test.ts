@@ -375,6 +375,8 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
 test("the page at a glance (#1094): judged this week, the last run, unwatched folders, review skills, and the Every scheme rows", async () => {
   // Not Citadel: a scheme with a repo whose last month touched src/ and game/logic/, and one critic on src/**.
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Glance Grove' } });
+  // And one Cara isn't a member of: its row stays off her Every scheme tab.
+  const { data: away } = await call('/api/projects', { method: 'POST', body: { name: 'Not Hers' } });
   const repo = join(root, 'glance-repo');
   mkdirSync(join(repo, 'game', 'logic'), { recursive: true });
   mkdirSync(join(repo, 'src'), { recursive: true });
@@ -393,6 +395,8 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   const b = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'two', properties: { type: 'chore' } } })).data;
   const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
   db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
+  db.prepare('UPDATE projects SET owner_id = NULL WHERE id = ?').run(away.id);
+  db.prepare('DELETE FROM project_members WHERE project_id = ?').run(away.id);
   db.prepare("UPDATE tickets SET status = 'closed', closed_at = ? WHERE id IN (?, ?)").run(Date.now(), a.id, b.id);
   const entry = db.prepare("SELECT id FROM review_entries WHERE project_id = ? AND slug = 'src-critic'").get(p.id) as { id: number };
   const at = Date.now() - 60_000;
@@ -406,6 +410,7 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
 
   const { status, data: every } = await call('/api/reviews/schemes');
   assert.equal(status, 200);
+  assert.equal(every.schemes.some((s: any) => s.id === away.id), false, 'only schemes the person is a member of');
   const row = every.schemes.find((s: any) => s.id === p.id);
   assert.deepEqual([row.name, row.opened, row.critics, row.trial, row.preship, row.rate, row.last, row.closed, row.judged],
     ['Glance Grove', true, 1, 1, true, 100, at, 2, 1]);

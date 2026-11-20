@@ -19,8 +19,8 @@ export const folderOf = (p: string) => {
   return parts.length > 2 ? parts.slice(0, 2).join('/') : parts.length === 2 ? parts[0] : '(top)';
 };
 
-/** The critics of a scheme's own that watch a diff: on, written for the scheme (not the kit's, not a repo agent file), with diff globs. */
-export const ownGlobs = (entries: ReviewEntry[]) => entries.filter((e) => e.enabled && !fromFile(e) && e.triggers.diff?.length).flatMap((e) => e.triggers.diff!);
+/** The critics of a scheme's own that watch a diff: on, written for the scheme (not the kit's, not a repo agent file), with diff globs. A teacher runs only on a hand-off, so its globs watch nothing. */
+export const ownGlobs = (entries: ReviewEntry[]) => entries.filter((e) => e.enabled && e.kind !== 'teacher' && !fromFile(e) && e.triggers.diff?.length).flatMap((e) => e.triggers.diff!);
 
 export interface Coverage { changes: number; watched: number; gaps: { folder: string; changes: number }[] }
 
@@ -44,7 +44,7 @@ export function changedPaths(repoDir: string | null | undefined, now = Date.now(
   if (!repoDir) return Promise.resolve(null);
   const hit = cache.get(repoDir);
   if (hit && now - hit.at < 10 * 60_000) return hit.paths;
-  const paths = git('git', ['-C', repoDir, 'log', `--since=${COVERAGE_DAYS}.days`, '--no-merges', '--format=', '--name-only'], { maxBuffer: 64 << 20 })
+  const paths = git('git', ['-C', repoDir, '-c', 'core.quotePath=false', 'log', `--since=${COVERAGE_DAYS}.days`, '--no-merges', '--format=', '--name-only'], { maxBuffer: 64 << 20 })
     .then(({ stdout }) => stdout.split('\n').filter(Boolean))
     .catch(() => null);
   cache.set(repoDir, { at: now, paths });

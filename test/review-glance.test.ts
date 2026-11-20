@@ -41,6 +41,7 @@ test("only the scheme's own critics that are on and watch a diff count", () => {
     e({ source: 'kit:reviewer', triggers: { diff: ['kit/**'] } }),
     e({ source: 'agent:shader-critic', triggers: { diff: ['agent/**'] } }),
     e({ triggers: { ask: true } as any }),
+    e({ kind: 'teacher', triggers: { diff: ['teacher/**'] } }),
   ]), ['src/**']);
 });
 
@@ -51,9 +52,10 @@ test("the last 30 days' changed paths come from git, and no repo or no history i
   execFileSync('git', ['init', '-q', repo]);
   writeFileSync(join(repo, 'app', 'a.ts'), '1');
   g('add', '.'); g('commit', '-qm', 'one');
-  writeFileSync(join(repo, 'app', 'a.ts'), '2'); writeFileSync(join(repo, 'b.ts'), '1');
+  writeFileSync(join(repo, 'app', 'a.ts'), '2'); writeFileSync(join(repo, 'b.ts'), '1'); writeFileSync(join(repo, 'app', 'café.ts'), '1');
   g('add', '.'); g('commit', '-qm', 'two');
-  assert.deepEqual((await changedPaths(repo))?.sort(), ['app/a.ts', 'app/a.ts', 'b.ts']);
+  // A name past ASCII comes back as written, not git's quoted escape, so app/** still matches it.
+  assert.deepEqual((await changedPaths(repo))?.sort(), ['app/a.ts', 'app/a.ts', 'app/café.ts', 'b.ts']);
   assert.equal(await changedPaths(null), null);
   assert.equal(await changedPaths(join(root, 'not-a-repo')), null);
 });

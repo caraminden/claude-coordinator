@@ -187,7 +187,8 @@
 .rv-mx td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .rv-mx tbody tr:last-child td { border-bottom: 0; }
 .rv-mx tbody tr { cursor: pointer; transition: background-color var(--citadel-motion, 120ms); }
-.rv-mx tbody tr:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); outline: none; }
+.rv-mx tbody tr:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.rv-mx tbody tr:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .rv-mx td .meter { min-width: 5rem; }
 /* A narrow pane (a phone, or rails open on a small screen): the table's rows become cards, a cell a line, its column's name before it. */
 @container every (max-width: 40rem) {

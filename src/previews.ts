@@ -10,7 +10,7 @@ import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_pro
 import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { get, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync, backup } from 'node:sqlite';
@@ -65,6 +65,28 @@ export function buildTip(repoDir: string, n: number): string | null {
 }
 
 const buildKey = (n: number) => `build-${n}`;
+
+/**
+ * A preview's /api/health, or null unless it answers 2xx with JSON within `ms`. Its own timer destroys the
+ * request: fetch with AbortSignal.timeout sometimes never ended against a server that accepts and never
+ * answers (seen on the CI runner, #1197), which held the boot loop past its deadline.
+ */
+function health(port: number, ms = 3000): Promise<any> {
+  return new Promise((resolve) => {
+    const req = get({ host: '127.0.0.1', port, path: '/api/health' }, (res) => {
+      let body = '';
+      res.setEncoding('utf8').on('data', (d) => (body += d)).on('error', () => resolve(null)).on('close', () => resolve(null)).on('end', () => {
+        try {
+          resolve(res.statusCode! >= 200 && res.statusCode! < 300 ? JSON.parse(body) : null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    const timer = setTimeout(() => req.destroy(), ms);
+    req.on('error', () => resolve(null)).on('close', () => (clearTimeout(timer), resolve(null)));
+  });
+}
 
 /** End a preview's process and wait until it has exited, so nothing writes into its folder as we delete it. */
 async function end(proc: ChildProcess): Promise<void> {
@@ -270,11 +292,11 @@ export class Previews {
     for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((res) => setTimeout(res, 100))) {
       if (proc.exitCode !== null || proc.signalCode) throw await fail(`The preview exited during boot (code ${proc.exitCode})`);
       if (Date.now() > deadline) throw await fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
-      // A server that accepts and never answers must not hold the loop past its deadline: fetch alone waits 5 minutes.
-      const health = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(3000) }).then((res) => (res.ok ? res.json() : null), () => null);
-      if (!health) continue;
+      // A server that accepts and never answers must not hold the loop past its deadline: http alone waits for ever.
+      const answer = await health(port);
+      if (!answer) continue;
       // A branch from before preview mode would serve with turns and pushes switched on.
-      if (health.preview !== true) throw await fail('This branch\'s server has no preview mode; rebase it onto main first');
+      if (answer.preview !== true) throw await fail('This branch\'s server has no preview mode; rebase it onto main first');
       break;
     }
     this.running.set(key, r);

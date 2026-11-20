@@ -96,8 +96,8 @@ ignored finding as a note, never a blocker.
 - Meaning carried by colour alone: a red dot with no word (rule 17).
 - An app still in Citadel's orange accent rather than its own ("First look", 1).
 - A category drawn as a round chip, where it reads as a status ("First look", 5).
-- A view of more than a screen that opens on its detail, with no closed summaries to read its state from ("First look", 11).
-- A list of more than about six items shown whole, with no "Show all" ("First look", 12).
+- A view of more than a screen that opens on its detail, with no closed summaries to read its state from ("First look", 11), unless the scheme's own style guide says otherwise.
+- A list of more than about six items shown whole, with no "Show all" ("First look", 12), unless the scheme's own style guide says otherwise.
 - An empty or failed state that is blank or says only "Error" (rule 19).
 - Text on the accent that isn't `--citadel-on-accent`, or grey text too faint to read on its panel.
 - A control's label off its baseline, so a row grows taller than its parts (Citadel #289: a switch

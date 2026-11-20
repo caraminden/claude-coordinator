@@ -141,8 +141,8 @@ instead. The code for each, and the picked take:
    your own accent passes 4.5:1 with `on-accent` and 3:1 with `surface`, and your own accent-2 4.5:1
    with `surface`.
 10. **One standout per view.** Pick one thing to be memorable (a stat tile, the empty-state mark, a
-    gradient, one animated or glowing moment) and keep everything around it quiet. Rules 1 to 9 are
-    the floor, not decoration to stack. Optional, and always one: your own radius set or heading face,
+    gradient, one animated or glowing moment) and keep everything around it quiet. Rules 1 to 9, 11 and 12
+    are the floor, not decoration to stack. Optional, and always one: your own radius set or heading face,
     named with its reason in your first reply, like the accent.
 11. **Summary first.** A view with more than a screen of detail opens on what each part is for: a
     card or row whose head answers its question with a toned chip and the one or two numbers that

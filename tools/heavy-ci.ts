@@ -57,7 +57,8 @@ function gh(args: string[], what: string): any {
   }
 }
 function ghText(path: string, what: string): string {
-  try { return execFileSync('gh', ['api', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000, maxBuffer: 256 << 20 }); }
+  // gh refuses to print a body with terminal escapes in it unless told to, and job logs carry colour codes.
+  try { return execFileSync('gh', ['api', '--allow-escape-sequences', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000, maxBuffer: 256 << 20 }); }
   catch (e: any) { throw new Error(`${what}: ${String(e.stderr || e.message).trim().split('\n').pop()}`); }
 }
 

@@ -18,9 +18,13 @@ let id = 0; const waits = new Map();
 ws.onmessage = (m) => { const d = JSON.parse(m.data); waits.get(d.id)?.(d); };
 const send = (method, params = {}) => new Promise((r) => { const n = ++id; waits.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
 
-await sleep(4000); // let the page settle
-const at = await send('Runtime.evaluate', { expression: 'location.href', returnByValue: true });
-console.log('page', at.result?.result?.value);
+let href = '';
+for (let i = 0; i < 30 && !/^https?:/.test(href); i++) { // a fresh profile can show about:blank before the address
+  await sleep(500);
+  href = (await send('Runtime.evaluate', { expression: 'location.href', returnByValue: true })).result?.result?.value ?? '';
+}
+await sleep(3000); // let the page settle
+console.log('page', href);
 await send('Page.bringToFront');
 await send('Runtime.evaluate', { userGesture: true, expression: `(() => {
   const t = document.createElement('textarea'); t.value = ${JSON.stringify(text)};

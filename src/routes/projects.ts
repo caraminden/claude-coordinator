@@ -1050,6 +1050,19 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    // A person's own Settings save (#1162): what already says the new words, shown before the save so they can save
+    // anyway or keep editing. The matcher only: a minion's edit adds its Grunt's findings, a person reads the list.
+    method: 'POST', path: '/api/projects/:project/instructions/overlaps', who: ['person'],
+    async handler({ req, res, app, project }) {
+      const body = await readJson(req);
+      if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
+      if (typeof body.text !== 'string' || body.text.length > MAX_INSTRUCTIONS * 2) throw new HttpError(400, 'text must be text');
+      const before = body.scope === 'citadel' ? app.store.appInstructions().text : project.instructions;
+      const found = settingsOverlaps(app, project, body.scope, before, body.text.replace(/\r\n/g, '\n').trim());
+      return json(res, 200, { found });
+    },
+  },
+  {
     method: 'GET', path: '/api/projects/:project/repo-setup', who: ['person'],
     handler: async ({ res, project }) => json(res, 200, project.repo_dir ? await repoSetup(project.repo_dir) : { facts: null, rules: [], skills: [] }),
   },

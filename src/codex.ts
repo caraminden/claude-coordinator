@@ -134,7 +134,7 @@ export function toClaudePreamble(log: string): string {
 export const CODEX_NOTE = `## Running on Codex
 You are running as Codex (OpenAI) inside Citadel, in place of Claude Code. The instructions above were written for Claude Code; read them with these swaps:
 - Bash, Read, Grep and Glob: use the shell (exec_command). Edit, Write and MultiEdit: use apply_patch.
-- Plan with your own plan updates, not the `plan` tool (mcp__thread__plan) nor TaskCreate, TaskUpdate or TodoWrite: the progress readout follows your plan updates. Keep working through the steps.
+- Plan with your own plan updates, not the plan tool (mcp__thread__plan) nor TaskCreate, TaskUpdate or TodoWrite: the progress readout follows your plan updates. Keep working through the steps.
 - The Agent tool (Grunts) is not available: do the work yourself.
 - Skills ("use the citadel:… skill"): the citadel-… skills in your skills list are the same skills; open the SKILL.md and follow it.
 - MCP tools keep their names (mcp__thread__set_thread_status is the thread server's set_thread_status). Call them as the instructions say.

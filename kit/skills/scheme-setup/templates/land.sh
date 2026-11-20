@@ -16,8 +16,9 @@
 #       each failure land_failures finds (below) and "verify: red"; exit 0 green, 1 red, 75 CI gave no verdict.
 #       With LAND_VERIFY_IDS (ids, a line each: fast mode's culprit search), only what those need runs: CI only for a
 #       ci: id, and with CHECK_FILE_CMD set, only their test files in place of the whole CHECK.
-# Build branches (the kit's build-branches skill): a major build is a branch build/<n>, checked out nowhere, that
-#    feeders merge into and that ships to $BRANCH whole. Ported from Citadel's own land.sh.
+# Build branches: a major build is a branch build/<n>, checked out nowhere, that feeders merge into and that ships
+#    to $BRANCH whole. Ported from Citadel's own land.sh. Once this script takes --into, Citadel's prompts tell the
+#    Taskmaster when to suggest a build and each feeder and build minion its steps (the scheme's Builds setting).
 #   tools/land.sh --into build/<n> [<test files>]   a feeder merges into it: rebases onto build/<n> (no rebase when it
 #       is already under the branch), runs the named test files through CHECK_FILE_CMD (with none named, or no
 #       CHECK_FILE_CMD: CHECK_LIGHT, else CHECK), and moves build/<n> by compare-and-swap. No CI, no line, no push:

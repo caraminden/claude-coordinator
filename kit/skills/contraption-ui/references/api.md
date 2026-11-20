@@ -72,7 +72,7 @@ Citadel sets these on your service and its timers; `citadel-app.json` can't over
 |---|---|
 | `PORT` | The registry's port |
 | `BASE_PATH` | `/apps/<name>` |
-| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise, except that big uploads land in its `uploads/<login>/` ("Big uploads") (tested) |
+| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise, except that big uploads land in its `uploads/<login>/` ("Big uploads"), and a deploy that changes your `migrations` snapshots it and a roll back restores it (below) (tested) |
 | `CITADEL_KEYS` | Your key folder |
 | `CITADEL_URL` | Where your server calls Citadel: `http://127.0.0.1:8573` on the live box. Read it; don't hard-code it |
 | `PATH` | mise's shims, `~/.local/bin`, then the system's |
@@ -863,7 +863,7 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 | `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20. Time waiting in line for a heavy slot doesn't count |
 | `disk_warn_gb` | A number of GB above 0: Settings marks the app once its `DATA_DIR` passes it ("Heavy steps and disk use") |
 | `clipboard` | `"write"` lets your page call `navigator.clipboard.writeText` itself (the frame gets `clipboard-write`); leave it out otherwise. Without it, a framed app can't touch the clipboard on its own, as Windows Defender flags any page that copies a command with no click (#1086). Citadel UI's `copyText` needs no opt-in: called from a click, it copies the old way. Takes effect on the next page load after a deploy |
-| `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A Roll back to last green past a commit that touched one is refused (below) |
+| `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A deploy that changes one snapshots your `DATA_DIR` first, so a roll back brings the data back with the code; with no matching snapshot, a Roll back to last green past one is refused (below) |
 
 The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes
 your `DATA_DIR` beyond creating it when missing.
@@ -909,8 +909,21 @@ when that Taskmaster deployed it itself). It never fails the deploy, so a first 
 **Roll back to last green.** While your app runs a commit newer than your home scheme's last green
 (the newest commit on its default branch whose every CI workflow passed), its Releases card offers
 **Roll back to last green**. Any member can press it: it deploys that commit as above (steps 1 to 4,
-the same two checkouts), refusing one off the branch or past a change to a `migrations` path, since
-code that old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations").
+the same two checkouts), refusing one off the branch. Past a change to a `migrations` path, code that
+old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations"), so it also puts
+back the newest snapshot of your data taken under code with the same migrations, and is refused when
+there is none.
+
+**Data snapshots** (#1137; Josh, 2026-11-19, picked "Build it"). A deploy whose commit changes a
+`migrations` path stops your app, copies its `DATA_DIR` to
+`~/.local/share/.<name>.snapshots/<time>-<commit>/data` (a reflinked copy on perigee's btrfs, so it
+costs little disk), then starts the new code; the deploy says "Snapshotted its data" and ends
+"its data was snapshotted first". If the new code fails its health check, the roll back restores
+that snapshot along with the old code. A restore never deletes: the data it replaces is kept as a
+snapshot of its own, so what your people wrote since is still there for a person to merge back by
+hand. Each app keeps its newest 3 snapshots within 10 GB together; a `DATA_DIR` over 10 GB isn't
+snapshotted (the deploy says so). These are for roll backs and never leave the box: keep writing
+your nightly `backups/<day>/`, which do. A deploy that changes no `migrations` path takes none.
 Once it is live, auto-deploy leaves the app there until main has a newer green commit, and a
 minion's or Taskmaster's `deploy_contraption` is refused meanwhile; a person's Deploy on the card ships main at
 once. Your home scheme's Taskmaster is told either way. With no CI, there is no last green and no
@@ -988,6 +1001,8 @@ Newest first.
   sessions, media list, openrouter, spend, asks, home, minions and the relay as this file describes them;
   `test/fake-citadel-contract.test.ts` runs the same calls on it and on the real API. Not faked: the
   audit, caps, jobs, embeddings, secrets (404 `not_faked`).
+- **2026-11-19:** A deploy that changes your `migrations` snapshots your `DATA_DIR` first, and a roll
+  back restores it with the code ("Data snapshots").
 - **2026-11-19:** Turns take `effort` (`low`, `medium`, `high`) and `toolSearch: true` (MCP tools
   load only when the agent searches for them). Kept turns record both. Claude Code doesn't let a
   turn clear old tool results before compacting yet: Citadel has no switch for it.

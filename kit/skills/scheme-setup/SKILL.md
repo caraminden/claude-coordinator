@@ -339,7 +339,7 @@ Nearly every scheme spent its first week on follow-up minions for these (onboard
 
 **8c. Top bar** (closes VA #57 and #66, ToC #139, Mandate #117). The contraption's page header is the kit's `<header class="cui-topbar">`, first in the page (`citadel:contraption-ui`, rule 24). *Done when* the live screenshot shows it.
 
-**8d. Nightly backup** (closes VA #51), for a contraption that keeps data (a database or files). The convention: the app writes `$DATA_DIR/backups/<day>/` before 04:00 PST, from a timer in `citadel-app.json` (`timers`, see `references/api.md` of `citadel:contraption-ui`). `on_calendar` is systemd time on the server, which runs UTC; 04:00 PST is 12:00 UTC, so use `*-*-* 10:30:00` (02:30 PST, 03:30 PDT). Citadel ships them off the box and never snapshots app data itself. *Done when* the timer is in `citadel-app.json` and one run wrote a `backups/<day>/` folder, or the app keeps no data.
+**8d. Nightly backup** (closes VA #51), for a contraption that keeps data (a database or files). The convention: the app writes `$DATA_DIR/backups/<day>/` before 04:00 PST, from a timer in `citadel-app.json` (`timers`, see `references/api.md` of `citadel:contraption-ui`). `on_calendar` is systemd time on the server, which runs UTC; 04:00 PST is 12:00 UTC, so use `*-*-* 10:30:00` (02:30 PST, 03:30 PDT). Citadel ships them off the box. Its own snapshots of `DATA_DIR`, taken before a deploy that changes the app's `migrations` (#1137), are only for roll backs and stay on the box, so they don't replace this backup. *Done when* the timer is in `citadel-app.json` and one run wrote a `backups/<day>/` folder, or the app keeps no data.
 
 **8e. Pin every agent you wrote**
 

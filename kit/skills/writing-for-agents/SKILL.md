@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Writing, testing and vetting documents for agents. Use before creating or rewriting a skill (one encoding a process you just did too), changing a rule in CLAUDE.md, AGENTS.md or .claude/rules/ (a hurried one-liner too), or adding a third-party skill.
+description: Writing, testing and vetting documents for agents. Use before creating or rewriting a skill (one that encodes a process you just did too), adding or changing a rule in CLAUDE.md, AGENTS.md or .claude/rules/ (a one-liner asked for in a hurry too), or adding a downloaded or third-party skill to a repo.
 ---
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.

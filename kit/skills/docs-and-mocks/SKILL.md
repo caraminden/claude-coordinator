@@ -1,6 +1,10 @@
 ---
 name: docs-and-mocks
-description: Mocks and pages people decide from, with the mock kit. Use when someone asks to see mocks or other designs, before making an HTML page, design doc or prototype (ideation, a proposal, a review, a new look), and to judge if a page is worth making.
+description: >
+  Mocks and the pages people decide from, made with the mock kit. Use when someone asks to see
+  mocks, ideas or other designs for a look or a screen, before making an HTML page, a design doc or a
+  clickable prototype (ideation, a proposal, an art or feature review, a new look), and to judge
+  whether a page is worth making at all.
 ---
 
 # Docs and mocks

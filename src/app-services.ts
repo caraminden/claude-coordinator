@@ -483,6 +483,11 @@ export class AppServices {
     return mine;
   }
 
+  /** Each unit's state, for the Status page (#1123): one that isn't installed reads load not-found. */
+  async unitStates(units: string[]): Promise<UnitState[]> {
+    return Promise.all(units.map((u) => this.state(u)));
+  }
+
   private async state(unit: string): Promise<UnitState> {
     const r = await this.systemctl('show', unit, '-p', 'LoadState', '-p', 'ActiveState', '-p', 'SubState', '-p', 'UnitFileState');
     const v = Object.fromEntries(r.out.split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));

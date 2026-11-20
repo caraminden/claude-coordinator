@@ -254,6 +254,14 @@ export const machineRoutes: Route[] = [
       json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now() });
     },
   },
+  // The Status page (#1123): Citadel's own health and each app's week, the apps scoped to the schemes they can see.
+  {
+    method: 'GET', path: '/api/status', ...people,
+    handler: async ({ res, app, session }) => {
+      if (!app.status) return json(res, 200, null);
+      json(res, 200, await app.status.read({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }));
+    },
+  },
   // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.
   // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).
   {

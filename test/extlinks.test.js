@@ -216,4 +216,6 @@ test('firefoxDownload: when the server gives no link, Chrome downloads it as bef
   const chrome = [];
   await firefoxDownload(`${origin}/c/api/tickets/5/file?path=a.zip&download`, { origin, post: async () => { throw new Error('403'); }, launch: () => assert.fail('no Firefox'), fallback: (a) => chrome.push(a) });
   assert.deepEqual(chrome, [`${origin}/c/api/tickets/5/file?path=a.zip&download`]);
+  await firefoxDownload(`${origin}/c/api/artifacts/9/raw?download`, { origin, post: async () => ({ path: 'javascript:x' }), launch: () => false, fallback: (a) => chrome.push(a) });
+  assert.equal(chrome[1], `${origin}/c/api/artifacts/9/raw?download`, 'a link Firefox can\'t be handed downloads here too, never swallowed');
 });

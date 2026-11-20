@@ -153,7 +153,7 @@ export async function firefoxDownload(address, { origin = location.origin, post 
   if (url.origin !== origin || !API_PATH.test(url.pathname)) return void launch(url.href);
   try {
     const { path } = await post(url.pathname + url.search);
-    launch(new URL(path, origin).href);
+    if (!launch(new URL(path, origin).href)) throw new Error('not a web address');
   } catch {
     fallback(url.href);
   }

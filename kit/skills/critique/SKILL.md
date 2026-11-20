@@ -93,7 +93,9 @@ running every rubric at once:
 - **Hand-offs** (`on_fail:`): after that many failed rounds an item goes to the step it names:
   `professor` (step 5), `person` (an ask card, as step 6 ends), or another entry's slug, whose
   rubric judges the item's next round in its place. With no `on_fail:`, a critic hands off as
-  `professor after 2 fails, person after 3`: step 5 and `max_rounds`.
+  `professor after 2 fails, person after 3`: step 5 and `max_rounds`. An `on_fail:` replaces
+  steps 5 and 6's own triggers: the professor comes in only where it names `professor`, and a
+  `person` step is the last round (with none, `max_rounds` still is).
 - **Record every round:** after each round of each rubric (a panel's judges and its referee too),
   call `review_set` with its slug and `run: {round, verdict}`. The verdict is `ask` when an item went
   to a person, else `fail` when an item needs another round, else `pass`. The page's dots and pass

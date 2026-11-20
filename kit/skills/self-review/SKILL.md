@@ -126,8 +126,8 @@ When the turn's "Review set:" line names rubrics, run `citadel:critique` for eac
 this diff, after the reviewer's fixes. Its blockers are findings like the reviewer's: fixed, or in
 "Not fixed" with a reason; a `gate: blocks-ready` rubric holds the change until it passes or a
 person decides (Citadel holds it too: `hand_off_land` refuses while its last recorded run is a fail).
-Record each round with `review_set` (slug, `run: {round, verdict}`), and the pre-ship review and the
-finding checker too when the line names them as entries. The critic doesn't set the label: you do, in 4.
+Record each round with `review_set` (slug, `run: {round, verdict}`), and the reviewer's and the
+finding checker's too, as slugs `pre-ship-review` and `finding-checker`. The critic doesn't set the label: you do, in 4.
 
 When Project facts names a **Real-hardware ledger**, everything this change does that wasn't
 seen working on real hardware gets an entry there, committed with the change, as the ledger's

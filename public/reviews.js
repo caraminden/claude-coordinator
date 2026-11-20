@@ -116,6 +116,8 @@ function columnUnits(here) {
   for (const e of here) {
     const key = isLens(e) ? 'lens' : e.panel && !e.kit ? `panel:${e.panel}` : null;
     if (key && seen.has(key)) continue;
+    // A panel sits where its first member that's on runs (orderLine), not at a switched-off one above it.
+    if (key !== 'lens' && key && !e.enabled && here.some((x) => x.panel === e.panel && !x.kit && x.enabled)) continue;
     if (key) seen.add(key);
     if (key === 'lens') out.push({ node: lensesCard(here.filter(isLens)) });
     else if (key) {

@@ -291,9 +291,7 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
   const tail: string[] = [];
   if (ctx.length) tail.push(`## Context\n\n${ctx.join('\n')}`);
   // Q13: people's disagreements with this entry's verdicts, newest first, for every later run and for calibration.
-  if (readsVerdicts(c) && extra.verdicts?.length) {
-    tail.push(`## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${extra.verdicts.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`);
-  }
+  if (readsVerdicts(c) && extra.verdicts?.length) tail.push(verdictsSection(extra.verdicts));
   if (c.requester && extra.requester?.text.trim()) {
     tail.push(`## The requester's words\n\nWhat ${extra.requester.author} asked this minion for, in their own words (the brief may quote them):\n\n${extra.requester.text.trim().slice(0, 4000).split('\n').map((l) => `> ${l}`).join('\n')}`);
   }
@@ -631,9 +629,19 @@ export class ReviewSet {
    * minion of fail or ask. A pass in a later round lifts it.
    */
   holds(projectId: number, ticketId: number): { slug: string; name: string; verdict: string }[] {
-    return (this.db.prepare(`SELECT e.slug, e.name, r.verdict FROM review_entries e JOIN review_runs r ON r.id = (SELECT max(id) FROM review_runs WHERE entry_id = e.id AND ticket_id = ?)
-      WHERE e.project_id = ? AND e.enabled = 1 AND e.trial = 0 AND e.gate = 'block' AND r.verdict != 'pass' ORDER BY e.position, e.name`).all(ticketId, projectId) as Row[])
-      .map((r) => ({ slug: r.slug, name: r.name, verdict: r.verdict }));
+    const all = this.list(projectId);
+    const last = (entryId: number) => this.db.prepare('SELECT id, verdict FROM review_runs WHERE entry_id = ? AND ticket_id = ? ORDER BY id DESC LIMIT 1').get(entryId, ticketId) as Row | undefined;
+    const out: { slug: string; name: string; verdict: string }[] = [];
+    for (const e of all) {
+      if (!e.enabled || e.trial || e.gate !== 'block') continue;
+      const r = last(e.id);
+      if (!r || r.verdict === 'pass') continue;
+      // Its panel's referee, or an entry its hand-offs name, judges in its place: a later pass there lifts it too.
+      const inPlace = all.filter((x) => x.id !== e.id && x.enabled && ((e.panel && x.panel === e.panel && x.stage === e.stage && x.kind === 'referee') || e.on_fail?.some((s) => s.to === x.slug)));
+      if (inPlace.some((x) => { const y = last(x.id); return y && y.id > r.id && y.verdict === 'pass'; })) continue;
+      out.push({ slug: e.slug, name: e.name, verdict: r.verdict });
+    }
+    return out;
   }
 
   /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
@@ -651,13 +659,21 @@ export class ReviewSet {
  * Write the scheme's enabled entries into `dir` as `<slug>.md` rubric files, replacing what was there, for a turn's
  * critics to read. Returns how many it wrote.
  */
+const verdictsSection = (vs: Verdict[]) =>
+  `## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${vs.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`;
+
 export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null): number {
   rmSync(dir, { recursive: true, force: true });
   // The kit's built-ins aren't rubrics: kitLine tells the turn which are off and where the scheme's additions are.
   const on = entries.filter((e) => e.enabled && !isKit(e));
   if (!on.length) return 0;
   mkdirSync(dir, { recursive: true });
-  for (const e of on) writeFileSync(join(dir, `${e.slug}.md`), renderEntry(e, { verdicts: verdicts.get(e.id), requester }));
+  // A hand-off to an entry since deleted or switched off would send the critic nowhere: those steps drop out.
+  const live = (s: OnFail) => s.to === 'professor' || s.to === 'person' || on.some((x) => x.slug === s.to);
+  for (const e of on) {
+    const steps = e.on_fail?.filter(live) ?? null;
+    writeFileSync(join(dir, `${e.slug}.md`), renderEntry({ ...e, on_fail: steps?.length ? steps : null }, { verdicts: verdicts.get(e.id), requester }));
+  }
   return on.length;
 }
 
@@ -785,11 +801,13 @@ export function orderLine(entries: ReviewEntry[]): string {
  * The turn's line on the kit's built-ins (Q10): which ones this scheme switched off, what that means for the ship, and
  * the scheme's additions to the ones still on, written into `dir` as `<slug>.md`. Empty when all are on as the kit has them.
  */
-export function kitLine(entries: ReviewEntry[], dir: string): string {
+export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map()): string {
   rmSync(dir, { recursive: true, force: true });
   const kit = entries.filter(isKit);
   const off = kit.filter((e) => !e.enabled);
-  const added = kit.filter((e) => e.enabled && e.body.trim());
+  // People's recorded verdicts reach a kit reviewer the way its additions do (Q13).
+  const said = (e: ReviewEntry) => (readsVerdicts(e.context) && verdicts.get(e.id)) || [];
+  const added = kit.filter((e) => e.enabled && (e.body.trim() || said(e).length));
   const out: string[] = [];
   if (off.some((e) => e.slug === 'pre-ship-review')) {
     const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
@@ -801,7 +819,7 @@ export function kitLine(entries: ReviewEntry[], dir: string): string {
   if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, and an off fresh eyes means no citadel:fresh-eyes Grunt.`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
-    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${e.body.trim()}\n`);
+    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : ''].filter(Boolean).join('\n\n')}\n`);
     out.push(`This scheme's additions to kit reviewers, read with the kit's own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
   }
   return out.length ? `Kit reviewers: ${out.join(' ')}` : '';

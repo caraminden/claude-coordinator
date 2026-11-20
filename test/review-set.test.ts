@@ -319,6 +319,40 @@ test('the run record: dots, first-round pass rate, a stuck entry, and the ship h
   assert.equal(set.record(3).get(set.get(3, 'ui')!.id)!.stuck, 'fail', 'five first rounds, all failed');
 });
 
+test("a blocking entry's fail is lifted by a later pass from what judges in its place: its panel's referee or its hand-off", () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'layout', name: 'Layout', gate: 'block', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'taste-ref', name: 'Taste referee', kind: 'referee', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'copy', name: 'Copy', gate: 'block' }, 'Josh');
+  set.create(3, { slug: 'tone', name: 'Tone' }, 'Josh');
+  set.save(3, 'copy', { on_fail: [{ after: 1, to: 'tone' }] }, 'Josh', 'x');
+  set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
+  set.recordRun(3, 'layout', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  set.recordRun(3, 'copy', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['layout', 'copy'], 'a pass from before the fail lifts nothing');
+  set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
+  set.recordRun(3, 'tone', { ticketId: 41, minion: '#41', round: 2, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['copy'], "the referee's merged pass governs the panel; another minion's hand-off pass doesn't count");
+  set.recordRun(3, 'tone', { ticketId: 40, minion: '#40', round: 2, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 40), [], 'the hand-off passed it');
+});
+
+test("hand-offs to an entry switched off drop out of the rubric, and a kit reviewer's file carries people's verdicts", () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3);
+  set.create(3, { slug: 'copy', name: 'Copy' }, 'Josh');
+  set.create(3, { slug: 'tone', name: 'Tone' }, 'Josh');
+  set.save(3, 'copy', { on_fail: [{ after: 1, to: 'tone' }, { after: 3, to: 'person' }] }, 'Josh', 'x');
+  set.save(3, 'tone', { enabled: false }, 'Josh', 'x');
+  const dir = join(root, 'dangling');
+  renderSet(set.list(3), dir, new Map());
+  assert.match(readFileSync(join(dir, 'copy.md'), 'utf8'), /^on_fail: person after 3 fails$/m);
+  set.recordVerdict(3, 'pre-ship-review', { person: 'Josh', words: 'Style nits are not blockers here.', ticketId: 40, minion: '#40' }, Date.UTC(2026, 10, 19));
+  const kdir = join(root, 'kit-verdicts');
+  kitLine(set.list(3), kdir, set.verdicts(3));
+  assert.match(readFileSync(join(kdir, 'pre-ship-review.md'), 'utf8'), /## Verdicts[\s\S]*Style nits are not blockers here/);
+});
+
 test("people's verdicts: recorded by a minion, an amber dot, read by the next run unless switched off, and removable", () => {
   const { set } = fresh();
   const e = set.create(3, { slug: 'ui', name: 'UI' }, 'Josh');
@@ -372,4 +406,6 @@ test("the describe agent may change a scheme entry's gate, panel and hand-offs, 
   assert.deepEqual(proposals[0].settings, { gate: 'advise', panel: 'Taste', on_fail: [{ after: 1, to: 'person' }] });
   assert.deepEqual(proposals[0].settings_before, { gate: null, panel: null, on_fail: null });
   assert.equal(proposals[0].after, '# UI', 'the body is kept when the edit leaves it out');
+  const moved = readProposals(JSON.stringify({ note: 'ok', edits: [{ slug: 'ui', settings: { position: 7 } }] }), set.list(3)).proposals[0];
+  assert.deepEqual([moved.settings, moved.settings_before], [{ position: 7 }, { position: set.get(3, 'ui')!.position }], 'and its run order');
 });

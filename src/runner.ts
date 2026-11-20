@@ -2731,9 +2731,10 @@ export class Runner {
       const reviewDir = join(dir, 'review-set');
       const reviews = this.store.reviews.list(project.id);
       // Phase 3: people's recorded verdicts, and the minion's ask for entries that read the requester's words.
-      const reviewOn = renderSet(reviews, reviewDir, this.store.reviews.verdicts(project.id), reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
+      const verdicts = this.store.reviews.verdicts(project.id);
+      const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
       // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
-      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'))].filter(Boolean);
+      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts)].filter(Boolean);
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.

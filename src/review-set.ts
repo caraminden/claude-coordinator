@@ -167,6 +167,12 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
   { slug: 'professor', name: 'Professor', kind: 'teacher', source: 'kit:citadel:professor', when: "When a critic hands it a stubborn fail: after 2 failed rounds, unless the critic's hand-offs say otherwise", what: "Takes the cause a critic keeps failing work on and returns ranked fixes concrete enough to type. Its record is whether the critic's next round passed after its fix." },
 ];
 export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
+/** A scheme's own agent file (#1089, Q1 "File"): `agent:.claude/agents/<name>.md` in its repo is its text, read live; its body holds the scheme's additions. */
+export const isAgentFile = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('agent:');
+/** Text that lives outside the set, the kit's or an agent file's: the set holds only the scheme's additions, and renders no rubric for it. */
+export const fromFile = (e: Pick<ReviewEntry, 'source'>) => isKit(e) || isAgentFile(e);
+/** What an agent file's text fixes: the rest (switch, column, run order, block or advise, hand-offs) is the scheme's to set. */
+const AGENT_FIXED = ['slug', 'name', 'kind', 'extends', 'source'] as const;
 /** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
 const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'context', 'model', 'effort', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration', 'panel', 'on_fail'] as const;
 
@@ -209,6 +215,50 @@ export function stageFor(t: Triggers): string {
 export function nameFor(slug: string): string {
   const words = slug.split('-').map((w) => (w.length <= 2 ? w.toUpperCase() : w));
   return words.join(' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+/** A scheme's agent file that reviews, critiques or teaches (#1089), as readAgentFiles finds it. */
+export type AgentFile = { path: string; slug: string; description: string; kind: string; text: string };
+// The words that make an agent a judge (Q2 "Guess", Josh 2026-11-19), first match wins: its name, then its description.
+const AGENT_GUESS: [RegExp, string][] = [[/\b(professor|teacher|tutor|coach)\b/, 'teacher'], [/\breferee\b/, 'referee'], [/\b(critic|critique|critiques|judge|judges)\b/, 'critic'], [/\b(checker|fact check)\b/, 'checker'], [/\b(audit|auditor)\b/, 'audit'], [/\b(review|reviews|reviewer)\b/, 'reviewer']];
+
+/** Which kind of judge an agent is: its frontmatter `kind:` (any other word, like none, hides it), else a guess from its name, then its description; null for none. */
+export function agentKind(name: string, description: string, kind = ''): string | null {
+  if (kind) return (KINDS as readonly string[]).includes(kind) ? kind : null;
+  for (const s of [name, description]) {
+    const words = s.toLowerCase().replace(/[-_]/g, ' ');
+    const hit = AGENT_GUESS.find(([re]) => re.test(words));
+    if (hit) return hit[1];
+  }
+  return null;
+}
+
+/** A scheme repo's `.claude/agents/*.md` that agentKind counts as judges, read live (at most 100 files of 256 KB). */
+export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] {
+  if (!repoDir) return [];
+  let names: string[];
+  try {
+    names = readdirSync(join(repoDir, '.claude', 'agents')).filter((n) => n.endsWith('.md')).sort().slice(0, 100);
+  } catch {
+    return [];
+  }
+  const out: AgentFile[] = [];
+  for (const n of names) {
+    let raw: string;
+    try {
+      raw = readFileSync(join(repoDir, '.claude', 'agents', n), 'utf8');
+    } catch {
+      continue;
+    }
+    if (raw.length > 256_000) continue;
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
+    const field = (k: string) => unquote(new RegExp(`^${k}:[ \\t]*(.*)$`, 'm').exec(fm?.[1] ?? '')?.[1].trim() ?? '');
+    const base = n.slice(0, -3);
+    const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const kind = agentKind(field('name') || base, field('description'), field('kind'));
+    if (slug && kind) out.push({ path: `.claude/agents/${n}`, slug, description: field('description'), kind, text: (fm ? raw.slice(fm[0].length) : raw).trim() });
+  }
+  return out;
 }
 
 /** A frontmatter value, unquoted the way the rubric files quote one (`when: "diff: public/**"`). */
@@ -444,11 +494,15 @@ export class ReviewSet {
     next.panel = next.panel?.trim() || null;
     if (next.on_fail && !next.on_fail.length) next.on_fail = null;
     // Back on trial, it only advises (Q12): a person putting a blocker back on trial means that, not "switch it to Advise first".
-    if (next.trial && !was.trial && !isKit(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
+    if (next.trial && !was.trial && !fromFile(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
     if (JSON.stringify(next) === JSON.stringify(snapshotOf(was))) return was;
     if (isKit(was)) {
       const changed = KIT_FIXED.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(was[k]));
       if (changed.length) throw new ReviewError(`${was.name} is the kit's: a scheme switches it on or off and adds to its text, but can't change its ${changed.join(', ')}`);
+    }
+    if (isAgentFile(was)) {
+      const changed = AGENT_FIXED.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(was[k]));
+      if (changed.length) throw new ReviewError(`${was.name} is this scheme's agent file ${was.source!.slice(6)}: change its ${changed.join(', ')} in the file (a kind: line sets the kind)`);
     }
     onlyCalibratedJudge(next);
     this.handOffsExist(projectId, next);
@@ -494,6 +548,17 @@ export class ReviewSet {
       if (have.has(b.slug)) return;
       this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', 'The kit\'s, added to the page', at);
     });
+  }
+
+  /**
+   * An entry for each of the scheme's reviewing agent files (readAgentFiles) it has no entry for yet, on, its text left
+   * in the file. An entry of the scheme's own with the same slug is that agent's row already (Q4 "One"), so it adds none.
+   */
+  ensureAgents(projectId: number, files: AgentFile[], at = Date.now()): void {
+    for (const f of files) {
+      if (this.get(projectId, f.slug)) continue;
+      this.create(projectId, { slug: f.slug, name: nameFor(f.slug), kind: f.kind, source: `agent:${f.path}` }, 'Citadel', `Read from ${f.path}`, at);
+    }
   }
 
   /** The scheme's kit built-in by slug, or null when it has none or its own entry took the slug. */
@@ -675,7 +740,7 @@ const verdictsSection = (vs: Verdict[]) =>
 export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null): number {
   rmSync(dir, { recursive: true, force: true });
   // The kit's built-ins aren't rubrics: kitLine tells the turn which are off and where the scheme's additions are.
-  const on = entries.filter((e) => e.enabled && !isKit(e));
+  const on = entries.filter((e) => e.enabled && !fromFile(e));
   if (!on.length) return 0;
   mkdirSync(dir, { recursive: true });
   // A hand-off to an entry since deleted or switched off would send the critic nowhere: those steps drop out.
@@ -787,7 +852,7 @@ export function reviewSetLine(dir: string, on: number, entries: ReviewEntry[] = 
  */
 export function orderLine(entries: ReviewEntry[]): string {
   // A teacher runs only when a critic hands off to it: it has no place in a column's order.
-  const on = entries.filter((e) => e.enabled && !isKit(e) && e.kind !== 'teacher');
+  const on = entries.filter((e) => e.enabled && !fromFile(e) && e.kind !== 'teacher');
   const cols: string[] = [];
   for (const stage of STAGES) {
     const col = on.filter((e) => e.stage === stage);
@@ -818,7 +883,8 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   const off = kit.filter((e) => !e.enabled);
   // People's recorded verdicts reach a kit reviewer the way its additions do (Q13).
   const said = (e: ReviewEntry) => (readsVerdicts(e.context) && verdicts.get(e.id)) || [];
-  const added = kit.filter((e) => e.enabled && (e.body.trim() || said(e).length));
+  const own = entries.filter(isAgentFile);
+  const added = entries.filter((e) => fromFile(e) && e.enabled && (e.body.trim() || said(e).length));
   const out: string[] = [];
   if (off.some((e) => e.slug === 'pre-ship-review')) {
     const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
@@ -828,10 +894,15 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   }
   const rest = off.filter((e) => e.slug !== 'pre-ship-review');
   if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, an off fresh eyes means no citadel:fresh-eyes Grunt, and an off professor means no citadel:professor, so a stubborn fail's hand-off to it goes to the next step (a person, at the last round).`);
+  const named = (list: ReviewEntry[]) => list.map((e) => `\`${e.slug}\` (${e.source!.slice(6)})`).join(', ');
+  const ownOff = own.filter((e) => !e.enabled);
+  if (ownOff.length) out.push(`This scheme switched off its own agents ${named(ownOff)}: don't run them where a skill or the scheme's instructions would, and a hand-off to one goes to its next step.`);
+  const ownOn = own.filter((e) => e.enabled);
+  if (ownOn.length) out.push(`This scheme's own reviewing agents, whose text is their file: ${named(ownOn)}. Where a hand-off or a skill names one of these slugs, run that agent (subagent_type its name) instead of a kit one.`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
-    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : ''].filter(Boolean).join('\n\n')}\n`);
-    out.push(`This scheme's additions to kit reviewers, read with the kit's own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
+    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : ''].filter(Boolean).join('\n\n')}\n`);
+    out.push(`This scheme's additions to kit reviewers and its own agents, read with their own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
   }
   return out.length ? `Kit reviewers: ${out.join(' ')}` : '';
 }

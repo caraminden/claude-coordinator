@@ -2,7 +2,7 @@
 // Everyone in the scheme reads it; people and the Taskmaster change anything. A minion saves only an entry's body,
 // for the critic loop's learning step (citadel:critique step 9): the switches stay a person's call (Q10, Q12).
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
-import { BUILT_INS, calibratedText, isKit, loadStarters, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type EntryFields, type ReviewEntry, type ReviewSet, type Verdict } from '../review-set.ts';
+import { BUILT_INS, calibratedText, isAgentFile, isKit, loadStarters, readAgentFiles, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type AgentFile, type EntryFields, type ReviewEntry, type ReviewSet, type Verdict } from '../review-set.ts';
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
 import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
 import { turnEnv } from '../turn-launch.ts';
@@ -24,12 +24,25 @@ function kitAgent(slug: string): { path: string; text: string } | null {
   }
 }
 
-/** An entry for the page: a kit built-in's `when` and `what` are the kit's, and its text is only the scheme's additions. */
-const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[] } = {}) => {
+/** The kit's built-ins and the scheme's reviewing agent files (#1089), each on the page once the scheme opens it. */
+function ensure(app: App, project: Project): void {
+  app.store.reviews.ensureBuiltIns(project.id);
+  app.store.reviews.ensureAgents(project.id, readAgentFiles(project.repo_dir));
+}
+
+/**
+ * An entry for the page: a kit built-in's `when` and `what` are the kit's, and its text is only the scheme's additions.
+ * An agent file's entry (`file`, its path) is the same with the file's description and text, read live; `agent` is null
+ * when the file is gone. A scheme's own entry with an agent file of the same slug shows that file's text too (Q4 "One").
+ */
+const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[]; agents?: AgentFile[] } = {}) => {
   const kit = isKit(e) ? BUILT_INS.find((b) => b.slug === e.slug) : undefined;
+  const file = isAgentFile(e) ? e.source!.slice(6) : null;
+  const own = kit ? undefined : (more.agents ?? []).find((a) => (file ? a.path === file : !isKit(e) && a.slug === e.slug));
   return {
-    ...e, kit: !!kit, what: kit?.what ?? null, when: kit?.when ?? (whenText(e.triggers) || 'ask'), text: kit ? e.body : renderEntry(e, { verdicts: more.verdicts }),
-    agent: kit ? kitAgent(e.slug) : null,
+    ...e, kit: !!kit, file, what: kit?.what ?? (file ? own?.description || null : null), when: kit?.when ?? (file ? 'When a skill, the scheme\'s instructions or a minion calls it: its description says when' : whenText(e.triggers) || 'ask'),
+    text: kit || file ? e.body : renderEntry(e, { verdicts: more.verdicts }),
+    agent: kit ? kitAgent(e.slug) : own ? { path: own.path, text: own.text } : null,
     calibrated: e.calibration ? calibratedText(e.calibration) : null,
     // The record (Q4) and people's verdicts (Q13), read-only here: only a minion adds to them.
     runs: more.record?.runs ?? [], rate: more.record?.rate ?? null, firsts: more.record?.firsts ?? 0, passes: more.record?.passes ?? 0, stuck: more.record?.stuck ?? null, verdicts: more.verdicts ?? [],
@@ -38,7 +51,7 @@ const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[] } 
 type Record_ = ReturnType<ReviewSet['record']> extends Map<number, infer R> ? R : never;
 /** One entry as the page shows it, with its record and verdicts. */
 function viewOne(app: App, project: Project, e: ReviewEntry) {
-  return view(e, { record: app.store.reviews.record(project.id).get(e.id), verdicts: app.store.reviews.verdicts(project.id).get(e.id) });
+  return view(e, { record: app.store.reviews.record(project.id).get(e.id), verdicts: app.store.reviews.verdicts(project.id).get(e.id), agents: readAgentFiles(project.repo_dir) });
 }
 /** The minion as the record names it: #N, or the Taskmaster. */
 const minionName = (caller: Ticket) => (caller.kind === 'coordinator' ? 'Taskmaster' : caller.number != null ? `#${caller.number}` : caller.title);
@@ -108,10 +121,11 @@ export const reviewRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/reviews', who: ['person', 'taskmaster', 'minion'],
     handler({ res, app, project }) {
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const record = app.store.reviews.record(project.id);
       const verdicts = app.store.reviews.verdicts(project.id);
-      return json(res, 200, { entries: app.store.reviews.list(project.id).map((e) => view(e, { record: record.get(e.id), verdicts: verdicts.get(e.id) })), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id) });
+      const agents = readAgentFiles(project.repo_dir);
+      return json(res, 200, { entries: app.store.reviews.list(project.id).map((e) => view(e, { record: record.get(e.id), verdicts: verdicts.get(e.id), agents })), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id) });
     },
   },
   {
@@ -134,7 +148,7 @@ export const reviewRoutes: Route[] = [
     // New: blank, or on top of a kit starter (`extends`), and always on trial first (Q12).
     method: 'POST', path: '/api/projects/:project/reviews', who: ['person', 'taskmaster'], refuse: 'Only people and Taskmasters add reviewers and critics; ask your Taskmaster',
     async handler({ req, res, app, session, project }) {
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const body = await readJson(req);
       const f = fieldsFrom(body);
       const starter = f.extends ? loadStarters().find((s) => s.slug === f.extends) : null;
@@ -160,7 +174,7 @@ export const reviewRoutes: Route[] = [
       if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new HttpError(400, 'Describe the change in 1 to 2,000 characters');
       const place = app.claude.place(session.uid);
       if (!place) throw new HttpError(409, "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the agent on");
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const entries = app.store.reviews.list(project.id);
       let reply: string;
       try {
@@ -182,7 +196,7 @@ export const reviewRoutes: Route[] = [
         throw new HttpError(403, "A minion saves only an entry's body (what it learned) and a calibration run's counts; switches, triggers and names are for people and the Taskmaster");
       }
       if (body.version !== undefined && !Number.isInteger(body.version)) throw new HttpError(400, 'version is the whole number you started from');
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       if (body.calibration !== undefined) {
         // A calibration run's counts (citadel:critique, references/calibrate.md); the store decides whether it comes off trial.
         if (Object.keys(f).length) throw new HttpError(400, 'Send a calibration on its own, not with other changes');
@@ -207,7 +221,7 @@ export const reviewRoutes: Route[] = [
     async handler({ req, res, app, session, project, params }) {
       const { dir } = (await readJson(req)) ?? {};
       if (dir !== 'up' && dir !== 'down') throw new HttpError(400, 'dir is up or down');
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const e = run(() => app.store.reviews.move(project.id, decodeURIComponent(params.slug), dir, session.name));
       broadcast(app, project);
       return json(res, 200, viewOne(app, project, e));
@@ -218,7 +232,7 @@ export const reviewRoutes: Route[] = [
     method: 'POST', path: '/api/projects/:project/reviews/:slug/runs', who: ['minion', 'taskmaster'], refuse: 'Only the minion that ran it records a run',
     async handler({ req, res, app, caller, project, params }) {
       const { round, verdict } = (await readJson(req)) ?? {};
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const r = run(() => app.store.reviews.recordRun(project.id, decodeURIComponent(params.slug), { ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!), round, verdict }));
       broadcast(app, project);
       return json(res, 201, r);
@@ -229,7 +243,7 @@ export const reviewRoutes: Route[] = [
     method: 'POST', path: '/api/projects/:project/reviews/:slug/verdicts', who: ['minion', 'taskmaster'], refuse: "Only a minion records a verdict, when a person disagrees with a critic in its chat",
     async handler({ req, res, app, caller, project, params }) {
       const { person, words } = (await readJson(req)) ?? {};
-      app.store.reviews.ensureBuiltIns(project.id);
+      ensure(app, project);
       const v = run(() => app.store.reviews.recordVerdict(project.id, decodeURIComponent(params.slug), { person, words, ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!) }));
       broadcast(app, project);
       return json(res, 201, v);

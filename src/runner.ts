@@ -616,6 +616,8 @@ export class Runner {
   private dataDir: string;
   /** Each warm session's held system prompt (#1276). */
   holds: Holds;
+  /** The repos found to hold the live checkout's code: their minions' prompts carry the deploy lines (buildLaunch). */
+  private deploysRepos = new Set<string>();
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
@@ -3153,7 +3155,8 @@ export class Runner {
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
       if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
       // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
-      const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
+      // Sticky once true (#1276): a `git cat-file` that fails under load would flip it off for one turn, and with it the system prompt.
+      const deploys = ticket.kind !== 'coordinator' && !!project.repo_dir && (this.deploysRepos.has(project.repo_dir) || (runsRepo(project.repo_dir, this.liveHead()) && !!this.deploysRepos.add(project.repo_dir)));
       // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
       // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
       const builds = landsBuilds(project.repo_dir);

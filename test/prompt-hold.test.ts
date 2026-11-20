@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { changeNote, decideHold, HOLD_CAP_MS, HOLD_WARM_MS, NOTE_MAX, promptHash, type HoldRecord } from '../src/prompt-hold.ts';
+import { BACK_NOTE, changeNote, decideHold, HOLD_CAP_MS, HOLD_WARM_MS, NOTE_MAX, promptHash, type HoldRecord } from '../src/prompt-hold.ts';
 import { Runner } from '../src/runner.ts';
+import { readout } from '../tools/prompt-hold-readout.ts';
 import { transcriptPath } from '../src/sessions.ts';
 import { jsonLines, stopTurns, testPins, until } from './helpers.ts';
 testPins();
@@ -50,6 +51,11 @@ test('it takes the current prompt when cold, past the cap, on a new session, or 
     assert.equal(d.note, null);
     assert.equal(d.record.since, now, 'the cap counts from the new take');
   }
+  // Changed and changed back: a session that read the note hears it no longer applies, once.
+  const back = decide(old, { record: recordOf(old, { sent: promptHash(edited) }) });
+  assert.equal(back.held, false);
+  assert.equal(back.note, BACK_NOTE);
+  assert.equal(back.record.pending, promptHash(old));
   // No change: nothing held, nothing to say.
   const same = decide(old);
   assert.equal(same.held, false);
@@ -61,6 +67,19 @@ test('the note lists a new section and a dropped one', () => {
   const note = changeNote(old, { base: old.base, approval: ['Ask first on high risk.'] });
   assert.match(note, /New or reworded:\nAsk first on high risk\./);
   assert.match(note, /- "Link files by path\."/);
+});
+
+test('the readout counts warm turns, the ones on a changed system prompt and the held ones, per Pacific day', () => {
+  const at = Date.UTC(2026, 10, 20, 20); // 12:00 PST
+  const row = (ticket_id: number, ended_at: number, system: object, extra = {}) => ({ ticket_id, ended_at, duration_ms: 1000, cache_write_tokens: 500, prompt_digest: JSON.stringify({ system, ...extra }) });
+  const [day] = readout([
+    row(1, at, { base: 'a' }),
+    row(1, at + 60_000, { base: 'b' }), // warm, changed
+    row(1, at + 120_000, { base: 'b' }, { held: true }), // warm, held
+    row(1, at + 3 * 3600_000, { base: 'c' }), // cold: not counted
+    row(2, at, { base: 'a' }),
+  ]);
+  assert.deepEqual(day, { day: '2026-11-20', warm: 2, sysChanged: 1, held: 1, changedWrites: 500 });
 });
 
 const root = mkdtempSync(join(tmpdir(), 'prompt-hold-'));

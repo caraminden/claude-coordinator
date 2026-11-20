@@ -58,13 +58,17 @@ export function decideHold(o: { record: HoldRecord | null; held: PromptSections 
   if (record.session !== session) return take('session');
   if (!held) return take('cold');
   if (lastEnd === null || now - lastEnd >= HOLD_WARM_MS) return take(record.hash === hash ? null : 'cold');
-  if (record.hash === hash) return { system: current, note: null, held: false, record: { ...record, sent: hash, pending: undefined }, reload: null };
+  // Back to the held text: a session that read a note about a later version hears that it no longer applies.
+  if (record.hash === hash) return { system: current, note: record.sent === hash ? null : BACK_NOTE, held: false, record: { ...record, pending: hash }, reload: null };
   if (now - record.since >= HOLD_CAP_MS) return take('cap');
   const note = changeNote(held, current);
   if (note.length > NOTE_MAX) return take('too-long');
   // The note goes once per change: a session that read it keeps it in its conversation (a compaction clears `sent`).
   return { system: held, note: record.sent === hash ? null : note, held: true, record: { ...record, pending: hash }, reload: null };
 }
+
+/** The note for a session whose instructions changed and then changed back to its system prompt's. */
+export const BACK_NOTE = 'Your instructions are back to this conversation\'s system prompt as written: the last note about changed instructions no longer applies.';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 

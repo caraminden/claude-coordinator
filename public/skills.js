@@ -16,6 +16,9 @@ let scope = 'scheme';
 let data = null;
 let pageEl = null;
 let token = 0;
+// Rows are ordered by their runs only when the counts were there at the first draw; counts that fill in later keep the order
+// the person is looking at (no reflow without input) until they switch tab or scope.
+let ranked = false;
 
 export function skillsPage() {
   pageEl = h('section', { class: 'artifacts-main skills-main' });
@@ -32,15 +35,29 @@ export function onSkillsChanged() {
   draw();
 }
 
+/** The list comes at once, with the counts if the server has a report; else the counts follow in a second request. */
 async function load() {
   const mine = ++token;
+  const q = scope === 'all' ? '?all=1' : '';
   try {
-    const got = await api(`api/projects/${view.projectId}/skills${scope === 'all' ? '?all=1' : ''}`);
+    const got = await api(`api/projects/${view.projectId}/skills${q}`);
     if (mine !== token) return;
     data = got;
+    ranked = !!got.usage;
   } catch (err) {
     if (mine !== token) return;
     data = { error: err.message };
+  }
+  draw();
+  if (data.error || data.usage) return;
+  try {
+    const got = await api(`api/projects/${view.projectId}/skills/usage${q}`);
+    if (mine !== token) return;
+    data.usage = got.usage;
+    data.since = got.since;
+  } catch (err) {
+    if (mine !== token) return;
+    data.usageError = err.message;
   }
   draw();
 }
@@ -57,19 +74,19 @@ function draw() {
   const counts = { kit: data.items.filter((i) => i.source === 'kit' && i.kind === 'skill').length, scheme: data.items.filter((i) => i.source === 'scheme').length, agents: data.items.filter((i) => i.source === 'kit' && i.kind === 'agent').length };
   const bar = h('div', { class: 'sk-bar' },
     h('div', { class: 'rules-seg sk-tabs', role: 'group', 'aria-label': 'Show' },
-      TABS.map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(tab === k), onclick: () => { tab = k; draw(); } }, l, h('span', { class: 'sk-count' }, String(counts[k]))))),
+      TABS.map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(tab === k), onclick: () => { tab = k; ranked = !!data.usage; draw(); } }, l, h('span', { class: 'sk-count' }, String(counts[k]))))),
     data.canKit ? h('div', { class: 'rules-seg sk-scope', role: 'group', 'aria-label': 'Counts from' },
-      [['scheme', 'This scheme'], ['all', 'Every scheme']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(scope === k), onclick: () => { if (scope === k) return; scope = k; load(); } }, l))) : null,
+      [['scheme', 'This scheme'], ['all', 'Every scheme']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(scope === k), onclick: () => { if (scope === k) return; scope = k; data.usage = null; data.usageError = null; load(); } }, l))) : null,
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: newSkill }, '+ New skill'));
-  pageEl.replaceChildren(head, bar, ...list());
+  pageEl.replaceChildren(head, bar, ...list().filter(Boolean));
 }
 
-const usageOf = (item) => (item.kind === 'agent' ? data.usage.agents : data.usage.skills)[item.name];
+const usageOf = (item) => (item.kind === 'agent' ? data.usage?.agents : data.usage?.skills)?.[item.name];
 
 function list() {
   const items = data.items.filter((i) => (tab === 'agents' ? i.source === 'kit' && i.kind === 'agent' : tab === 'kit' ? i.source === 'kit' && i.kind === 'skill' : i.source === 'scheme'));
-  const byRuns = (a, b) => (usageOf(b)?.runs ?? 0) - (usageOf(a)?.runs ?? 0) || a.name.localeCompare(b.name);
+  const byRuns = (a, b) => (ranked ? (usageOf(b)?.runs ?? 0) - (usageOf(a)?.runs ?? 0) : 0) || a.name.localeCompare(b.name);
   if (tab === 'scheme' && !items.length) {
     return [h('p', { class: 'muted sk-empty' }, `${view.project?.name ?? 'This scheme'} has no skills or Grunt types of its own yet (its repo's .claude/skills and .claude/agents). `, h('button', { type: 'button', class: 'cui-btn', onclick: newSkill }, '+ New skill'))];
   }
@@ -95,7 +112,9 @@ function row(item) {
   const chip = item.source !== 'kit' ? h('span', { class: 'cui-chip', 'data-tone': 'info' }, 'This scheme\'s')
     : item.kind === 'agent' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'Kit Grunt')
       : off ? h('span', { class: 'cui-chip', 'data-tone': 'warn' }, 'Off here') : h('span', { class: 'cui-chip', 'data-tone': 'ok' }, 'Default, recommended');
-  const stats = u
+  // Until the counts arrive the stats line holds a bar and the "When, where and how" line its place (css: the slot is a fixed height, used or not).
+  const stats = !data.usage ? (data.usageError ? 'Counts unavailable: ' + data.usageError : h('span', { class: 'sk-ghost', 'aria-label': 'Loading counts' }))
+    : u
     ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} in ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${u.shipped} of ${u.runs} followed by a ship`
     : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
   return h('article', { class: `sk-row${off ? ' off' : ''}` },
@@ -103,7 +122,7 @@ function row(item) {
     item.trigger ? h('p', { class: 'sk-when' }, h('b', {}, 'When: '), item.trigger) : null,
     item.what ? h('p', { class: 'sk-what muted' }, item.what) : null,
     h('p', { class: 'sk-stats' }, stats),
-    u ? detail(item, u) : null);
+    h('div', { class: 'sk-slot' }, u ? detail(item, u) : null));
 }
 
 /** When, where and how (Josh's words): the step of the turn, the kinds of minion, the Grunts, and the last few runs. */

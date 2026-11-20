@@ -11,7 +11,12 @@
 .sk-top .rules-switch { margin-left: auto; }
 .sk-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); font-size: 0.92rem; overflow-wrap: anywhere; min-width: 0; }
 .sk-when, .sk-what { font-size: 0.9rem; line-height: 1.4; }
-.sk-stats { font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.sk-stats { font-size: 0.85rem; font-variant-numeric: tabular-nums; min-height: 1.3em; }
+.sk-ghost { display: inline-block; width: 24ch; max-width: 100%; height: 0.8em; border-radius: 4px; background: var(--line); opacity: 0.6; vertical-align: -0.05em; }
+/* The "When, where and how" line's height, there or not, so counts arriving move nothing. */
+.sk-slot { min-height: 1.45rem; }
+.sk-detail summary { box-sizing: border-box; height: 1.45rem; line-height: 1.05rem; }
+.sk-detail[open] summary { height: auto; min-height: 1.45rem; }
 .sk-detail { font-size: 0.85rem; }
 .sk-detail summary { cursor: pointer; padding: 0.2rem 0; color: var(--accent); }
 .sk-detail p { margin: 0.25rem 0 0; }
@@ -24,6 +29,7 @@
 .sk-new, .sk-confirm { width: min(36rem, calc(100vw - 2rem)); }
 
 @media (max-width: 600px) {
+  .sk-stats { min-height: 2.6em; }
   .skills-main .sk-bar .spacer { display: none; }
   .skills-main .sk-tabs { width: 100%; }
 }

@@ -56,8 +56,23 @@ console.log('page', JSON.stringify(await ev(`({ href: location.href, wco: matchM
 // Points in CSS px of the page: across the header strip, and just under it.
 const dpr = await ev('devicePixelRatio');
 const W = await ev('innerWidth');
-const points = [[150, 4], [150, 16], [280, 16], [480, 16], [560, 16], [900, 16], [W - 220, 16], [W - 160, 8], [W - 300, 40], [480, 60]];
-for (const [x, y] of points) {
+// The empty space of each header in the strip, its ‹, and a point below the strip that should not drag.
+const points = await ev(`(() => {
+  const r = (sel) => document.querySelector(sel)?.getBoundingClientRect();
+  const out = [];
+  for (const p of ['.shelf', '.sidebar']) {
+    const s = r(p + '[open] > summary'), last = document.querySelector(p + '[open] > summary > :last-child')?.getBoundingClientRect();
+    if (s) { out.push([p + ' above header', s.left + 40, Math.max(2, s.top / 2)]); out.push([p + ' header gap', Math.round((last.right + s.right - 24) / 2), Math.round(s.top + s.height / 2)]); }
+  }
+  const row = document.querySelector('.ticket-head > .row'), rr = row.getBoundingClientRect(), kids = [...row.children].filter((k) => k.getClientRects().length);
+  const end = Math.max(...kids.map((k) => k.getBoundingClientRect().right)), stop = navigator.windowControlsOverlay?.getTitlebarAreaRect().right || rr.right;
+  out.push(['chat head above row', Math.round((end + stop) / 2), Math.max(2, Math.round(rr.top / 2))]);
+  out.push(['chat head row gap', Math.round((end + stop) / 2), Math.round(rr.top + rr.height / 2)]);
+  out.push(['chat head row, by the controls', Math.round(stop - 20), Math.round(rr.top + rr.height / 2)]);
+  out.push(['below the strip (no drag)', Math.round((end + stop) / 2), Math.round(rr.bottom + 30)]);
+  return out;
+})()`);
+for (const [label, x, y] of points) {
   const what = await ev(`(() => { const e = document.elementFromPoint(${x}, ${y}); return e ? (e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\\s+/).join('.') : '') + ' "' + (e.textContent || '').trim().slice(0, 20) + '" region:' + getComputedStyle(e).appRegion) : 'none'; })()`);
   const before = await where();
   const sx = Math.round((before.x + x) * dpr), sy = Math.round((before.y + y) * dpr);
@@ -65,9 +80,20 @@ for (const [x, y] of points) {
   await sleep(500);
   const after = await where();
   const moved = after.x !== before.x || after.y !== before.y;
-  console.log(`${moved ? 'DRAGS  ' : 'no drag'} at ${x},${y}: ${what}`);
+  console.log(`${moved ? 'DRAGS  ' : 'no drag'} ${label} (${x},${y}): ${what}`);
   if (moved) { await mouse(`drag ${sx + 60} ${sy + 40} ${sx} ${sy}`); await sleep(500); }
   await mouse('key {ESC}');
+}
+// The ‹ of each open panel still folds it, by a real click.
+for (const p of ['.shelf', '.sidebar']) {
+  const c = await ev(`(() => { const s = document.querySelector('${p}[open] > summary'); if (!s) return null; const b = s.getBoundingClientRect(); return [b.right - 10, b.top + b.height / 2]; })()`);
+  if (!c) continue;
+  const o = await where();
+  await mouse(`click ${Math.round((o.x + c[0]) * dpr)} ${Math.round((o.y + c[1]) * dpr)}`);
+  await sleep(600);
+  console.log(`${p} ‹ ${(await ev(`document.querySelector('${p}').open`)) ? 'did NOT fold' : 'folds'} the panel`);
+  await ev(`(document.querySelector('${p}').open = true, 1)`);
+  await sleep(400);
 }
 const b = await ev('({ left: screenX, top: screenY, width: outerWidth, height: outerHeight })');
 await mouse(`shot ${path.join(process.env.TEMP, 'electron-drag.png')} ${[b.left, b.top, b.width, b.height].map((v) => Math.round(v * dpr)).join(' ')}`);

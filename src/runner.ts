@@ -1013,7 +1013,7 @@ export class Runner {
   private restoreDir(ticket: Ticket, project: Project) {
     if (ticket.kind === 'ticket' && !ticket.cwd) {
       try {
-        const { cwd, branch } = recoverTicketDir(this.dataDir, project.id, project.repo_dir, ticket.id, ticket.number, ticket.title);
+        const { cwd, branch } = recoverTicketDir(this.dataDir, project.id, project.repo_dir, ticket.id, ticket.number, ticket.title, ticket.build);
         this.store.setTicketDir(ticket.id, cwd, branch);
         // The caller's copy too: the turn about to start runs in it.
         Object.assign(ticket, { cwd, branch });

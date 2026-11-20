@@ -265,6 +265,22 @@ test('a minion whose worktree was never recorded (creation cut off by a restart)
   assert.match(notes(half.id).at(-1)!, /could not make one/);
 });
 
+test("a feeder minion whose creation was cut off is recovered from its build's branch, as createTicketDir makes it (R2)", async () => {
+  const s = scheme('Feeder');
+  git(s.repo, 'checkout', '-q', '-b', 'build/4');
+  writeFileSync(join(s.repo, 'build.txt'), 'the build\n');
+  git(s.repo, 'add', '.');
+  git(s.repo, 'commit', '-qm', 'build work');
+  const tip = git(s.repo, 'rev-parse', 'HEAD');
+  git(s.repo, 'checkout', '-q', 'main');
+  const feeder = store.createTicket({ project_id: s.id, title: 'Feed it', permission_mode: 'default', created_by: 'T' });
+  store.updateTicket(feeder.id, { build: 4 });
+  await runner.reopened(feeder.id);
+  const t = store.getTicket(feeder.id)!;
+  assert.equal(t.branch, `ticket/${feeder.number}-feed-it`);
+  assert.equal(git(t.cwd, 'rev-parse', 'HEAD'), tip, "cut from build/4, not the checkout's main");
+});
+
 test('one cleanup note per scheme per Pacific day: a second sweep the same day adds to it, the next day starts a new one (#1055)', async () => {
   const s = scheme('Daily');
   const day1 = Date.parse('2026-11-19T20:00:00Z');

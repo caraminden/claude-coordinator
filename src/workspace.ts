@@ -257,9 +257,9 @@ export async function createTicketDir(
  * no folder recorded, though createTicketDir may have made it. Its turns ran in the server's own folder, where Claude
  * filed its session under that folder's name, so no later turn found it (#899). This takes the folder where
  * createTicketDir puts it, on whatever branch it holds, or makes it: on its branch if that exists, else a new one from
- * the scheme checkout's HEAD. Synchronous: it runs just before a turn starts.
+ * its build's branch (a feeder's) or the scheme checkout's HEAD. Synchronous: it runs just before a turn starts.
  */
-export function recoverTicketDir(dataDir: string, projectId: number, repoDir: string | null, ticketId: number, ticketNumber: number | null, title: string): { cwd: string; branch: string | null } {
+export function recoverTicketDir(dataDir: string, projectId: number, repoDir: string | null, ticketId: number, ticketNumber: number | null, title: string, build: number | null = null): { cwd: string; branch: string | null } {
   const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
   const gitSync = (args: string[], dir: string) => execFileSync('git', args, { cwd: dir, timeout: GIT_TIMEOUT_MS, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   if (!repoDir) {
@@ -275,7 +275,7 @@ export function recoverTicketDir(dataDir: string, projectId: number, repoDir: st
       have = false;
     }
     gitSync(['worktree', 'prune'], repoDir);
-    gitSync(['worktree', 'add', '--quiet', ...(have ? [cwd, branch] : ['-b', branch, cwd, 'HEAD'])], repoDir);
+    gitSync(['worktree', 'add', '--quiet', ...(have ? [cwd, branch] : ['-b', branch, cwd, buildBranch(repoDir, build) ?? 'HEAD'])], repoDir);
   }
   // A folder git never finished making is no worktree: refuse it rather than run the turn somewhere else.
   if (!existsSync(join(cwd, '.git'))) throw new Error(`${cwd} is not a git worktree`);

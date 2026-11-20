@@ -263,6 +263,65 @@ test("a land during a pass isn't lost; an old red escalates while a run is going
   assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
 });
 
+test("a pinning run with no verdict, or red only on what it can't name, is no pass: it is run again, then the pin stops and the Taskmaster has it (R1)", async () => {
+  for (const nothing of ['verify: no verdict\n', red('the check'), red('CI')]) {
+    const w = world();
+    w.commit('one');
+    await w.tick();
+    await w.finish(GREEN);
+    const c2 = w.commit('two'), c3 = w.commit('three'), c4 = w.commit('four');
+    w.fm.landed(PEEK, 2, c2), w.fm.landed(PEEK, 3, c3), w.fm.landed(PEEK, 4, c4);
+    await w.tick();
+    await w.finish(red('test/a.test.ts'));
+    assert.equal(w.runs.at(-1)!.sha, c2, 'pinning starts at the oldest');
+    await w.finish(nothing);
+    assert.equal(w.runs.at(-1)!.sha, c2, `${nothing.trim()}: two is run again, not passed`);
+    await w.finish(nothing);
+    assert.equal(w.told.length, 0, `${nothing.trim()}: no minion is blamed for a red nothing pinned on it`);
+    assert.equal(w.tm.length, 1, 'the Taskmaster has it');
+    assert.match(w.tm[0], /test\/a\.test\.ts/);
+    assert.match(w.tm[0], /no verdict/);
+    assert.equal(w.fm.knownRed(PEEK), 'test/a.test.ts\tthe Taskmaster has it');
+    const runs = w.runs.length;
+    await w.tick();
+    assert.equal(w.runs.length, runs, 'the head counts as verified: not run again until main moves');
+  }
+  // A retry that gives a verdict goes on as usual.
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(GREEN);
+  const c2 = w.commit('two'), c3 = w.commit('three');
+  w.fm.landed(PEEK, 2, c2), w.fm.landed(PEEK, 3, c3);
+  await w.tick();
+  await w.finish(red('a'));
+  await w.finish('verify: no verdict\n');
+  await w.finish(red('a'));
+  assert.deepEqual(w.told.map((t) => t.ticket), [2]);
+});
+
+test("a reset while a pass awaits git sticks: the pass doesn't write its old state back, and the run it started stays known (R3)", async () => {
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(red('a'));
+  assert.equal(w.fm.knownRed(PEEK), 'a\tthe Taskmaster has it');
+  const c2 = w.commit('two');
+  const pass = w.tick(); // reads the state, then awaits git to start a run on two
+  w.fm.reset(PEEK);
+  await pass;
+  assert.equal(w.fm.knownRed(PEEK), '', 'the ledger the reset cleared stays cleared');
+  const s = w.kv.get(`fast-mode:${PEEK}`)!;
+  assert.equal(s.verified, undefined, 'no verdict from before the reset');
+  assert.equal(s.running?.sha, c2, 'the run the pass started is still known, so it is not started twice');
+  assert.equal(s.running?.stale, true, 'and its result is dropped');
+  const runs = w.runs.length;
+  await w.finish(red('a'));
+  assert.equal(w.runs.length, runs + 1, 'the head is run afresh');
+  await w.finish(red('a'));
+  assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
+});
+
 test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, and the run goes on", async () => {
   const w = world();
   w.commit('one');

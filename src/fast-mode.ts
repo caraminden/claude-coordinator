@@ -33,6 +33,8 @@ interface Pinning {
   /** The range's commits before `head`, oldest first, and which of them is next. */
   shas: string[];
   next: number;
+  /** The run on `shas[next]` gave no verdict once and is being run again; a second goes to the Taskmaster unpinned. */
+  retried?: boolean;
   /** The ids no ledger entry had and no commit is blamed for yet: the first commit failing on one is its culprit. */
   ids: string[];
   /** When the red was seen (the 30 minutes start then), and its run's output, for the ids left on `head`. */
@@ -85,6 +87,8 @@ export const ESCALATE_MS = 30 * 60_000;
 export const PIN_MAX = 8;
 // shortcut: every scheme's branch is main, as land.sh's BRANCH default; read land.local.sh's BRANCH if one moves.
 const BRANCH = 'main';
+/** The ids land.sh --verify gives a failure it can't name: a red only on one of these says nothing of the other ids. */
+const UNNAMED = ['the check', 'CI'];
 
 /** What --verify printed: green, red with its failing ids, or no verdict. */
 export function verifyResult(output: string): { verdict: 'green' } | { verdict: 'red'; ids: string[] } | { verdict: 'none' } {
@@ -102,6 +106,8 @@ export class FastMode {
   private again = false;
   /** Each scheme's failure as last said: a failure that repeats is said once, not every 30 s. */
   private said = new Map<number, string>();
+  /** Each scheme's resets: a pass that awaited git across one doesn't write its old state back. */
+  private resets = new Map<number, number>();
   private readonly d: FastModeDeps;
   private readonly now: () => number;
   private readonly git: (cwd: string, ...args: string[]) => Promise<string>;
@@ -142,6 +148,7 @@ export class FastMode {
    * going (fast, off and fast again) is kept so its job isn't started twice, but its result is dropped: it may have been
    * a pinning run that checked only a few ids. */
   reset(projectId: number) {
+    this.resets.set(projectId, (this.resets.get(projectId) ?? 0) + 1);
     const { running } = this.state(projectId);
     this.d.set(key(projectId), { reds: [], landed: {}, ...(running ? { running: { ...running, stale: true } } : {}) });
   }
@@ -184,8 +191,14 @@ export class FastMode {
   private async step(projectId: number, repo: string) {
     const s = this.state(projectId);
     const jobDir = join(this.d.dir(projectId), 'job');
-    // land() writes `landed` while this awaits git: save with the newest map, not the one read here.
-    const save = () => this.d.set(key(projectId), { ...s, landed: this.state(projectId).landed });
+    const gen = this.resets.get(projectId);
+    // land() writes `landed` while this awaits git: save with the newest map, not the one read here. A reset meanwhile
+    // wins: only the run this pass leaves going is kept, its result dropped, so its job isn't started twice.
+    const save = () => {
+      const { running: _, ...now } = this.state(projectId);
+      if (this.resets.get(projectId) !== gen) return this.d.set(key(projectId), { ...now, ...(s.running ? { running: { ...s.running, stale: true } } : {}) });
+      this.d.set(key(projectId), { ...s, landed: now.landed });
+    };
     if (s.running) {
       const job = this.d.jobs.state(jobDir, 20_000);
       if (job && job.code === null) {
@@ -245,8 +258,20 @@ export class FastMode {
         pin.ids = pin.ids.filter((id) => !hit.includes(id));
         await this.open(projectId, repo, s, sha, hit, output, undefined, pin.at);
       }
+      // No verdict, or red only on a failure it couldn't name: the ids left neither passed nor failed on this commit,
+      // so it is run again once, then the pin stops rather than blame a later commit's minion.
+      if (pin.ids.length && (r.verdict === 'none' || (r.verdict === 'red' && r.ids.some((id) => UNNAMED.includes(id) && !hit.includes(id))))) {
+        if (!pin.retried) {
+          pin.retried = true;
+          return;
+        }
+        delete s.pin;
+        s.verified = pin.head;
+        return this.open(projectId, repo, s, pin.head, pin.ids, pin.output ?? '', `on ${pin.head.slice(0, 12)}; pinning it on ${sha.slice(0, 12)} gave no verdict twice, so no culprit was found`, pin.at);
+      }
       if (pin.ids.length && pin.next + 1 < pin.shas.length) {
         pin.next++;
+        delete pin.retried;
         return;
       }
       delete s.pin;

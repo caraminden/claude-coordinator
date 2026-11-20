@@ -2,7 +2,7 @@
 // failures already on main through, and --verify runs the full check and CI on a commit on main.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, queueSetup, setup, until } from './scheme-setup-land-fixture.ts';
@@ -16,7 +16,12 @@ function fakeCi(dir: string) {
   mkdirSync(bin);
   writeFileSync(join(bin, 'gh'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\necho "${1:0:12}" >>"$CI_DIR/asked"\nf=$CI_DIR/${1:0:12}\n[ -e "$f" ] || exit 3\ntail -n +2 "$f"\nexit "$(head -n 1 "$f")"\n', { mode: 0o755 });
-  const answer = (sha: string, code: number, out = '') => writeFileSync(join(ci, sha.slice(0, 12)), `${code}\n${out}`);
+  // Written aside and renamed in: status.sh reading a file writeFileSync had just truncated got an empty exit code (exit 2).
+  const answer = (sha: string, code: number, out = '') => {
+    const f = join(ci, sha.slice(0, 12));
+    writeFileSync(`${f}.tmp`, `${code}\n${out}`);
+    renameSync(`${f}.tmp`, f);
+  };
   const asked = () => { try { return readFileSync(join(ci, 'asked'), 'utf8').split('\n').filter(Boolean); } catch { return []; } };
   return { env: { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_START: '3' }, answer, asked };
 }

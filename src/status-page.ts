@@ -273,8 +273,15 @@ export class StatusPage {
     // CI: Citadel's workflows' verdicts on main and how many of the runs the last poll saw passed.
     const ciVisible = !!own && viewer.canSee(own);
     const view = ciVisible ? this.deps.ciSnapshot?.((id) => id === own && viewer.canSee(id)).find((s) => s.id === own)?.view : undefined;
-    const done = (view?.runs ?? []).filter((r: any) => r.status === 'completed' && r.conclusion && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped');
+    // Only the default branch's runs of workflows that ring: `view.runs` is every branch's newest, quiet workflows included.
+    const quietNames = new Set((view?.workflows ?? []).filter((w) => w.quiet).map((w) => w.name));
+    const done = (view?.runs ?? []).filter((r: any) => r.branch === view?.branch && !quietNames.has(r.name)).filter((r: any) => r.status === 'completed' && r.conclusion && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped');
+    const redWorkflows = (view?.workflows ?? []).filter((w) => !w.quiet && w.verdict?.conclusion && w.verdict.conclusion !== 'success').map((w) => w.name);
+    // Enough main runs: by failure share. Too few (tests.yml on main is daily): main's newest verdict red is yellow, as before.
+    const enough = done.length >= RATE_MIN_RUNS;
+    const ciTone: Tone = enough ? rateTone(done.length - done.filter((r: any) => r.conclusion === 'success').length, done.length) : redWorkflows.length ? 'warn' : 'ok';
     const ci = view ? {
+      tone: ciTone,
       at: view.at, url: `https://github.com/${view.slug}/actions`,
       workflows: view.workflows.filter((w) => !w.quiet).map((w) => ({ name: w.name, conclusion: w.verdict?.conclusion ?? null, status: w.verdict?.status ?? null, at: w.verdict?.at ?? null, url: w.verdict?.url ?? null })),
       runs: done.length, green: done.filter((r: any) => r.conclusion === 'success').length,
@@ -295,11 +302,7 @@ export class StatusPage {
     const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
     const backupMissing = backupProblems(backup, now);
     if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`]);
-    if (ci) {
-      const failedRuns = ci.runs - ci.green;
-      const tone = rateTone(failedRuns, ci.runs);
-      if (tone !== 'ok') reasons.push([tone, `${failedRuns} of the last ${ci.runs} CI runs failed`]);
-    }
+    if (ci && ci.tone !== 'ok') reasons.push([ci.tone, enough ? `${ci.runs - ci.green} of the last ${ci.runs} CI runs failed` : `CI red on main: ${redWorkflows.join(', ')}`]);
     return {
       verdict: worst(reasons),
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
@@ -377,12 +380,10 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   // Verdict: bad when its service isn't running or its last deploy failed; warn on many errors or a failed deploy this week.
   const reasons: [Tone, string][] = [];
   if (unit && unit.load !== 'not-found' && unit.active !== 'active' && unit.active !== 'activating' && unit.active !== 'reloading') reasons.push(['bad', `its service is ${unit.active}`]);
+  const nFailed = dFailed.reduce((x, y) => x + y, 0);
+  const deployTone: Tone = lastDeploy?.outcome === 'failed' ? 'bad' : rateTone(nFailed, deploys.length);
   if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed']);
-  else {
-    const nFailed = dFailed.reduce((x, y) => x + y, 0);
-    const tone = rateTone(nFailed, deploys.length);
-    if (tone !== 'ok') reasons.push([tone, `${nFailed} of ${deploys.length} deploys failed this week`]);
-  }
+  else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`]);
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`]);
   if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`]);
   const backup = appBackup(join(home, '.local/share', a.name), now);
@@ -391,7 +392,7 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
     name: a.name, title: a.title, icon: a.icon, scheme: a.home_scheme,
     verdict: worst(reasons),
     service: unit ? { unit: unit.unit, active: unit.active, sub: unit.sub, installed: unit.load !== 'not-found' } : null,
-    deploys: { counts: dCount, failed: dFailed, median: median(took), longest: took.length ? Math.max(...took) : null, last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null },
+    deploys: { tone: deployTone, counts: dCount, failed: dFailed, median: median(took), longest: took.length ? Math.max(...took) : null, last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null },
     errors: { counts: eCount, kinds, top, lastDay },
     turns: { counts: tCount, tokens: tTokens, people: [...people.entries()].sort((x, y) => y[1] - x[1]).map(([name, turns]) => ({ name, turns })) },
     disk: disk ? { bytes: disk.data_bytes, at: disk.measured_at, warn_gb: disk.warn_gb } : null,
@@ -408,7 +409,7 @@ export interface CitadelStatus {
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
   /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
   ciVisible: boolean;
-  ci: { at: number; url: string; workflows: { name: string; conclusion: string | null; status: string | null; at: string | null; url: string | null }[]; runs: number; green: number } | null;
+  ci: { tone: Tone; at: number; url: string; workflows: { name: string; conclusion: string | null; status: string | null; at: string | null; url: string | null }[]; runs: number; green: number } | null;
   /** The read of the units failed this time: `units` is empty because it is unknown, not because none run. */
   unitsFailed: boolean;
   units: { unit: string; load: string; active: string; sub: string }[];
@@ -425,7 +426,7 @@ export interface AppStatus {
   scheme: number | null;
   verdict: Verdict;
   service: { unit: string; active: string; sub: string; installed: boolean } | null;
-  deploys: { counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; sha: string | null; took: number | null } | null };
+  deploys: { tone: Tone; counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; sha: string | null; took: number | null } | null };
   errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };
   turns: { counts: number[]; tokens: number[]; people: { name: string; turns: number }[] };
   disk: { bytes: number; at: number; warn_gb: number | null } | null;

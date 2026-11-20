@@ -14,7 +14,7 @@ import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GOAL_MAX, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
 import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
@@ -53,6 +53,9 @@ import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
+/** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
+const homeBuckets = new HomeBucketCache();
+
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 
 /** A non-admin's GitHub for work the server does for them (#195): their linked token, or no login, never the box's. */
@@ -478,7 +481,7 @@ export const projectRoutes: Route[] = [
     method: 'GET', path: '/api/home', who: ['person'],
     handler: ({ res, app: { store, runner }, session }) => {
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
-      const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()));
+      const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()), Date.now(), homeBuckets);
       // The waiting minions as a scheme's list draws them (#1217: Josh, 2026-11-20, "the normal minion list render"), and when this person last opened each.
       const ids = [...new Set(home.items.map((i) => i.ticketId))];
       const seen: Record<number, number> = {};

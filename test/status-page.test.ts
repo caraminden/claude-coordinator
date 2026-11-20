@@ -170,7 +170,33 @@ test('a viewer outside Citadel sees its health but not its CI', async () => {
   assert.equal(admin.ci?.workflows[0].conclusion, 'failure');
   assert.equal(admin.ciVisible, true);
   assert.equal(admin.ships.last?.changes.length, 1);
-  assert.deepEqual(admin.verdict.reasons, [], 'one red workflow with no run counts is not a rate');
+  assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests'], 'too few main runs to rate: main\'s newest red verdict is yellow, as it was');
+  assert.equal(admin.ci?.tone, 'warn');
+});
+
+test('the CI share counts only main\'s runs of workflows that ring, not other branches or quiet workflows', async () => {
+  const { store, citadel } = setup('cishare');
+  const run = (id: number, branch: string, conclusion: string, name = 'tests') => ({ id, name, branch, status: 'completed', conclusion, at: '', url: 'u' });
+  const verdict = (conclusion: string) => ({ id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion, at: '', url: 'u' });
+  const build = async (workflows: any[], runs: any[]) => {
+    const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows, runs };
+    const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: () => [{ id: citadel.id, view: view as any }] });
+    return (await page.build({ canSee: () => true, admin: true, key: 'a' })).citadel;
+  };
+  const tests = { name: 'tests', file: 't.yml', skipped: [] };
+  const lands = Array.from({ length: 9 }, (_, i) => run(10 + i, `land/b${i}`, 'failure'));
+  const green = await build([{ ...tests, verdict: verdict('success') }], [...lands, ...[1, 2, 3, 4, 5].map((i) => run(i, 'main', 'success'))]);
+  assert.equal(green.ci?.tone, 'ok');
+  assert.equal(green.ci?.runs, 5, 'only main\'s runs');
+  assert.equal(green.verdict.tone, 'ok');
+  const quiet = await build([{ ...tests, verdict: verdict('success') }, { name: 'nightly', file: 'n.yml', skipped: [], quiet: true, verdict: null }],
+    [...[1, 2, 3, 4, 5].map((i) => run(i, 'main', 'success')), ...[6, 7, 8, 9, 10].map((i) => run(i, 'main', 'failure', 'nightly'))]);
+  assert.equal(quiet.ci?.runs, 5, 'a quiet workflow\'s runs are left out');
+  assert.equal(quiet.ci?.tone, 'ok');
+  const few = await build([{ ...tests, verdict: verdict('failure') }], [run(1, 'main', 'failure'), run(2, 'main', 'success'), ...lands]);
+  assert.equal(few.ci?.tone, 'warn', 'under 5 main runs, newest red: yellow');
+  const many = await build([{ ...tests, verdict: verdict('success') }], [1, 2, 3, 4, 5, 6, 7].map((i) => run(i, 'main', i <= 3 ? 'failure' : 'success')));
+  assert.equal(many.ci?.tone, 'bad', '3 of 7 is over 30%');
 });
 
 test('health readings and host samples are kept a week and a day', () => {
@@ -269,7 +295,7 @@ test('failure share sets the colour: one failure in many stays green, then yello
 
 test('CI with one failed run in twenty leaves the verdict green; six in twenty is red', async () => {
   const { store, citadel } = setup('cirate');
-  const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => ({ status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
+  const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => ({ name: 'tests', branch: 'main', status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
   let bad = 1;
   const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000,
     ciSnapshot: () => [{ id: citadel.id, view: mk(bad) as any }] });

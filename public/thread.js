@@ -784,8 +784,8 @@ function budgetChip(t) {
 function shipLine(t) {
   const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
   if (!stage) return '';
-  return h('span', { class: `ship f-${stage.fam}` },
-    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch', `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}`)));
+  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` },
+    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch')));
 }
 
 /**

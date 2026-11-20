@@ -241,7 +241,7 @@ export function renderInbox() {
  * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited.
  */
 let inboxTips = null;
-export function inboxRow(items, { href = (to) => to, scheme = null } = {}) {
+export function inboxRow(items) {
   const { from } = items[0];
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
@@ -255,9 +255,8 @@ export function inboxRow(items, { href = (to) => to, scheme = null } = {}) {
   inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });
   const seen = items.every(faded);
   const target = rowTarget(items);
-  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: href(target ? jumpHref(t, target) : threadHref(t)) },
-    // Home (#1140) names the scheme with its tag, in its own hue (`scheme`); a scheme's own strip as words.
-    h('span', { class: 'name' }, from ? (scheme ? [scheme(from.scheme), ' '] : `${from.scheme} `) : '',
+  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
+    h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
       isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.

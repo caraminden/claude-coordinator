@@ -155,8 +155,8 @@ function drawPanel() {
     visit.shown.push(...ids);
     return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name), ...ids.map((id) => {
       const { t, items } = rows.has(id) ? { t: tickets.get(id), items: rows.get(id) } : visit.last.get(id);
-      // The row's card badge opens its card on Home too, not in the scheme.
-      const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })) }, rowHref(t, items));
+      // The row's card and spend badges open on Home too, not in the scheme.
+      const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));
       if (!rows.has(id)) {
         // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
         row.classList.add('done');
@@ -193,11 +193,13 @@ function drawOverview() {
 
 /** A scheme's line: its tag, what's going on in it as chips, and its last days' ships as bars; it opens the scheme. */
 function schemeRow(s, days, top) {
+  // Always the three counts, in fixed slots (dim at zero), so the line's height doesn't change when a count does.
+  const slot = (n, tone, text) => { const c = toneChip(n ? tone : 'neutral', text); c.classList.add('home-count'); if (!n) c.classList.add('zero'); return c; };
   const chips = [
-    s.waiting ? toneChip('warn', `${s.waiting} need${s.waiting === 1 ? 's' : ''} you`) : null,
-    s.working ? toneChip('info', `${s.working} working`) : null,
-    s.shipped ? toneChip('ok', `${s.shipped} shipped`) : null,
-  ].filter(Boolean);
+    slot(s.waiting, 'warn', `${s.waiting} need${s.waiting === 1 ? 's' : ''} you`),
+    slot(s.working, 'info', `${s.working} working`),
+    slot(s.shipped, 'ok', `${s.shipped} shipped`),
+  ];
   const total = s.daily.reduce((a, b) => a + b, 0);
   const bars = h('span', { class: 'home-bars', role: 'img', 'aria-label': `${total} shipped in the last ${s.daily.length} days` }, ...s.daily.map((n, i) => {
     const bar = h('i', { title: `${dayLabel(days[i])}: ${n} shipped`, class: n ? null : 'none' });
@@ -205,7 +207,7 @@ function schemeRow(s, days, top) {
     return bar;
   }));
   return h('a', { class: 'hue-row home-scheme', href: `#/p/${s.id}`, 'data-cat': schemeHue(s.name) },
-    h('span', { class: 'hue-row-text' }, schemeTag(s.name), ...(chips.length ? chips : [toneChip('neutral', 'Quiet')])),
+    h('span', { class: 'hue-row-text' }, schemeTag(s.name), h('span', { class: 'home-counts' }, ...chips)),
     h('span', { class: 'hue-row-meta' }, bars));
 }
 

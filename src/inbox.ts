@@ -152,7 +152,34 @@ export interface HomeView {
 export const HOME_DAYS = 14;
 
 /** `ms` as its Pacific day, "2026-11-20". */
-const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: ZONE });
+const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE });
+const pacificDay = (ms: number) => dayFormat.format(ms);
+
+/** How long Home's 14-day buckets are kept: they are the same for every person, and the page refetches on each burst of news. */
+export const HOME_BUCKETS_MS = 60_000;
+
+/** Minions shipped per scheme per Pacific day over the last HOME_DAYS days: project -> day -> tickets. */
+export type HomeBuckets = Map<number, Map<string, Set<number>>>;
+
+/** One pass over the ship notes of the window, each note's day worked out once. */
+function bucketShips(store: Store, now: number): HomeBuckets {
+  const out: HomeBuckets = new Map();
+  for (const n of store.shippedNotes(now - (HOME_DAYS + 1) * 86_400_000)) {
+    const days = out.get(n.project_id) ?? out.set(n.project_id, new Map()).get(n.project_id)!;
+    const day = pacificDay(n.at);
+    (days.get(day) ?? days.set(day, new Set()).get(day)!).add(n.ticket_id);
+  }
+  return out;
+}
+
+/** The server's cache of the buckets above, `HOME_BUCKETS_MS` long. Without one (a test), every call reads fresh. */
+export class HomeBucketCache {
+  private held: { store: Store; at: number; buckets: HomeBuckets } | null = null;
+  get(store: Store, now: number): HomeBuckets {
+    if (!this.held || this.held.store !== store || now - this.held.at >= HOME_BUCKETS_MS || now < this.held.at) this.held = { store, at: now, buckets: bucketShips(store, now) };
+    return this.held.buckets;
+  }
+}
 
 /** The last HOME_DAYS Pacific days up to `now`'s, oldest first. */
 export function homeDays(now: number): string[] {
@@ -167,12 +194,14 @@ export function homeDays(now: number): string[] {
  * minion's turn is doing work, as api/projects counts it. A minion shipped twice in a span (a follow-up hand-off)
  * counts once.
  */
-export function homeView(store: Store, approvals: Approvals, who: { name: string; uid?: number }, busy: (t: Ticket) => boolean, since: number, now = Date.now()): HomeView {
+export function homeView(store: Store, approvals: Approvals, who: { name: string; uid?: number }, busy: (t: Ticket) => boolean, since: number, now = Date.now(), cache?: HomeBucketCache): HomeView {
   const hidden = store.hiddenProjects(who.uid ?? -1);
   const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
   const schemes = ids.map((id) => store.getProject(id)).filter((p): p is Project => !!p);
   const days = homeDays(now);
-  const ships = store.shippedNotes(Math.min(since, now - (HOME_DAYS + 1) * 86_400_000));
+  const buckets = cache ? cache.get(store, now) : bucketShips(store, now);
+  // Only this person's "shipped since your last visit" is read per request.
+  const sinceShips = store.shippedNotes(since);
   const items: InboxItem[] = [];
   const out: HomeView['schemes'] = [];
   for (const p of schemes) {
@@ -185,9 +214,9 @@ export function homeView(store: Store, approvals: Approvals, who: { name: string
     }
     // Another person's own Taskmaster in a split scheme (#919) is theirs.
     const working = tickets.filter((t) => t.status !== 'closed' && (t.coordinator_of == null || t.coordinator_of === who.uid) && busy(t)).length;
-    const mine = ships.filter((n) => n.project_id === p.id);
-    const daily = days.map((d) => new Set(mine.filter((n) => pacificDay(n.at) === d).map((n) => n.ticket_id)).size);
-    out.push({ id: p.id, name: p.name, waiting: minionCount(waiting), working, shipped: new Set(mine.filter((n) => n.at >= since).map((n) => n.ticket_id)).size, daily });
+    const mine = buckets.get(p.id);
+    const daily = days.map((d) => mine?.get(d)?.size ?? 0);
+    out.push({ id: p.id, name: p.name, waiting: minionCount(waiting), working, shipped: new Set(sinceShips.filter((n) => n.project_id === p.id && n.at >= since).map((n) => n.ticket_id)).size, daily });
   }
   const isTaskmaster = (i: InboxItem) => Number(i.from?.kind === 'coordinator');
   items.sort((a, b) => isTaskmaster(b) - isTaskmaster(a) || a.at - b.at);

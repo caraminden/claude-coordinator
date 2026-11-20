@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
-import { HOME_FIRST_LOOK, HOME_VISIT_GAP, homeDays, homeSince, homeView } from '../src/inbox.ts';
+import { HOME_BUCKETS_MS, HOME_FIRST_LOOK, HOME_VISIT_GAP, HomeBucketCache, homeDays, homeSince, homeView } from '../src/inbox.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'home-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -71,6 +71,23 @@ test('Home\'s working minions and what shipped since, only in the person\'s sche
   assert.equal(s.daily.reduce((a, b) => a + b, 0), 2, 'the twice-shipped minion counts once in the bars too');
   assert.equal(Math.max(...s.daily), 2, 'both on the same day (today, unless Pacific midnight fell mid-test)');
   assert.equal(homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, Date.now() + 60_000).schemes[0].shipped, 0, 'nothing shipped after `since`');
+});
+
+test('Home\'s ship buckets are read once a minute for everyone, and `shipped` stays per request', () => {
+  const { store, josh, scheme, minion, approvals } = setup('cache.sqlite');
+  const peek = scheme('Peek Auras');
+  const idle = minion(peek, 'one'), other = minion(peek, 'two');
+  const cache = new HomeBucketCache();
+  const now = Date.now();
+  const who = { name: 'josh', uid: josh.id };
+  store.addEvent(idle.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
+  const first = homeView(store, approvals, who, () => false, now - 1000, now, cache);
+  store.addEvent(other.id, 'note', { text: 'Shipped bbb2222: second. Risk low: x.' });
+  const second = homeView(store, approvals, who, () => false, now - 1000, now + 5000, cache);
+  assert.deepEqual(second.schemes[0].daily, first.schemes[0].daily, 'inside the minute the buckets are the held ones');
+  assert.equal(second.schemes[0].shipped, 2, 'shipped-since is read fresh each call');
+  const later = homeView(store, approvals, who, () => false, now - 1000, now + HOME_BUCKETS_MS + 1, cache);
+  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2, 'after the minute they are read again');
 });
 
 test('Home\'s days are the last 14 Pacific dates, oldest first, each once, across both clock changes', () => {

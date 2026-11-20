@@ -28,6 +28,13 @@
 # For a restart that cuts off running turns (only with a person's OK), land first, then run
 # tools/deploy.sh --now: it joins the restart this one queued.
 #
+# The ship train (#1166, docs/adr/0012-ship-train.md): at step 2 the landing at the front of the line stacks up to
+# LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
+# main and deploy once for them all. A red train is bisected by its prefixes: the green part ships, the first ship
+# that turned it red is refused with its own failure, and the ships after it stay in line. Each rider waits in line
+# as before and reads its verdict from <state>/train/<its ticket> (train_verdict below). Off: LAND_TRAIN=0, or for
+# every landing, touch <state>/train-off.
+#
 # Build branches (#593, specs/build-branches.md in the scheme's shared folder): a build is a branch build/<n>, checked out nowhere.
 #   tools/land.sh --into build/<n> <test files>   a feeder merges into it: rebases onto build/<n> (no rebase when it is
 #       already under the branch), runs only the named test files, and moves build/<n> by compare-and-swap. No CI, no
@@ -373,6 +380,49 @@ if [ -z "$resumed" ]; then
 fi
 # shellcheck source=tools/deploy-queue.sh
 . "$tools/deploy-queue.sh"
+# A rider's side of the ship train (#1166). The landing at the front writes <state>/train/<this ticket>: "riding
+# <front's branch>" while it tests the train; then "landed <this ship's commit> <live|restart> <front's branch> <this
+# branch's tip it took> <ships in the train>", or "refused <front's branch> <the red CI run>" with the failure's last
+# lines after it. No file: on no train, or the train left it in line. <held>: this holds the lock now, so a "riding"
+# is what a front that was killed left. On landed or refused this ends the landing, as its own ship would have.
+train_dir=$state/train riding=''
+[ "$mode" != land ] || [ "${LAND_TRAIN:-1}" = 0 ] || QUEUE_TRAIN=train # the ticket's 6th line (tools/deploy-queue.sh)
+train_verdict() {
+  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e lines=()
+  [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -s "$f" ] || { riding=''; return 0; }
+  read -r v a b c d e <"$f" || true
+  case $v in
+    riding)
+      [ -z "${1:-}" ] || { rm -f "$f"; return 0; }
+      [ -n "$riding" ] || { riding=1; queue_phase "riding in $a's ship train"; say "riding in $a's ship train: waiting for CI on the train"; }
+      return 1 ;;
+    landed)
+      rm -f "$f"
+      say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
+      if [ "$(git rev-parse HEAD)" != "$d" ] || ! git reset -q --keep "$a"; then
+        say "$branch moved after the train took it, so it stays as it is; what shipped of it is $(git rev-parse --short "$a")"
+      fi
+      say "main is now at $(git log -1 --format='%h "%s"' "$a"), in $c's ship train"
+      land_mark landed
+      if [ "$b" = live ]; then
+        echo "deploy: live now: $c's ship train went live with it" >&2
+        land_mark live
+      else
+        echo "deploy: not live yet: the restart $c's ship train queued carries it, and reports in that minion's chat" >&2
+      fi
+      queue_done
+      land_timing 0 || true
+      exit 0 ;;
+    refused)
+      mapfile -t lines <"$f" || true
+      rm -f "$f"
+      [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
+      queue_done
+      land_timing 1 || true
+      refuse "tests failed in CI on $a's ship train ($b), and its bisect found $branch the first ship that turned it red, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
+    *) rm -f "$f" ;;
+  esac
+}
 # One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges into a build take a minute,
 # so they wait only for each other, not in the lands' line. --full and --build take it before they get in that line, so
 # a land never waits on a feeder's test run; the feeders wait for them instead.
@@ -396,12 +446,14 @@ if [ -z "$resumed" ]; then
     waited_on=''
     queue_wait_check() {
       local now
+      [ "$mode" != land ] || train_verdict || return 0 # riding: the train's top decides, not main
       [ "$mode" != full ] && now=$(git rev-parse -q --verify refs/heads/main) && [ "$now" != "$waited_on" ] || return 0
       waited_on=$now under=$(under_of)
       early_check main "waiting in line"
     }
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
+    [ "$mode" != land ] || train_verdict held # its train's front let go of the lock before this read the verdict
   fi
   land_mark lock rebase
 fi

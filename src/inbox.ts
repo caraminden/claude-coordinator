@@ -156,10 +156,9 @@ const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { ti
 
 /** The last HOME_DAYS Pacific days up to `now`'s, oldest first. */
 export function homeDays(now: number): string[] {
-  const days = new Set<string>();
-  // shortcut: steps of 24 h from now, so a 23- or 25-hour DST day can't skip a day, only repeat one (dropped by the Set).
-  for (let i = HOME_DAYS; i >= 0; i--) days.add(pacificDay(now - i * 86_400_000));
-  return [...days].slice(-HOME_DAYS);
+  // Calendar steps back from today's Pacific date, so a 23- or 25-hour day can't skip or repeat one.
+  const [y, m, d] = pacificDay(now).split('-').map(Number);
+  return Array.from({ length: HOME_DAYS }, (_, i) => new Date(Date.UTC(y, m - 1, d - (HOME_DAYS - 1 - i))).toISOString().slice(0, 10));
 }
 
 /**

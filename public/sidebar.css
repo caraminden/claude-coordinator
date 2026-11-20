@@ -341,3 +341,4 @@
 .home-bars > i { flex: 1; height: max(2px, calc(var(--v, 0) * 100%)); border-radius: 3px 3px 0 0; background: var(--h); }
 .home-bars > i.none { background: color-mix(in srgb, var(--h) 22%, var(--panel)); }
 @media (max-width: 800px) { .home-bars { width: 7rem; } }
+.home-title { margin: 0 0 0.75rem; font-size: 1.25rem; }

@@ -68,18 +68,20 @@ test('Home\'s working minions and what shipped since, only in the person\'s sche
     'two minions shipped: the build merge and the failed push don\'t count, and a minion shipped twice counts once');
   assert.equal(home.days.length, 14, 'two weeks of days for the bars');
   assert.equal(s.daily.length, 14);
-  assert.equal(s.daily.at(-1), 2, 'today holds both minions, the twice-shipped one once');
-  assert.equal(s.daily.slice(0, -1).reduce((a, b) => a + b, 0), 0);
+  assert.equal(s.daily.reduce((a, b) => a + b, 0), 2, 'the twice-shipped minion counts once in the bars too');
+  assert.equal(Math.max(...s.daily), 2, 'both on the same day (today, unless Pacific midnight fell mid-test)');
   assert.equal(homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, Date.now() + 60_000).schemes[0].shipped, 0, 'nothing shipped after `since`');
 });
 
-test('Home\'s days are the last 14 Pacific dates, oldest first, each once', () => {
-  const now = Date.UTC(2026, 10, 2, 12); // the day US clocks fall back: a 25-hour Pacific day
-  const days = homeDays(now);
-  assert.equal(days.length, 14);
-  assert.equal(new Set(days).size, 14);
-  assert.equal(days.at(-1), '2026-11-02');
-  assert.equal(days[0], '2026-10-20');
+test('Home\'s days are the last 14 Pacific dates, oldest first, each once, across both clock changes', () => {
+  const fallBack = homeDays(Date.UTC(2026, 10, 2, 12)); // Nov 2, 4 AM PST: the day before was 25 hours
+  assert.equal(fallBack.length, 14);
+  assert.equal(new Set(fallBack).size, 14);
+  assert.deepEqual([fallBack[0], fallBack.at(-1)], ['2026-10-20', '2026-11-02']);
+  const springForward = homeDays(Date.UTC(2026, 2, 9, 7, 30)); // Mar 9, 12:30 AM PDT: Mar 8 was 23 hours
+  assert.equal(springForward.length, 14);
+  assert.ok(springForward.includes('2026-03-08'), 'the short day is kept');
+  assert.deepEqual([springForward[0], springForward.at(-1)], ['2026-02-24', '2026-03-09']);
 });
 
 test('a visit to Home counts what shipped since the last one ended, and keeps that start through its own refreshes', () => {

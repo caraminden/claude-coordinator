@@ -20,9 +20,10 @@ const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
 let data = null; // the last answer: { items, tickets, seen, schemes, since, days, me }, only ever drawn for the person it was fetched for
 try { data = JSON.parse(localStorage.getItem(CACHE)); } catch {}
+if (!Array.isArray(data?.days)) data = null; // an answer cached before the bars (#1217) can't draw them
 let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
 // This visit: each list's ids in the order shown, the ones there when it opened (the rest are "new"), and the rows as last seen.
-const visit = { rows: [], first: null, last: new Map(), fresh: false };
+const visit = { rows: [], first: null, last: new Map(), fresh: false, shown: [] };
 let next = null; // the chat whose card you just answered, to move on from once the list agrees
 let timer = 0;
 let panel = null;
@@ -57,7 +58,8 @@ export function homePanel() {
 export function homeOverview(list = null) {
   overview = h('div', { class: 'home-overview-body' });
   drawOverview();
-  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list, overview);
+  // On a phone the list sits here and the panel's summary (which says "Home" on a desktop) isn't shown, so the page says it.
+  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list ? h('h2', { class: 'home-title' }, 'Home') : '', list, overview);
 }
 
 /** Fetch Home again (a burst of news fetches once). */
@@ -112,9 +114,14 @@ function groups() {
   return rows;
 }
 
-/** A row's address: Home's own for its chat, at the oldest thing it waits on you for (a card opens at the card). */
+const CARDS = new Set(['question', 'plan', 'approval']);
+
+/** A row's address: Home's own for its chat, at its oldest card, else the oldest thing it waits on you for. */
 const rowHref = (t, items) => {
-  const target = items?.length ? rowTarget(items) : null;
+  // A card (question, plan, approval) wins over an older mention or reply offer: Josh, 2026-11-20, "clicking a question card
+  // on the home screen should go to the card".
+  const cards = (items ?? []).filter((i) => CARDS.has(i.kind));
+  const target = cards.length ? rowTarget(cards) : items?.length ? rowTarget(items) : null;
   return homeHash(target ? jumpHref(t, target) : threadHref(t));
 };
 
@@ -141,12 +148,15 @@ function drawPanel() {
     const t = visit.last.get(id)?.t;
     if (t && !names.some((s) => s.id === t.project_id)) names.push({ id: t.project_id, name: view?.projects?.find((p) => p.id === t.project_id)?.name ?? '' });
   }
+  visit.shown = []; // the rows top to bottom, scheme by scheme, for moveOn
   const sections = names.map((s) => {
     const ids = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
     if (!ids.length) return null;
+    visit.shown.push(...ids);
     return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name), ...ids.map((id) => {
       const { t, items } = rows.has(id) ? { t: tickets.get(id), items: rows.get(id) } : visit.last.get(id);
-      const row = threadRow(t, rowHref(t, items));
+      // The row's card badge opens its card on Home too, not in the scheme.
+      const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })) }, rowHref(t, items));
       if (!rows.has(id)) {
         // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
         row.classList.add('done');
@@ -211,13 +221,13 @@ function when(at) {
   return new Date(at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 }
 
-/** After your answer: once the list has no card left on that chat, open the next row's chat (below it, else the first). */
+/** After your answer: once the list has no card left on that chat, open the next row's chat as shown (below it, else the first). */
 function moveOn() {
   if (next == null || view?.id !== next) return void (next = null);
   const rows = groups();
   if (rows.has(next)) return; // it still asks something else: stay
-  const at = visit.rows.indexOf(next);
-  const after = [...visit.rows.slice(at + 1), ...visit.rows.slice(0, Math.max(at, 0))].find((id) => rows.has(id));
+  const at = visit.shown.indexOf(next);
+  const after = [...visit.shown.slice(at + 1), ...visit.shown.slice(0, Math.max(at, 0))].find((id) => rows.has(id));
   const from = next;
   next = null;
   if (after == null) return;

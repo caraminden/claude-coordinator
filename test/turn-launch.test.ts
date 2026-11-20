@@ -328,6 +328,10 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         spec.args = [standIn, ...spec.args];
         spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${(app.address() as any).port}` };
         writeFileSync(join(dir, 'spec.json'), JSON.stringify(spec), { mode: 0o600 });
+        // The runner follows this turn too, and ends it (deleting its folder) on the poll that sees exit.json. Racing
+        // that poll for the file failed under CI load (#1293): it is held off until the test has read the folder.
+        const [id, live] = [...(runner as any).turns.entries()].find(([, l]: any) => l.dir === dir)!;
+        clearInterval(live.timer);
         const [node, ...wrapper] = spawned[0].wrapper;
         const w = spawn(node, wrapper, { stdio: 'ignore' });
         for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
@@ -335,6 +339,7 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
         if (spec.pool) pool = readPool(spec.pool.dir);
         seen = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
+        live.timer = setInterval(() => (runner as any).poll(id), runner.pollMs);
       },
     });
   } finally {

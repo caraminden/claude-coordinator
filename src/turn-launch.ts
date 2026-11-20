@@ -97,8 +97,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it.
-  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'stale-docs', 'citadel-android-mic.ts']) {
+  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it; citadel-build-cache shows and clears the shared build caches (#1153).
+  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'stale-docs', 'citadel-android-mic.ts', 'citadel-build-cache']) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }

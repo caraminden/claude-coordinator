@@ -64,6 +64,19 @@ test('finds only wholly ignored target/ and node_modules/ folders, never tracked
   assert.deepEqual(await clearBuildOutput(dir), { dirs: 0, bytes: 0 });
 });
 
+test("a Gradle project's build/ and .gradle/ go too, only beside a Gradle build file (#1153)", async () => {
+  const dir = join(root, 'gradle');
+  mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q');
+  put(join(dir, '.gitignore'), 'build/\n.gradle/\n');
+  put(join(dir, 'android', 'settings.gradle'));
+  put(join(dir, 'android', 'app', 'build.gradle.kts'));
+  git(dir, 'add', '.');
+  git(dir, 'commit', '-qm', 'init');
+  for (const f of ['android/build/x', 'android/.gradle/x', 'android/app/build/outputs/a.apk', 'web/build/x', 'build/x']) put(join(dir, f));
+  assert.deepEqual(await findBuildOutput(dir), ['android/.gradle', 'android/app/build', 'android/build'].map((p) => join(dir, p)));
+});
+
 test("a folder inside another repo isn't a checkout of its own", async () => {
   const repo = join(root, 'outer');
   checkout(repo, join(root, 'outer-outside'));

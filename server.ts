@@ -13,6 +13,8 @@ import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
+import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from './src/build-cache.ts';
+import { size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
@@ -669,10 +671,19 @@ if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('cold mail', () => ru
 // Dismissed minions' build output (#336) and worktrees (#660): those dismissed before clearing on dismissal, or whose clearing
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
 if (!BOOT_CHECK && !PREVIEW) {
+  // The init script that points host turns' Gradle builds at the shared build cache (#1153); containers get theirs at start.
+  try {
+    ensureGradleInit(homedir());
+  } catch (err) {
+    console.error('Could not write the Gradle build cache init script (#1153):', err);
+  }
   // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
   const sweepBuild = () => void safely('build output sweep', async () => {
     await runner.sweepBuildOutput();
     await runner.sweepWorktrees();
+    // The shared Gradle build cache (#1153) under its cap.
+    const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
+    if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
   });
   setTimeout(sweepBuild, 10 * 60_000).unref();
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();

@@ -16,6 +16,7 @@ import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
 import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type Pick } from './account-pick.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
+import { ensureGradleInit } from './build-cache.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
 /** The checkout this server runs from (prompts.ts CHECKOUT). */
@@ -463,6 +464,10 @@ export class ClaudeLink {
     if (vol && existsSync(join(this.home, GRADLE_PROPS))) {
       mkdirSync(join(vol, dirname(GRADLE_PROPS)), { recursive: true });
       copyFileSync(join(this.home, GRADLE_PROPS), join(vol, GRADLE_PROPS));
+    }
+    // The shared Gradle build cache's init script (#1153): on only in a turn, which names the cache.
+    if (vol) {
+      try { ensureGradleInit(vol); } catch (e) { console.warn(`gradle init script for ${vol}: ${(e as Error).message}`); }
     }
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.

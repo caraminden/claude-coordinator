@@ -8,12 +8,12 @@ import { agentToken, bootServer } from './helpers.ts';
 
 // The check on new briefs (#1108, citadel:briefing): a warning, never a refusal, when an agent's brief
 // has no quoted words from a person or no "Done when".
-const complete = 'Goal: a retry button.\n\nJosh, 2026-11-19: "Go on the retry button"\n\nDone when\n- A failed upload shows Retry.';
+const complete = 'Goal: a retry button.\n\nJosh, 2026-11-19: "Go on the retry button"\n\nDone when\n- A failed upload shows Retry.\n\nAlready shipped on this: nothing found (2026-11-19).\nLeave alone: the upload queue.';
 
 test('a complete brief gets no warning; each missing part is named', () => {
   assert.equal(briefWarning(complete), null);
-  assert.equal(briefWarning('Josh:\n> go on the retry button\nDone-when: Retry shows.'), null, 'a > quote and done-when count');
-  assert.equal(briefWarning('Cara said “make the bar the scheme total”. Done when the bar reads it.'), null, 'curly quotes count');
+  assert.equal(briefWarning('Josh:\n> go on the retry button\nDone-when: Retry shows. Already shipped on this: nothing found. Leave alone: x.'), null, 'a > quote and done-when count');
+  assert.equal(briefWarning('Cara said “make the bar the scheme total”. Done when the bar reads it. Already shipped on this: none. Leave alone: x.'), null, 'curly quotes count');
 
   const noQuote = briefWarning('Add a retry button. Done when a failed upload shows Retry.');
   assert.match(noQuote!, /no quoted words from a person/);
@@ -27,6 +27,12 @@ test('a complete brief gets no warning; each missing part is named', () => {
 
 const root = mkdtempSync(join(tmpdir(), 'brief-lint-'));
 after(() => rmSync(root, { recursive: true, force: true }));
+
+test('the already-shipped and leave-alone parts are each named when missing', () => {
+  const w = briefWarning('Josh, 2026-11-19: "Go on the retry button". Done when Retry shows.')!;
+  assert.match(w, /no "Already shipped on this".*no "Leave alone"/);
+  assert.doesNotMatch(briefWarning(`${complete}`.replace('Leave alone', 'x'))!, /Already shipped/);
+});
 
 test('a pointer brief is judged with the handoff it names', () => {
   const shared = join(root, 'shared', 'project');

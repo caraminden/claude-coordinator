@@ -23,6 +23,9 @@
 /* A state too long for its line gets the line to itself, the rest wrapping under it; only then is it cut short. */
 .ticket-head .head-sub > .head-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
 .ticket-head .head-sub > :is(button, .find-box) { flex: none; white-space: nowrap; }
+/* A minion's spend against its usual cost (#1114); amber past the ask mark. */
+.ticket-head .head-sub > .budget-chip { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
+.ticket-head .head-sub > .budget-chip.over { color: var(--ink); border-color: color-mix(in srgb, var(--waiting-tint) 70%, transparent); background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); }
 .ticket-head > .row > .find-box { flex: none; }
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;

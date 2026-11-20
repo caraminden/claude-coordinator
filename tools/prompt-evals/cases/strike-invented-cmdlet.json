@@ -1,0 +1,30 @@
+{
+  "id": "strike-invented-cmdlet",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 384075 on event 384069, 2026-11-10 07:58 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "d285a17e",
+  "from": "Josh",
+  "history": "Josh is setting up his Windows desktop as a Citadel machine for git sync (not MCP): copy the laptop's machine-agent.json, clone the Obsidian vault (Threadspace's repo) to G:\\Vexavault and Delve's repo (caraminden/gamedevtest) to a local folder, then tick the folders in Settings > Machines. The machine agent runs as a Windows scheduled task named \"Coordinator agent (<name>)\" that the Machines page's setup script registers (public/machine-setup.js). The Taskmaster told him nothing on perigee can run commands on his desktop. His screenshot shows an admin PowerShell (C:\\WINDOWS\\system32) where `git clone` failed with \"git is not recognized\".",
+  "message": "I think I need the command to kick start the gitsync pipeline, check the screenshot",
+  "facts": [],
+  "right": "Give PowerShell commands that exist: install Git, clone in a normal window, then restart the agent's task the way Citadel's own setup script does (Stop-ScheduledTask then Start-ScheduledTask on \"Coordinator agent (...)\"), checked against public/machine-setup.js, not written from memory.",
+  "wrong": "Told Josh to restart the agent with `Get-ScheduledTask *Coordinator* | Restart-ScheduledTask`, a cmdlet that doesn't exist.",
+  "checks": [
+    {
+      "call": "Read|Grep|Bash",
+      "input": "machine-setup|ScheduledTask",
+      "before": "ScheduledTask",
+      "why": "read how Citadel's own setup script stops and starts the agent's task before handing Josh a command"
+    },
+    {
+      "noText": "Restart-ScheduledTask",
+      "why": "the made-up cmdlet the strike took back"
+    }
+  ]
+}

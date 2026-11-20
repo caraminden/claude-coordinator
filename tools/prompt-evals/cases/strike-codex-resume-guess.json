@@ -1,0 +1,30 @@
+{
+  "id": "strike-codex-resume-guess",
+  "kind": "strike",
+  "source": "#330, strike 268669 on event 265137, 2026-11-05 11:55 PST",
+  "role": "minion",
+  "ticket": {
+    "number": 330,
+    "title": "Codex second-opinion reviewer",
+    "type": "feature"
+  },
+  "commit": "7b9cbe11",
+  "from": "Josh",
+  "history": "The minion built a Codex second-opinion reviewer: Codex CLI in each person's container, a tripwire hook for Codex, a citadel-codex-review command, and self-review running Codex alongside its reviewer. It was writing its ship summary (risk high: src/tripwire.ts and the container image) and a go card when Josh's message arrived.",
+  "message": "Lets also make an option to fall back to Codex if/when someone runs out of claude usage so the app is still usable",
+  "facts": [],
+  "right": "Before saying what a Codex fallback can or can't carry over, look at how Citadel stores a turn's history (the events table holds every turn's full stream-json transcript), then scope it: a fallback can replay that transcript into a fresh Codex thread and trim only what doesn't fit; only Claude's native session file can't be loaded.",
+  "wrong": "Told Josh, from memory, that Codex can't pick up a Claude conversation where it stopped, so a fallback turn starts over from a summary.",
+  "checks": [
+    {
+      "call": "Grep|Read|Bash",
+      "input": "events|transcript|stream-json|resume|session",
+      "before": "can.?t pick up|start(s)? over from a summary",
+      "why": "look at what Citadel keeps of a conversation before saying what a fallback loses"
+    },
+    {
+      "noText": "can.?t pick up a Claude conversation|start(s)? over from a summary",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

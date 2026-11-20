@@ -119,7 +119,7 @@ export function closeSelfResult(cleared: boolean): string {
     + 'Do not announce the close in prose. If you do stay open, say plainly why ("Staying open in state ready for you to do X"; a complete minion closes by itself once a member has seen it). Finish your reply now.';
 }
 
-export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns'] as const;
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
@@ -284,6 +284,32 @@ const PROPOSE_MACHINE_NOTES = {
       notes: { type: 'string', maxLength: 2000, description: 'The whole new notes, at most 2,000 characters' },
     },
     required: ['machine', 'notes'],
+  },
+};
+
+const PROPOSE_MEMORY = {
+  name: 'propose_memory',
+  description:
+    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (a member ticks each one by hand), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      changes: {
+        type: 'array', maxItems: 300,
+        items: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['edit', 'add', 'delete', 'index', 'flag'] },
+            file: { type: 'string', description: 'The note file name, like some-note.md (never MEMORY.md)' },
+            text: { type: 'string', description: 'edit, add: the whole new note, frontmatter included' },
+            line: { type: 'string', description: 'add, index (optional on edit): its whole MEMORY.md line, "- [Name](file.md) — hook", under about 150 characters' },
+            reason: { type: 'string', maxLength: 500, description: 'Why, in one plain sentence' },
+          },
+          required: ['action', 'file', 'reason'],
+        },
+      },
+    },
+    required: ['changes'],
   },
 };
 
@@ -492,7 +518,7 @@ const TOOLS = [
   {
     name: 'create_ticket',
     description:
-      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained: write it with citadel:briefing. The result warns when it has no quoted words from a person or no "Done when".',
+      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained: write it with citadel:briefing. The result warns when it has no quoted words from a person, no "Done when", no "Already shipped on this" or no "Leave alone".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -623,7 +649,7 @@ const TOOLS = [
   {
     name: 'schedule_audit',
     description:
-      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. app-turns: a scheme home to an app; Citadel adds it by itself when the scheme gets its first app. A scheme has each at most once; update_schedule changes it.",
+      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. app-turns: a scheme home to an app; Citadel adds it by itself when the scheme gets its first app. ship-lessons: a scheme whose minions ship; Citadel adds it by itself on the scheme's first ship lessons. A scheme has each at most once; update_schedule changes it.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1426,6 +1452,8 @@ function registryReply(r: any, done: string): string {
   return [done, ...(r.notes ?? [])].join('\n');
 }
 
+const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+
 function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
@@ -1442,6 +1470,8 @@ function ticketLine(t: any): string {
     `by ${t.created_by}`,
     t.parent ? `from #${t.parent}` : '',
     t.last_activity ? `latest: ${t.last_activity}` : '',
+    // read_minion and read_ticket (#1114): spend against what its kind of work usually costs.
+    t.budget ? `budget: ${money(t.cost ?? 0)} used of about ${money(t.budget.usd)} (usual for ${t.budget.basis}; asked to say why or split past ${money(t.budget.ask)}, Taskmaster told past ${money(t.budget.wake)})` : '',
     // Each waiting card with its link (#400), so a mention of it can link it.
     ...(t.open_cards ?? []).map((c: CardLink) => `waiting: ${cardText(c)}`),
   ].filter(Boolean).join(' | ');
@@ -1540,6 +1570,21 @@ const MARK_IMAGE = {
       },
     },
     required: ['image', 'marks'],
+  },
+};
+
+/** The scheme's ship lessons queue (#1119): both roles read it, the weekly Ship lessons run and a Taskmaster mark lines taken. */
+const SHIP_LESSONS = {
+  name: 'ship_lessons',
+  description: "Read this scheme's ship lessons queue: the up-to-three lines each minion wrote at ship about what its brief or the docs didn't tell it, with its #N and the files it touched, newest first, plus how many ships wrote lines this week. Lines a proposal already took are left out unless taken is true. To mark lines handled (turned into a proposed edit, or dropped), pass take with their ids and note saying what became of them: taken lines stop coming back. The weekly Ship lessons schedule reads it; so can a Taskmaster or the memory curator.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      days: { type: 'integer', minimum: 1, maximum: 365, description: 'How far back to read, in days (default 60)' },
+      taken: { type: 'boolean', description: 'true: include lines already taken, with what became of them' },
+      take: { type: 'array', items: { type: 'integer' }, maxItems: 200, description: 'Lesson ids to mark taken' },
+      note: { type: 'string', maxLength: 300, description: 'With take: what became of them, e.g. "proposed: handoffs/handoff-x.md" or "dropped: one-off"' },
+    },
   },
 };
 
@@ -1663,6 +1708,11 @@ const THREAD_TOOLS = [
     },
   },
   {
+    name: 'log_learned',
+    description: 'For a ship that does not go through hand_off_land (a pull request): right before you open it or turn on its auto-merge, log in at most three lines what you had to find out that your brief or the docs did not tell you, and which tool, rule or skill got in your way (a refusal, a wrong instruction, a slow or broken step), one per line; "nothing" is a fine answer. It goes in the scheme\'s ship lessons queue with your #N and the files your branch touched, for the weekly pass that turns repeats into proposed doc, skill or brief edits. A second call within a few hours replaces the first. hand_off_land takes the same lines as learned, so never call this as well.',
+    inputSchema: { type: 'object', properties: { learned: { type: 'string', maxLength: 1000, description: 'Up to three lines, or "nothing"' } }, required: ['learned'] },
+  },
+  {
     name: 'hand_off_land',
     description:
       `Hand shipping to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the ship\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A ship to main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as shipping (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
@@ -1670,6 +1720,7 @@ const THREAD_TOOLS = [
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
+        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: in at most three lines, what you had to find out that your brief or the docs did not tell you (a path, a command, a gotcha, where something really lives), and which tool, rule or skill got in your way (a refusal, a wrong instruction, a slow or broken step), one per line. "nothing" is a fine answer. It goes in the scheme\'s ship lessons queue with your #N and the files you touched once the land is clean; a weekly pass turns anything said twice into a proposed doc, skill or brief edit. It never holds the ship' },
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label. Leave it out when the scheme's pre-ship review is off and nothing gives the label instead (your turn's Kit reviewers line says which): a ship with no label is high and needs go" },
         risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none), and with no risk label: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
@@ -2020,6 +2071,22 @@ async function runTool(name: string, args: any): Promise<string> {
       return codexImage(args);
     case 'usage_split':
       return usageSplitText(await call('GET', '/api/costs/mine'));
+    case 'log_learned': {
+      const r = await call('POST', `/api/tickets/${TICKET}/learned`, { learned: args.learned });
+      return r.lines ? `Logged ${r.lines.split('\n').length} line${r.lines.includes('\n') ? 's' : ''} (lesson #${r.id}, ${r.files} file${r.files === 1 ? '' : 's'} touched) in the scheme's ship lessons queue.` : `Logged "nothing" (lesson #${r.id}): it still counts as this ship's answer.`;
+    }
+    case 'ship_lessons': {
+      if (args.take !== undefined) {
+        if (typeof args.note !== 'string' || !args.note.trim()) throw new Error('take goes with note: what became of these lines');
+        const { taken } = await call('POST', `/api/projects/${PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
+        return `Marked ${taken.length} taken${taken.length ? `: #${taken.join(', #')}` : ''}${taken.length < args.take.length ? ' (the rest were already taken or not this scheme\'s)' : ''}.`;
+      }
+      const q = new URLSearchParams({ ...(args.days ? { days: String(args.days) } : {}), ...(args.taken ? { taken: '1' } : {}) });
+      const r = await call('GET', `/api/projects/${PROJECT}/ship-lessons?${q}`);
+      const head = `This week: ${r.week.ships} ship${r.week.ships === 1 ? '' : 's'} answered, ${r.week.withLines} with lines. Last ${r.days} days: ${r.window.ships} answered, ${r.window.withLines} with lines.`;
+      const rows = r.lessons.map((l: any) => `lesson ${l.id} · #${l.number ?? '?'} · ${new Date(l.at).toISOString().slice(0, 10)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
+      return [head, ...(rows.length ? rows : [`No ${args.taken ? '' : 'open '}lines in that window.`])].join('\n');
+    }
     case 'report_spend': {
       const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
       return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;
@@ -2205,6 +2272,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
+    case 'propose_memory': {
+      const { href, counts } = await call('POST', `/api/tickets/${TICKET}/memory-proposal`, { changes: args.changes });
+      return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member decides each change on the Memory page, and the answer comes as a message. End your turn now, in state ready, and close yourself with close_self once the answer comes.`;
+    }
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
@@ -2263,7 +2334,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
       return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state (the server shows you as landing until it ends): the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
@@ -2433,8 +2504,8 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS, SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

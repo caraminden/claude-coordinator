@@ -1,0 +1,34 @@
+{
+  "id": "correction-gpu-switch-wrong-place",
+  "kind": "correction",
+  "source": "#1175, event 893515, 2026-11-19 22:02 PST (Josh: \"I meant a switch in the citadel UI\" at 895117)",
+  "role": "minion",
+  "ticket": {
+    "number": 1175,
+    "title": "Real GPU on the Windows test box",
+    "type": "feature"
+  },
+  "commit": "3eee3937",
+  "from": "Josh",
+  "history": "You gave the Hyper-V Windows test box a share of the RTX 5080 on Cara's PC (Josh's pick): tools/win-test-box/gpu-host.ps1 runs once on Cara's PC as administrator to set up GPU partitioning, gpu.ps1 is the per-job switch inside the box, and a run-gpu task asks for the GPU per job; software drawing stays the default. It shipped and is waiting in the ship line. Josh is the one asking; he is not at Cara's PC. Your card asked when to walk through the ~10-minute setup at Cara's PC.",
+  "message": "My answers to your question card:\n\nGiving the test box a share of your RTX 5080 (Josh's pick) needs about 10 minutes at your PC, and the first step only checks. Your GPU comes on in the box only while a job asks, one job at a time. That job can cost a game you're playing some speed and graphics memory, because the half-share cap probably isn't enforced. Between jobs it costs nothing. HDR and overlays won't work in the box either way. When do you want to walk through it?\n-> Walk me through now\n  Added: There should be a switch I can flip that blocks all GPU jobs until unswitched",
+  "facts": [],
+  "right": "Start the walk-through, and treat the switch as one Josh flips in Citadel itself (for example on the Machines page or the test box's settings): ask where he wants it on a card, or plan it there, instead of building a script flag on Cara's PC.",
+  "wrong": "Built and shipped a PowerShell flag on Cara's PC (gpu-host.ps1 -Block / -Unblock) without asking where the switch should live.",
+  "checks": [
+    {
+      "noCall": "Edit|Write|Bash",
+      "input": "-Unblock|\\$Block\\b|-Block\\b",
+      "why": "the switch Josh meant is in Citadel's UI, not a script flag on Cara's PC"
+    },
+    {
+      "noCall": "hand_off_land|land",
+      "why": "nothing should ship before the switch's place is settled"
+    },
+    {
+      "call": "ask_question|Read|Grep|Glob|Bash|Edit|Write",
+      "input": "public/|Machines page|Citadel UI|in Citadel|switch in (the )?(ui|app|page)",
+      "why": "looks at or asks about a switch in Citadel's UI"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "id": "correction-build-parked-for-known-followup",
+  "kind": "correction",
+  "source": "#1050, event 864556, 2026-11-19 17:41 PST (Josh: \"Why is this parked but still listed in Build 4? is it done or not?\" at 866148)",
+  "role": "minion",
+  "ticket": {
+    "number": 1050,
+    "title": "Build 4: Reviewers and critics",
+    "type": "feature"
+  },
+  "commit": "9cfc9763",
+  "from": "Josh",
+  "history": "You are the build minion for Build 4 (a per-scheme store of reviewers and critics). All feeders are merged into build/4 and its tip passed CI; your go card asked to ship it to main. At go-live, a one-off import copies each scheme's repo rubric files into the new store. #1051 told you earlier what follows for Citadel itself: once live, check that docs/rubrics/kit-docs.md and docs/rubrics/ui-screenshots.md are in Citadel's Reviewers and critics store, delete docs/rubrics/, and remove the \"- **Rubrics:** docs/rubrics/\" line from Project facts in CLAUDE.md. #1051 will also send a relay saying so once the build is live.",
+  "message": "My answers to your question card:\n\nShip Build 4 (Reviewers and critics) to main as one deploy? Risk HIGH: pre-ship review off makes every ship in that scheme wait for a go. All three phases are in, the whole diff had a Fable review (its one real gap is fixed), and CI is green. Details are in my reply above.\n-> Ship it",
+  "facts": [
+    {
+      "tool": "land|hand_off_land",
+      "match": "",
+      "result": "Build 4 shipped: main and the server are on 9cfc9763, the boot check passed. It is live.",
+      "why": "the ship went through"
+    },
+    {
+      "tool": "review_set|host_check",
+      "match": "",
+      "result": "Citadel (2) review entries: kit-docs (critic, imported from docs/rubrics/kit-docs.md), ui-screenshots (critic, imported from docs/rubrics/ui-screenshots.md), plus built-ins.",
+      "why": "the import ran"
+    }
+  ],
+  "right": "Ship, then do the known follow-up now (check the two rubrics are in the store, remove docs/rubrics and the CLAUDE.md line, ship that) instead of parking until a relay repeats what it already knows.",
+  "wrong": "Shipped, then set state parked \"until the relay arrives\" with the follow-up undone, so Build 4 looked stuck.",
+  "checks": [
+    {
+      "noCall": "set_thread_status",
+      "input": "\"state\"\\s*:\\s*\"parked\"",
+      "why": "nothing outside the minion was holding the follow-up"
+    },
+    {
+      "call": "Bash|Read|Glob|Grep|Edit|Write|review_set",
+      "input": "docs/rubrics",
+      "why": "gets on with the rubric removal in the same turn"
+    }
+  ]
+}

@@ -16,6 +16,12 @@ utimesSync(join(root, 'backups', 'coordinator-2026-11-19.db'), new Date('2100-01
 after(() => rmSync(root, { recursive: true, force: true }));
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+// Now, pushed past 1:30 AM Pacific when earlier, so readings up to an hour old fall in today (CI ran this at 00:23 and they didn't).
+function sameDayNow() {
+  const t = Date.now();
+  const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(t).split(':').map(Number);
+  return t + Math.max(0, 90 - (h * 60 + m)) * 60_000;
+}
 
 function setup(name: string) {
   const store = new Store(join(root, `${name}.db`));
@@ -66,7 +72,7 @@ test('a member of another scheme sees only their own apps; an admin sees all, th
 
 test("an app's week: deploys, errors, turns and who ran them, per day, and its verdict", async () => {
   const { store, mia, peek } = setup('vitals');
-  const now = Date.now();
+  const now = sameDayNow();
   const today = pacificDay(now);
   store.addContraptionDeploy({ name: 'peek-auras', from_sha: null, to_sha: 'a'.repeat(40), by: 'Mia', started_at: now - 2 * DAY, finished_at: now - 2 * DAY + 60_000, outcome: 'deployed', stages: '{}', changes: '[]' });
   store.addContraptionDeploy({ name: 'peek-auras', from_sha: null, to_sha: 'b'.repeat(40), by: 'Mia', started_at: now - HOUR, finished_at: now - HOUR + 120_000, outcome: 'failed', stages: '{}', changes: '[]' });
@@ -121,7 +127,7 @@ test('boots say why: a ship when the code changed, else a restart on the same co
 
 test("Citadel's stalls per day with the longest, ships per day with their median, memory and disk hourly", async () => {
   const { store, josh, citadel } = setup('citadel');
-  const now = Date.now();
+  const now = sameDayNow();
   store.addHealthEvent('loop-lag', now - 10 * 60_000, 'x', 'The event loop was held for 6.2 s: sqlite');
   store.addHealthEvent('loop-lag', now - 20 * 60_000, 'x', 'The event loop was held for 1.5 s: json');
   store.addHealthEvent('client-error', now - 20 * 60_000, 'x', 'not a stall');

@@ -1,0 +1,44 @@
+{
+  "id": "correction-pipeline-check-no-fixes",
+  "kind": "correction",
+  "source": "#755, event 645764, 2026-11-15 07:00 PST (Cara: \"Why are you not proposing fixes? Isn't that part of these audits?\" at 645921)",
+  "role": "minion",
+  "ticket": {
+    "number": 755,
+    "title": "Daily pipeline check",
+    "type": "chore"
+  },
+  "commit": "45620992",
+  "from": "Citadel",
+  "history": "",
+  "message": "Scheduled run of \"Daily pipeline check\" (Every day at 07:00, this run Nov 15, 2026, 7:00 AM). A schedule started this minion, not a person.\n\nDaily read-only check of Citadel's CI -> land -> deploy -> restart pipeline over the last 24 hours. The aim is to catch a problem while it's small, before it blocks lands.\n\nRules: read only. Don't re-run, cancel, kill, restart, land or fix anything, and don't start minions. Report what you find; the Taskmaster decides what to start.\n\nCheck, with numbers: 1. Citadel's CI gate (green rate, cap-hits, median green duration; worth reporting: green under 80%). 2. Fallbacks, land times, red tests (check each red test against the flaky-tests memory; a repeat means a bug minion is due). 3. Deploys and restarts. 4. Runners (ci_runners). 5. Perigee load and leftovers. 6. GitHub API quota.\n\nOutput: nothing worth reporting: close yourself with one line. Otherwise write reports/pipeline-check-YYYY-MM-DD.md in the shared folder, message the Taskmaster with message_coordinator (one line per finding plus the report's path), and stay open in state ready.",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "ci|run|test",
+      "result": "Citadel tests.yml on land/** last 24 h: 107 runs, 75 green (70%), 32 red, 0 cap-hits, median green 89 s. Reds: prompt-budget.test.ts:60 x9 (Taskmaster prompt 40801 > budget 40800), access-matrix.test.ts:142 x6, turn-launch ENOTEMPTY cleanup race x5, browser tests (rail, frame-protocol, paste-anywhere) x6, app-services.test.ts:438 x2. turn-launch and app-services:438 are repeats in flaky-tests.md.",
+      "why": "the CI numbers that day"
+    },
+    {
+      "tool": "ci_runners",
+      "match": "",
+      "result": "windows: 2 online, idle. linux: 2 online, idle. No lost communication in 24 h.",
+      "why": "runners were fine"
+    },
+    {
+      "tool": "live_facts|host_check",
+      "match": "health|load|deploy|uptime",
+      "result": "live commit = main tip, fallbacks 0, 0 rollbacks, load peak 0.9, API core remaining 4929.",
+      "why": "the rest was clean"
+    }
+  ],
+  "right": "Report the findings and, for each, propose a fix (a bug minion for the repeat flakes, a call on the prompt-budget headroom), sent to the Taskmaster or put to people on a card, without fixing anything itself.",
+  "wrong": "Wrote the report and messaged the Taskmaster the findings only (\"bug minion due\", \"decision due\"), proposing no fixes.",
+  "checks": [
+    {
+      "call": "message_coordinator|ask_question",
+      "input": "\\bfix|propos|recommend|\\bstart",
+      "why": "an audit that finds problems proposes what to do about them"
+    }
+  ]
+}

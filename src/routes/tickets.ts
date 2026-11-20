@@ -29,6 +29,7 @@ import { lineDiff } from '../instructions.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
+import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
@@ -51,6 +52,7 @@ import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } fr
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
 import { MachineJobs } from '../machine-jobs.ts';
+import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -223,7 +225,7 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
  * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
  * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
-function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
+export function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a parked minion too (#718): answering is as deliberate as Unpark.
   app.runner.send(ticketId, author, text, images, extra, false, files);
 }
@@ -318,9 +320,9 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
  * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
  * and a release key card (#837) that app's.
  */
-function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string } }) {
+export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; memory?: object }) {
   const { store, runner } = app;
-  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : 'plan');
+  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.memory ? 'memory' : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {
     const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
@@ -718,6 +720,22 @@ export const ticketRoutes: Route[] = [
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }
+      // A kit sync's ship card (#1100): the server ships or drops the syncs itself, pushed as whoever answered, with no
+      // turn. The answer is held mail for the Taskmaster, as a machine job's is.
+      if (data.kitSync) {
+        const choice = answers[0]?.selected[0];
+        if (choice !== KIT_SHIP && choice !== KIT_NOT_NOW) throw new HttpError(400, "Pick one of the card's options");
+        let line: string;
+        try {
+          line = await app.kitSync.decide({ ticket: id, question: data.id }, choice, { id: session.uid ?? -1, name: session.name });
+        } catch (err: any) {
+          throw new HttpError(409, err.message);
+        }
+        runner.send(id, session.name, `My answer to the kit sync card: ${choice}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.emit(id, 'note', { text: line });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.
@@ -836,6 +854,8 @@ export const ticketRoutes: Route[] = [
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
+      // A memory tidy card (#1111) is decided change by change on the Memory page, never with Approve on the card.
+      if (card.memory) throw new HttpError(409, 'Review the memory tidy on the Memory page: each change is ticked there');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       const fixed = card.machine || card.releaseKey;
       const notes = body.verdict === 'approve' ? null : fixed && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
@@ -1146,7 +1166,8 @@ export const ticketRoutes: Route[] = [
       const target = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(ticket.project_id, n) : undefined;
       if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
       const v = runner.view(target);
-      const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(target.cwd ? { worktree: target.cwd } : {}) };
+      // Its spend against its budget too (#1114), which list_tickets' lines leave out.
+      const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), cost: v.cost, budget: v.budget, ...(target.cwd ? { worktree: target.cwd } : {}) };
       const events = store.listEvents(target.id).flatMap((e) => {
         const d = JSON.parse(e.data);
         const keep = e.kind === 'user_message' ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }
@@ -1247,6 +1268,18 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // log_learned (#1119): a pull-request ship's three lines; hand_off_land takes them as learned instead.
+    method: 'POST', path: '/api/tickets/:ticket/learned', who: ['minion'], refuse: 'Only the minion itself logs what it learned',
+    async handler({ req, res, app, ticket }) {
+      const body = (await readJson(req)) ?? {};
+      const lines = parseLearned(body.learned);
+      if (lines === null) throw new HttpError(400, 'learned is text: up to three lines, or "nothing"');
+      const files = ticket.cwd ? await touchedFiles(ticket.cwd) : [];
+      const row = queueLesson(app.store, app.dataDir, ticket, lines, files, 'tool');
+      return json(res, 200, { id: row.id, lines: row.lines, files: row.files.length });
+    },
+  },
+  {
     // hand_off_land (#706): the server runs tools/land.sh and reports it (LandHandoffs in src/land.ts), so the minion ends its turn now.
     method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
@@ -1309,6 +1342,12 @@ export const ticketRoutes: Route[] = [
       // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
       const clash = await landConflict(ticket.cwd, env, args);
       if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
+      // Its three lines (#1119) ride with the hand-off and queue on a clean land; they never refuse it.
+      const learned = parseLearned(body.learned);
+      if (learned !== null) {
+        h.learned = learned;
+        h.touched = await touchedFiles(ticket.cwd, args[0] === '--into' ? [args[1], `origin/${args[1]}`, 'main'] : undefined);
+      }
       if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
       app.runner.broadcastTicket(ticket.id);

@@ -17,6 +17,9 @@ import { pacificDay } from '../src/contraption-errors.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
+import { memoryFolders, readFolder } from '../src/memory-files.ts';
+import { checkChanges, countLine } from '../src/memory-curator.ts';
+import { templateBlobs } from '../src/kit-sync.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -525,6 +528,18 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  budget: {
+    about: 'a minion past twice its budget, beside five past features at $5 each: the header chip reads "$14 of about $5.00" in amber (#1114)',
+    seed(c) {
+      for (let i = 0; i < 5; i++) {
+        const done = minion(c, `Past feature ${i + 1}`, { status: 'closed' });
+        c.store.recordTurn(done.id, { session_id: `budget-${done.id}`, ended_at: Date.now(), session_cost_usd: 5 });
+      }
+      const t = minion(c, 'Costs more than usual');
+      c.store.recordTurn(t.id, { session_id: `budget-${t.id}`, ended_at: Date.now(), session_cost_usd: 14 });
+      return route(c, t);
+    },
+  },
   board: {
     about: 'the minions list with a minion in each state, types, notes and a build',
     seed(c) {
@@ -920,8 +935,30 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}")`;
     },
   },
+  'memory-tidy': {
+    about: 'Orders → Memory, Curator (#1111): the memory scenario plus an open memory tidy from a curator run (an edit, an index line, a delete, a flag) and an applied one that Put back can still undo',
+    seed(c) {
+      SCENARIOS.memory.seed(c);
+      const repo = c.store.getProject(c.project.id)!.repo_dir!;
+      const folder = memoryFolders(repo, [{ label: 'server', configDir: join(c.dataDir, 'claude') }])[0];
+      const view = readFolder(folder, () => false);
+      const old = c.store.memoryProposals.create({ project_id: c.project.id, ticket_id: null, folder: folder.id, changes: checkChanges(view, [{ action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax', reason: 'Not in the index, so no session finds it' }]) }, Date.now() - 6 * 86_400_000).proposal;
+      c.store.memoryProposals.decide(old.id, { status: 'applied', changes: old.changes.map((x) => ({ ...x, outcome: 'applied' })), backup: [{ file: 'perigee-shell.md', text: readFileSync(join(folder.dir, 'perigee-shell.md'), 'utf8'), line: null }], by: c.who }, Date.now() - 6 * 86_400_000);
+      const run = minion(c, 'Memory curator', {}, 'chore');
+      const changes = checkChanges(view, [
+        { action: 'edit', file: 'released-means-released.md', text: '---\nname: Released means released\ndescription: A target is live only when its people can get that version; ship, not land\nmetadata:\n  type: feedback\n---\n\nCara 2026-11-18: say "released" only once people can get the build.\nIn everything people read, a change going onto main is "shipping" (merged in from ship-not-land).\n', line: '- [Released means released](released-means-released.md) — live only when people can get it; ship, not land', reason: 'ship-not-land says the same kind of thing: merged into this note' },
+        { action: 'delete', file: 'ship-not-land.md', reason: 'Merged into released-means-released' },
+        { action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax or bash -c', reason: 'Not in the index, so no session finds it' },
+        { action: 'delete', file: 'fable-burst.md', reason: 'Its recheck date passed five days ago' },
+        { action: 'flag', file: 'for-cara-next-time.md', reason: 'Names a closed minion; live state: make it a pointer' },
+      ]);
+      const { proposal } = c.store.memoryProposals.create({ project_id: c.project.id, ticket_id: run.id, folder: folder.id, changes });
+      c.store.addEvent(run.id, 'plan', { id: `memory-${proposal.id}`, status: 'pending', summary: `Memory tidy: ${countLine(changes)}`, plan: changes.map((x) => `- **${x.action}** \`${x.file}\`: ${x.reason}`).join('\n'), memory: { proposal: proposal.id, project: c.project.id, counts: countLine(changes) } });
+      return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}"; the card is in #${run.number})`;
+    },
+  },
   decisions: {
-    about: "Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    about:"Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
     seed(c) {
       SCENARIOS.memory.seed(c);
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
@@ -1193,6 +1230,52 @@ mock.boards('#takes', { boards: [
         r.create(p.id, { slug: 'map-critic', name: 'Map critic', kind: 'critic', stage: 'work', trial: true, triggers: { diff: ['maps/**'] }, body: '## What it checks\n\nMaps.\n' } as never, c.who);
       }
       return `#/p/${id}/reviews`;
+    },
+  },
+  'kit-sync': {
+    about: "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed). A dev copy is a preview, whose kit sync timer is off (on copied data it would branch real schemes' repos): lift server.ts's guard on it in an edit you don't commit, start the copy, seed within 20 s, and one kit sync card lands in Seeded's Taskmaster chat",
+    seed(c) {
+      const kit = join(import.meta.dirname, '..');
+      const template = 'kit/skills/scheme-setup/templates/land.sh';
+      const old = execFileSync('git', ['-C', kit, 'log', '-2', '--format=%H', '--', template], { encoding: 'utf8' }).trim().split('\n')[1];
+      const id = { GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
+      const git = (repo: string, ...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, ...id } });
+      // Seeded is the home scheme: its repo holds the commit the copy runs, as Citadel's does.
+      const home = join(projectDir(c.dataDir, c.project.id), 'repo');
+      rmSync(home, { recursive: true, force: true });
+      execFileSync('git', ['clone', '-q', '--no-checkout', kit, home]);
+      c.store.setProjectRepoDir(c.project.id, home);
+      taskmaster(c);
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      const scheme = (name: string, local: string, origin: (dir: string) => string) => {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        c.store.setProjectSettings(p.id, { onboarding: 'skipped' });
+        if (user) c.store.addMember(p.id, user.id);
+        const dir = join(projectDir(c.dataDir, p.id), 'repo');
+        rmSync(join(projectDir(c.dataDir, p.id), 'kit-sync'), { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(join(dir, 'tools'), { recursive: true });
+        execFileSync('git', ['init', '-q', '-b', 'main', dir]);
+        writeFileSync(join(dir, 'tools', 'land.sh'), git(kit, 'show', `${old}:${template}`), { mode: 0o755 });
+        writeFileSync(join(dir, 'tools', 'land.local.sh'), local);
+        writeFileSync(join(dir, 'README.md'), `${name}\n`);
+        git(dir, 'add', '-A');
+        git(dir, 'commit', '-qm', 'seed');
+        git(dir, 'remote', 'add', 'origin', origin(dir));
+        if (!origin(dir).startsWith('https:')) {
+          rmSync(origin(dir), { recursive: true, force: true });
+          git(dir, 'clone', '-q', '--bare', dir, origin(dir));
+        }
+        c.store.setProjectRepoDir(p.id, dir);
+        taskmaster({ ...c, project: c.store.getProject(p.id)! });
+      };
+      const bare = (dir: string) => join(dir, '..', 'origin.git');
+      scheme('Green', "CHECK='true'\nSMOKE_CMD='echo smoke ok'\n", bare);
+      scheme('Red', "CHECK='true'\nSMOKE_CMD='echo the smoke test failed >&2; exit 3'\n", bare);
+      scheme('Elsewhere', "CHECK='true'\nSMOKE_CMD='true'\n", () => 'https://github.com/citadel-kit-sync-seed/no-such-repo.git');
+      // The last look saw the templates as they were before the newest land.sh change: the next look starts a round.
+      c.store.setSetting('kit-sync', { blobs: templateBlobs(kit, old) });
+      return `#/p/${c.project.id}`;
     },
   },
   'inbox-full': {

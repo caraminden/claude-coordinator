@@ -43,6 +43,10 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
   const { data: otherPage } = await call(`/api/projects/${other.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
   const url = `/api/projects/${p.id}/schedules`;
+  // A new scheme comes with the weekly Memory curator (#1111); this test starts from none.
+  const { data: starting } = await call(url);
+  assert.deepEqual(starting.schedules.map((s: any) => s.name), ['Memory curator']);
+  assert.equal((await call(`/api/schedules/${starting.schedules[0].id}`, { method: 'DELETE' })).status, 200);
   const nightly = { name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?' };
 
   const mine = await call(url, { method: 'POST', body: nightly });
@@ -94,6 +98,7 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
 test("the Taskmaster's schedule tools", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
+  for (const s of (await call(`/api/projects/${p.id}/schedules`)).data.schedules) await call(`/api/schedules/${s.id}`, { method: 'DELETE' });
   const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),

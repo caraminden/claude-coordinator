@@ -30,6 +30,7 @@ paths:
   - "test/scheme-setup-land.test.ts"
   - "test/scheme-setup-land-ci.test.ts"
   - "test/scheme-setup-land-local.test.ts"
+  - "test/scheme-setup-land-build.test.ts"
   - "test/kit-land-drift.test.ts"
   - "test/run-tests-scope.test.ts"
   - "test/citadel-wait.test.ts"

@@ -1,0 +1,17 @@
+{
+  "id": "fix-settingkeys-stalls",
+  "source": "#1029",
+  "ticket": {
+    "number": 1029,
+    "title": "Event-loop stalls in settingKeys",
+    "type": "bug"
+  },
+  "from": "Taskmaster",
+  "message": "Bug: the server's event loop stalls for over half a second more often since Nov 18, and it has now shown up after two deploys in a row.\n\nWhat we know:\n- Citadel's post-deploy watch reported stalls over 0.5 s rising from 4 to 9 after deploy 24a22fe6, then from 1 to 9 after deploy e0dcb049 (Nov 18, 08:59 PST; first seen 11:02 PST; 130 minutes after vs before). Nothing was reverted.\n- Both minions it woke (#1016, then #969) checked their own diffs and found they weren't the cause. #969 read the slow stacks: they sit in `settingKeys` (src/db.ts, around line 3416) called from `continueLoop` (src/runner.ts, around line 1973), plus `forTarget` and `coordinatorFor` lookups. Nobody has profiled it.\n\nSo this looks like a load-dependent hot path rather than one bad commit: something per-turn or per-loop is doing synchronous DB reads that grew (more settings rows, more schemes, more minions, fast mode's checks) until they cross the stall threshold.\n\nUse the `citadel:diagnosing-bugs` skill. Find where the stall data and its stacks are recorded (the post-deploy watch's source), measure how often `continueLoop` calls `settingKeys`/`forTarget`/`coordinatorFor` and how long each takes on a copy of the live data (`citadel-dev-copy`; never point a worktree's server.ts at the live DB: set DATA_DIR and PORT), and fix the cause (caching, a prepared statement, an index, or not calling it per iteration), not the threshold. Failing test or a repeatable benchmark first. The runner is high-ish risk by file: self-review, and if it labels high, ask with a card before shipping.\n\nDone when: you can name the cause with numbers (calls per minute and time per call before and after), the fix is live, and the next post-deploy watch shows stalls back at the pre-Nov-18 level (about 1-4), or you report what's left with evidence.",
+  "before": "db1678f5292c5e116f20aaf366f7979bbd708389",
+  "fix": "1654c35deefb8363bc03ef2fa6a6d17f0f94d9a3",
+  "tests": [
+    "test/loop-guard.test.ts"
+  ],
+  "right": "A person's message to a Taskmaster no longer scans the settings once per minion (settingKeys read once, not per row): 0.67 s down to 5 ms on live data."
+}

@@ -162,3 +162,16 @@ test('fresh: something waits that wasn\'t waiting when you last opened the schem
   const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Private two' } });
   assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/seen-items`, { method: 'PUT', body: { keys: [] } })).status, 404);
 });
+
+test("a card another scheme addressed to you isn't in this scheme's Needs you list (Josh, 2026-11-19: keep schemes isolated)", async () => {
+  const { data: here } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Here' } });
+  const { data: there } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'There' } });
+  for (const p of [here, there]) assert.equal((await call('Cara', `/api/projects/${p.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  const tm = store.createTicket({ project_id: there.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  store.addEvent(tm.id, 'question', { id: 'q-cross', questions: [], to: 'Josh' });
+  const ids = async (id: number) => (await call('Josh', `/api/projects/${id}/inbox`)).data.items.map((i: any) => i.card?.id);
+  assert.deepEqual(await ids(there.id), ['q-cross'], 'its own scheme still lists it');
+  assert.deepEqual(await ids(here.id), [], 'another scheme does not');
+  store.db.close();
+});

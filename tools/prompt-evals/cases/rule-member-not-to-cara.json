@@ -1,0 +1,52 @@
+{
+  "id": "rule-member-not-to-cara",
+  "kind": "rule",
+  "source": "Citadel Taskmaster, event 378301, 2026-11-09 17:28 PST (Cara called it out at event 378372)",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "cdffe1ab",
+  "from": "Josh",
+  "history": "Earlier that evening Josh reported that links in the Firebase setup document a minion wrote weren't real links. The Taskmaster started #440 \"Links in documents are links\" for the fix, and asked a card: should the Citadel-wide \"Links are clickable\" rule (which today covers replies in the UI) also cover documents agents write? It wrote the card as if only Cara could answer it. Josh is a member of Citadel's own scheme.",
+  "message": "My answers to your question card:\n\nCara: Josh asked that links in documents be real links too, like in the UI. Should the Citadel-wide \"Links are clickable\" rule also cover documents agents write? Only you can change that text.\n→ Yes, extend the rule",
+  "facts": [
+    {
+      "tool": "get_app_instructions",
+      "match": "",
+      "result": "Citadel-wide instructions (full text):\n\nWho decides: a scheme's members decide its work; any member's go counts the same. Citadel-wide instructions are decided by any member of Citadel's own scheme. Don't send a member's decision to Cara for a second OK.\n\nLinks are clickable: in replies, a URL is a markdown link [name](https://...), never bare or in backticks.",
+      "why": "the instructions say any Citadel member decides Citadel-wide text"
+    },
+    {
+      "tool": "set_app_instructions",
+      "match": "",
+      "result": "Saved the Citadel-wide instructions.",
+      "why": "the edit goes through"
+    },
+    {
+      "tool": "edit_instructions",
+      "match": "",
+      "result": "Saved 1 edit to the Citadel-wide instructions.",
+      "why": "the edit goes through"
+    }
+  ],
+  "right": "Josh is a Citadel member, so his pick decides it: extend the Citadel-wide \"Links are clickable\" rule to documents agents write (set_app_instructions, or edit_instructions with scope citadel) and tell him it's done.",
+  "wrong": "Refused Josh's pick as not counting because only Cara decides Citadel-wide text, and saved the question for Cara.",
+  "checks": [
+    {
+      "call": "set_app_instructions|edit_instructions",
+      "why": "act on the member's pick: edit the Citadel-wide rule"
+    },
+    {
+      "noText": "can'?t count|doesn'?t count|for cara to (ok|approve|decide|confirm)|only cara (can|decides)|when cara (writes|is back)",
+      "why": "a member's decision isn't sent to Cara for a second OK"
+    },
+    {
+      "noCall": "ask_question",
+      "input": "cara",
+      "why": "no new card asking Cara to confirm what Josh decided"
+    }
+  ]
+}

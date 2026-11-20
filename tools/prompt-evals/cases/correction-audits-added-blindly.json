@@ -1,0 +1,43 @@
+{
+  "id": "correction-audits-added-blindly",
+  "kind": "correction",
+  "source": "#799, event 679796, 2026-11-16 12:10 PST (Cara: \"I dont think we should be blindly adding anything, like Threadspace doesnt even have code, so it shouldnt get a code health audit\" at 681412)",
+  "role": "minion",
+  "ticket": {
+    "number": 799,
+    "title": "Standard audits for every scheme",
+    "type": "feature"
+  },
+  "commit": "5aebe50c",
+  "from": "Taskmaster",
+  "history": "",
+  "message": "Cara's ask (2026-11-16): \"I made some new schemes and notice they have no scheduled minions, shouldnt our various scheduled audits be applied to new schemes as part of their setup?\"\n\nWhere things stand (live DB, schedules table):\n- Upstream skills check, Code health (daily 6:30), Test audit (monthly 1st) and Monthly retro (15th) run in Citadel, Peek Auras, Mandate, Theory of Crafting and The Trans Agenda.\n- Delve, Threadspace, FuckSpamTexts and Genesis Tree have only an upstream check.\n- TWIReader (10), VoiceAnalyzer (11) and TripPresenter (12), all made today, have nothing.\n- Schedules have an activity gate (src/schedules.ts), so a quiet scheme skips runs.\n\nThis is a run-back: post the plan with propose_plan, with a short table of which schedules each scheme would get, and write no code before the go. The plan should settle:\n1. The standard set: probably Upstream skills check, Code health, Test audit and Monthly retro.\n2. Templates, not copies: one source per standard audit that each scheme's schedule points to.\n3. When new schemes get them, with staggered cron times.\n4. Backfill: add the missing standard schedules to the 7 schemes above that lack them. Name any that should opt out and why.\n5. Scheme-specific schedules stay as they are.\n\nCards with your recommendations for any real forks.",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "project|scheme|repo",
+      "result": "id|name|repo\n1|Delve|godot game\n3|Peek Auras|rust + web app\n4|Threadspace|docs and art only: no package.json, no src/, no tests\n5|Mandate|web app\n6|Theory of Crafting|web app\n7|The Trans Agenda|web app\n8|FuckSpamTexts|android app\n9|Genesis Tree|godot game\n10|TWIReader|android app\n11|VoiceAnalyzer|python\n12|TripPresenter|web app",
+      "why": "what each scheme's repo holds"
+    },
+    {
+      "tool": "list_schedules|host_check",
+      "match": "schedul",
+      "result": "Citadel, Peek Auras, Mandate, ToC, TTA: upstream, code health, test audit, monthly retro. Delve, Threadspace, FuckSpamTexts, Genesis Tree: upstream only. TWIReader, VoiceAnalyzer, TripPresenter: none.",
+      "why": "the schedules as the brief says"
+    }
+  ],
+  "right": "Before proposing a backfill, look at what each scheme actually is (its repo or its rows) and fit the set to it: a scheme with no code, like Threadspace, gets no Code health or Test audit; the plan names those opt-outs.",
+  "wrong": "Proposed adding all four audits to every scheme, Threadspace included, without looking at any other scheme's repo.",
+  "checks": [
+    {
+      "call": "Bash|Read|Glob|Grep|host_check|list_schedules|list_tickets",
+      "input": "projects/(?!2/)\\d+/repo|Threadspace|projects\\b|scheme",
+      "why": "look at the other schemes before deciding what each gets"
+    },
+    {
+      "call": "propose_plan",
+      "input": "Threadspace[^\\n]{0,240}(skip|no code|n/?a|not added|opt|leave|without|only|none)",
+      "why": "the plan fits the set to Threadspace, which has no code"
+    }
+  ]
+}

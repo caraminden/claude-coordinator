@@ -1,0 +1,25 @@
+{
+  "id": "correction-parked-waiting-on-person",
+  "kind": "correction",
+  "source": "#476, event 475893, 2026-11-11 12:48 PST (Josh: \"this should not be parked\" at 478959)",
+  "role": "minion",
+  "ticket": {
+    "number": 476,
+    "title": "Ultra review follow-up",
+    "type": "chore"
+  },
+  "commit": "252a5d3b",
+  "from": "Josh",
+  "history": "You prepare ultra reviews (Claude Code's /code-review ultra, a few free runs per person) of parts of the repo. Josh, after the Nov 10 land jam: \"lets reevaluate the things we want to review, I want to focus on preempting any kinda of similar failure that would take out our ability to deploy and/or clog CI\". You re-cut three pipeline slices under 8,000 lines each (1: land, deploy, restart; 2: CI and the kit's land gate; 3: turns under a restart) and offered a drill minion that breaks the pipeline on purpose on a dev copy; its handoff is handoffs/handoff-pipeline-failure-drill.md. Only a person can start an ultra review, by pressing the ultra review button in this chat once per slice and pasting its paths.",
+  "message": "My answers to your question card:\n\n1. Which pipeline slices should get an ultra review (one free run each, from your and Cara's 3 apiece)?\n-> 1: Land, deploy, restart; 2: CI and the kit's land gate; 3: Turns under a restart\n\n2. Also start a minion that breaks the pipeline on purpose on a dev copy (big database, loaded box, a kill mid-deploy, runners offline) to catch what a code review can't see?\n-> Yes, start the drill",
+  "facts": [],
+  "right": "Ask the Taskmaster to start the drill, give Josh the three slices to run, and leave the minion showing it needs him (state null or ready), since the next step is a person pressing the button.",
+  "wrong": "Set state parked (\"waiting on 3 ultra review runs\") while the next step was Josh's, so the minion dropped out of what needs him.",
+  "checks": [
+    {
+      "noCall": "set_thread_status",
+      "input": "\"state\"\\s*:\\s*\"parked\"",
+      "why": "waiting on a person is not on hold on purpose"
+    }
+  ]
+}

@@ -30,3 +30,9 @@ test('the Taskmaster prompt says a brief covers what happens to things saved bef
   assert.match(line, /what happens to the ones saved before the change: migrated, left as they are on purpose, or flagged to their owner/);
   assert.ok(!build('ticket').includes('saved before the change'));
 });
+
+test('a minion prompt carries the done-lines rule; the Taskmaster prompt does not (#1115)', () => {
+  assert.match(build('ticket'), /Done lines \(#1115\): on a feature, before any code/);
+  assert.match(build('ticket'), /Bugs, chores and research write none/);
+  assert.ok(!build('coordinator').includes('Done lines (#1115)'));
+});

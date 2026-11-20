@@ -132,25 +132,27 @@ report_me() {
   fi
 }
 
-# A deploy whose range (<from> <to>) changes the kit's land.sh template lists the schemes whose tools/land.sh now
-# differ from it (tools/kit-land-drift.sh, #602) and tells the Taskmaster in one message, as the deploying minion
-# (a deploy run by hand only prints it). Sent once the tests and the boot check passed. Best effort: it never stops
-# a deploy.
+# A deploy whose range (<from> <to>) changes a kit template schemes copy (land.sh, guard.sh, pre-push, ponytail.md)
+# tells the Taskmaster in one message, as the deploying minion (a deploy run by hand only prints it), with the schemes
+# whose tools/land.sh now differ (tools/kit-land-drift.sh, #602). The server syncs them itself (src/kit-sync.ts, #1100):
+# the message only says a sync card is coming. Sent once the tests and the boot check passed. Best effort: it never
+# stops a deploy.
 # shortcut: a restart that is then rolled back has still sent it; the list is only ever read as "sync these".
 kit_land_drift() {
-  local rc=0 list text body
-  git_live diff --quiet "$1" "$2" -- kit/skills/scheme-setup/templates/land.sh 2>/dev/null || rc=$?
-  [ "$rc" = 1 ] || return 0
-  list=$("$LIVE/tools/kit-land-drift.sh" "$(dirname "$(dirname "$SOURCE")")" 2>&1) || { say "the kit's land.sh changed, but the drift check failed: $list"; return 0; }
-  if [ -z "$list" ]; then
+  local changed list text body
+  changed=$(git_live diff --name-only "$1" "$2" -- kit/skills/scheme-setup/templates/{land.sh,guard.sh,pre-push,ponytail.md} 2>/dev/null) || return 0
+  [ -n "$changed" ] || return 0
+  list=$("$LIVE/tools/kit-land-drift.sh" "$(dirname "$(dirname "$SOURCE")")" 2>&1) || { say "the kit's scheme files changed, but the land.sh drift check failed: $list"; return 0; }
+  # Only land.sh is a byte copy: a change to the adapted files may still be a sync for the server to make.
+  if [ -z "$list" ] && [ "$changed" = kit/skills/scheme-setup/templates/land.sh ]; then
     say "the kit's land.sh changed; every scheme's tools/land.sh already matches it"
     return 0
   fi
-  say "the kit's land.sh changed; these schemes' tools/land.sh differ from it: $(tr '\n' ';' <<<"$list" | sed 's/;$//; s/;/; /g')"
+  [ -n "$list" ] || list='(none; the change is in the files schemes adapt)'
+  say "the kit's scheme files changed; sync waiting on your go. Schemes whose tools/land.sh differ: $(tr '\n' ';' <<<"$list" | sed 's/;$//; s/;/; /g')"
   [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] || return 0
-  text="tools/deploy.sh: $(short "$2") changes the kit's land.sh template (kit/skills/scheme-setup/templates/land.sh). These schemes' tools/land.sh differ from it (project number, repo):
-$(sed 's/^/- /' <<<"$list")
-Send each one a sync: copy the template over tools/land.sh byte for byte (the scheme's settings and land_after stay in tools/land.local.sh), run the scheme's land tests, and land it as high risk. A scheme with no tools/land.local.sh yet needs its migration to the local file first (Citadel #602's handoffs)."
+  text="tools/deploy.sh: $(short "$2") changes the kit's scheme files (kit/skills/scheme-setup/templates/: land.sh, guard.sh, pre-push or ponytail.md): sync waiting on your go. The server makes the syncs itself (#1100): within 10 minutes it merges the change into every scheme that is behind, keeping each scheme's own edits, runs each one's quick check, and posts one kit sync card in Citadel's Taskmaster chat. Its Ship it ships every green one, pushed as whoever clicks. Start no sync minions. Schemes whose tools/land.sh differ now (project number, repo):
+$(sed 's/^/- /' <<<"$list")"
   body=$(node -e 'console.log(JSON.stringify({text:process.argv[1]}))' "$text")
   curl -fsS -o /dev/null --max-time "$REPORT_WAIT" -X POST "${COORDINATOR_API:-$URL}/api/tickets/$COORDINATOR_TICKET/coordinator" \
     -K - -H 'Content-Type: application/json' -d "$body" 2>/dev/null <<<"header = \"Authorization: Bearer $COORDINATOR_TOKEN\"" ||

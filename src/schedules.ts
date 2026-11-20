@@ -245,6 +245,8 @@ export interface TemplateVars {
   scheme: string;
   /** Citadel's shared folder, where the cross-scheme process digests live. */
   citadelShared: string;
+  /** The memory folder a memory curator run tidies, known only when the run starts. */
+  memoryDir?: string;
 }
 
 /** A run's brief from its template: the body with the scheme filled in, then the scheme's notes. */
@@ -252,6 +254,7 @@ export function renderTemplate(t: ScheduleTemplate, notes: string, v: TemplateVa
   const body = t.body.replace(/\{(\w+)\}/g, (all, k) => {
     if (k === 'scheme') return v.scheme;
     if (k === 'citadel_shared') return v.citadelShared;
+    if (k === 'memory_dir') return v.memoryDir ?? "the scheme's memory folder (filled in when the run starts)";
     throw new Error(`kit/schedules/${t.slug}.md uses ${all}, which nothing fills in`);
   });
   return notes.trim() ? `${body}\n\nFor ${v.scheme}:\n${notes.trim()}` : body;
@@ -277,7 +280,7 @@ export function templateVars(store: Pick<Store, 'getProject' | 'listProjects'>, 
 }
 
 /** A standard audit's category, by its kit template. */
-const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps' };
+const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps', 'memory-curator': 'Process', 'ship-lessons': 'Process' };
 // First match on the name wins; a name nothing matches stays uncategorised ('', shown as Other).
 const NAME_CATEGORY: [RegExp, string][] = [
   [/read-?back/i, 'Read-backs'],
@@ -485,6 +488,8 @@ export interface ScheduledRunDeps {
   dataDir: string;
   /** The schedule templates; the kit's by default. */
   templates?: () => Map<string, ScheduleTemplate>;
+  /** The memory folder the memory curator (#1111) tidies in a scheme, and its note count; none skips its run. */
+  memoryTarget?: (projectId: number) => { dir: string; notes: number } | null;
 }
 
 /**
@@ -530,12 +535,34 @@ export class ScheduledRuns {
         return store.schedules.ran(s.id, { skip }, now);
       }
     }
+    // Ship lessons (#1119) skips, as free, a stretch with no new lines or too few open ones to repeat.
+    if (s.template === 'ship-lessons') {
+      const newest = store.lessons.newestOpen(s.project_id);
+      const open = store.lessons.list(s.project_id, { limit: 2 }, now).length;
+      if (!newest || newest <= store.schedules.since(s) || open < 2) {
+        const skip = `Skipped ${pacific(now)}: ${open < 2 ? `${open} open ship lesson${open === 1 ? '' : 's'}, too few to repeat` : `no new ship lessons since ${pacific(store.schedules.since(s))}`}`;
+        console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
+        return store.schedules.ran(s.id, { skip }, now);
+      }
+    }
+    let memoryDir: { dir: string; notes: number } | null | undefined;
+    // The memory curator (#1111) skips, as free, a scheme with no notes or with last week's tidy still waiting on a member.
+    if (s.template === 'memory-curator') {
+      const open = store.memoryProposals.open(s.project_id);
+      memoryDir = this.d.memoryTarget?.(s.project_id);
+      const why = open ? `a tidy${open.ticket_id === null ? '' : ` from #${store.getTicket(open.ticket_id)?.number}`} still waits on the Memory page` : !memoryDir?.notes ? 'no memory notes to tidy' : null;
+      if (why) {
+        const skip = `Skipped ${pacific(now)}: ${why}`;
+        console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
+        return store.schedules.ran(s.id, { skip }, now);
+      }
+    }
     try {
       // A standard audit renders its kit template now, so a template fix reaches every scheme's next run (#799).
       if (s.template) {
         const t = (this.d.templates ?? loadTemplates)().get(s.template);
         if (!t) throw new Error(`its template kit/schedules/${s.template}.md is gone from the kit`);
-        s = { ...s, brief: renderTemplate(t, s.notes, templateVars(store, this.d.dataDir, s.project_id)) };
+        s = { ...s, brief: renderTemplate(t, s.notes, { ...templateVars(store, this.d.dataDir, s.project_id), ...(memoryDir ? { memoryDir: memoryDir.dir } : {}) }) };
         store.schedules.setBrief(s.id, s.brief);
       }
       // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.

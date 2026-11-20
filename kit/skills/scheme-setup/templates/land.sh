@@ -16,6 +16,21 @@
 #       each failure land_failures finds (below) and "verify: red"; exit 0 green, 1 red, 75 CI gave no verdict.
 #       With LAND_VERIFY_IDS (ids, a line each: fast mode's culprit search), only what those need runs: CI only for a
 #       ci: id, and with CHECK_FILE_CMD set, only their test files in place of the whole CHECK.
+# Build branches: a major build is a branch build/<n>, checked out nowhere, that feeders merge into and that ships
+#    to $BRANCH whole. Ported from Citadel's own land.sh. Once this script takes --into, Citadel's prompts tell the
+#    Taskmaster when to suggest a build and each feeder and build minion its steps (the scheme's Builds setting).
+#   tools/land.sh --into build/<n> [<test files>]   a feeder merges into it: rebases onto build/<n> (no rebase when it
+#       is already under the branch), runs the named test files through CHECK_FILE_CMD (with none named, or no
+#       CHECK_FILE_CMD: CHECK_LIGHT, else CHECK), and moves build/<n> by compare-and-swap. No CI, no line, no push:
+#       it waits only for other runs on the same build (a lock per build).
+#   tools/land.sh --into build/<n> --full           the build minion's merge of $BRANCH: build/<n> must already be
+#       under its branch (it ran git merge build/<n>; no rebase, which would flatten the build's merges), then the
+#       full CHECK and CI on land/<branch>, as --verify runs them, then the same compare-and-swap. Out of the line.
+#   tools/land.sh --build                            ships the build its branch is at the tip of, through the line:
+#       $BRANCH comes in by merge (not rebase), then the check, CI, the fast-forward and the push as for any land,
+#       then build/<n> is deleted, here and on origin. Only as the head of the line, never stacked, never in fast mode.
+#   A plain land refuses a branch that carries commits of a build/* that $BRANCH doesn't have: half a build would go live.
+#   Lock order: a build's lock (fd 6) before the land lock (fd 9); --into and --full take only the build's.
 # Fast mode (#1017): with LAND_FAST=1 (Citadel sets it for a low or medium risk land in a scheme whose Settings turn
 #    fast mode on), a branch that changes none of tools/land.sh, tools/land.local.sh, the LANES map, .github/* or the
 #    scheme's FAST_FULL patterns lands on the smoke check alone: no check, no CI. The full suite runs behind it on main.
@@ -342,6 +357,7 @@ queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
   l[$1]=$2
+  [ "$1" != 5 ] || [ "$mode" != build ] || l[5]=old # a build is a batch of its own: no gated landing's batch takes it in
   queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "${l[3]:-}" "${l[4]:--}" "${l[5]:--}" "${l[6]:--}" 2>/dev/null || true
 }
 
@@ -679,29 +695,67 @@ undo_guard() {
 # rebase, which catches it as before; and a branch whose commit main already has as a cherry-pick, with a later commit
 # on the same lines, is refused here though the rebase would skip it: the git rebase the refusal names then goes
 # through clean. Upgrade to a replay if that bites.
+# A third argument checks onto a build instead: --check --into build/<n>.
 early_conflict() {
-  local out rc=0 files
-  out=$(git -c "attr.tree=refs/heads/$BRANCH" merge-tree --write-tree --name-only --no-messages "refs/heads/$BRANCH" "$1" 2>/dev/null) || rc=$?
+  local out rc=0 files onto=${3:-$BRANCH} fix
+  out=$(git -c "attr.tree=refs/heads/$onto" merge-tree --write-tree --name-only --no-messages "refs/heads/$onto" "$1" 2>/dev/null) || rc=$?
   [ "$rc" = 1 ] || return 0
   files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
-  say "$branch won't rebase onto $BRANCH ($(git log -1 --format='%h "%s"' "refs/heads/$BRANCH")) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  case $mode in
+    build) fix="Take $BRANCH in on your branch by hand (git merge $BRANCH), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again" ;;
+    into | full) fix="On conflicts: run git rebase $onto, resolve them keeping the other feeders' changes, re-test, commit, then run this again" ;;
+    *) fix="On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
+  esac
+  say "$branch won't $([ "$mode" = build ] && echo "merge $onto in" || echo "rebase onto $onto") ($(git log -1 --format='%h "%s"' "refs/heads/$onto")) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. $fix"
   return 1
 }
 
-# --check: only the early check, changing nothing; exit 3 on a conflict, else 0. Citadel runs it at hand_off_land.
+# --check: only the early check, changing nothing; exit 3 on a conflict, else 0. Citadel runs it at hand_off_land,
+# with the land's own arguments.
 check='' verify=''
 [ "${1:-}" != --check ] || { check=1; shift; }
 [ "${1:-}" != --verify ] || { verify=1; shift; }
-[ $# -eq 0 ] || refuse "takes no arguments"
+mode=land build='' files=() # mode: land, into, full or build (the header's "Build branches")
+case ${1:-} in
+  '') ;;
+  --into)
+    build=${2:-}
+    [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]] || refuse "--into takes a build branch, build/<n>, then the test files the change touched (or --full)"
+    shift 2
+    mode=into
+    if [ "${1:-}" = --full ]; then
+      mode=full
+      shift
+      [ $# -eq 0 ] || refuse "--full runs the whole check and CI: name no test files with it"
+    fi
+    files=("$@") ;;
+  --build) [ $# -eq 1 ] || refuse "--build takes nothing more: run it from the build minion's branch at the build's tip"; mode=build ;;
+  *) refuse "takes no arguments besides --check, --verify, --lane, --into build/<n> <test files>, --into build/<n> --full and --build" ;;
+esac
+[ -z "$verify" ] || [ "$mode" = land ] || refuse "--verify takes no other arguments"
 here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
 [ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
+# --build ships the build whose tip the branch is at. After the recovery below, which may put the branch back.
+find_build() {
+  build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/')
+  [[ ! $build =~ ^build/[1-9][0-9]{0,5}$ ]] || return 0
+  [ -z "$check" ] || exit 0 # the land itself refuses it
+  local ahead='' # one merge ahead of a build: $BRANCH merged in by hand
+  [ -n "$build" ] || ! git rev-parse -q --verify HEAD^2 >/dev/null || ahead=$(git for-each-ref --points-at HEAD^1 --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
+  [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a merge of $BRANCH by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
+  refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
+}
 if [ -n "$check" ]; then
   { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || exit 0 # the land itself refuses these
-  early_conflict HEAD "at hand-off" || exit 3
-  exit 0
+  [ "$mode" != build ] || find_build
+  case $mode in
+    land | build) early_conflict HEAD "at hand-off" || exit 3 ;;
+    into) git merge-base --is-ancestor "refs/heads/$build" HEAD 2>/dev/null || ! git show-ref -q --verify "refs/heads/$build" || early_conflict HEAD "at hand-off" "$build" || exit 3 ;;
+  esac
+  exit 0 # --full: no rebase, so nothing to check
 fi
 # A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
 if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
@@ -714,7 +768,24 @@ if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
 fi
 rm -f "$gitdir/land-branch"
 { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || refuse "run it from a minion's branch, not $BRANCH or a detached HEAD"
+[ "$mode" != build ] || find_build
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
+case $mode in
+  land)
+    # The guard: a branch on a build's commits (a feeder that ran the usual command) would put part of that build live.
+    while read -r ref; do
+      for mb in $(git merge-base --all HEAD "$ref" 2>/dev/null); do
+        git merge-base --is-ancestor "$mb" "refs/heads/$BRANCH" ||
+          refuse "$branch carries commits of ${ref#refs/heads/} that $BRANCH doesn't have, so landing it would put part of that build live; nothing landed. Merge it into the build instead: tools/land.sh --into ${ref#refs/heads/} <the test files you touched>"
+      done
+    done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
+    ;;
+  into | full)
+    [[ $branch != build/* ]] || refuse "run it from a feeder's branch or the build minion's own, not from a build branch"
+    git show-ref -q --verify "refs/heads/$build" || refuse "$build doesn't exist: its build minion makes it (git branch $build $BRANCH), so nothing merged"
+    for f in "${files[@]}"; do [ -f "$f" ] || refuse "$f is not a file in $here, so nothing merged: name the test files the change touched, from the worktree's top"; done
+    ;;
+esac
 # Fast mode (the header): the first path the branch changes since it forked from main that keeps the full gate.
 fast_full() {
   local fork f p
@@ -728,6 +799,7 @@ fast_full() {
   done < <(git diff --no-renames --name-only -z "$fork" HEAD) # -z: a non-ASCII path as it is, not quoted (Mandate #152)
 }
 FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
+[ "$mode" = land ] || LAND_FAST='' # a whole build takes the full gate, and a merge into one isn't in the line
 if [ "${LAND_FAST:-}" = 1 ]; then
   why=$(set -f; fast_full)
   if [ -z "$why" ] && { [ -z "$SMOKE_CMD" ] || [ "${LAND_SMOKE:-1}" = 0 ]; }; then why='a land with no smoke check'; fi
@@ -740,6 +812,9 @@ if [ "${LAND_FAST:-}" = 1 ]; then
     say "fast mode is on, but $why takes the full gate"
   fi
 fi
+# A build lands only as the head of the line, on $BRANCH itself, and alone: its ticket says "old" (queue_set), so no
+# batch takes it in. The ones behind may still stack on it.
+[ "$mode" != build ] || CI_STACK=1 CI_BATCH=1 BATCH='' UNRUN=old
 # The main checkout is the first entry of the worktree list.
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 state=$(git -C "$MAIN" rev-parse --absolute-git-dir)
@@ -752,7 +827,7 @@ if [ -n "$CI_ON" ]; then
 fi
 cilog="$state/land-ci-${branch//\//-}.log"
 # Never holding the lock: a gh or git left hanging after its timeout mustn't keep it.
-hub() { GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&-; }
+hub() { GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 6>&-; }
 
 pre=$(git rev-parse HEAD) # the branch as it was: every build starts from here
 base=''    # the commit the build sits on: main, or the commit of the one directly ahead
@@ -805,7 +880,7 @@ ci_runs() {
   ci_skipped='' ci_open=0
   lane_ci "$ln" || return 0
   if [ -n "$CI_STATUS" ]; then
-    timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&- || rc=$?
+    timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&- 6>&- || rc=$?
     # Its lines for workflows still going ("<file>: in_progress …", "<file>: not started …") keep a red from deciding.
     [ "$rc" != 1 ] || ! grep -Eq '^[[:space:]]*[^:[:space:]][^:]*: (in_progress|queued|waiting|pending|requested|not started)' "$cilog" || ci_open=2
     return "$rc"
@@ -998,13 +1073,23 @@ build() {
     phase="rebasing onto $Q_PREDNAME's commit"
     on="$Q_PREDNAME's commit ${want:0:12}, $(queue_ordinal $((Q_AHEAD + 1))) in line: CI runs on both at once, and this lands once $Q_PREDNAME has"
   fi
+  [ "$mode" != build ] || phase="merging $BRANCH into $build"
   queue_phase "$phase"
-  say "rebasing $branch onto $on"
+  if [ "$mode" = build ]; then say "merging $on into $build on $branch"; else say "rebasing $branch onto $on"; fi
   # The branch, and the commit this leaves the worktree on: how the next run puts things back if this one is killed.
   printf '%s\n' "$branch" "$pre" >"$gitdir/land-branch"
   # 9>&- on git: a git gc --auto it starts detaches, and mustn't keep the lock.
-  git checkout -q --detach "$pre" 9>&-
-  if git rebase -q "$want" 9>&-; then
+  git checkout -q --detach "$pre" 9>&- 6>&-
+  if [ "$mode" = build ]; then
+    # A build takes $BRANCH in by merge: a rebase would flatten its merges of $BRANCH and change its feeders' commits.
+    if git merge-base --is-ancestor "$want" HEAD || git merge -q -m "Merge $BRANCH into $build" "$want" 9>&- 6>&-; then
+      printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+    else
+      git merge --abort 2>/dev/null || true
+      blocked="merging $BRANCH into $build failed (see git's output above), so nothing landed. Take $BRANCH in on your branch by hand (git merge $BRANCH), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again"
+      return 0
+    fi
+  elif git rebase -q "$want" 9>&- 6>&-; then
     printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
   else
     git rebase --abort 2>/dev/null || true # nothing to abort if it never started
@@ -1053,8 +1138,8 @@ build() {
     (
       flock -w "$CHECK_WAIT" 7 || exit 1
       queue_phase "running the check since $(date +%H:%M)"
-      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" >"$log" 2>&1 9>&- 7>&-
-    ) 7>"$state/land-check.lock" 9>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
+      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" >"$log" 2>&1 9>&- 7>&- 6>&-
+    ) 7>"$state/land-check.lock" 9>&- 6>&- || rc=$? # 9>&-: this subshell outlives a killed landing, and mustn't keep its lock
     [ "$rc" = 0 ] || [ -e "$log" ] || refuse "the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check never ran and nothing landed: $(check_holder). A person needs to look at it before anyone tries again"
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
       echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
@@ -1193,7 +1278,7 @@ leave() {
     if [ "$(git rev-parse "refs/heads/$branch")" != "$pre" ]; then
       say "$branch moved while this ran, so it is left as it is now"
       git checkout -q "$branch" 9>&-
-    elif [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ] || [ -n "$landed" ]; }; then
+    elif [ -n "$keep" ] && { [ -n "$landed" ] || { [ "$mode" != build ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ]; }; }; }; then
       git checkout -q -B "$branch" "$keep" 9>&-
     else
       git checkout -q "$branch" 9>&-
@@ -1201,7 +1286,7 @@ leave() {
   fi
   rm -f "$gitdir/land-branch"
   queue_done $landed
-  exec 9>&-
+  exec 9>&- 6>&-
   if [ -n "$pushed" ]; then
     ci_cancel
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
@@ -1222,7 +1307,7 @@ smoke() {
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
   if [ -n "$SMOKE_CMD" ]; then
-    out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1) || rc=$?
+    out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1 6>&-) || rc=$?
     if { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ -n "$FAST" ]; then
       refuse "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, and a fast land goes live on it alone, so nothing landed. Find what hangs; a land labelled high takes the full gate"
     elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
@@ -1264,7 +1349,7 @@ verify_run() {
   if [ -n "$chk" ]; then
     (
       flock -w "$CHECK_WAIT" 7 || { echo "land: the check lock was still taken after ${CHECK_WAIT}s"; exit 1; }
-      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" 2>&1 7>&-
+      timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" 2>&1 7>&- 6>&-
     ) >"$log" 7>"$state/land-check.lock" || rc=$?
     if [ "$rc" != 0 ]; then
       tail -n 40 "$log" >&2
@@ -1305,6 +1390,81 @@ verify_run() {
   exit 1
 }
 [ -z "$verify" ] || verify_run
+
+# A build's lock: one run at a time on build/<n> (a merge into it, its --full run or its land), on fd 6. --build takes
+# it before the line, so a land never waits on a feeder's check; the feeders wait for the build's land instead.
+if [ -n "$build" ]; then
+  [[ ${LAND_BUILD_WAIT:-3600} =~ ^[0-9]+$ ]] || refuse "LAND_BUILD_WAIT is in whole seconds, not \"$LAND_BUILD_WAIT\""
+  lock=$state/land-build-${build#build/}.lock
+  exec 6>"$lock" || refuse "can't open $lock for writing, so nothing ran: a person needs to look at it"
+  if ! flock -n 6; then
+    say "waiting for the run on $build ahead of this one (a merge into it, its full run or its land) to end"
+    flock -w "${LAND_BUILD_WAIT:-3600}" 6 || refuse "waited ${LAND_BUILD_WAIT:-3600} s for the run on $build ahead of this one, so nothing ran: run it again later, or look at what holds $lock"
+  fi
+  # Under its lock only land.sh moves it: what a merge into it compares and swaps against.
+  bbase=$(git rev-parse -q --verify "refs/heads/$build") || refuse "$build doesn't exist (a build that landed is deleted), so nothing ran"
+  [ "$mode" != build ] || [ "$bbase" = "$pre" ] || refuse "$build moved on while this waited ($(git log -1 --format='%h "%s"' "$bbase")): bring $branch to it (git merge --ff-only $build) and run it again. Nothing landed"
+fi
+
+# --into and --full (the header's "Build branches"): out of the line, under the build's lock only.
+if [ "$mode" = into ] || [ "$mode" = full ]; then
+  if git merge-base --is-ancestor "$bbase" HEAD; then
+    say "$build is already under $branch: no rebase"
+  else
+    [ "$mode" = into ] || refuse "$build has commits $branch doesn't: run git merge $build (not a rebase), re-test, then run this again. Nothing merged"
+    say "rebasing $branch onto $build ($(git log -1 --format='%h "%s"' "$bbase"))"
+    if ! git rebase -q "$bbase" 6>&-; then
+      git rebase --abort 2>/dev/null || true
+      refuse "the rebase onto $build failed (see git's output above), so $build is untouched. On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again"
+    fi
+  fi
+  rc=0
+  clashes=$(numbered_clashes "$bbase" "$(git merge-base "$bbase" "$pre")" "$pre") || rc=$?
+  if [ "$rc" != 0 ]; then
+    printf '%s\n' "$clashes" | sed 's/^/land:   /' >&2
+    [ "$rc" != 2 ] || refuse "fix that line in $FACTS (commit it on this branch), then run this again. $build is untouched"
+    [ "$rc" = 1 ] || refuse "the numbered-things check itself failed (exit $rc), so $build is untouched; a person needs to look"
+    refuse "this branch takes a number $build already has (above), so $build is untouched. Renumber yours past $build's highest, commit, then run this again"
+  fi
+  rc=0
+  clashes=$(undo_guard "$bbase") || rc=$?
+  if [ "$rc" != 0 ]; then
+    [ "$rc" = 1 ] || refuse "the undo check itself failed (exit $rc, above), so $build is untouched; a person needs to look"
+    printf 'land: %s\n' "$branch removes what these merged, without naming them:" "$clashes" >&2
+    refuse "$build is untouched. If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
+  fi
+  if [ "$mode" = into ]; then
+    # A feeder runs only what it touched: its test files through CHECK_FILE_CMD, else the light check, else CHECK.
+    chk=${CHECK_LIGHT:-$CHECK}
+    if [ ${#files[@]} -gt 0 ] && [ -n "$CHECK_FILE_CMD" ]; then
+      chk='r=0; '
+      for f in "${files[@]}"; do chk+="{ ${CHECK_FILE_CMD//\{file\}/$(printf %q "$f")}; } || r=1; "; done
+      chk+='exit $r'
+    fi
+    if [ -n "$chk" ]; then
+      say "running $chk"
+      log="$state/land-check-${branch//\//-}.log"
+      (
+        flock -w "$CHECK_WAIT" 7 || { echo "land: the check lock was still taken after ${CHECK_WAIT}s"; exit 1; }
+        timeout -k 30 "$CHECK_LIMIT" bash -c "$chk" 2>&1 7>&- 6>&-
+      ) >"$log" 7>"$state/land-check.lock" 6>&- || rc=$?
+      [ "$rc" = 0 ] || { tail -n 40 "$log" >&2; refuse "the check failed on the rebased branch (full log: $log), so $build is untouched; $branch keeps the rebased work"; }
+    fi
+  else
+    # The build minion's merge of $BRANCH: the full check and CI, judged as --verify judges (no fast mode, no known reds).
+    out=$(LAND_VERIFY_IDS='' verify_run) || rc=$?
+    case $rc in
+      0) ;;
+      75) park "CI gave no verdict on $(git rev-parse --short=12 HEAD), so $build is untouched. Park, and run this again once a person says the runners are back" ;;
+      *) sed -n 's/^verify: failing /land:   failing: /p' <<<"$out" >&2
+         refuse "the full check or CI is red on $branch (above), so $build is untouched. Fix it, commit, then run this again" ;;
+    esac
+  fi
+  tip=$(git rev-parse HEAD)
+  git update-ref -m "land.sh --into" "refs/heads/$build" "$tip" "$bbase" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
+  say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); $BRANCH is untouched"
+  exit 0
+fi
 
 [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 queue_join "$state" "$branch"
@@ -1395,6 +1555,13 @@ if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then
   with=$(printf ', %s' "${B_LABEL[@]:2:GI-1}")
   say "landed in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"
 fi
+if [ "$mode" = build ]; then
+  if git update-ref -d "refs/heads/$build" "$bbase"; then
+    say "deleted $build, which is on $BRANCH now (to make it again: git branch $build $(git rev-parse --short "$bbase"))"
+  else
+    say "$build moved during the land (not by land.sh), so it stays: what is in it after $(git rev-parse --short "$bbase") isn't on $BRANCH"
+  fi
+fi
 
 if [ "$PUSH_MAIN" = 0 ]; then
   say "PUSH_MAIN is 0, so $BRANCH stays local"
@@ -1410,6 +1577,9 @@ queue_phase "pushing $BRANCH to origin"
 if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$MAIN" push -q --no-verify origin "$BRANCH" 2>&1); then
   say "pushed $BRANCH to origin"
   main_pushed=1
+  if [ "$mode" = build ] && git show-ref -q --verify "refs/remotes/origin/$build"; then
+    hub git push -q --no-verify origin ":refs/heads/$build" 2>/dev/null || say "couldn't delete $build on origin: delete it there by hand"
+  fi
 else
   say "$BRANCH moved, but the push to origin failed: $out"
   say "the next landing retries it; if origin's $BRANCH moved on its own (rejected as non-fast-forward), a person merges it into $MAIN first"

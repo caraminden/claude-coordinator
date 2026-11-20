@@ -1,0 +1,24 @@
+{
+  "id": "rule-other-scheme-number",
+  "kind": "rule",
+  "source": "Citadel Taskmaster, event 255149, 2026-11-05 01:16 PST (Josh: \"Did you mean to link me to Peek Auras #83?\")",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "89431bdd",
+  "from": "Josh",
+  "history": "Peek Auras' CI is moving onto a self-hosted runner on Cara's Windows desktop. In Peek Auras' scheme, its minion #83 is writing the script that installs the runner hidden on the desktop; Peek Auras #60, #71 and #75 wait on it. Citadel's own #320 (the runner kit) is live. Josh is asking what he must do. Note: in a Citadel chat, a bare #N opens Citadel's minion #N, not another scheme's.",
+  "message": "ok, what do I need to do to install the runner?",
+  "facts": [],
+  "right": "Tell Josh what's his to do (nothing until Peek Auras #83's install script is ready, then run it), naming the other scheme's minion as \"Peek Auras #83\" rather than a bare #83 that opens Citadel's #83.",
+  "wrong": "Wrote a bare \"#83\", which in Citadel's chat links to Citadel's #83, not Peek Auras'.",
+  "checks": [
+    {
+      "noText": "(?<!auras )(?<!auras's )(?<![/\\w])#83\\b",
+      "why": "another scheme's minion is named with its scheme, never a bare #N"
+    }
+  ]
+}

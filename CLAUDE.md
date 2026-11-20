@@ -56,7 +56,9 @@ skill step is skipped or uses its default.
 - **Medium risk at least (self-review):** a change to `test/ui-contract.json`, Citadel UI's contract
   with every app: it means an app-visible change to `public/ui/` or theme.css. Additive only.
 - **Agent instructions:** the prompt text in `src/prompts.ts` and the MCP tool descriptions in
-  `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`.
+  `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
+  `citadel-heavy tools/prompt-eval run --base main` once before it ships; 2 or more cases fell makes it high risk
+  (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`).
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
 - **Decisions log (ADRs):** `docs/adr/`.

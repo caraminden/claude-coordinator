@@ -33,10 +33,10 @@ export interface BudgetState { asked?: number; woke?: number }
 export const budgetKey = (ticketId: number) => `minion_budget:${ticketId}`;
 
 const FAMILIES = ['fable', 'sonnet', 'haiku', 'opus'] as const;
-/** The model family a model id belongs to; Opus for none, the default model. */
-export function family(model: string | null | undefined): string {
+/** The Claude model family a model id belongs to; Opus for none (the default model); null for a Codex or other non-Claude model, which gets no budget (its turns aren't priced). */
+export function family(model: string | null | undefined): string | null {
   const m = (model ?? '').toLowerCase();
-  return FAMILIES.find((f) => m.includes(f)) ?? 'opus';
+  return FAMILIES.find((f) => m.includes(f)) ?? (!m || m.includes('claude') ? 'opus' : null);
 }
 const familyName = (f: string) => f[0].toUpperCase() + f.slice(1);
 
@@ -52,6 +52,7 @@ export function medians(rows: { type: string | null; model: string | null; cost:
   const add = (key: string, cost: number) => (groups.get(key) ?? groups.set(key, []).get(key)!).push(cost);
   for (const r of rows) {
     const f = family(r.model);
+    if (!f) continue;
     add(f, r.cost);
     if (r.type) add(`${r.type} ${f}`, r.cost);
   }
@@ -63,6 +64,7 @@ export function medians(rows: { type: string | null; model: string | null; cost:
 /** The usual cost for a type of work on a model, or null with too little history. */
 export function budgetFrom(table: Map<string, { usd: number; n: number }>, type: string | null, model: string | null | undefined): Budget | null {
   const f = family(model);
+  if (!f) return null;
   const own = type ? table.get(`${type} ${f}`) : undefined;
   if (own) return { ...own, basis: `${/^[aeiou]/.test(type!) ? 'an' : 'a'} ${type} on ${familyName(f)}` };
   const all = table.get(f);

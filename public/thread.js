@@ -710,7 +710,6 @@ function pinButton(t) {
     icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
 }
 
-/** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */
 /** "$14 of about $6.50" (#1114): what the minion has cost against what its kind of work usually does; amber once past the ask. */
 function budgetChip(t) {
   const b = !isCoordinator(t) && t.budget;
@@ -722,6 +721,7 @@ function budgetChip(t) {
   `${usd(cost)} of about ${usd(b.usd)}`);
 }
 
+/** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */
 function shipLine(t) {
   const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
   if (!stage) return '';

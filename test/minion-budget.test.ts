@@ -25,6 +25,10 @@ test('the usual cost is the median per type and model family, falling back to th
   assert.deepEqual(budgetFrom(table, 'bug', 'opus'), { usd: 2.5, n: 10, basis: 'a minion on Opus' });
   assert.equal(budgetFrom(table, 'ideation', null)!.basis, 'a minion on Opus');
   assert.equal(budgetFrom(table, null, 'claude-fable-5-2'), null); // no Fable history at all
+  // A Codex minion's turns aren't priced: no budget, and its history counts for no Claude family.
+  const withCodex = medians([...rows('feature', 'gpt-6-astra', 50, 50, 50, 50, 50), ...rows('feature', 'claude-opus-5-5', 1, 1, 1, 1, 1)]);
+  assert.equal(budgetFrom(withCodex, 'feature', 'gpt-6-astra'), null);
+  assert.deepEqual(budgetFrom(withCodex, 'feature', null), { usd: 1, n: 5, basis: 'a feature on Opus' });
 });
 
 test('a mark is its multiple or its floor, whichever is more, and each fires once', () => {
@@ -88,8 +92,14 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
     store.props.set('minion', t.id, project.id, { type }, 'Josh');
     return t.id;
   };
-  // Five features that cost $5 each: the ask at $10, the wake at $20.
-  for (let i = 0; i < 5; i++) store.recordTurn(make('feature'), { session_id: `s${i}`, ended_at: Date.now(), session_cost_usd: 5 });
+  // Five closed features that cost $5 each: the ask at $10, the wake at $20. Open ones, still short of their final
+  // cost, count for nothing: five at $1 would otherwise pull the median down to $1.
+  for (let i = 0; i < 5; i++) {
+    const done = make('feature');
+    store.recordTurn(done, { session_id: `s${i}`, ended_at: Date.now(), session_cost_usd: 5 });
+    store.updateTicket(done, { status: 'closed' });
+  }
+  for (let i = 0; i < 5; i++) store.recordTurn(make('feature'), { session_id: `open${i}`, ended_at: Date.now(), session_cost_usd: 1 });
   const id = make('feature');
   assert.deepEqual(budgetFor(store, store.getTicket(id)!), { usd: 5, n: 5, basis: 'a feature on Opus' });
   assert.deepEqual(runner.view(store.getTicket(id)!).budget, { usd: 5, n: 5, basis: 'a feature on Opus', ask: 10, wake: 20 });

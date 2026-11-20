@@ -3464,7 +3464,7 @@ export class Store {
   }
 
   /**
-   * Every minion created since `since` that has cost anything, every scheme (#1114): its `type` property (null untyped),
+   * Every closed minion created since `since` that cost anything (open ones are still short of their final cost), every scheme (#1114): its `type` property (null untyped),
    * the model it was set to or last ran on, and what its turns cost. src/minion-budget.ts takes the usual cost from these.
    */
   minionCosts(since: number): { type: string | null; model: string | null; cost: number }[] {
@@ -3472,7 +3472,7 @@ export class Store {
           WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
         coalesce(k.model, k.last_model) AS model, c.cost
       FROM tickets k JOIN (SELECT ticket_id, SUM(cost_usd) AS cost FROM turns GROUP BY ticket_id) c ON c.ticket_id = k.id
-      WHERE k.kind = 'ticket' AND k.created_at >= ? AND c.cost > 0`).all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
+      WHERE k.kind = 'ticket' AND k.status = 'closed' AND k.created_at >= ? AND c.cost > 0`).all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
   }
 
   /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */

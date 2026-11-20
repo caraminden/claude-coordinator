@@ -17,4 +17,6 @@ scheme pooled (`src/minion-budget.ts`). It is never a cap. The grilling round wi
 Replayed over the 1,072 minions of the week to Nov 19, each against the three weeks before: the ask fires on about 18%
 (which held 48% of that week's spend; plain 2x would fire on 33%), and the wake on about 3% (25 to 33 a week; plain 4x
 would be about 120). Medians per scheme or per effort fired on as many, so they stay pooled per type and model family.
-A type with fewer than five minions in the window falls back to its family's median; with none, there is no budget.
+Only closed minions count (an open one is still short of its final cost). A type with fewer than five in the window falls
+back to its family's median; with none, there is no budget. Codex and other non-Claude models get none: their turns
+aren't priced.

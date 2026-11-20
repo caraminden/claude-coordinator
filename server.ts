@@ -1416,7 +1416,7 @@ github.onCiFailed = (t) => {
 // A minion past four times its budget (#1114): its Taskmaster hears, waking unless cold (no one's around to act on it then).
 runner.onBudgetWake = (ticketId, text) => {
   const ticket = store.getTicket(ticketId);
-  if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask').catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
+  if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 

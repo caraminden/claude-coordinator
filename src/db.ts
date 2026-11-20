@@ -2639,6 +2639,7 @@ export class Store {
          VALUES (?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
       )
       .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.title, t.permission_mode, t.created_by, now, now);
+    if (t.title.includes('status:')) this.noteLooks(Number(r.lastInsertRowid), t.title, now);
     return this.getTicket(Number(r.lastInsertRowid))!;
   }
 
@@ -2715,6 +2716,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [closedAt] : []), now, id);
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
+    if (fields.title?.includes('status:')) this.noteLooks(id, fields.title, now);
   }
 
   /** Change a ticket's activity line without counting it as new activity. */
@@ -2729,7 +2731,16 @@ export class Store {
     let id: number | null = null;
     if (this.eventIds) this.eventIds.next = (id = Math.max(this.eventIds.next, this.eventIds.floor())) + 1;
     const rowid = this.insertEvent(id, ticketId, kind, json, now, data);
+    if (kind === 'user_message' && json.includes('status:')) this.noteLooks(ticketId, json, now);
     return { id: id ?? (rowid as number), ticket_id: ticketId, kind, data: json, created_at: now };
+  }
+
+  /**
+   * The Status page's looks (#1273): a minion whose title, or a message to it, quotes a tile's tag ("status:citadel/cpu") is
+   * on that tile. Noted as it's written, a health event per tag, so the page reads a few rows and never scans messages.
+   */
+  private noteLooks(ticketId: number, text: string, at: number) {
+    for (const tag of new Set(text.match(/status:(?:citadel|app:[\w.-]+)\/[a-z][a-z0-9-]*/g))) this.addHealthEvent('look', at, null, `${tag}\n${ticketId}`);
   }
 
   /** The next events.id to hand out, set by the write worker's start (src/db-writer.ts); null writes inline and lets SQLite pick. */
@@ -3758,8 +3769,8 @@ export class Store {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
-      // Boots and slow-ship nudges are few and the Status page and the once-a-day rule need them: only the time keep drops them.
-      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'ship-slow')").run(Number(id) - HEALTH_MAX_ROWS);
+      // Boots, slow-ship nudges, Investigate clicks and looks (#1273) are few and the Status page and the once-a-day rule need them: only the time keep drops them.
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

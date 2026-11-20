@@ -9,7 +9,8 @@ import { runnerAsk } from '../ci-runner.ts';
 import { ciJobReadRoutes, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
-import { HttpError, json, ownWrites, readJson, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
+import { ensureCoordinatorFor } from './projects.ts';
 
 // The agent caps fetch_file at 20 MB too.
 const MAX_MACHINE_UPLOAD = 20_000_000;
@@ -263,6 +264,29 @@ export const machineRoutes: Route[] = [
     handler: async ({ res, app, session }) => {
       if (!app.status) return json(res, 200, null);
       json(res, 200, await app.status.read({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }));
+    },
+  },
+  // Investigate on a Status tile (#1273): the tile's numbers to the clicker's own Taskmaster in the tile's scheme (Cara picked
+  // "Your own, in that scheme"), made for them as writing to it would. Only those who can see the scheme get a tile to press.
+  {
+    method: 'POST', path: '/api/status/investigate', who: ['person'], refuse: 'Only people press Investigate',
+    handler: async ({ req, res, app, session }) => {
+      if (!app.status) throw new HttpError(404, 'This server keeps no status');
+      const body = await readJson(req);
+      const target = str(body.target, 'Target', 80);
+      const tile = str(body.tile, 'Tile', 60);
+      if (!/^[a-z][a-z0-9-]*$/.test(tile) || !/^(citadel|app:[\w.-]+)$/.test(target)) throw new HttpError(400, 'Unknown tile');
+      if (!Array.isArray(body.reasons) || body.reasons.length > 10) throw new HttpError(400, 'reasons must be a list of up to 10');
+      const maybe = (v: unknown, field: string, max: number) => (v === undefined || v === null || v === '' ? '' : str(v, field, max));
+      const sent = app.status.investigate({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }, session.name, {
+        target, tile, title: str(body.title, 'Title', 60), value: str(body.value, 'Value', 200), sub: maybe(body.sub, 'Line', 400),
+        chart: maybe(body.chart, 'Chart', 2000), reasons: body.reasons.map((r: unknown) => str(r, 'Reason', 300)),
+      });
+      if (!sent) throw new HttpError(404, 'No such tile you can see');
+      const tm = await ensureCoordinatorFor(app, app.store.getProject(sent.scheme)!, session.uid);
+      app.runner.send(tm.id, session.name, sent.text);
+      sent.record();
+      json(res, 202, { taskmaster: tm.id, project: sent.scheme });
     },
   },
   // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.

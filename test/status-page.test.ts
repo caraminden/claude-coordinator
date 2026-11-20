@@ -150,7 +150,7 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.equal(c.ships.median.at(-1), 180);
   assert.equal(c.ships.last?.version, 'v2000000', 'the last ship is the newest live one, not the newest row');
   assert.equal(c.host.series.length, 1);
-  assert.deepEqual(c.host.series[0].slice(1), [95, 95]);
+  assert.deepEqual(c.host.series[0].slice(1, 3), [95, 95]);
   assert.equal(c.verdict.tone, 'bad');
   assert.deepEqual(c.verdict.reasons, ['claude-coordinator-prune.timer failed', 'a 6.2 s stall in the last day', 'under 10% of memory free', 'under 10% of disk free']);
   assert.ok(c.slots.some((s) => s.key === 'line') && !c.slots.some((s) => s.key === 'backups'), 'the backups slot became the real tile');
@@ -329,4 +329,91 @@ test('CI with one failed run in twenty leaves the verdict green; six in twenty i
   const c = (await page.build(admin)).citadel;
   assert.equal(c.verdict.tone, 'bad');
   assert.deepEqual(c.verdict.reasons, ['6 of the last 20 CI runs failed']);
+});
+
+test('the CPU tile (#1273) reads load1 from host_samples against the cores, and warns only when it stays high', async () => {
+  const { store, josh, citadel } = setup('cpu');
+  const now = sameDayNow();
+  const s = { mem_total: 100, mem_avail: 50, disk_total: 100, disk_free: 50, rss: 1 };
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, cores: 4 });
+  store.addHostSample({ at: now - 40 * 60_000, ...s, load1: 12.34 });
+  store.addHostSample({ at: now - 10 * 60_000, ...s, load1: 9 });
+  store.addHostSample({ at: now - 5 * 60_000, ...s, load1: 3 });
+  let c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.host.cores, 4);
+  assert.equal(c.host.cpuWarn, 8);
+  assert.equal(c.host.latest?.load1, 3);
+  assert.deepEqual(c.host.peak, { at: now - 40 * 60_000, load1: 12.3 });
+  assert.ok(c.host.series.some((r) => r[3] === 12.3), 'the hour series carries its highest load');
+  assert.ok(!c.verdict.tiles.includes('cpu'), 'one high reading in the window is not "stays high"');
+  store.addHostSample({ at: now - 60_000, ...s, load1: 9 });
+  store.addHostSample({ at: now - 5 * 60_000, ...s, load1: 8.5 });
+  c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.ok(!c.verdict.tiles.includes('cpu'), 'high readings over 10 of the 15 minutes are not "for 15 min"');
+  store.addHostSample({ at: now - 14 * 60_000, ...s, load1: 10 });
+  c = (await page.build(viewer(store, josh.id, true))).citadel;
+  const i = c.verdict.tiles.indexOf('cpu');
+  assert.equal(c.verdict.reasons[i], 'load over 8 on 4 cores for 15 min');
+  assert.equal(c.verdict.tone, 'warn');
+});
+
+test('Investigate (#1273): an app tile goes to its home scheme, and the minion quoting its tag is the one on it', async () => {
+  const { store, mia, josh, peekScheme, citadel } = setup('investigate');
+  let now = sameDayNow();
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now });
+  const tile = { target: 'app:peek-auras', tile: 'errors', title: 'Errors', value: '12 today', sub: 'http 5xx', chart: 'errors a day: Thu 12', reasons: ['12 errors today'] };
+  // Mia is only in Peek's scheme: Citadel's tiles and an app she can't see are no target of hers.
+  assert.equal(page.investigate(viewer(store, mia.id), 'Mia', { ...tile, target: 'app:calm' }), null);
+  assert.equal(page.investigate(viewer(store, mia.id), 'Mia', { ...tile, target: 'citadel', tile: 'memory' }), null);
+  const sent = page.investigate(viewer(store, mia.id), 'Mia', tile)!;
+  assert.equal((await page.build(viewer(store, mia.id))).apps[0].looks.errors, undefined, 'nothing shows until the Taskmaster has it');
+  sent.record();
+  assert.equal(sent.scheme, peekScheme.id);
+  assert.match(sent.text, /Mia pressed Investigate on PEEK-AURAS's Errors tile/);
+  assert.match(sent.text, /`status:app:peek-auras\/errors`/);
+  assert.match(sent.text, /Chart: errors a day: Thu 12/);
+  let app = (await page.build(viewer(store, mia.id))).apps[0];
+  assert.equal(app.looks.errors.minion, null);
+  assert.equal(app.looks.errors.by, 'Mia');
+  // A minion in another scheme quoting the tag doesn't count; one in Peek's scheme quoting it in a message does.
+  store.createTicket({ project_id: citadel.id, title: 'status:app:peek-auras/errors', permission_mode: 'default', created_by: josh.id });
+  const t = store.createTicket({ project_id: peekScheme.id, title: 'Fix the 5xx', permission_mode: 'default', created_by: josh.id });
+  store.addEvent(t.id, 'user_message', { text: 'Brief. Tag: status:app:peek-auras/errors' });
+  now += 60_000;
+  app = (await page.build(viewer(store, mia.id))).apps[0];
+  assert.deepEqual(app.looks.errors.minion, { project: peekScheme.id, number: t.number, title: 'Fix the 5xx', closed: false });
+  assert.equal(app.verdict.tone, 'ok', 'a look links a minion; it changes no verdict');
+  // A second click adds to the open look and names its minion.
+  const again = page.investigate(viewer(store, mia.id), 'Mia', tile)!;
+  assert.match(again.text, new RegExp(`More on the open look.*#${t.number} Fix the 5xx is on it`));
+  // Once that minion closes, it is shown as having looked, and a new click is a fresh look.
+  store.updateTicket(t.id, { status: 'closed' });
+  app = (await page.build(viewer(store, mia.id))).apps[0];
+  assert.equal(app.looks.errors.minion?.closed, true);
+  assert.match(page.investigate(viewer(store, mia.id), 'Mia', tile)!.text, /Quote the tag/);
+});
+
+test('Investigate (#1273): a Citadel tile goes to Citadel, its reason carries its tile key, and CI\'s tile adds to the CI page\'s fix minion', async () => {
+  const { store, josh, mia, citadel } = setup('investigate-citadel');
+  const now = sameDayNow();
+  const fixer = store.createTicket({ project_id: citadel.id, title: 'Fix the red tests', permission_mode: 'default', created_by: josh.id });
+  const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
+    mem: async () => ({ total: 100, avail: 5 }), disk: async () => ({ total: 100, free: 50 }),
+    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any, problems: [{ fixMinion: { number: fixer.number!, closed: false } }] }] : []) });
+  await page.sample();
+  const c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.verdict.tiles[c.verdict.reasons.indexOf('under 10% of memory free')], 'memory');
+  assert.equal(c.canInvestigate, true);
+  assert.deepEqual(c.looks.ci?.minion, { project: citadel.id, number: fixer.number, title: 'Fix the red tests', closed: false });
+  const memory = { target: 'citadel', tile: 'memory', title: 'Memory', value: '95% used', sub: '', chart: '', reasons: ['under 10% of memory free'] };
+  const sent = page.investigate(viewer(store, josh.id, true), 'Josh', memory)!;
+  assert.equal(sent.scheme, citadel.id);
+  sent.record();
+  // The message for CI's tile names the fix the tile shows, so the Taskmaster adds to it rather than starting another.
+  assert.match(page.investigate(viewer(store, josh.id, true), 'Josh', { ...memory, tile: 'ci', title: 'CI on main' })!.text, new RegExp(`its CI fix; #${fixer.number} Fix the red tests is on it`));
+  // Someone outside Citadel's scheme sees its health but not who is on it, and gets no button.
+  const outside = (await page.build(viewer(store, mia.id))).citadel;
+  assert.deepEqual(outside.looks, {});
+  assert.equal(outside.canInvestigate, false);
 });

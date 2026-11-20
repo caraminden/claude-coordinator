@@ -122,7 +122,8 @@ export function pcCard(pc) {
 export function trouble(pc) {
   if (pc.verdict.kind === 'over') return 'CI is overloading its desktop';
   if (pc.verdict.kind === 'crash') return 'CI desktop crashed under load';
-  if (pc.verdict.kind === 'none' && pc.series.some((s) => s[1] !== null)) return 'CI desktop is offline';
+  // The Status page sends `seen` in place of the series (#1273: it threw here and the page never drew).
+  if (pc.verdict.kind === 'none' && (pc.seen ?? pc.series.some((s) => s[1] !== null))) return 'CI desktop is offline';
   return '';
 }
 

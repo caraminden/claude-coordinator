@@ -2632,6 +2632,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/status/investigate": {
+  "anon": "401 Not logged in",
+  "person": "400 Target is required",
+  "member": "400 Target is required",
+  "outsider": "400 Target is required",
+  "tmA": "403 Only people press Investigate",
+  "tmB": "403 Only people press Investigate",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/stream": {
   "anon": "401 Not logged in",
   "person": "200",

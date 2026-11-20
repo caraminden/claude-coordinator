@@ -3,12 +3,12 @@
 // (deploys, errors, agent turns, who used it, disk), each with a week of daily history. Read-only: it only reads
 // what other parts already record, plus perigee's memory and disk, which HostSampler samples every 5 minutes.
 import { readFile, statfs } from 'node:fs/promises';
-import { homedir, loadavg } from 'node:os';
+import { availableParallelism, homedir, loadavg } from 'node:os';
 import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
-import { pacificDay } from './pacific.ts';
+import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
@@ -28,6 +28,15 @@ const STALL_WARN_S = 5;
 export const STORM_WARN_S = 60;
 /** Errors in an app's last day that turn its verdict to warn. */
 export const APP_ERRORS_WARN = 10;
+/**
+ * perigee's load turns Citadel's verdict to warn when every reading of the last CPU_WARN_MS sat over CPU_WARN_PER_CORE times its
+ * cores (#1273). Picked from the day's readings (Nov 20: 2 to 226 on 16 cores; over 32 only in the 10:44 and 11:17-11:36 PST
+ * pile-ups), so a busy build is quiet and a pile-up that lasts is not.
+ */
+export const CPU_WARN_PER_CORE = 2;
+export const CPU_WARN_MS = 15 * 60_000;
+/** How far back an Investigate click (#1273) and the minion on it are remembered: the page's week. */
+const LOOK_MS = 8 * DAY_MS;
 
 export type Tone = 'ok' | 'warn' | 'bad';
 
@@ -44,7 +53,9 @@ export function rateTone(failed: number, total: number): Tone {
   const share = failed / total;
   return share >= RATE_BAD ? 'bad' : share >= RATE_WARN ? 'warn' : 'ok';
 }
-export interface Verdict { tone: Tone; reasons: string[] }
+/** tiles[i] is the tile reasons[i] comes from (#1273), whose look (who is on it) the page shows beside it. */
+export interface Verdict { tone: Tone; reasons: string[]; tiles: string[] }
+type Reason = [Tone, string, string];
 
 /** The last STATUS_DAYS Pacific days, oldest first, as 2026-11-19. */
 export function lastDays(now: number): string[] {
@@ -60,11 +71,43 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-const worst = (reasons: [Tone, string][]): Verdict => {
-  const bad = reasons.filter(([t]) => t === 'bad').map(([, r]) => r);
-  const warn = reasons.filter(([t]) => t === 'warn').map(([, r]) => r);
-  return bad.length ? { tone: 'bad', reasons: [...bad, ...warn] } : warn.length ? { tone: 'warn', reasons: warn } : { tone: 'ok', reasons: [] };
+const worst = (reasons: Reason[]): Verdict => {
+  const shown = [...reasons.filter(([t]) => t === 'bad'), ...reasons.filter(([t]) => t === 'warn')];
+  return { tone: shown[0]?.[0] ?? 'ok', reasons: shown.map(([, r]) => r), tiles: shown.map(([, , k]) => k) };
 };
+
+/** The tag an Investigate click on a tile carries (#1273): a minion whose title or messages quote it is the one on it. */
+export const lookTag = (target: string, tile: string) => `status:${target}/${tile}`;
+
+/** Who is on a tile (#1273): the newest Investigate click on it, and the minion that quotes its tag, the first open one, else the newest. */
+export interface Look { sentAt: number | null; by: string | null; minion: { project: number; number: number; title: string; closed: boolean } | null }
+
+/** Each tile of `target` someone pressed Investigate on in the last LOOK_MS, with its minion; CI's fix minion wins on Citadel's CI tile. */
+export function looksFor(store: Store, scheme: number | null, target: string, now: number): Record<string, Look> {
+  const out: Record<string, Look> = {};
+  const prefix = lookTag(target, '');
+  const first = new Map<string, number>();
+  const quoted = new Map<string, { at: number; id: number }[]>();
+  for (const e of store.healthEventsSince(['investigate', 'look'], now - LOOK_MS)) {
+    const [tag, who] = e.detail.split('\n');
+    if (!tag.startsWith(prefix)) continue;
+    const tile = tag.slice(prefix.length);
+    if (e.kind === 'investigate') {
+      if (!first.has(tile)) first.set(tile, e.at);
+      out[tile] = { sentAt: e.at, by: who ?? null, minion: null };
+    } else quoted.set(tile, [...(quoted.get(tile) ?? []), { at: e.at, id: Number(who) }]);
+  }
+  if (scheme == null) return out;
+  // Quoted from a minute before the first click on (a brief written as the click lands), by one of this scheme's minions.
+  for (const [tile, from] of first) {
+    const named = [...new Set((quoted.get(tile) ?? []).filter((q) => q.at >= from - 60_000).map((q) => q.id))]
+      .map((id) => store.getTicket(id)).filter((t) => t && t.project_id === scheme && t.kind !== 'coordinator' && t.number != null)
+      .sort((a, b) => a!.created_at - b!.created_at);
+    const t = named.find((x) => x!.status !== 'closed') ?? named.at(-1);
+    if (t) out[tile].minion = { project: scheme, number: t.number!, title: t.title, closed: t.status === 'closed' };
+  }
+  return out;
+}
 
 /** "The event loop was held for 2.3 s: …" → 2.3; null when the line doesn't say. */
 export function stallSeconds(detail: string): number | null {
@@ -100,7 +143,9 @@ export interface StatusDeps {
   commit: string;
   /** Citadel's own scheme: its releases are Citadel's ships and its CI is Citadel's. */
   ownScheme: () => number | null;
-  ciSnapshot?: (canSee: (id: number) => boolean) => { id: number; view: CiView }[];
+  ciSnapshot?: (canSee: (id: number) => boolean) => { id: number; view: CiView; problems?: { fixMinion?: { number: number; closed: boolean } }[] }[];
+  /** perigee's cores, for the CPU tile (#1273); the real count unless a test says otherwise. */
+  cores?: number;
   desktops?: () => PcView[];
   diskUse?: (row: ContraptionRow) => DiskUse | null;
   /** systemctl --user show for these units; left out where they can't be read (a preview, a test). */
@@ -115,6 +160,9 @@ export interface StatusDeps {
   storms?: () => Storm[];
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
 }
+
+/** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
+export interface InvestigateTile { target: string; tile: string; title: string; value: string; sub: string; chart: string; reasons: string[] }
 
 /** Who reads the page: canSee is the store's for their session; admin sees apps with no home scheme too. */
 export interface Viewer { canSee: (projectId: number) => boolean; admin: boolean; key: string }
@@ -182,6 +230,54 @@ export class StatusPage {
       sent++;
     }
     return sent;
+  }
+
+  /** Citadel's looks; with `ciRed`, CI's tile takes the CI page's fix minion for the red (ci-health.ts), the first open one, else the newest. */
+  private citadelLooks(viewer: Viewer, own: number, now: number, ciRed: boolean): Record<string, Look> {
+    const looks = looksFor(this.deps.store, own, 'citadel', now);
+    if (!ciRed) return looks;
+    const fixes = (this.deps.ciSnapshot?.((id) => id === own && viewer.canSee(id)).find((s) => s.id === own)?.problems ?? []).flatMap((x) => (x.fixMinion ? [x.fixMinion] : []));
+    const fix = fixes.find((f) => !f.closed) ?? fixes.at(-1);
+    if (fix) looks.ci = { sentAt: looks.ci?.sentAt ?? null, by: looks.ci?.by ?? null, minion: { project: own, number: fix.number, title: this.deps.store.getTicketByNumber(own, fix.number)?.title ?? '', closed: fix.closed } };
+    return looks;
+  }
+
+  /**
+   * An Investigate click on a tile (#1273; Cara, 2026-11-20: "each of the boxes should have an "investigate" button that sends
+   * the data to the relevant taskmaster to look into it"): records it, and returns the scheme whose Taskmaster hears it (Citadel's
+   * own for its tiles, an app's home scheme for the app's) and what it reads. A second click while the look is open says so,
+   * naming the minion on it, so the Taskmaster adds to it rather than starting another (Cara picked "Add to the same one").
+   * Null when the viewer can't see that target.
+   */
+  investigate(viewer: Viewer, who: string, tile: InvestigateTile): { scheme: number; text: string; record: () => void } | null {
+    const { store } = this.deps;
+    const now = this.now();
+    const own = this.deps.ownScheme();
+    const app = tile.target === 'citadel' ? null : store.listContraptions().find((a) => `app:${a.name}` === tile.target);
+    if (tile.target === 'citadel' ? own == null || !viewer.canSee(own) : !app || (app.home_scheme === null ? !viewer.admin : !viewer.canSee(app.home_scheme))) return null;
+    // An app with no home scheme is admin-only; its tiles go to Citadel's Taskmaster.
+    const scheme = app?.home_scheme ?? own;
+    if (scheme == null) return null;
+    const tag = lookTag(tile.target, tile.tile);
+    // The same looks the page shows, CI's fix minion included, so a click on a red already being fixed adds to that fix.
+    const open = (app ? looksFor(store, scheme, tile.target, now) : this.citadelLooks(viewer, scheme, now, true))[tile.tile];
+    const before = open && (!open.minion || !open.minion.closed) ? open : null;
+    // Recorded by the caller once the Taskmaster has it, so a failed send shows no look nobody heard of.
+    const record = () => { store.addHealthEvent('investigate', now, null, `${tag}\n${who}`); this.built.clear(); };
+    const where = app ? app.title : 'Citadel';
+    const lines = [
+      `[Status page] ${who} pressed Investigate on ${where}'s ${tile.title} tile.`,
+      before
+        ? `More on the open look at this (${before.sentAt ? `first sent ${pacificStamp(before.sentAt)}` : 'its CI fix'}${before.minion ? `; #${before.minion.number} ${before.minion.title} is on it` : '; no minion on it yet'}): pass these numbers on rather than start another minion.`
+        : `Look into it, and decide whether it needs a minion. Quote the tag \`${tag}\` in the brief of a minion you start for it, or in a message to one already on it: the Status page links whichever minion quotes it as "Looking into it".`,
+      '',
+      `${tile.title}: ${tile.value}`,
+      tile.sub,
+      ...(tile.chart ? [`Chart: ${tile.chart}`] : []),
+      ...(tile.reasons.length ? [`Why ${where}'s verdict isn't OK, from this tile: ${tile.reasons.join(' · ')}`] : []),
+      `Read ${pacificStamp(now)}.`,
+    ];
+    return { scheme, text: lines.join('\n'), record };
   }
 
   /** The page for one viewer, reused for BUILD_KEEP_MS per viewer. */
@@ -272,11 +368,21 @@ export class StatusPage {
     for (const s of samples) {
       const h = Math.floor(s.at / 3_600_000) * 3_600_000;
       const prev = hourly.get(h);
-      if (!prev || s.mem_avail / s.mem_total < prev.mem_avail / prev.mem_total) hourly.set(h, { ...s, disk_free: Math.min(s.disk_free, prev?.disk_free ?? Infinity) });
-      else prev.disk_free = Math.min(prev.disk_free, s.disk_free);
+      if (!prev || s.mem_avail / s.mem_total < prev.mem_avail / prev.mem_total) hourly.set(h, { ...s, disk_free: Math.min(s.disk_free, prev?.disk_free ?? Infinity), load1: Math.max(s.load1, prev?.load1 ?? 0) });
+      else {
+        prev.disk_free = Math.min(prev.disk_free, s.disk_free);
+        prev.load1 = Math.max(prev.load1, s.load1);
+      }
     }
-    const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10] as [number, number, number]);
+    const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10] as [number, number, number, number]);
     const latest = samples.at(-1) ?? null;
+    // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
+    const cores = this.deps.cores ?? availableParallelism();
+    const today = samples.filter((s) => dayOf(s.at) === days.at(-1));
+    const peak = today.reduce<HostSample | null>((p, s) => (!p || s.load1 > p.load1 ? s : p), null);
+    // Readings must cover the window (the first within one sample of its start), so two high readings 5 min apart aren't 15 min.
+    const recent = samples.filter((s) => s.at >= now - CPU_WARN_MS);
+    const cpuHigh = recent.length >= 2 && recent[0].at < now - CPU_WARN_MS + SAMPLE_EVERY_MS && recent.every((s) => s.load1 > cores * CPU_WARN_PER_CORE);
     // Ships: Citadel's releases that went live, per day, and how long each took from start to live.
     const own = this.deps.ownScheme();
     const releases: ReleaseRow[] = own ? store.releasesSince(own, 'citadel-server', since).filter((r) => r.outcome === 'live' && r.live_at) : [];
@@ -308,27 +414,33 @@ export class StatusPage {
     const citadelUnits = (units ?? []).filter((u) => CITADEL_UNITS.includes(u.unit));
     const desktops = (this.deps.desktops?.() ?? []).map((pc) => ({ host: pc.host, verdict: pc.verdict, now: pc.now, restarts: pc.restarts, seen: pc.series.some((s) => s[1] !== null) }));
     // The verdict: bad on a failed unit; warn on a restart that wasn't a ship, a long stall, low memory or disk; CI by its share of failed runs.
-    const reasons: [Tone, string][] = [];
-    for (const u of citadelUnits) if (u.active === 'failed') reasons.push(['bad', `${u.unit} failed`]);
-    if (units === null) reasons.push(['warn', 'its services couldn\'t be read']);
+    const reasons: Reason[] = [];
+    for (const u of citadelUnits) if (u.active === 'failed') reasons.push(['bad', `${u.unit} failed`, 'services']);
+    if (units === null) reasons.push(['warn', 'its services couldn\'t be read', 'services']);
     const dayAgo = now - DAY_MS;
     const oddBoots = boots.filter((b) => b.at >= dayAgo && b.detail.startsWith('a restart'));
-    if (oddBoots.length) reasons.push(['warn', `${oddBoots.length} restart${oddBoots.length > 1 ? 's' : ''} without a ship in the last day`]);
+    if (oddBoots.length) reasons.push(['warn', `${oddBoots.length} restart${oddBoots.length > 1 ? 's' : ''} without a ship in the last day`, 'uptime']);
     const longStall = Math.max(0, ...stalls.filter((s) => s.at >= dayAgo).map((s) => stallSeconds(s.detail) ?? 0));
-    if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`]);
+    if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`, 'stalls']);
     const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
-    if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`]);
-    if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free']);
-    if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free']);
+    if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`, 'memory-limits']);
+    if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free', 'memory']);
+    if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free', 'disk']);
+    if (cpuHigh) reasons.push(['warn', `load over ${cores * CPU_WARN_PER_CORE} on ${cores} cores for ${CPU_WARN_MS / 60_000} min`, 'cpu']);
     const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
     const backupMissing = backupProblems(backup, now);
-    if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`]);
-    if (ci && ci.tone !== 'ok') reasons.push([ci.tone, enough ? `${ci.runs - ci.green} of the last ${ci.runs} CI runs failed` : `CI red on main: ${redWorkflows.join(', ')}`]);
+    if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`, 'backups']);
+    if (ci && ci.tone !== 'ok') reasons.push([ci.tone, enough ? `${ci.runs - ci.green} of the last ${ci.runs} CI runs failed` : `CI red on main: ${redWorkflows.join(', ')}`, 'ci']);
+    // Who is on each tile (#1273); CI's tile takes the CI page's fix minion for the red (ci-health.ts), the first open one, else the newest.
+    // Only for those who can see Citadel's scheme: the looks name its minions and who clicked, and only they can press Investigate.
+    const looks = ciVisible ? this.citadelLooks(viewer, own!, now, !!ci && ci.tone !== 'ok') : {};
     return {
       verdict: worst(reasons),
+      looks,
+      canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), detail: lastStall.detail.slice(0, 300) } : null },
-      host: { series, latest, sampledFrom: samples[0]?.at ?? null },
+      host: { series, latest, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
@@ -400,19 +512,20 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
     people.set(t.person, (people.get(t.person) ?? 0) + 1);
   }
   // Verdict: bad when its service isn't running or its last deploy failed; warn on many errors or a failed deploy this week.
-  const reasons: [Tone, string][] = [];
-  if (unit && unit.load !== 'not-found' && unit.active !== 'active' && unit.active !== 'activating' && unit.active !== 'reloading') reasons.push(['bad', `its service is ${unit.active}`]);
+  const reasons: Reason[] = [];
+  if (unit && unit.load !== 'not-found' && unit.active !== 'active' && unit.active !== 'activating' && unit.active !== 'reloading') reasons.push(['bad', `its service is ${unit.active}`, 'service']);
   const nFailed = dFailed.reduce((x, y) => x + y, 0);
   const deployTone: Tone = lastDeploy?.outcome === 'failed' ? 'bad' : rateTone(nFailed, deploys.length);
-  if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed']);
-  else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`]);
-  if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`]);
-  if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`]);
+  if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed', 'deploys']);
+  else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`, 'deploys']);
+  if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`, 'errors']);
+  if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
   const backup = appBackup(join(home, '.local/share', a.name), now);
-  if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`]);
+  if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`, 'backup']);
   return {
     name: a.name, title: a.title, icon: a.icon, scheme: a.home_scheme,
     verdict: worst(reasons),
+    looks: looksFor(store, a.home_scheme, `app:${a.name}`, now),
     service: unit ? { unit: unit.unit, active: unit.active, sub: unit.sub, installed: unit.load !== 'not-found' } : null,
     deploys: { tone: deployTone, counts: dCount, failed: dFailed, median: median(took), longest: took.length ? Math.max(...took) : null, last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null },
     errors: { counts: eCount, kinds, top, lastDay },
@@ -424,10 +537,14 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
 
 export interface CitadelStatus {
   verdict: Verdict;
+  /** Who is on each tile, by tile key (#1273): only tiles someone pressed Investigate on, and CI's with a fix minion. */
+  looks: Record<string, Look>;
+  /** Whether this viewer can see Citadel's scheme, so its tiles carry Investigate (#1273). */
+  canInvestigate: boolean;
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
   stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; detail: string } | null };
-  /** series: [hour, memory used %, disk used %], the hour's worst. */
-  host: { series: [number, number, number][]; latest: HostSample | null; sampledFrom: number | null };
+  /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
+  host: { series: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
@@ -449,6 +566,7 @@ export interface AppStatus {
   icon: string | null;
   scheme: number | null;
   verdict: Verdict;
+  looks: Record<string, Look>;
   service: { unit: string; active: string; sub: string; installed: boolean } | null;
   deploys: { tone: Tone; counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; sha: string | null; took: number | null } | null };
   errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };

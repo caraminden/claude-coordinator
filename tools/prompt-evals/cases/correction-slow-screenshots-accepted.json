@@ -1,0 +1,38 @@
+{
+  "id": "correction-slow-screenshots-accepted",
+  "kind": "correction",
+  "source": "Citadel Taskmaster, event 565149, 2026-11-13 01:11 PST (Josh: \"Why are screenshots slow? that seems like a problem we should fix\" at 565157)",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "2807cada",
+  "from": "Josh",
+  "history": "Josh asked #637 to move the side panels' headers into the title-bar strip of the installed app (\"lets try moving stuff up into that space\"). #637 is a UI minion; it checks its work with screenshots before shipping.",
+  "message": "is 637 ok? seems like it hasnt been moving",
+  "facts": [
+    {
+      "tool": "read_minion|read_ticket",
+      "match": "637",
+      "result": "#637, running. Code changes done (headers in the title-bar strip; an old CSS rule override fixed). It wrote its own headless-Chrome screenshot script: the last run of 4 shots took about 7 minutes and still showed the old CSS; the current run has been going 4 minutes of a 400 s limit while it works out where the script stalls.",
+      "why": "where #637 was"
+    },
+    {
+      "tool": "host_check",
+      "match": "load|uptime|mem",
+      "result": "load 1.0, 22 GB free",
+      "why": "the box was idle"
+    }
+  ],
+  "right": "Answer that #637 is stuck on minutes-long screenshots on an idle box, and treat that as a problem to fix for every UI minion: start or offer a minion for a shared fast screenshot tool.",
+  "wrong": "Said #637 was \"slow, not hung\" and \"nothing needed from you\", accepting 7-minute screenshots as normal.",
+  "checks": [
+    {
+      "call": "create_ticket|ask_question|message_coordinator",
+      "input": "screenshot",
+      "why": "minutes per screenshot on an idle box is a problem to fix, not a status to report"
+    }
+  ]
+}

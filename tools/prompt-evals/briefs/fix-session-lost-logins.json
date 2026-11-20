@@ -1,0 +1,18 @@
+{
+  "id": "fix-session-lost-logins",
+  "source": "#899",
+  "ticket": {
+    "number": 899,
+    "title": "Sessions lost across Claude logins",
+    "type": "bug"
+  },
+  "from": "Taskmaster",
+  "message": "Bug report from TWIReader's Taskmaster for Cara (2026-11-17): TWIReader #27 (scheme 10) lost its session on every one of its last 5 turns (2026-11-16 8:39 PM PST through 2026-11-17 10:47 AM PST). Each turn posted \"This minion's conversation (session …) isn't on this Claude login or in the database, so this turn starts a fresh session.\" It forgot everything each time, kept telling Cara it was \"waiting on CI\" for a repo with no CI, and the work sat about 14 hours. Their guess: sessions don't survive a switch between Cara's login (her container) and the server's login (the server's login is out until Saturday).\n\nWhere: src/runner.ts ~2515–2542 (restoreSession / storedPaths / transcriptPath, the note at 2540). The DB is supposed to hold the transcript so any login can restore it, so 5/5 misses means something in the save or restore path is broken for this case. Suspects to prove or rule out: the end-of-turn save doesn't run or doesn't reach the DB for turns run in a person's container (see the memory note container-turns-limits: such a turn can't see the live DB); the transcript path differs between container and host (cwd mapping → projectSlug); the fresh session's new id isn't saved, so each turn starts over. Read TWIReader #27 (read_ticket isn't available to you; use `sqlite3 -readonly` on the data DB and the journal) to see which login each of those turns ran on.\n\nUse citadel:bug-fixing: prove the cause with a failing test first. Fix the cause. Then also do the second ask: when a fresh session really is unavoidable, seed it with the minion's note and its last few chat entries (a short, capped digest) so it doesn't start blind, and say in the note that it did.\n\nRunner change: run citadel-test on touched files, citadel:self-review; if it rates high, ask with a card before landing. When it's live, message the Taskmaster (message_coordinator) one line on the cause and fix, so I can tell TWIReader.",
+  "before": "5a22d4eb8e6c88921c63979564f50c027111feee",
+  "fix": "22473c52acbf910c6f88bb745d0c6ccd0de5ce10",
+  "tests": [
+    "test/person-switch-session.test.ts",
+    "test/worktree-sweep.test.ts"
+  ],
+  "right": "A minion whose worktree was never recorded (a restart cut its creation off) takes its folder back at its next turn, so its session is found instead of started fresh."
+}

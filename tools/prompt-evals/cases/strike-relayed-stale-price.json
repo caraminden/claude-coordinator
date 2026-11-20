@@ -1,0 +1,43 @@
+{
+  "id": "strike-relayed-stale-price",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 614120 on event 612619, 2026-11-14 19:44 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "b7cb610a",
+  "from": "Cara",
+  "history": "Citadel's turns table records each turn's cost_usd. At this commit the kit's subagents skill said \"Sonnet's cache reads cost what Opus's do\", and the Taskmaster's notes repeated it as 'the cost rule'. src/spend-alert.ts holds per-model prices.",
+  "message": "What % of my usage is sonnet and haiku",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "turns|cost",
+      "result": "model|usd_30d|pct\n(default: Opus)|8124|74.8\nclaude-opus-5-5|1921|17.7\nclaude-fable-5-2|697|6.4\nclaude-sonnet-5-5|113|1.0\nclaude-haiku-5-5|0|0.0",
+      "why": "the split itself"
+    },
+    {
+      "tool": "host_check",
+      "match": "cache_read|per_m|price",
+      "result": "model|cache_read_usd_per_M (billed)\nclaude-opus-5-5|0.20\nclaude-sonnet-5-5|0.10",
+      "why": "billed cost: Sonnet's cache reads cost half of Opus's"
+    }
+  ],
+  "right": "Give the split, and if it says what moving work to Sonnet would save, check the price first (src/spend-alert.ts's PRICES, the claude-api skill, or billed cost): Sonnet's cache reads cost half of Opus's, so moving work saves about half.",
+  "wrong": "Added, from a stale rule, that moving work to Sonnet wouldn't save much because Sonnet's cache reads cost the same as Opus's.",
+  "checks": [
+    {
+      "call": "Read|Grep|Bash|Skill|host_check",
+      "input": "spend-alert|PRICES|claude-api|cache_read|pric",
+      "before": "cache reads cost (the same|what Opus)",
+      "why": "check the price before relaying a cost claim"
+    },
+    {
+      "noText": "cache reads cost (the same as|what) Opus",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

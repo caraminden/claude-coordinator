@@ -1,0 +1,18 @@
+{
+  "id": "fix-card-answer",
+  "source": "#812",
+  "ticket": {
+    "number": 812,
+    "title": "Unrelated message counts as card answer",
+    "type": "bug"
+  },
+  "from": "Taskmaster",
+  "message": "Bug: a person's unrelated chat message makes Citadel treat an open question card as no longer waiting. That caused Cara to get a duplicate card today. Use the citadel:bug-fixing skill (proof before fix).\n\nWhat happened, in the Citadel Taskmaster's chat, 2026-11-16 (DB times are UTC; events table in /home/cara/.local/share/claude-coordinator/coordinator.db, read with `sqlite3 -readonly -safe`):\n- e=695153, 22:08:56: the Taskmaster asks question card a601eb21f5ba (close policy).\n- e=695797, 22:19:33: Cara types an unrelated message about Code Mode.\n- e=695833, 22:19:51: Cara answers the card (\"My answers to your question card: …\").\n- The Taskmaster's Stop-hook link check (src/link-check.ts → src/card-links.ts) then reported the card as no longer waiting, with the reason `Cara wrote in its chat at …: \"I just heard about the claude code harness function called code mode…\"`. That's the fallback at src/card-links.ts:77 in `settledHow`. Its `reply` is \"the first person's message after it\" from Store.recentCards.\n- So the Taskmaster re-asked the same card as e=695904 (2ca59ab9e359) at 22:20:35, even though Cara had already answered it. She asked \"Why did I get that question card again?\"\n\nWhat to find out and fix:\n1. Does a typed message that isn't an answer really stop a card from waiting? Check this everywhere a card counts as open: the needs-you list, read_ticket's \"waiting:\" line, recentCards, and the hold-open-after-deploy logic. A card should stay open until it is clicked, settled (settle_question / doc Send), replaced, or its minion is dismissed. An unrelated message shouldn't count. If some path does treat any later message as settling the card, fix that path.\n2. In `settledHow`/recentCards, when a real answer exists (the card's answer message, even if it isn't the first message after the card), report that answer. Don't report an earlier unrelated message.\n3. Write a failing test first that reproduces the sequence above (card, unrelated message, then the answer): the card's reason must name the answer, and before the answer the card must still count as waiting. Then make it pass.\n\nThen test with `citadel-test` on the touched test files, run citadel:self-review, and land with hand_off_land per the scheme's shipping rules.",
+  "before": "6f40175ca677854f7decec8d66b9d3c60fbdfbf1",
+  "fix": "f721c07af9ce65cc08224c8f0e0fe059a4a32f70",
+  "tests": [
+    "test/card-links.test.ts",
+    "test/inbox.test.ts"
+  ],
+  "right": "Only a card's own answer settles it: an unrelated typed message no longer counts, and the real answer is the one reported."
+}

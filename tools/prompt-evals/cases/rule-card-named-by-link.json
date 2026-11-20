@@ -1,0 +1,31 @@
+{
+  "id": "rule-card-named-by-link",
+  "kind": "rule",
+  "source": "#138, event 52324, 2026-10-29 16:14 PDT (Cara: \"Where is the card?\" at event 52653)",
+  "role": "minion",
+  "ticket": {
+    "number": 138,
+    "title": "Trim the fixed starting context",
+    "type": "chore"
+  },
+  "commit": "0140b9ef",
+  "from": "Cara",
+  "history": "You trimmed about 7k tokens from the fixed context every turn starts with (commits fb487c6 and 2bfc388, both live) and shipped the machine_tools switch (f068587, live). One thing is open: a card you asked earlier, still unanswered, at [the card above](#/p/2/t/138?e=44989): \"Shorten your ~/.claude/CLAUDE.md perigee notes?\" It offers to cut Cara's own ~/.claude/CLAUDE.md notes, which load into every turn.",
+  "message": "are we done here?",
+  "facts": [
+    {
+      "tool": "ask_question",
+      "match": "",
+      "result": "Card asked: [the card below](#/p/2/t/138?e=52360). It is in the chat. End your turn now with a short reply.",
+      "why": "a fresh card comes back with its link"
+    }
+  ],
+  "right": "Say the trims are live and the one thing left is the CLAUDE.md card, named by its link ([the card above](#/p/2/t/138?e=44989)), or ask it again as a fresh card and link that.",
+  "wrong": "Said the only thing left was \"the card about your ~/.claude/CLAUDE.md\" and told her to tap a button, with no link, so Cara had to ask where the card was.",
+  "checks": [
+    {
+      "reply": "\\]\\(#/p/\\d+/t/\\d+\\?e=\\d+\\)",
+      "why": "a question waiting on a card is named by its link"
+    }
+  ]
+}

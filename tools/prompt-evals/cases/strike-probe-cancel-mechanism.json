@@ -1,0 +1,37 @@
+{
+  "id": "strike-probe-cancel-mechanism",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 486681 on event 485484, 2026-11-11 15:34 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "a2b08241",
+  "from": "Cara",
+  "history": "#564 (more test files at once on CI) was stress-testing CI by pushing land/564-probe-* branches back to back; their runs share tests.yml's concurrency group citadel-tests with real lands. land.sh waits for the desktop CI run on the commit it lands; if no runner starts the job within 90 s it cancels its own run, writes \"no runner started the job within 90s\" to the day's retro log (shared/retro-log/<day>/land.md) and falls back to the full suite on perigee, which sends Cara an alert. #553's ef38a0f (23:26Z) and #568's a2b0824 (23:30Z) both show 'cancelled' in the Actions list.",
+  "message": "Just got a notification that CI fellback to perigee, whats up?",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "landing|retro|land",
+      "result": "retro log, land.md 2026-11-11:\nland ticket/553 ef38a0f: no runner started the job within 90s (pending behind a land/564-probe run in progress); land.sh cancelled its run; CI FALLBACK\nland ticket/568 a2b0824: same, behind the next probe; CI FALLBACK",
+      "why": "land.sh cancelled its own pending runs at its 90 s wait; GitHub didn't"
+    }
+  ],
+  "right": "Read the lands' retro log or output (or land.sh's CI wait) before naming the mechanism: each land's run sat pending behind a ~2 min probe already running and land.sh cancelled it at its 90 s runner wait. Tell #564 to stop the probes, without claiming GitHub cancels pending runs.",
+  "wrong": "Inferred from the 'cancelled' status that GitHub keeps only one pending run per concurrency group and each probe push cancelled a land's waiting run, and told both Cara and #564 so.",
+  "checks": [
+    {
+      "call": "Read|Grep|Bash|host_check",
+      "input": "retro|land\\.md|landings|output\\.log|within|CI_START|land\\.sh",
+      "before": "only one (pending|waiting) run|cancels the one (already )?waiting",
+      "why": "read why the runs were cancelled before naming the mechanism"
+    },
+    {
+      "noText": "(keeps|allows) only one (pending|waiting) run|cancels the one (already )?waiting",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

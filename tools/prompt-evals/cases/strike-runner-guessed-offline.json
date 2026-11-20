@@ -1,0 +1,43 @@
+{
+  "id": "strike-runner-guessed-offline",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 514749 on event 514564, 2026-11-12 01:35 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "395d0aff",
+  "from": "Josh",
+  "history": "Peek Auras' CI runs on Cara's Windows PC: four Windows build runners, plus one 'desktop' runner in Cara's logged-in session for the screen-capture tests (desktop.yml and other session workflows, like a hand-started stress.yml, need it). Peek's land gate waits only on windows.yml; desktop.yml blocks a land only when it goes red. Citadel sends an alert when runs sit queued.",
+  "message": "Whats going on with the peek auras CI runners? I just got an alert",
+  "facts": [
+    {
+      "tool": "ci_runners",
+      "match": "",
+      "result": "peek-auras-desktop  online  busy  job: stress (stress.yml, started by hand 08:58 UTC)\npeek-auras-win-1..4  online  busy/idle",
+      "why": "the desktop runner was online and busy with a hand-started stress run"
+    },
+    {
+      "tool": "host_check",
+      "match": "ci_runs|stress|desktop",
+      "result": "run|workflow|status|started\nstress.yml|in_progress|08:58Z (started by hand)\n8 x desktop.yml|queued|since 09:02Z",
+      "why": "a stress run held the one desktop runner since 08:58"
+    }
+  ],
+  "right": "Find what the desktop runner is doing (every in-progress run, any workflow) before giving a cause: a stress.yml run started by hand at 08:58 holds Peek's only desktop runner, so desktop runs queue behind it. If that can't be seen, say the cause is unknown rather than guess.",
+  "wrong": "Guessed that the desktop runner had lost its connection to GitHub (PC asleep, session logged out, or wedged), when it was busy with a stress run.",
+  "checks": [
+    {
+      "call": "ci_runners|host_check|Bash",
+      "input": "in_progress|stress|busy|runners|list",
+      "before": "lost (its )?connection|wedged|asleep",
+      "why": "look at what the runner is running before guessing why it's idle"
+    },
+    {
+      "noText": "lost (its )?connection",
+      "why": "the guess the strike took back"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "strike-only-citadel-has-schedules",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 326810 on event 326787, 2026-11-08 12:31 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "37979798",
+  "from": "Cara",
+  "history": "The Citadel Taskmaster sees every scheme's minions and can message other schemes' Taskmasters. Citadel has a monthly 'Upstream skills check' schedule that runs citadel:upstream-check on the kit's THIRD_PARTY.md. The scheme-setup skill asks for an upstream check when setup writes a repo's first third-party copy.",
+  "message": "Why do Delve and Mandate not have upstream skills checks?",
+  "facts": [
+    {
+      "tool": "host_check|list_schedules",
+      "match": "schedul",
+      "result": "id|project|name|cron|type\n1|Citadel|Upstream skills check|monthly|research\n2|Delve|Upstream skills check|0 9 1 * *|research (added 2026-11-06, Josh's ask)\n3|Peek Auras|Upstream skills check|0 9 1 * *|research",
+      "why": "Delve and Peek Auras already had their own upstream checks; Mandate, Theory of Crafting and Threadspace had none"
+    }
+  ],
+  "right": "Read the schedules (every scheme's) before answering: Delve already has an upstream check (from 2026-11-06), Peek Auras too; Mandate is the one without, so only Mandate (and maybe ToC and Threadspace) needs one.",
+  "wrong": "Said without looking that schedules belong to each scheme and the only one is Citadel's, so neither Delve nor Mandate had a check.",
+  "checks": [
+    {
+      "call": "host_check|list_schedules|Bash",
+      "input": "schedul",
+      "before": "only one is Citadel|neither .{0,30}(has|have)",
+      "why": "read the schedules table before saying which schemes have one"
+    },
+    {
+      "noText": "the only one is Citadel.?s",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

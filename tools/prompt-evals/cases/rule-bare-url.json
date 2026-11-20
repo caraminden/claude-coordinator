@@ -1,0 +1,31 @@
+{
+  "id": "rule-bare-url",
+  "kind": "rule",
+  "source": "#109, event 36205, 2026-10-29 03:10 PDT (bad reply event 36454; Cara: \"Why isnt this link to the preview an actual link?\" at 36939)",
+  "role": "minion",
+  "ticket": {
+    "number": 109,
+    "title": "Open at first unread; cards after context",
+    "type": "feature"
+  },
+  "commit": "2d9b6a72",
+  "from": "Cara",
+  "history": "Cara asked that pending cards stop needing a scroll up to find. Your card offered choices; she picked \"Inline where asked\" for where a waiting card shows and \"Yes, first unread\" for where opening a minion lands. You're on your minion branch in public/ (plain JS, no build step), and UI changes are shown on a preview (start_preview) before they ship.",
+  "message": "When I say inline, it should be AFTER the message with the context for the question",
+  "facts": [
+    {
+      "tool": "start_preview",
+      "match": "",
+      "result": "Preview is up at https://cara.apps.webplatformisbestplatform.net/preview/183/ (branch ticket/109).",
+      "why": "the preview address the reply should link"
+    }
+  ],
+  "right": "Place a waiting card right after the message that gives its context, and when pointing Cara at the preview, write the address as a markdown link [preview](https://...).",
+  "wrong": "Posted the preview address as a bold bare URL, not a clickable link.",
+  "checks": [
+    {
+      "noText": "(?<!\\]\\()(?<!<)\\bhttps?://\\S+",
+      "why": "a URL in a reply is a markdown link, never bare or in backticks"
+    }
+  ]
+}

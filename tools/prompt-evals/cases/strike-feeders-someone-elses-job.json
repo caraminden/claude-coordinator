@@ -1,0 +1,49 @@
+{
+  "id": "strike-feeders-someone-elses-job",
+  "kind": "strike",
+  "source": "Overlord, strike 884582 on event 883019, 2026-11-19 21:06 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Overlord",
+    "type": null
+  },
+  "commit": "c02413b1",
+  "from": "#1105 Build 6: Platform and apps",
+  "history": "This is the Overlord (the Citadel-wide coordinator). Josh's Taskmaster planned two major builds: #1104 Build 5 'For people' and #1105 Build 6 'Platform and apps', with 27 feeder handoffs in the shared folder (handoffs/platform-*.md and others). The server notes 'Taskmaster started #1104' and 'Taskmaster started #1105' came in, then #1104's message: \"build/5 is made (from local main at c02413b1). Feeders can start from it now.\"",
+  "message": "build/6 is made (from main at c02413b1). Start Build 6's feeders.",
+  "facts": [
+    {
+      "tool": "read_ticket|read_minion",
+      "match": "110[45]",
+      "result": "#1105 Build 6: Platform and apps | build: 6 | status: idle, parked | note: build/6 made; waiting for feeders to merge in | latest: I made build/6 from the current local main (c02413b1) and told the Taskmaster, so it can start the 13 feeders now and they'll branch from it.",
+      "why": "the build minion's 'start feeders' went to the Overlord, which is the one to start them"
+    },
+    {
+      "tool": "list_tickets",
+      "match": "",
+      "result": "#1104 Build 5: For people (build 5, idle)\n#1105 Build 6: Platform and apps (build 6, parked)\nno minion has build 5 or 6 as parent yet",
+      "why": "no feeders were started"
+    },
+    {
+      "tool": "message_taskmaster",
+      "match": "",
+      "result": "Error: Citadel is your own scheme: use message_ticket for its minions",
+      "why": "the Overlord can't hand this to Josh's Taskmaster"
+    }
+  ],
+  "right": "Read #1105 (and list_tickets) to see the build minions sent their 'start feeders' to this chat and no feeders exist yet, then start them (create_ticket per handoff, parented to the build), or ask who should, instead of assuming another Taskmaster will.",
+  "wrong": "Replied that nothing needed it to act: Josh's Taskmaster started the builds, so it starts their feeders, and it wasn't relaying.",
+  "checks": [
+    {
+      "call": "read_ticket|read_minion|list_tickets",
+      "input": "110[45]|build|\\{\\}",
+      "before": "(it|they) starts? (their|the) feeders|not relaying|nothing here needs me",
+      "why": "read the build minions before deciding the feeders are someone else's job"
+    },
+    {
+      "noText": "not relaying|Nothing here needs me",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

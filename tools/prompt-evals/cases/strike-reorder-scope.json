@@ -1,0 +1,37 @@
+{
+  "id": "strike-reorder-scope",
+  "kind": "strike",
+  "source": "Citadel Taskmaster, strike 827292 on event 827241, 2026-11-18 21:46 PST",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "1f83ea2f",
+  "from": "Cara",
+  "history": "#1002 shipped earlier that evening (live since 20:18 PST): drag and a 'Land next' button on the Releases page's land line, for lands waiting their turn. Cara looks at the Releases page across schemes, including Peek Auras' Contraption and Windows release lines.",
+  "message": "I thought we made it so you could rearrange the release line?",
+  "facts": [
+    {
+      "tool": "read_ticket|read_minion",
+      "match": "1002",
+      "result": "#1002 Reorder the land line | done | latest: live since 20:18 PST. Drag and 'Land next' work on Citadel's own land line (its Releases target) only. Other schemes' release lines, like Peek Auras' Contraption and Windows lines, can't be reordered at all.",
+      "why": "#1002 covers Citadel's own land line only"
+    }
+  ],
+  "right": "Check what #1002 covers before saying yes (its ticket or public/releases.js): only Citadel's own land line can be reordered; other schemes' lines, such as Peek Auras' Contraption and Windows, can't. Ask which line she means or say so.",
+  "wrong": "Answered 'Yes, you can reorder it: #1002 has been live since 20:18' and explained why she might not see the handle, without saying it only covers Citadel's line.",
+  "checks": [
+    {
+      "call": "read_ticket|read_minion|Read|Grep|Bash",
+      "input": "1002|releases|land.?order|reorder",
+      "before": "yes, you can (reorder|rearrange)",
+      "why": "check what #1002 covers before answering yes"
+    },
+    {
+      "noText": "yes, you can (reorder|rearrange)",
+      "why": "the claim the strike took back"
+    }
+  ]
+}

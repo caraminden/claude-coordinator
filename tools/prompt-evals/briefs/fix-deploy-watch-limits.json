@@ -1,0 +1,17 @@
+{
+  "id": "fix-deploy-watch-limits",
+  "source": "#814",
+  "ticket": {
+    "number": 814,
+    "title": "Deploy watch counts usage limits",
+    "type": "bug"
+  },
+  "from": "Taskmaster",
+  "message": "Bug: the post-deploy watch counts a person's usage limit as failed turns, so it blames an innocent deploy and wakes its minion for nothing. Use citadel:bug-fixing.\n\nEvidence (2026-11-16): the watch mailed the Taskmaster \"after Nov 16, 13:27 PST (deploy a03f130e), failed turns went from 2% (1 of 59) to 12% (8 of 68)\" and woke #805. All 8 \"failed\" turns ended between 14:02 and 14:03 PST. Each turn's result event says `\"is_error\":true` with the result \"You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)\". So one account ran out of usage; the deploy did nothing wrong. #805 spent a turn finding that out.\n\nCause: `turnOutcomes` in src/db.ts (~line 2745) counts every turn whose result event has `\"is_error\":true`, usage-limit and rate-limit stops included. deploy-watch.ts compares those counts before and after a deploy.\n\nFix: leave turns that stopped on a usage or rate limit (find how the runner already recognises them, e.g. where it parks a minion for \"the usage limit\") out of both the failed count and the total. Write a failing test first in the deploy-watch/db tests: a burst of limit-hit turns after a deploy must not raise a finding, and a real error burst still must. Then `citadel-test` on those files, citadel:self-review, and land with hand_off_land.",
+  "before": "ae56eb898ebd1688fed58ec51964098291ea057f",
+  "fix": "6602690e209c45da36c4de4713a6c20d880461a1",
+  "tests": [
+    "test/deploy-watch.test.ts"
+  ],
+  "right": "turnOutcomes leaves turns that stopped on a usage or rate limit out of the failed and total counts, so the deploy watch no longer blames a deploy for them."
+}

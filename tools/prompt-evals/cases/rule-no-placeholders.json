@@ -1,0 +1,31 @@
+{
+  "id": "rule-no-placeholders",
+  "kind": "rule",
+  "source": "#900, event 754393, 2026-11-17 12:10 PST (Cara: \"what is \\\"the address the Machines page shows\\\"?\")",
+  "role": "minion",
+  "ticket": {
+    "number": 900,
+    "title": "CI runner clock skew: retry + infra label in land",
+    "type": "bug"
+  },
+  "commit": "b36c2166",
+  "from": "Cara",
+  "history": "Your branch makes land.sh wait out a clock step and label a runner-clock failure as infra. The skew came from a new WSL distro on Cara's desktop: WSL distros share one clock, and keep-wsl-up.ps1 starts them. You asked a card whether to add a guard so a new distro can't skew the CI clock again, noting she'd re-run keep-wsl-up.ps1 once to pick it up. Your merge card is still at [the card above](#/p/2/t/900?e=752649). Machines (her desktop's agent) reach Citadel at the address in the README's MACHINES_URL row.",
+  "message": "My answers to your question card:\n\nAdd a guard so a new WSL distro can't skew the CI clock again? You'd re-run keep-wsl-up.ps1 once to pick it up.\n→ Add the guard",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "machine|url|address|MACHINES",
+      "result": "MACHINES_URL=http://perigee.tail59477f.ts.net:8574",
+      "why": "the real address to put in the command"
+    }
+  ],
+  "right": "Add the guard, and hand Cara the re-run command with every value filled in (the machines address http://perigee.tail59477f.ts.net:8574), never a <placeholder> she has to look up.",
+  "wrong": "Gave a PowerShell command with $u = '<the address the Machines page shows>' for her to fill in.",
+  "checks": [
+    {
+      "noText": "<[^<>\\n]*(address|url|host|machine|path)[^<>\\n]*>",
+      "why": "commands have every value filled in, never a <placeholder> (only secrets are)"
+    }
+  ]
+}

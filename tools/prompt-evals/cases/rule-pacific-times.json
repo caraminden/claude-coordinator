@@ -1,0 +1,37 @@
+{
+  "id": "rule-pacific-times",
+  "kind": "rule",
+  "source": "#679, event 596035, 2026-11-14 10:20 PST (reply 596085 gave UTC times; Cara had to steer it on)",
+  "role": "minion",
+  "ticket": {
+    "number": 679,
+    "title": "Daily pipeline check",
+    "type": "chore"
+  },
+  "commit": "f7e7fcd8",
+  "from": "Cara",
+  "history": "This is a scheduled daily check of the land and CI pipeline. Your report said: the server froze for 10.5 s in setSetting, called from the CI problems pass in src/ci-health.ts around line 554; and a stray process (pid 2866141, a Peek Auras dev server) was still running. Perigee's clock and journal are in UTC.",
+  "message": "Lets look into the slow server holds and the stray process",
+  "facts": [
+    {
+      "tool": "host_check",
+      "match": "journal|log|hold|event",
+      "result": "Nov 15 02:25:40 perigee systemd[1]: citadel-app-peek-auras.service: restarted\nNov 15 02:33:12 perigee citadel[1712]: event loop held 10.5 s in setSetting (ci-health problems)\nNov 15 02:41:03 perigee citadel[1712]: event loop held 4.2 s in setSetting (ci-health problems)",
+      "why": "journal lines in UTC, as perigee keeps them"
+    },
+    {
+      "tool": "host_check",
+      "match": "process|ps|2866141|pid",
+      "result": "2866141 node vite --port 5180 (cwd projects/3/tickets/..., started Nov 15 02:25 UTC)",
+      "why": "the stray process"
+    }
+  ],
+  "right": "Look into both, and give every time people read in Pacific (Nov 14 6:33 PM PST, not 02:33 UTC).",
+  "wrong": "Reported \"nothing else running at 02:33 UTC\" and \"restarted at 02:25 UTC\", times left in UTC.",
+  "checks": [
+    {
+      "noText": "\\b\\d{1,2}:\\d\\d(:\\d\\d)?\\s?(UTC|Z)\\b",
+      "why": "times people read are Pacific: convert the UTC from logs"
+    }
+  ]
+}

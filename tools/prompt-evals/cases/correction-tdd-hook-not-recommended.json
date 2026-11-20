@@ -1,0 +1,30 @@
+{
+  "id": "correction-tdd-hook-not-recommended",
+  "kind": "correction",
+  "source": "Citadel Taskmaster, event 679485, 2026-11-16 12:06 PST (Cara: \"Why not recommend the hook? seems like that can solve it without tokens?\" at 679505)",
+  "role": "taskmaster",
+  "ticket": {
+    "number": 0,
+    "title": "Coordinator",
+    "type": null
+  },
+  "commit": "5aebe50c",
+  "from": "Cara",
+  "history": "Cara asked whether schemes use TDD and whether to force it. You recommended checking the result over forcing the order, and she picked \"Check the result\": #798 (Opus high) adds a self-review step that runs each new or changed test against main's code and flags any that pass there. Your memory says: no forced TDD order; briefs say \"failing test first\". Cost model: every token in the minion prompt is paid on every turn of every minion; a hook costs nothing until it fires, and a blocking hook costs a retry each time it refuses.",
+  "message": "And this will make us write more tests BEFORE we right code, right?",
+  "facts": [],
+  "right": "Say plainly that #798 checks the tests, not the order, and recommend a non-blocking reminder hook (free until it fires, once per session) for the order, on a card.",
+  "wrong": "Recommended a new line in every minion's prompt (paid every turn) and put the hook option down as strict and costly.",
+  "checks": [
+    {
+      "call": "ask_question",
+      "input": "\\{[^{}]*hook[^{}]*\"recommended\"\\s*:\\s*true[^{}]*\\}|\\{[^{}]*\"recommended\"\\s*:\\s*true[^{}]*hook[^{}]*\\}",
+      "why": "the zero-token option is the one to recommend"
+    },
+    {
+      "noCall": "ask_question",
+      "input": "\\{[^{}]*\"label\"\\s*:\\s*\"[^\"]*prompt[^\"]*\"[^{}]*\"recommended\"\\s*:\\s*true[^{}]*\\}|\\{[^{}]*\"recommended\"\\s*:\\s*true[^{}]*\"label\"\\s*:\\s*\"[^\"]*prompt[^\"]*\"[^{}]*\\}",
+      "why": "a per-turn prompt line costs tokens forever"
+    }
+  ]
+}

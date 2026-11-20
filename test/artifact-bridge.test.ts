@@ -152,10 +152,7 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'draw', src: 'https://x/a.png' })?.req.src, 'https://x/a.png');
   assert.equal(msg({ op: 'draw' }), null);
   assert.equal(msg({ op: 'draw', src: 'x'.repeat(4001) }), null);
-  // A link to another site, for Firefox when the device says so (#988).
-  assert.equal(msg({ op: 'link', url: 'https://example.org/' })?.req.url, 'https://example.org/');
-  assert.equal(msg({ op: 'link' }), null);
-  assert.equal(msg({ op: 'link', url: 'x'.repeat(4001) }), null);
+  assert.equal(msg({ op: 'link', url: 'https://example.org/' }), null, 'no link op any more: the page opens its own tab');
   // Only a picture behind a file token can be drawn on (the page could fetch it anyway), never a cookie-backed route.
   const base = 'https://citadel.test/';
   assert.equal(ownPicture('https://citadel.test/api/files/tok/shot.png', base), true);

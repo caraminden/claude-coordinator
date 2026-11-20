@@ -27,5 +27,5 @@ test('a citadel.zip link carrying a login, or over http, is not taken as Citadel
 });
 
 test('anything that is not a web or mail link is ignored', () => {
-  for (const h of ['javascript:alert(1)', 'file:///C:/x', 'citadel-firefox:https://x']) assert.deepEqual(go(h), { kind: 'none' });
+  for (const h of ['javascript:alert(1)', 'file:///C:/x']) assert.deepEqual(go(h), { kind: 'none' });
 });

@@ -177,11 +177,11 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
    (`myapp://…`) needs `target="_top"`: inside the frame Citadel's CSP (`default-src 'self'`, so
    `frame-src 'self'`) blocks it, and the top window hands it to the OS. Never `_top` for a plain
    web link.
-   What counts as internal is decided by address only (Cara, 2026-11-18), with "Open links in Firefox" on or off:
+   What counts as internal is decided by address only (Cara, 2026-11-18):
    your own origin stays in your page (no `target`, no `preventDefault`); another app's address, by its
    host or `/apps/<name>/…`, opens in Citadel's app view; any other host on the apps domain (`citadel.zip` and
    `*.citadel.zip`) or on Citadel's own host opens in Citadel's window when it was meant for a new tab (`target="_blank"`); every other domain is outside and goes to
-   Firefox when the person has the switch on (Windows desktop), else the browser. There is no per-link override.
+   the browser. There is no per-link override.
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
 8. **Use the variables, never copied hex.** Your own accent pairs (First look, 1) are the only hex an

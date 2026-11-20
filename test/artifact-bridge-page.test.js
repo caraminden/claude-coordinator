@@ -158,28 +158,15 @@ test('typing on the page tells the viewer, at most once a second, so a new front
   assert.equal(p.posted.filter((m) => m.op === 'typing').length, 1);
 });
 
-test('a link to another site asks the viewer: Firefox when the device says so, else the page opens a tab (#988)', async () => {
+test('a link to another site opens a tab and asks the viewer nothing', async () => {
   const p = page();
   const opened = [];
   Object.assign(p.ctx, { URL, location: { origin: 'null' }, open: (...a) => opened.push(a) });
   p.ctx.document.baseURI = 'https://citadel.example/files/p.html';
-  p.answer('hello', { person: 'Cara', entries: [] });
-  await p.ctx.citadel.ready;
-  const click = () => {
-    const a = { getAttribute: (k) => (k === 'href' ? 'https://example.org/x' : null) };
-    const e = { button: 0, defaultPrevented: false, target: { closest: () => a }, preventDefault() { this.defaultPrevented = true; } };
-    p.fire('click', e);
-    return e;
-  };
-  assert.equal(click().defaultPrevented, true);
-  await wait(5);
-  assert.equal(p.waiting('link')[0].url, 'https://example.org/x');
-  p.answer('link', { opened: true });
-  await wait(5);
-  assert.equal(opened.length, 0, 'the viewer took it');
-  click();
-  await wait(5);
-  p.answer('link', { opened: false });
-  await wait(5);
-  assert.deepEqual(opened, [['https://example.org/x', '_blank', 'noopener']], 'not for Firefox: a tab as before');
+  const a = { getAttribute: (k) => (k === 'href' ? 'https://example.org/x' : null) };
+  const e = { button: 0, defaultPrevented: false, target: { closest: () => a }, preventDefault() { this.defaultPrevented = true; } };
+  p.fire('click', e);
+  assert.equal(e.defaultPrevented, true);
+  assert.deepEqual(opened, [['https://example.org/x', '_blank', 'noopener']]);
+  assert.equal(p.waiting('link').length, 0);
 });

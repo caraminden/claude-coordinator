@@ -67,8 +67,8 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
    `rig.ts run corner` is #890's: at three window widths no control sits under the caption buttons, and they sit
    on the page colour, not white. `rig.ts run hint` checks #890's one-time ⌃ note stays away with the title
    bar hidden. Edge's app window has no ⌃ (the title bar is always hidden), so the side with it showing can't be
-   driven here. `rig.ts run contraption-window` is #988's: a contraption's page at top level (an app's own
-   window) keeps a link to its own app and sends an outside one to Firefox (accept the prompt; shot `window link`).
+   driven here. `rig.ts run contraption-window` checks a contraption's page at top level (an app's own
+   window) keeps a link to its own app.
    - A new check is a file in `checks/`, using `checks/lib.js`'s helpers (`openFixture`, `click`, `drag`,
      `expect`, `snap`).
    - A new fixture page is a file in `fixture/`, opened with `openFixture('<file>')`.
@@ -91,16 +91,6 @@ empty space in the title bar strip and from a point below it, and clicks each pa
 point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`, `kill -HUP` the rig's `devPid` (state.json):
 `rig.ts reload` wants the Edge driver. Electron is the one in `%LOCALAPPDATA%\defender-copy`. A turn without the
 `tailscale` command sets `RIG_HOST=perigee.tail59477f.ts.net` for `rig.ts up`.
-
-## Links out of the installed app (#988)
-
-`scripts/firefox-link/` (`check.ps1`, `t.html`) proves the `citadel-firefox:` protocol on its own: an Edge app
-window, a real mouse click, then the window title and Firefox's command lines. `rig.ts run firefox` (in the WCO
-rig, `checks/firefox.js`) proves Citadel's "Open links in Firefox" switch in the installed app and in a framed
-contraption, with real clicks and the "Open this app?" prompt accepted. It asserts nothing itself: look at its
-`firefox links` shot (Firefox's tabs for the top link and the frame link, none for the off case), after the one-time
-setup (`public/citadel-firefox-link.ps1`) on the box; `%LOCALAPPDATA%\Citadel\open-in-firefox.ps1` stays installed there.
-The driver falls back to an Edge tab when the install dialog never comes (the overlay check then fails: ignore it).
 
 ## What you get back
 

@@ -58,7 +58,7 @@ function worker(script: string, b: ReturnType<typeof browser>) {
   return { lifecycle, request };
 }
 
-const NAMES = ['index.html', 'app.js', 'style.css', 'ui/chat.js', 'icon.svg', 'sw.js', 'manifest.webmanifest', 'machine-agent.mjs', 'ui/chat.d.ts', 'citadel-firefox-link.ps1'];
+const NAMES = ['index.html', 'app.js', 'style.css', 'ui/chat.js', 'icon.svg', 'sw.js', 'manifest.webmanifest', 'machine-agent.mjs', 'ui/chat.d.ts'];
 const net = (version: string) => Object.fromEntries(['/c/', '/c/app.js', '/c/icon.svg', '/c/style.css', '/c/ui/chat.js'].map((u) => [u, { version, body: `${version} ${u}` }]));
 
 test('the off switch: the worker the server serves then drops every kept file, reloads the windows they served, and keeps nothing', async () => {

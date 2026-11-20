@@ -953,6 +953,38 @@ test('a roll back deploys an older commit of its branch, but not one off it or p
   }
 });
 
+test('an app in a folder of its repo (#1136) reads its manifest, builds and runs there, and counts only its own migrations', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const work = join(root, 'work', `cara/${name}`);
+  mkdirSync(join(work, 'apps/notes/migrations'), { recursive: true });
+  mkdirSync(join(work, 'migrations'), { recursive: true });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null, subdir: 'apps/notes' } as ContraptionRow;
+    r.push({
+      'README.md': 'the scheme\'s own repo', '.gitignore': 'out.txt\n',
+      'apps/notes/citadel-app.json': appManifest(['pwd > out.txt'], { migrations: ['migrations'] }), 'apps/notes/migrations/0001.sql': 'a',
+    });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(realpathSync(readFileSync(join(liveSlot(name), 'apps/notes/out.txt'), 'utf8').trim()), join(liveSlot(name), 'apps/notes'), 'the build ran in its folder');
+    assert.equal(unitDirOf(name), join(liveSlot(name), 'apps/notes'), 'its service runs there');
+    assert.equal((await services.status(c)).manifestError, null);
+
+    // The repo's own migrations folder isn't the app's: no snapshot.
+    r.push({ 'migrations/0001.sql': 'the scheme\'s, not the app\'s' });
+    services.deploy(c, 'Cara');
+    assert.doesNotMatch((await done(name)).said.join('\n'), /Snapshotted its data/);
+    r.push({ 'apps/notes/migrations/0002.sql': 'b' });
+    services.deploy(c, 'Cara');
+    assert.match((await done(name)).said.join('\n'), /Snapshotted its data/);
+  } finally {
+    svc.close();
+  }
+});
+
 // #1137: a fixture app whose migration runs when it starts, as a real one's does. A stand-in systemctl runs the live
 // slot's migrate.sh against its DATA_DIR on start, and its /health fails while its data holds "GARBLED".
 async function migratingApp() {

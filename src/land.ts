@@ -334,6 +334,8 @@ export interface DeployOps {
   last(name: string): Promise<{ state: string; to: string | null; said: string[]; tail?: string; log: string } | null>;
   /** Whether `deployed` holds `landed` in the app's checkout (git merge-base --is-ancestor); without it, only the same commit does. */
   has?(name: string, landed: string, deployed: string): Promise<boolean>;
+  /** False when nothing of the app's changed from `deployed` to `landed` (an app in a folder of its scheme's repo, #1136): it isn't deployed. */
+  changed?(name: string, deployed: string, landed: string): Promise<boolean>;
   sleep?(ms: number): Promise<void>;
   now?(): number;
 }
@@ -360,6 +362,10 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
       const before = await ops.last(name);
       if (before?.state === 'deployed' && (await holds(name, before.to))) {
         out.push({ name, ok: true, line: healthy(name, before.to) });
+        continue apps;
+      }
+      if (commit && before?.state === 'deployed' && before.to && ops.changed && !(await ops.changed(name, before.to, commit).catch(() => true))) {
+        out.push({ name, ok: true, line: `${name} wasn't deployed: nothing in its folder changed.` });
         continue apps;
       }
       try {

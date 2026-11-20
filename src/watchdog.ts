@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { MANIFEST, parseManifest, unitName } from './app-services.ts';
+import { appRoot, MANIFEST, parseManifest, unitName } from './app-services.ts';
 import type { PushMessage } from './push.ts';
 
 /** Something to watch: a unit, and how to ask it whether it answers. */
@@ -84,14 +84,15 @@ export function step(prev: WatchState, found: Map<string, { title: string; findi
 
 /** Citadel, then every contraption, from the database. */
 export function targets(db: DatabaseSync, home: string, citadelPort = 8573): Target[] {
-  const rows = db.prepare('SELECT name, title, port, folder FROM contraptions ORDER BY name').all() as { name: string; title: string; port: number; folder: string | null }[];
+  // SELECT *: a column added later (subdir, #1136) is read when there, so the watchdog runs on an older database too.
+  const rows = db.prepare('SELECT * FROM contraptions ORDER BY name').all() as { name: string; title: string; port: number; folder: string | null; subdir?: string | null }[];
   return [
     { key: 'citadel', title: 'Citadel', unit: 'claude-coordinator.service', probe: { url: `http://127.0.0.1:${citadelPort}/api/health` }, always: true },
     ...rows.map((r): Target => {
       const folder = r.folder ? (r.folder.startsWith('~/') ? join(home, r.folder.slice(2)) : r.folder) : join(home, 'apps', r.name);
       let health: string | null = null;
       try {
-        health = parseManifest(readFileSync(join(folder, MANIFEST), 'utf8')).health;
+        health = parseManifest(readFileSync(join(appRoot(r, folder), MANIFEST), 'utf8')).health;
       } catch {} // no manifest or a broken one: an open port has to do
       return { key: `app:${r.name}`, title: r.title || r.name, unit: `${unitName(r.name)}.service`, probe: health ? { url: `http://127.0.0.1:${r.port}${health}` } : { port: r.port }, always: false };
     }),

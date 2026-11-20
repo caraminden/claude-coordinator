@@ -407,6 +407,20 @@ test('deployApps waits behind a running deploy, retries a refused start once, an
   assert.equal(r.ok, false);
   assert.match(r.line, /deployed 0ld0ld0aa, which doesn't hold the landed abc1234: GitHub's main didn't have it yet/);
 
+  // An app in a folder of its scheme's repo (#1136) whose folder the ship didn't touch isn't deployed; one whose folder it did is.
+  const live = { state: 'deployed', to: '0ld0ld0aaaa', said: [], log: '' };
+  const folder = (touched: boolean) => {
+    const started: string[] = [];
+    const ops: DeployOps = { running: () => false, start: async (name) => void started.push(name), last: async () => (started.length ? { ...live, to: 'abc1234aaaa' } : live), has: async () => false, changed: async () => touched, sleep: async () => {} };
+    return { ops, started };
+  };
+  const untouched = folder(false);
+  assert.deepEqual(await deployApps(5, ['notes'], 'abc1234', untouched.ops), [{ name: 'notes', ok: true, line: "notes wasn't deployed: nothing in its folder changed." }]);
+  assert.deepEqual(untouched.started, []);
+  const touched = folder(true);
+  assert.equal((await deployApps(5, ['notes'], 'abc1234', touched.ops))[0].ok, true);
+  assert.deepEqual(touched.started, ['notes']);
+
   // A start refused for good (no repo, services off) fails after its one retry, with its reason.
   const refused: DeployOps = { running: () => false, start: async () => { throw new Error('Mandate has no repo set'); }, last: async () => null, sleep: async () => {} };
   assert.deepEqual(await deployApps(5, ['mandate'], 'abc1234', refused), [{ name: 'mandate', ok: false, line: "mandate's deploy couldn't start: Mandate has no repo set" }]);

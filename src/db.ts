@@ -535,6 +535,8 @@ export interface ContraptionRow {
   repo: string | null;
   branch: string | null;
   folder: string | null;
+  /** The app's own folder inside its repo, like apps/notes (#1136): its citadel-app.json, units and build run there; null: the repo's root. */
+  subdir: string | null;
   default_model: string | null;
   turn_cap: number | null;
   identity_public: string;
@@ -1290,6 +1292,7 @@ export class StateDb {
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
+  ['contraptions', 'subdir', 'ALTER TABLE contraptions ADD COLUMN subdir TEXT'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1460,6 +1463,7 @@ export const SCHEMA_HISTORY = [
   [81, 'review_entries, review_versions, review_runs, review_verdicts; repo rubric files imported once (#1051, #1054)'],
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
+  [84, 'contraptions.subdir (#1136)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

@@ -17,7 +17,7 @@ import type { IncomingMessage } from 'node:http';
 import { connect } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { appFolder, MANIFEST, parseManifest } from './app-services.ts';
+import { appFolder, appRoot, MANIFEST, parseManifest } from './app-services.ts';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
@@ -182,8 +182,8 @@ export class Contraptions {
   }
 
   /** Whether an app's live manifest asks for clipboard writes in its frame; an app with no readable manifest doesn't. */
-  async clipboard(row: Pick<ContraptionRow, 'name' | 'folder'>): Promise<boolean> {
-    const text = await readFile(join(appFolder(row, this.appsHome), MANIFEST), 'utf8').catch(() => '');
+  async clipboard(row: Pick<ContraptionRow, 'name' | 'folder' | 'subdir'>): Promise<boolean> {
+    const text = await readFile(join(appRoot(row, appFolder(row, this.appsHome)), MANIFEST), 'utf8').catch(() => '');
     try {
       // A manifest a deploy would refuse grants nothing.
       return parseManifest(text).clipboard === 'write';

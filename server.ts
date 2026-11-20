@@ -1165,6 +1165,14 @@ const landHandoffs = new LandHandoffs({
       const row = store.getContraption(name);
       return new Promise((done) => (row ? execFile('git', ['merge-base', '--is-ancestor', landed, deployed], { cwd: services.folder(row), timeout: 30_000 }, (err) => done(!err)) : done(false)));
     },
+    // An app in a folder of its scheme's repo (#1136) goes out only when a ship touched that folder; read in the scheme's clone, which has both commits.
+    changed: async (name, deployed, landed) => {
+      const row = store.getContraption(name);
+      const dir = row?.subdir && row.home_scheme !== null ? store.getProject(row.home_scheme)?.repo_dir : null;
+      if (!row?.subdir || !dir) return true;
+      const out = await git(['diff', '--name-only', deployed, landed, '--', row.subdir], dir);
+      return out === null || !!out.trim();
+    },
   },
 });
 // The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a

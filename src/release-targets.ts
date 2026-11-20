@@ -31,6 +31,8 @@ export interface Found extends Target {
   jobName?: string;
   /** The repo folders it ships (#764): a change touching one goes to it; a target with none takes what no target's folder holds. */
   paths?: string[];
+  /** Ships only changes in its paths, never the rest as a fallback: an app in a folder of its scheme's repo (#1136). */
+  own?: boolean;
   /** ci: the workflow files ("desktop.yml") that must also run every job green on a build's commit before it goes out to
    * people (#1019, citadel-app.json `release.needs`): until then its changes are still on their way. */
   needs?: string[];
@@ -119,7 +121,7 @@ export interface SchemeFacts {
   /** The scheme whose code this server runs: its server is its target (CitadelServer), so it gets no Main. */
   own: boolean;
   branch: string;
-  contraptions: (Pick<ContraptionRow, 'name' | 'title'> & Partial<Pick<ContraptionRow, 'repo'>>)[];
+  contraptions: (Pick<ContraptionRow, 'name' | 'title'> & Partial<Pick<ContraptionRow, 'repo' | 'subdir'>>)[];
   /** Contraptions with an android/latest.json in their data folder: an APK they serve. */
   apkFeeds: string[];
   workflows: { path: string; text: string }[];
@@ -288,7 +290,8 @@ export function detect(f: SchemeFacts): Found[] {
   const base = { projectId: pid, branch: f.branch };
   for (const c of f.contraptions) {
     // The root citadel-app.json is the contraption deployed from this repo.
-    const dir = f.appDir && (!c.repo || c.repo.toLowerCase() === slug) ? { paths: [f.appDir] } : {};
+    // An app in a folder of the repo (#1136) ships only what touches that folder; otherwise the root citadel-app.json's workdir.
+    const dir = c.subdir ? { paths: [`${c.subdir.replace(/\/$/, '')}/`], own: true } : f.appDir && (!c.repo || c.repo.toLowerCase() === slug) ? { paths: [f.appDir] } : {};
     out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'Contraption', link: `/apps/${c.name}/`, contraption: c.name, ...dir });
   }
   const apkDir = f.apkDir ? { paths: [f.apkDir] } : {};

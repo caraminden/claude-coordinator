@@ -10,7 +10,7 @@ import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
 import type { Pin } from '../src/last-green.ts';
-import { ApkReader, buildWait, ROLLBACK_BRANCH, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
+import { ApkReader, buildWait, shipsOnTarget, ROLLBACK_BRANCH, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { BEHIND_OLD, CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
@@ -115,6 +115,18 @@ test('a target owns its folders: a contraption its workdir, an APK its top folde
   const needs = (release: unknown) => detect(facts({ workflows: [{ path: '.github/workflows/windows.yml', text: WINDOWS }], overrides: [{ id: 'ci:windows:release', release: release as never }] }))[0].needs;
   assert.deepEqual(needs({ needs: ['.github/workflows/desktop.yml', 'desktop.yml', 'e2e.yaml', 'x/../../etc', 3] }), ['desktop.yml', 'e2e.yaml'], 'workflow files by name, once each; anything else is dropped (#1019)');
   assert.equal(needs({ name: 'Build {n}' }), undefined);
+});
+
+test('an app in a folder of its repo (#1136) owns that folder: only changes there ship on it, even as the scheme\'s one target', () => {
+  const [notes] = detect(facts({ contraptions: [{ name: 'notes', title: 'Notes', subdir: 'apps/notes' }], appDir: 'web/' }));
+  assert.deepEqual([notes.id, notes.paths, notes.own], ['app:notes', ['apps/notes/'], true], 'its folder, not the root workdir');
+  const on = shipsOnTarget(notes, [notes]);
+  assert.equal(on(['apps/notes/server.ts', 'README.md']), true);
+  assert.equal(on(['README.md', 'apps/notesy/x.ts']), false, 'the rest of the repo never ships on it');
+  assert.equal(on(null), true, 'files unknown: counted, as for every target');
+  const root = detect(facts({ contraptions: [{ name: 'site', title: 'Site' }, { name: 'notes', title: 'Notes', subdir: 'apps/notes/' }] }));
+  assert.deepEqual(shipsTo(['apps/notes/a.ts'], root), ['app:notes']);
+  assert.deepEqual(shipsTo(['server.ts'], root), ['app:site']);
 });
 
 test('pushPaths and workdirOf read the folder a workflow and a contraption ship from', () => {

@@ -45,6 +45,7 @@ export const targetOf = (t: Found) => ({ id: t.id, projectId: t.projectId, name:
 
 /** Whether files ship on `t` among its scheme's targets (#764, shipsTo); a scheme with one target takes everything. */
 export function shipsOnTarget(t: Found, all: Found[]): (files: string[] | null | undefined) => boolean {
+  if (t.own) return (files) => !files || files.some((f) => holds(t, f));
   const scheme = all.filter((x) => x.projectId === t.projectId);
   return scheme.length < 2 ? () => true : (files) => shipsTo(files, scheme).includes(t.id);
 }

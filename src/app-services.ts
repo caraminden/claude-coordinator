@@ -122,6 +122,10 @@ const execLine = (argv: string[], home: string) => [argv[0], ...argv.slice(1).ma
 const tilde = (s: string, home: string) => (s.startsWith('~/') ? join(home, s.slice(2)) : s);
 /** A contraption's folder: where its repo is checked out; default ~/apps/<name>. */
 export const appFolder = (row: Pick<ContraptionRow, 'name' | 'folder'>, home: string) => (row.folder ? tilde(row.folder, home) : join(home, 'apps', row.name));
+/** Where the app itself is in a checkout of its repo: its subdir (#1136, an app in a folder of a scheme's repo), else the root. */
+export const appRoot = (row: { subdir?: string | null }, checkout: string) => (row.subdir ? join(checkout, row.subdir) : checkout);
+/** A repo path of the app's, from one relative to its own folder (its manifest's migrations, say). */
+export const repoPath = (row: { subdir?: string | null }, rel: string) => (row.subdir ? `${row.subdir.replace(/\/$/, '')}/${rel}` : rel);
 /** Where a deploy keeps an app's two builds (#801), `.<folder's name>/a` and `/b` beside it; the folder links to the live one. */
 export const slotsOf = (folder: string) => join(dirname(folder), `.${basename(folder)}`);
 
@@ -454,8 +458,9 @@ export class AppServices {
   }
 
   /** The manifest in the app's folder, or an Error saying why not. */
-  async manifest(row: Pick<ContraptionRow, 'name' | 'folder'>, folder = this.folder(row)): Promise<Manifest> {
+  async manifest(row: Pick<ContraptionRow, 'name' | 'folder'> & { subdir?: string | null }, folder = this.folder(row)): Promise<Manifest> {
     let text: string;
+    folder = appRoot(row, folder);
     try {
       text = await readFile(join(folder, MANIFEST), 'utf8');
     } catch {
@@ -469,7 +474,7 @@ export class AppServices {
   }
 
   private inputs(row: ContraptionRow, manifest: Manifest, folder: string): UnitInputs {
-    return { row, manifest, folder, keysDir: this.opts.keysDir(row.name), citadelUrl: this.opts.citadelUrl(), home: this.opts.home };
+    return { row, manifest, folder: appRoot(row, folder), keysDir: this.opts.keysDir(row.name), citadelUrl: this.opts.citadelUrl(), home: this.opts.home };
   }
 
   /** The unit files this contraption owns now, by file name. */
@@ -899,8 +904,8 @@ export class AppServices {
         // A roll back (#1016) goes to an older commit of the branch, never one off it; nor past a change to the data's shape.
         if (!(await inBranch(hooks.to, to))) throw new Error(`${short(hooks.to)} isn't on ${repo}'s ${view.branch}, so nothing changed.`);
         // Both ends' migrations: the commit it goes back to may list a path the live one dropped.
-        const there = await git(next, 'show', `${hooks.to}:${MANIFEST}`).then(parseManifest).catch(() => null);
-        const paths = [...new Set([...((await this.manifest(row, old).catch(() => null))?.migrations ?? []), ...(there?.migrations ?? [])])];
+        const there = await git(next, 'show', `${hooks.to}:${repoPath(row, MANIFEST)}`).then(parseManifest).catch(() => null);
+        const paths = [...new Set([...((await this.manifest(row, old).catch(() => null))?.migrations ?? []), ...(there?.migrations ?? [])])].map((p) => repoPath(row, p));
         const moved = paths.length ? (await git(next, 'diff', '--name-only', hooks.to, prev, '--', ...paths)).split('\n').filter(Boolean) : [];
         if (moved.length) {
           // The newest snapshot whose code has the same migrations as the commit it goes back to (#1137).
@@ -951,7 +956,7 @@ export class AppServices {
             const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
             const fd = openSync(view.log, 'a');
             holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
-              cwd: next, env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
+              cwd: appRoot(row, next), env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
             });
             closeSync(fd);
             holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
@@ -975,11 +980,11 @@ export class AppServices {
             const stepEnv = { ...env, CITADEL_HEAVY_HELD: '1', CITADEL_HEAVY_WHO: who };
             const unit = buildUnit(row.name);
             const argv = this.opts.systemdRun
-              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${next}`, `--property=StandardOutput=append:${view.log}`,
+              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
                 `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
               : inner;
             // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).
-            const code = await sh(argv, next, secs * 1000 + 15_000, stepEnv);
+            const code = await sh(argv, appRoot(row, next), secs * 1000 + 15_000, stepEnv);
             if (code === 124 && this.opts.systemdRun) await run(this.opts.systemctl, ['--user', 'stop', unit]);
             if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
             if (code) throw new Error(`Build step failed (${exitWhy(code)}): ${step}${await lastLines(view.log, from)}`);
@@ -1001,7 +1006,7 @@ export class AppServices {
       let taken = null as Snapshot | null;
       let snapWhy: string | null = null;
       if (!hooks.to && prev && prev !== view.to) {
-        const paths = [...new Set([...((await this.manifest(row, old!).catch(() => null))?.migrations ?? []), ...m.migrations])];
+        const paths = [...new Set([...((await this.manifest(row, old!).catch(() => null))?.migrations ?? []), ...m.migrations])].map((p) => repoPath(row, p));
         const moved = paths.length ? (await git(next, 'diff', '--name-only', prev, view.to, '--', ...paths)).split('\n').filter(Boolean) : [];
         if (moved.length) snapWhy = `before ${short(view.to)} deployed, which changes ${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''}`;
       }

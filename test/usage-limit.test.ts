@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -8,42 +8,20 @@ import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
 import { clockTime, parseResetTime } from '../src/pacific.ts';
-import { lines, stopTurns, testPins } from './helpers.ts';
+import { lines, releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
 // A failed turn says why. A usage limit is a wait: the minion is `limited`, resumes by itself after the
 // reset (spaced from the others, capped, held messages included, across a restart), and nobody gets
-// pushed. An account error needs a person: blocked, one push. Fake `claude -p` as in pending-deploy.test.ts:
-// it ends with the release file's words as its result (an error unless they are "ok"), and logs its prompt.
+// pushed. An account error needs a person: blocked, one push. Fake `claude -p`: helpers' releaseFake.
 const root = mkdtempSync(join(tmpdir(), 'usage-limit-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
-const fake = join(root, 'claude-fake');
-const release = join(root, 'release');
-const prompts = join(root, 'prompts.log');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
-let input = '';
-process.stdin.on('data', (d) => (input += d));
-const wait = setInterval(() => {
-  if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
-  clearInterval(wait);
-  appendFileSync(${JSON.stringify(prompts)}, input);
-  const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
-  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'm-main' }));
-  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result, modelUsage: { 'm-grunt': { contextWindow: 200000 }, 'm-main': { contextWindow: 1000000 } } }));
-  process.exit(0);
-}, 20);
-`,
-);
-chmodSync(fake, 0o755);
+const { fake, prompts, setRelease, turnsRun } = releaseFake(root);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
@@ -78,12 +56,6 @@ async function turn(id: number, result: string, text = 'go') {
 }
 
 const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data).text as string);
-/** Sets the release file whole: a fake polling for it would otherwise read it between create and write, empty. */
-const setRelease = (words: string) => {
-  writeFileSync(`${release}.tmp`, words);
-  renameSync(`${release}.tmp`, release);
-};
-const turnsRun = () => lines(prompts).length;
 
 // Two hours from now: a fixed time came round once a day, and a run in the minute before it saw no wait to speak of (#564).
 const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' }).replace(' ', '').toLowerCase()} (America/Los_Angeles)`;

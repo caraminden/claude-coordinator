@@ -23,7 +23,7 @@
 // whole there too; only a hard crash (power, the OOM killer) can stop between two writes of one task, which this skips.
 import assert from 'node:assert/strict';
 import { createHook } from 'node:async_hooks';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -32,7 +32,7 @@ import { Store } from '../src/db.ts';
 import { coldKey, mailKey } from '../src/minion-relay.ts';
 import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Runner } from '../src/runner.ts';
-import { lines, stopTurns, testPins } from './helpers.ts';
+import { releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -44,35 +44,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
-// A stand-in for `claude -p`, as usage-limit.test.ts's: it waits for the release file, ends with its words as its result
-// (an error unless they are "ok"; FAKE_RESULT, a second account's, wins), and logs the prompt it got.
-const fake = join(root, 'claude-fake');
-const release = join(root, 'release');
-const prompts = join(root, 'prompts.log');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
-let input = '';
-process.stdin.on('data', (d) => (input += d));
-const wait = setInterval(() => {
-  if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
-  clearInterval(wait);
-  appendFileSync(${JSON.stringify(prompts)}, input);
-  const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result }));
-  process.exit(0);
-}, 10);
-`,
-);
-chmodSync(fake, 0o755);
-/** Sets the release file whole (a fake polling for it would otherwise read it empty); null holds turns running. */
-function setRelease(words: string | null) {
-  if (words === null) return rmSync(release, { force: true });
-  writeFileSync(`${release}.tmp`, words);
-  renameSync(`${release}.tmp`, release);
-}
-const turnsRun = () => lines(prompts).length;
+const { fake, prompts, setRelease, turnsRun } = releaseFake(root);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Two hours from now, in Claude's words.

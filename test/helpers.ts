@@ -1,6 +1,6 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -87,6 +87,43 @@ export function lines(path: string): string[] {
   const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
   return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean);
 }
+/**
+ * A stand-in for `claude -p` in `root`: it waits for the release file, ends with its words as its result (an error
+ * unless they are "ok"; a FAKE_RESULT in its env, a second account's, wins) and appends the prompt it got to `prompts`.
+ * setRelease(null) holds turns running.
+ */
+export function releaseFake(root: string) {
+  const fake = join(root, 'claude-fake');
+  const release = join(root, 'release');
+  const prompts = join(root, 'prompts.log');
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
+const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => (input += d));
+const wait = setInterval(() => {
+  if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
+  clearInterval(wait);
+  appendFileSync(${JSON.stringify(prompts)}, input);
+  const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'm-main' }));
+  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result, modelUsage: { 'm-grunt': { contextWindow: 200000 }, 'm-main': { contextWindow: 1000000 } } }));
+  process.exit(0);
+}, 20);
+`,
+  );
+  chmodSync(fake, 0o755);
+  /** Sets the release file whole: a fake polling for it would otherwise read it between create and write, empty. */
+  const setRelease = (words: string | null) => {
+    if (words === null) return rmSync(release, { force: true });
+    writeFileSync(`${release}.tmp`, words);
+    renameSync(`${release}.tmp`, release);
+  };
+  return { fake, prompts, setRelease, turnsRun: () => lines(prompts).length };
+}
+
 export const jsonLines = (path: string): any[] => lines(path).map((l) => JSON.parse(l));
 
 /** A turn message's blocks without the [System] note of the minion's own lines that opens it (#878), for tests about the rest. */

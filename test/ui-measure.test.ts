@@ -170,3 +170,17 @@ test('a shot settles first: a spinner is frozen on its first frame and the point
     assert.ok(shots.every((x) => x === shots[0]), 'three shots of the same view differ');
   } finally { await browser.close(); }
 });
+
+test('sweep: false keeps --click to its one control, and shot() leaves a hover the flow asked for', { skip }, async () => {
+  const r = await measure(opts('/sweep', { widths: [1440], click: '#good', sweep: false }));
+  assert.equal(at(r, 1440).filter((f: any) => f.check.startsWith('click')).length, 0);
+  assert.equal(r.pages[0].sweep, undefined);
+  const browser = launch(bin);
+  try {
+    const page = await openPage(browser.send, base + '/busy', 390, { headers: [], cookies: [], settle: 50 });
+    await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 385, y: 835 });
+    await shot(page, join(tmpdir(), `uim-hover-${process.pid}.png`));
+    assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent !== null`), true);
+    await page.close();
+  } finally { await browser.close(); }
+});

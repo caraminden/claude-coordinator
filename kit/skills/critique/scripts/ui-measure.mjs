@@ -186,7 +186,7 @@ export async function openPage(send, url, width, o) {
     if (m.method === 'Network.requestWillBeSent' && m.params.type !== 'EventSource') inflight.add(id);
     else if (m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') inflight.delete(id);
   });
-  const settle = async ({ network = true } = {}) => {
+  const settle = async ({ network = true, pointer = true } = {}) => {
     const spot = await evaluate(`(() => {
       const busy = 'a, button, input, select, textarea, summary, label, [role], [title], [data-tip], [tabindex]';
       for (const [fx, fy] of [[0.99, 0.99], [0.01, 0.99], [0.5, 0.99], [0.99, 0.5], [0.01, 0.5], [0.99, 0.01]]) {
@@ -195,7 +195,7 @@ export async function openPage(send, url, width, o) {
       }
       return { x: innerWidth - 1, y: innerHeight - 1 };
     })()`).catch(() => ({ x: width - 1, y: height - 1 }));
-    await s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y }).catch(() => {});
+    if (pointer) await s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y }).catch(() => {});
     let ok = true;
     for (let end = Date.now() + 3000, quiet = 0; ; await sleep(50)) {
       const calm = await evaluate(`(() => {
@@ -217,8 +217,9 @@ export async function openPage(send, url, width, o) {
 
 // What a person sees first, at the window's size: a full-page capture misplaces fixed bars and makes a
 // phone shot thousands of pixels tall. Scroll with --before to shoot further down.
-export async function shot(page, file, { network = true } = {}) {
-  await page.settle?.({ network });
+// A shot of a flow keeps the pointer where the flow left it (a hover it asked for); ui-measure's own pass `pointer: true`.
+export async function shot(page, file, { network = true, pointer = false } = {}) {
+  await page.settle?.({ network, pointer });
   const { data } = await page.s('Page.captureScreenshot', { format: 'png' });
   writeFileSync(file, Buffer.from(data, 'base64'));
   return file;
@@ -613,7 +614,7 @@ async function sweep(browser, url, width, o, slug, rec, first) {
       rec.sweep.clicked++;
       const f = await clickCheck(page, `(${sweepList})(${args})[${i}].c`, `existing control ${name}`, { hold: 1000, end: 1300 });
       rec.findings.push(...f);
-      if (f.length && o.shots) rec.shots_after_click = [...(rec.shots_after_click || []), await shot(page, join(o.shots, `${slug}-${width}-existing-${i}.png`), { network: false })];
+      if (f.length && o.shots) rec.shots_after_click = [...(rec.shots_after_click || []), await shot(page, join(o.shots, `${slug}-${width}-existing-${i}.png`), { network: false, pointer: true })];
     } finally {
       await page.close().catch(() => {});
     }
@@ -637,12 +638,12 @@ export async function measure(o) {
           const minTap = o.minTap || (await page.evaluate(`(() => { const s = getComputedStyle(document.documentElement); return parseFloat(s.getPropertyValue('--citadel-control-h')) || parseFloat(s.getPropertyValue('--control-h')) || 40; })()`));
           const m = await page.evaluate(`(${inPage})(${JSON.stringify({ phone: page.phone, minTap, scope: o.scope })})`);
           const rec = { url, width, phone: page.phone, min_tap: page.phone ? minTap : 24, ...m };
-          if (o.shots) rec.shot = await shot(page, join(o.shots, `${slug}-${width}.png`));
+          if (o.shots) rec.shot = await shot(page, join(o.shots, `${slug}-${width}.png`), { pointer: true });
           if (o.click) {
             rec.findings.push(...(await clickCheck(page, `document.querySelector(${JSON.stringify(o.click)})`, o.click)));
-            if (o.shots) rec.shot_after_click = await shot(page, join(o.shots, `${slug}-${width}-click.png`), { network: false });
+            if (o.shots) rec.shot_after_click = await shot(page, join(o.shots, `${slug}-${width}-click.png`), { network: false, pointer: true });
           }
-          if (o.click || o.sweep) await sweep(browser, url, width, o, slug, rec, page);
+          if ((o.click || o.sweep) && o.sweep !== false) await sweep(browser, url, width, o, slug, rec, page);
           pages.push(rec);
         } finally {
           await page.close().catch(() => {});

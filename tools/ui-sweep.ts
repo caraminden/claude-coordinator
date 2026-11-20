@@ -175,7 +175,7 @@ async function main() {
     const run = () => measure({
       urls: [base + hash], widths: s.widths ?? [1440, 390], settle: 700, cookies: s.anon ? [] : [cookie], headers: [], ignore: [], dark: false,
       // #app fills before a slow route finishes: wait it out, or the shot catches the page spinner.
-      shots, before: `${helpers}\nawait until(() => (document.body.classList.contains('navigating') ? null : document.body), 20000);\n${s.before ?? 'await sleep(300);'}`, click: s.click,
+      shots, before: `${helpers}\nawait until(() => (document.body.classList.contains('navigating') ? null : document.body), 20000);\n${s.before ?? 'await sleep(300);'}`, click: s.click, sweep: false,
       wait: s.anon ? 'form' : '#app > *',
     });
     // One retry: a busy box sometimes misses the 15 s load wait.

@@ -488,14 +488,17 @@ details.recap-group:not([open]) > summary { margin: 0; }
 /* A chained minion's held brief (#728): read-only, in its sender's colour like the sent brief (.from-tm, .from-minion: Cara, 2026-11-14, "The brief should be purple since it came from a taskmaster right?"); a person's stays plain but dashed. */
 .msg.user.held-brief { border-style: dashed; }
 
-/* Held mail (#1067, heldmsg.js): the composer's held-mail card shows what the next turn hasn't read, so its bubble stays out
-   of the log until then; a run of read ones is one collapsed row (thread.js sumRun). An open loop-guard card in the log
-   gives way to the held-mail card's Needs-you row. */
-.msg.user.held-waiting, .held-run[hidden] { display: none; }
-/* Queued into a working minion (Josh, 2026-11-19, the old lighter view): dashed, tagged "not sent yet" (thread.js markHeld). */
-.msg.user.held-queued, .held-run.held-queued { border-style: dashed; }
+/* A message held for a minion (heldmsg.js): dashed and dimmed while it waits, with one quiet row under it (the small Deliver
+   button on the newest). The row is one fixed height, as tall as its button, so the flip changes only text and the border style.
+   Queued into a working minion it's dashed with a "not sent yet" tag. */
+.msg.user.held-msg > .held-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; min-height: 2rem; margin-top: 0.4rem; padding: 0.25rem 0; color: var(--muted); font-size: 0.9em; }
+.msg.user.held-msg > .held-line .held-text { flex: 1 1 14rem; min-width: 0; }
+.msg.user.held-msg > .held-line button { flex: none; }
+.msg.coord > summary .held-act, .mcopies > summary .held-act { flex: none; margin-left: auto; align-self: center; font-size: 1em; min-height: 1.6rem; padding-block: 0.15rem; }
+.msg.user.held-waiting { border-style: dashed; }
+.msg.user.held-waiting > :not(.who, .held-line) { opacity: 0.6; }
+.msg.user.held-queued { border-style: dashed; }
 .msg.user.held-queued .held-tag { color: var(--ink); }
-.chat:has(#chat-held .hc-need:not([hidden])) .log .lcard:has(button) { display: none; }
 /* Mine and Everyone (#920, board C of #917's takes): the Mine / Everyone switch in your Taskmaster's title row; the
    Overlord's items carry a violet band down their left edge; a message in another session names whose it went to. */
 .tm-views { flex: none; display: inline-flex; gap: 0.25rem; }

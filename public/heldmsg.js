@@ -1,8 +1,9 @@
-// Held mail in a chat (#1067, Josh picked "C · A next-turn inbox card", 2026-11-19), as plain data so node tests can import
-// it (thread.js and heldcard.js build the nodes). A held message is "waiting" while the ticket still lists its event id in
-// held_ids: the inbox card over the composer shows it, and its bubble stays out of the log until a turn reads it. While the
-// minion is working it's "queued" instead (Josh, 2026-11-19: "reserve this UI for minions that are not working ... messages
-// into a turn like this can be the old less intense view"): no card, its bubble shows dashed, tagged "not sent yet".
+// Held mail in a chat, as plain data so node tests can import it (thread.js builds the nodes). A held message is "waiting"
+// while the ticket still lists its event id in held_ids: its bubble shows dashed with a quiet "Not sent yet" row and a small
+// Deliver button (Josh, 2026-11-20: "make the held mail messages we show to users a lot less intense, maybe we go back to how
+// it used to look with a small less intrusive "deliver" button"; #1067's inbox card is gone). While the minion is working it's
+// "queued" instead: its bubble shows dashed, tagged "not sent yet" (Josh, 2026-11-19: "messages into a turn like this can be
+// the old less intense view").
 
 /** Held mail the Taskmaster only keeps for tracking: the server's wording for a note that needs nothing done. */
 export const TRACKING = /^\(for your tracking; nothing to do\)\s*/;
@@ -28,32 +29,3 @@ export const NEVER_HOLD_KINDS = ['start', 'unpark', 'decision', 'relay', 'ask', 
 
 /** What a kind of held mail is called on the never-hold menu and the Messages setting: a sender's `need`, or Citadel's notes. */
 export const kindLabel = (k) => (k === 'note' ? "Citadel's notes" : `need: ${k}`);
-
-/**
- * The inbox card for a chat (`t`, a ticket view), or null when nothing waits: the count, who reads it and when, a "Needs
- * you" row for a loop-guard hold, the mail grouped by sender (each section's kinds the scheme still holds, from `never`,
- * its msg_never_hold), and what the footer offers (`deliver`, `unpark`, or nothing once dismissed).
- */
-export function heldModel(t, never = '', fmt = String) {
-  // A working minion's mail shows in the log (heldLine's queued); only a loop hold, which needs a person, keeps the card.
-  const items = t.status === 'running' ? [] : t.held_mail?.items ?? [];
-  const loop = t.loop_hold ?? null;
-  if (!items.length && !loop) return null;
-  const reader = t.kind === 'coordinator' ? 'the Taskmaster' : `#${t.number}`;
-  const parked = parkedChat(t);
-  const off = new Set(never.split(',').filter(Boolean));
-  const by = new Map();
-  for (const m of items) by.set(m.author, [...(by.get(m.author) ?? []), m]);
-  const sections = [...by].map(([author, list]) => ({
-    author, items: list,
-    preview: (list.at(-1).text ?? '').replace(TRACKING, '').split('\n').find((l) => l.trim()) ?? '',
-    kinds: parked ? [] : [...new Set(list.flatMap((m) => (m.parked ? [] : m.note ? ['note'] : m.need ? [m.need] : [])))].filter((k) => !off.has(k)),
-  }));
-  const sub = !items.length ? 'Held by the loop guard'
-    : parked ? "It's parked: read when it's unparked"
-      : t.held_mail.until ? `Read then, or by ${fmt(t.held_mail.until)}` : 'Read then';
-  const footer = !items.length ? null
-    : t.status === 'closed' ? { text: "Read if it's reopened", action: null }
-      : { text: `All ${items.length} go in one turn`, action: parked ? 'unpark' : 'deliver' };
-  return { count: items.length + (loop ? 1 : 0), title: `Waiting for ${reader}'s next turn`, sub, loop, sections, footer };
-}

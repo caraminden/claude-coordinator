@@ -761,7 +761,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'held-mail': {
-    about: 'a minion with held mail waiting for its next turn (#1067): a cold hold from two senders, one a loop-guard hold, so its chat shows the inbox card with Continue and Deliver now, and the list its loop badge',
+    about: 'a minion with held mail waiting for its next turn (#1067, #1252): a cold hold from two senders, one a loop-guard hold, so its chat shows the held rows with a small Deliver, the loop hold\'s Continue card, and the list its loop badge',
     seed(c) {
       const tm = taskmaster(c);
       const other = minion(c, 'Rail settings page');

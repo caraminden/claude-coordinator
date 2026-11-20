@@ -9,7 +9,6 @@ import { alertNote, composer, composerPlaceholder, outbox, renderModelPicker } f
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { composerHint, heldLine, TRACKING } from './heldmsg.js';
-import { renderHeldCard } from './heldcard.js';
 import { rowState, SHIP, workingBy, workingLabel } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -325,8 +324,6 @@ export function chatSection(chatId, ticket) {
   // A parked minion reads nothing until it's unparked: said over the box before you send, not only after (renderTicketHead).
   form.prepend(h('div', { class: 'parked-hint', hidden: true }));
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
-  // What the next turn will read (#1067, heldcard.js): held mail and a loop-guard hold, over the replies.
-  form.prepend(h('div', { id: 'chat-held', hidden: true }));
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
   selectActions(log, form);
@@ -470,11 +467,12 @@ export function renderTicketHead() {
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
-  for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) {
+  const bubbles = [...chat?.querySelectorAll('.log [data-event]') ?? []];
+  const lastHeld = bubbles.findLast((b) => b.heldData && t.held_ids?.includes(Number(b.dataset.event)));
+  for (const bubble of bubbles) {
     markQueued(bubble, t);
-    if (bubble.heldData) markHeld(bubble, t);
+    if (bubble.heldData) markHeld(bubble, t, bubble === lastHeld);
   }
-  for (const run of chat?.querySelectorAll('.log .held-run') ?? []) sumRun(run);
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
   const form = chat?.querySelector('.composer');
@@ -489,7 +487,6 @@ export function renderTicketHead() {
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();
-    renderHeldCard(chat.querySelector('#chat-held'), t, unpark);
     // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
     const unparkSlot = form.querySelector('.unpark-slot');
     if (unparkSlot) {
@@ -746,21 +743,58 @@ function shipLine(t) {
 }
 
 /**
- * Held mail (#1067): a bubble the next turn hasn't read yet stays out of the log (the held-mail card over the composer
- * shows it), then shows with a small tag once a turn read it. Queued into a working minion it shows dashed, tagged
- * "not sent yet", and the tag turns to the read one in place.
+ * A message held for a minion says so in its bubble, in place (Josh, 2026-11-20: "make the held mail messages we show to
+ * users a lot less intense, maybe we go back to how it used to look with a small less intrusive "deliver" button"): a dashed
+ * bubble with a quiet "Not sent yet" row while it waits (a small Deliver on the newest one, Unpark and send when parked), a
+ * small tag once a turn read it. Queued into a working minion it shows dashed with the "not sent yet" tag instead.
+ * The row is one fixed height either way, so nothing moves when it flips.
  */
-function markHeld(bubble, ticket) {
+function markHeld(bubble, ticket, last = true) {
   const line = heldLine(bubble.heldData, Number(bubble.dataset.event), ticket);
   if (!line) return;
   bubble.classList.add('held-msg');
   bubble.classList.toggle('held-waiting', line.waiting);
   bubble.classList.toggle('held-queued', line.queued);
-  if (line.waiting) return;
+  let row = bubble.querySelector(':scope > .held-line');
+  // The button sits where it shows without opening anything: in the summary of a collapsed bubble or of the group row it's in.
+  const host = bubble.parentElement?.closest('details.mcopies') ?? (bubble.matches('details') ? bubble : null);
+  const act = host?.querySelector(':scope > summary') ?? row;
+  for (const old of (host ?? bubble).querySelectorAll('.held-act')) if (old.dataset.for === String(bubble.dataset.event)) old.remove();
+  if (line.waiting) {
+    bubble.querySelector('.who .held-tag')?.remove();
+    if (!row) bubble.append(row = h('div', { class: 'held-line', role: 'status' }));
+    const parked = ticket.parked_for || ticket.state === 'parked';
+    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is parked, so it reads this when it's unparked." : line.text));
+    if (last) {
+      const btn = parked
+        ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unpark and send')
+        : h('button', { type: 'button', class: 'secondary small held-act', title: 'Run a turn now that reads all the held mail' }, 'Deliver');
+      btn.dataset.for = bubble.dataset.event;
+      btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (parked) unpark(ticket); else deliverMail(ticket, btn); };
+      (act ?? row).append(btn);
+    }
+    return;
+  }
+  row?.remove();
   let tag = bubble.querySelector('.held-tag');
   if (!tag) bubble.querySelector('.who')?.append(tag = h('span', { class: 'msg-tag held-tag' }));
   tag?.replaceChildren(line.queued ? 'not sent yet' : line.tag);
   tag?.setAttribute('title', line.queued ? line.text : line.title);
+}
+
+/** Deliver: the row says so at once and the turn starts behind it; a refusal, or none delivered because its Claude can't run a turn, puts it back with a toast and a retry. */
+function deliverMail(t, btn) {
+  const was = btn.textContent;
+  optimistic({
+    key: `deliver:${t.id}`,
+    apply: () => { btn.disabled = true; btn.textContent = 'Delivering…'; },
+    send: async () => {
+      const r = await api(`api/tickets/${t.id}/deliver-mail`, { method: 'POST', body: {} });
+      if (!r?.delivered) throw new Error("its Claude can't run a turn right now");
+    },
+    undo: () => { btn.disabled = false; btn.textContent = was; },
+    label: 'deliver the held mail',
+  });
 }
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
@@ -927,18 +961,19 @@ function drawEvent(event, scroll) {
       }
       if (data.need) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'What the sender said this message needs' }, `need: ${data.need}`));
       markQueued(bubble, view.ticket);
-      if (data.mail) {
-        // A run of held mail, from anyone, is one collapsed row once read, each message behind it (#1001, #1067).
+      if (data.mail && TRACKING.test(data.text ?? '')) {
+        // A run of "for your tracking" notes from one minion is one collapsed row, each note behind it (#1001).
         const pending = new Set(view.pendingMessages.map((m) => m.el));
         let prev = log.lastElementChild;
         while (prev && pending.has(prev)) prev = prev.previousElementSibling;
-        if (prev?.matches('.held-run')) addHeld(prev, bubble);
-        else if (prev?.heldData) {
-          // The second one: the lone one above joins a new group row.
-          const group = h('details', { class: 'msg coord mcopies tracked held-run' }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
+        bubble.dataset.tracking = data.author;
+        if (prev?.matches('.mcopies.tracked') && prev.dataset.author === data.author) addTracked(prev, bubble);
+        else if (prev?.dataset.tracking === data.author) {
+          // The second note: the lone one above joins a new group row.
+          const group = newTracked(data.author);
           prev.replaceWith(group);
           group.dataset.at = prev.dataset.at;
-          addHeld(addHeld(group, prev), bubble);
+          addTracked(addTracked(group, prev), bubble);
         } else nodes.push(bubble);
       } else nodes.push(bubble);
     }
@@ -1227,24 +1262,19 @@ function addMinionCopy(group, data, event) {
   return group;
 }
 
-/** A held message into its run's row. */
-function addHeld(group, bubble) {
-  group.querySelector('.mc-list').append(bubble);
-  return sumRun(group);
+/** An empty group row for one sender's tracking notes; addTracked fills it. */
+function newTracked(author) {
+  return h('details', { class: 'msg coord mcopies tracked', 'data-author': author }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
 }
 
-/** A run's summary counts what the log shows (the card shows the rest): the count, the senders, how many a working minion
- * hasn't read yet, the newest as the preview; hidden while the card shows them all. */
-function sumRun(group) {
-  const read = [...group.querySelectorAll(':scope > .mc-list > .held-msg:not(.held-waiting)')];
-  group.hidden = !read.length;
-  if (!read.length) return group;
-  const by = new Map();
-  for (const b of read) by.set(b.heldData.author, (by.get(b.heldData.author) ?? 0) + 1);
-  const queued = read.filter((b) => b.classList.contains('held-queued')).length;
-  group.classList.toggle('held-queued', !!queued);
-  group.querySelector('.who').textContent = `✉ ${read.length} held message${read.length === 1 ? '' : 's'} · ${[...by].map(([a, n]) => (n > 1 ? `${a} ×${n}` : a)).join(', ')}${queued ? ` · ${queued} not sent yet` : ''}`;
-  group.querySelector('.preview').textContent = read.at(-1).querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
+/** One tracking note's own row into its group: the count and the sender in the summary, the newest note as the preview. */
+function addTracked(group, bubble) {
+  const list = group.querySelector('.mc-list');
+  list.append(bubble);
+  const count = list.children.length;
+  const sender = group.dataset.author.replace(/\s.*$/, '');
+  group.querySelector('.who').textContent = `${count} tracking note${count === 1 ? '' : 's'} from ${sender}`;
+  group.querySelector('.preview').textContent = bubble.querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
   return group;
 }
 
@@ -1317,7 +1347,7 @@ function syncHeldBrief() {
     } }, 'Show more'));
   }
   // Above the messages left for it, which come after the brief.
-  const first = [...log.children].find((c) => (c.classList.contains('user') && c.heldData?.parked) || (c.matches('.held-run') && [...c.querySelectorAll('.held-msg')].some((b) => b.heldData?.parked)));
+  const first = [...log.children].find((c) => c.classList.contains('user') && c.heldData?.parked);
   const after = log.querySelector(':scope > #recap, :scope > .pending');
   if (first) first.before(el); else if (after) after.before(el); else log.append(el);
 }

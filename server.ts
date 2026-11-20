@@ -2,7 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createConnection, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -71,6 +71,8 @@ import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
+import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
+import { ghGet } from './src/gh-api.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
@@ -1172,6 +1174,49 @@ if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', asy
 if (!BOOT_CHECK) {
   void safely('deploy watch', () => deployWatch!.tick());
   setInterval(() => void safely('deploy watch', () => deployWatch!.tick()), 60_000).unref();
+}
+// Incident timelines (#1145): the server down, the ship line still 15 min, a burst of red CI runs make one read-only
+// timeline per incident in Citadel's shared reports/, and an ask to the Taskmaster to start a research minion on it.
+const ownGithub = (p: Project) => (p.repo_dir ? githubOf(p.repo_dir) : undefined);
+const incidents = new Incidents({
+  store, bootAt: BOOT_AT,
+  line: () => waits.line,
+  jobs: () => {
+    const p = ownScheme();
+    return p ? ciHealth.recent.get(p.id) ?? [] : [];
+  },
+  sources: {
+    dbPath: join(DATA_DIR, 'coordinator.db'),
+    deploys: (from, to) => readDeploys(import.meta.dirname, from, to),
+    journal: (from, to) => readJournal(from, to),
+    ci: async (from, to) => {
+      const p = ownScheme();
+      const slug = p && repoSlug(p.repo_url);
+      if (!p || !slug) throw new Error('no scheme runs this server');
+      return readCiRuns(ghGet, slug, ownGithub(p), from, to);
+    },
+  },
+  write: (name, text) => {
+    const p = ownScheme();
+    if (!p) return null;
+    const dir = join(projectSharedDir(DATA_DIR, p.id), 'reports');
+    mkdirSync(dir, { recursive: true });
+    let file = join(dir, name);
+    for (let i = 2; existsSync(file); i++) file = join(dir, name.replace(/\.md$/, `-${i}.md`));
+    writeFileSync(file, text);
+    return file;
+  },
+  tell: (text) => {
+    const p = ownScheme();
+    const tm = p && store.getOverlord(p.id);
+    if (!tm) return false;
+    runner.send(tm.id, APP_NAME, text, [], runner.isOverlord(tm) ? { everyone: true } : {});
+    return true;
+  },
+});
+if (!BOOT_CHECK) {
+  incidents.boot();
+  setInterval(() => void safely('incidents', () => incidents.tick()), 60_000).unref();
 }
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });

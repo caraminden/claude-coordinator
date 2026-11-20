@@ -113,7 +113,8 @@ function row(item) {
     : item.kind === 'agent' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'Kit Grunt')
       : off ? h('span', { class: 'cui-chip', 'data-tone': 'warn' }, 'Off here') : h('span', { class: 'cui-chip', 'data-tone': 'ok' }, 'Default, recommended');
   // Until the counts arrive the stats line holds a bar of the same height; the line is the toggle for the detail when the skill ran, so unused rows reserve nothing.
-  const text = u ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} · ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${u.shipped} then shipped` : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
+  const k = (n) => (n >= 10000 ? `${Math.floor(n / 1000)}k` : n >= 1000 ? `${Math.floor(n / 100) / 10}k` : String(n)); // a count never wraps the line on a phone: 5.6k, 99k
+  const text = u ? `${k(u.runs)} ${u.runs === 1 ? 'run' : 'runs'} · ${k(u.minions)} ${u.minions === 1 ? 'minion' : 'minions'} · ${k(u.shipped)} shipped` : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
   const stats = !data.usage ? h('p', { class: 'sk-stats' }, data.usageError ? `Counts unavailable: ${data.usageError}` : h('span', { class: 'sk-ghost', 'aria-label': 'Loading counts' }))
     : u ? detail(item, u, text) : h('p', { class: 'sk-stats' }, text);
   return h('article', { class: `sk-row${off ? ' off' : ''}` },
@@ -130,7 +131,7 @@ function detail(item, u, stats) {
   const withs = top(u.with).map(([k, n]) => `${k === 'none' ? 'no skill first' : k} ${n}`).join(' · ');
   const line = (label, text) => (text ? h('p', {}, h('b', {}, label), text) : null);
   return h('details', { class: 'sk-detail' },
-    h('summary', { title: 'When, where and how it ran' }, stats),
+    h('summary', { 'data-tip': 'Runs, minions, and runs followed by a ship. Open for when, where and how' }, stats),
     line('Step of the turn: ', phases),
     line('Minion types: ', types),
     line(item.kind === 'skill' ? 'Grunts it started: ' : 'Started after: ', withs),

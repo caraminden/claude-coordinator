@@ -12,9 +12,7 @@
 .sk-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); font-size: 0.92rem; overflow-wrap: anywhere; min-width: 0; }
 .sk-when, .sk-what { font-size: 0.9rem; line-height: 1.4; }
 .sk-stats, .sk-detail summary { font-size: 0.85rem; line-height: 1.3; padding: 0.2rem 0; font-variant-numeric: tabular-nums; }
-.sk-ghost { display: inline-block; width: 24ch; max-width: 100%; height: 0.8em; border-radius: 4px; background: var(--muted, #b8b8b8); opacity: 0.45; vertical-align: -0.05em; animation: sk-pulse 1.4s ease-in-out infinite; }
-@keyframes sk-pulse { 50% { opacity: 0.2; } }
-@media (prefers-reduced-motion: reduce) { .sk-ghost { animation: none; } }
+.sk-ghost { display: inline-block; width: 24ch; max-width: 100%; height: 0.8em; border-radius: 4px; background: var(--muted); opacity: 0.3; vertical-align: -0.05em; }
 .sk-detail { font-size: 0.85rem; }
 .sk-detail summary { cursor: pointer; }
 .sk-detail summary::marker { color: var(--accent); }

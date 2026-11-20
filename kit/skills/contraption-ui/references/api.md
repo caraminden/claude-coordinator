@@ -46,7 +46,14 @@ the test on purpose.
 
 An admin registers a contraption in Settings → Contraptions, or Citadel's own Taskmaster does it on
 an admin's turn (`register_contraption`, `update_contraption`, `set_contraption_person`,
-`rotate_contraption_keys`). Another scheme asks its Taskmaster to ask Citadel's.
+`rotate_contraption_keys`). Another scheme asks its Taskmaster to ask Citadel's, except for a new
+app: any scheme's Taskmaster, on a turn a member of that scheme asked for, calls `make_app` (`name`,
+`title`, `idea`). It generates the kit's starter (`new-app/` beside this skill's `SKILL.md`: a server that
+checks the identity header, migrations, a nightly backup, `/healthz`, a first page on Citadel UI, its tests
+and a CI workflow when the scheme has a runner) into `apps/<name>/` of the scheme's repo on a new minion's
+branch, registers it with `subdir` set and a free port from 7350 to 7999, switches it on for the scheme's
+members and briefs that minion to ship it and build the idea. `set_app_person` (`name`, `login`,
+`enabled`) then switches a scheme's own app for one person.
 
 | Field | What | Rules |
 |---|---|---|
@@ -60,6 +67,7 @@ an admin's turn (`register_contraption`, `update_contraption`, `set_contraption_
 | `default_model` | Model for turns that name none | `^[\w.\[\]-]{1,60}$`, like `haiku` |
 | `turn_cap` | Turns a person may start per day (server-local midnight) | 1 to 100,000, or none |
 | `repo`, `branch`, `folder` | Where deploys come from and go | `owner/name`; default `main`; default `~/apps/<name>` |
+| `subdir` | The app's folder inside its repo, for an app that shares its scheme's repo (`make_app` sets `apps/<name>`) | A relative path; default none, the repo's root. Its manifest, build, units, migrations and `paths` all read there, and a ship that changes nothing in it doesn't redeploy it |
 
 Being in the home scheme grants no access to the app. Only people the contraption is **enabled
 for** reach it, and disabling someone takes effect on their next request (tested).
@@ -836,7 +844,8 @@ Authorization: Bearer <contraption.key>
 
 ## Running and deploying: `citadel-app.json`
 
-Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.service` (and
+Put `citadel-app.json` at your repo's root (with `subdir`, at that folder's root; `workdir` and every
+path in it are then relative to the folder). Citadel writes `citadel-app-<name>.service` (and
 `citadel-app-<name>-<job>.service`/`.timer` per timer) from it; you never write a unit.
 
 ```json
@@ -997,6 +1006,11 @@ red would hold a real release. So name what your updater gates on.
 ## What changed since 2026-11-02
 
 Newest first.
+
+- **2026-11-19:** New apps in one call: a scheme's Taskmaster calls `make_app` and gets a tested,
+  signed-in, backed-up app in `apps/<name>/` of its own repo, with a minion to ship it ("The registry
+  entry"). An app can live in a folder of a repo (`subdir`); a ship that doesn't touch that folder
+  doesn't redeploy it, and its release target counts only changes there.
 
 - **2026-11-19:** A fake Citadel for your tests: `fake-citadel/fake-citadel.ts` beside this skill's
   `SKILL.md`. It signs the identity header and answers turns (scripted), cancel, messages, verdict,

@@ -259,7 +259,7 @@ export async function gather(store: IncidentStore, src: Sources, from: number, t
   };
   await take('health_events', async () => {
     const rows = store.healthBetween(from, to, 2000);
-    return { list: healthEntries(rows), said: `${rows.length} rows` };
+    return { list: healthEntries(rows), said: rows.length === 2000 ? `the first 2000 rows (the cap: later ones not read)` : `${rows.length} rows` };
   });
   await take('runner_load', async () => {
     const rows = store.runnerLoadSince(from).filter((r) => r.at <= to);

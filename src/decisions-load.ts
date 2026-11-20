@@ -6,6 +6,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { adrDir, assemble, gitEdits, githubHref, memTitle, type Doc, type DecisionList, type Edit, type SourceKind } from './decisions.ts';
 import { gitOut } from './git.ts';
+import { mdFiles } from './rule-overlap.ts';
 import { memoryFolders, type MemoryLogin } from './memory-files.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import type { App } from './http.ts';
@@ -23,19 +24,6 @@ export function memoryLogins(app: Pick<App, 'store' | 'claude'>): MemoryLogin[] 
   }) : []));
 }
 
-/** Markdown files under a folder of a repo, as repo-relative paths; none when it is missing. */
-function mdFiles(repo: string, dir: string, depth = 6): string[] {
-  if (depth < 0) return [];
-  let names: string[];
-  try { names = readdirSync(join(repo, dir)); } catch { return []; }
-  return names.sort().flatMap((n) => {
-    const rel = dir ? `${dir}/${n}` : n;
-    let st;
-    // Never through a link: a linked file or folder could pull lines from outside the repo (as src/memory-files.ts refuses).
-    try { st = lstatSync(join(repo, rel)); } catch { return []; }
-    return st.isDirectory() ? mdFiles(repo, rel, depth - 1) : /\.md$/i.test(n) ? [rel] : [];
-  });
-}
 const read = (path: string): string => { try { return lstatSync(path).isFile() ? readFileSync(path, 'utf8') : ''; } catch { return ''; } };
 
 /** A repo's files as Docs, with their git history and links to GitHub when the repo is there. */

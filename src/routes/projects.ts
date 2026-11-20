@@ -36,6 +36,9 @@ import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
+import { heldPlan, saveInstructions, settingsOverlaps, type FindReplace } from '../instructions-save.ts';
+import { postPlan } from '../plan-cards.ts';
+import { cardHref } from '../card-links.ts';
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
@@ -997,7 +1000,7 @@ export const projectRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/edit-instructions', who: ['minion'], refuse: 'Only the minion itself can edit instructions from its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
-      const { store, runner } = app;
+      const { store } = app;
       const body = await readJson(req);
       if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
       if (!Array.isArray(body.edits) || !body.edits.length) throw new HttpError(400, 'edits must be a non-empty list of { find, replace }');
@@ -1022,28 +1025,28 @@ export const projectRoutes: Route[] = [
       text = text.replace(/\r\n/g, '\n').trim();
       if (text.length > MAX_INSTRUCTIONS) throw new HttpError(400, `Instructions would be ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
       if (text === original) throw new HttpError(400, 'Those edits change nothing');
+      // What the turn's own Grunt found already says it (#1162): plain lines, checked like any request text.
+      if (body.overlaps != null && (!Array.isArray(body.overlaps) || body.overlaps.length > 30 || body.overlaps.some((o: unknown) => typeof o !== 'string' || o.length > 1000))) throw new HttpError(400, 'overlaps must be a list of at most 30 lines of text');
+      const fromGrunt = ((body.overlaps ?? []) as string[]).map((o) => o.trim()).filter(Boolean);
       const askerId = store.turnAsker(ticket.id);
-      const by = `#${ticket.id} for ${(askerId === null ? undefined : store.getUser(askerId))?.name ?? 'nobody'}`;
-      if (citadel) store.setAppInstructions(text, by);
-      else store.setProjectInstructions(project.id, text, by);
-      recheckDecisions(app, citadel ? store.listProjects() : [store.getProject(project.id)!]);
-      const where = citadel ? `${APP_NAME}-wide` : 'scheme';
-      const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);
-      const shown = (edits as { find: string; replace: string }[]).map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
-      runner.emit(ticket.id, 'note', { text: `Saved the ${where} Settings text as ${by}; it applies from each minion's next turn.\n${shown}` });
-      const note = `${by} ${text ? 'updated' : 'cleared'} the ${where} instructions; they apply from each minion's next turn.`;
-      if (citadel) {
-        for (const p of store.listProjects()) {
-          const c = store.getOverlord(p.id);
-          if (c) runner.emit(c.id, 'note', { everyone: true, text: note });
-        }
-        app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
-      } else {
-        const c = store.getOverlord(project.id);
-        if (c) runner.emit(c.id, 'note', { everyone: true, text: note });
-        app.broadcast({ type: 'project', project: store.getProject(project.id)! });
+      const asker = askerId === null ? undefined : store.getUser(askerId);
+      const by = `#${ticket.id} for ${asker?.name ?? 'nobody'}`;
+      const scope = citadel ? 'citadel' : 'scheme';
+      const held = { scope, project: project.id, old: original, text, edits: edits as FindReplace[], by } as const;
+      const found = settingsOverlaps(app, project, scope, original, text);
+      if (found.length || fromGrunt.length) {
+        // Held on a card for the person the turn runs for (Josh, 2026-11-20, "Hold it on a card"): Save anyway, Work it in or Cancel edit.
+        const count = found.length + fromGrunt.length;
+        const event = postPlan(app, ticket.id, {
+          summary: `Edit to the ${citadel ? `${APP_NAME}-wide` : 'scheme'} instructions repeats ${count === 1 ? 'one place' : `${count} places`}`,
+          plan: heldPlan(scope, found, fromGrunt, held.edits),
+          instructions: { ...held, count },
+          ...(asker && store.listMembers(project.id).some((u) => u.id === asker.id) ? { to: asker.name } : {}),
+        });
+        return json(res, 202, { held: count, href: cardHref(ticket, event.id), found: found.map((o) => `${o.label}${o.line ? `:${o.line}` : ''}: ${o.why}`) });
       }
-      return json(res, 200, { saved: where, edits: edits.length, length: text.length });
+      saveInstructions(app, ticket.id, held);
+      return json(res, 200, { saved: citadel ? `${APP_NAME}-wide` : 'scheme', edits: edits.length, length: text.length });
     },
   },
   {

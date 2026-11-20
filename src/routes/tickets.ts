@@ -3,7 +3,6 @@
 import { azureSpeech } from '../azure-speech.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, sep } from 'node:path';
@@ -49,6 +48,10 @@ import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketVi
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
+import { postPlan } from '../plan-cards.ts';
+import { saveInstructions, type HeldEdit } from '../instructions-save.ts';
+
+export { postPlan };
 import { machineNotes, patchMachine } from './machines.ts';
 import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
@@ -314,27 +317,6 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   }
   if (!size.files) throw new HttpError(400, spec.mode === 'branch' ? `Nothing to review: ${spec.branch} has no changes against ${base}` : 'Nothing to review: those paths hold no files');
   return { spec, size };
-}
-
-/**
- * Post a plan card that waits, across restarts, for a person. A new one replaces any earlier one of its kind still open
- * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
- * and a release key card (#837) that app's.
- */
-export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; memory?: object }) {
-  const { store, runner } = app;
-  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.memory ? 'memory' : 'plan');
-  for (const e of store.eventsOfKinds(id, ['plan'])) {
-    const old = JSON.parse(e.data);
-    if (old?.status !== 'pending' && old?.status !== 'revising') continue;
-    if (kind(old) !== kind(card)) continue;
-    store.setEventData(e.id, { ...old, status: 'superseded' });
-    runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
-  }
-  const event = runner.emit(id, 'plan', { id: randomBytes(6).toString('hex'), ...card, status: 'pending' });
-  runner.broadcastTicket(id);
-  app.notify(id, { kind: 'plan', summary: card.summary, eventId: event.id, ...(typeof card.to === 'string' ? { to: card.to } : {}) });
-  return event;
 }
 
 export const ticketRoutes: Route[] = [
@@ -860,16 +842,20 @@ export const ticketRoutes: Route[] = [
       const { store, runner } = app;
       // A person approves a plan card (the go) or sends it back with notes; never the minion or the Taskmaster.
       const body = await readJson(req);
-      if (body.verdict !== 'approve' && body.verdict !== 'revise') throw new HttpError(400, 'verdict must be approve or revise');
+      if (body.verdict !== 'approve' && body.verdict !== 'revise' && body.verdict !== 'reject') throw new HttpError(400, 'verdict must be approve, revise or reject');
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
       // A memory tidy card (#1111) is decided change by change on the Memory page, never with Approve on the card.
       if (card.memory) throw new HttpError(409, 'Review the memory tidy on the Memory page: each change is ticked there');
+      // A held instructions edit (#1162): Save anyway, Work it in (notes optional) or Cancel edit; only it has a reject of its own.
+      const ins = card.instructions as HeldEdit | undefined;
+      if (body.verdict === 'reject' && !ins) throw new HttpError(400, 'verdict must be approve or revise');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       const fixed = card.machine || card.releaseKey;
-      const notes = body.verdict === 'approve' ? null : fixed && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
+      const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
       if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : 'A newer plan replaced this one');
+      if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
       if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       if (card.machine && notes === null) {
         const machine = store.getMachine(card.machine.id);
@@ -879,13 +865,26 @@ export const ticketRoutes: Route[] = [
         if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
         await patchMachine(app, session, machine, { notes: card.plan });
       }
+      if (ins && notes === null) {
+        // Save anyway writes what the card showed, or nothing: a Settings save since then isn't overwritten unseen.
+        if (ins.scope === 'citadel' && !session.admin) throw new HttpError(403, `Only a ${APP_NAME} admin or a member of the ${APP_NAME} scheme can save the ${APP_NAME}-wide text`);
+        const now = ins.scope === 'citadel' ? store.appInstructions().text : store.getProject(ins.project)?.instructions;
+        if (now !== ins.old) throw new HttpError(409, 'The instructions changed since this edit was held; ask the minion to make it again');
+        saveInstructions(app, id, ins, `${ins.by}, saved by ${session.name}`);
+      }
       // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
       if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
-      const result = { status: body.verdict === 'approve' ? 'approved' : fixed ? 'rejected' : 'revising', by: session.name, at: Date.now() };
+      const result = { status: body.verdict === 'approve' ? 'approved' : fixed || body.verdict === 'reject' ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
-      runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? 'Approved' : `Sent back${notes ? `: ${notes}` : ''}`}`);
-      deliverAnswer(app, id, session.name, card.releaseKey
+      runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`);
+      deliverAnswer(app, id, session.name, ins
+        ? notes === null
+          ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'
+          : body.verdict === 'reject'
+            ? `Cancelled: your instructions edit is dropped and nothing was saved. Don't make it again unless asked.${notes ? `\n\n${notes}` : ''}`
+            : `Work it in: nothing was saved. Put your change where the card shows it is already said, or reword it to point there in a few words, then call edit_instructions again.${notes ? `\n\n${notes}` : ''}`
+        : card.releaseKey
         ? notes === null
           ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
           : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`

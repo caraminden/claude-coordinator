@@ -3,10 +3,10 @@
 // repo test (test/rule-homes.test.ts) and the server's Settings check run the same code.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { norm } from './decisions.ts';
+import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
 
-/** One text to search: a file or a Settings text, and whether it is code (each line its own paragraph). */
+/** One text to search: a file or a Settings text, whether it is code (each line its own paragraph), and its link (a GitHub file's gets the line). */
 export interface Source { label: string; text: string; code?: boolean; href?: string | null }
 export interface Para { text: string; line: number }
 export interface Copy { rule: string; title: string; label: string; line: number; phrases: string[]; run: string | null; excerpt: string }
@@ -126,6 +126,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
   const out: Overlap[] = [];
   const seen = new Set<string>();
   const push = (o: Overlap) => { const k = `${o.label}|${o.line}|${o.why}`; if (!seen.has(k)) { seen.add(k); out.push(o); } };
+  const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text), qw: content(q.text) }))) : [];
   for (const p of news) {
     for (const rule of rules) {
       const hits = phraseHits(p.text, rule);
@@ -134,45 +135,78 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
     const pr = runs(p.text);
     const pw = content(p.text);
     const pn = norm(p.text);
-    for (const s of sources) {
-      for (const q of paragraphs(s.text, s.code)) {
-        const qn = norm(q.text);
-        if (!qn || qn === pn) continue;
-        let why: string | null = null;
-        for (const r of runs(q.text)) if (pr.has(r)) { why = `shares "${r}"`; break; }
-        if (!why) {
-          const qw = content(q.text);
-          const both = [...pw].filter((w) => qw.has(w)).length;
-          if (both >= 6 && both / Math.min(pw.size, qw.size) >= 0.6) why = `shares ${both} of its words`;
-        }
-        if (why) push({ label: s.label, href: s.href ?? null, line: q.line, excerpt: excerpt(q.text), why });
+    for (const { s, q, qn, qr, qw } of others) {
+      if (!qn || qn === pn) continue;
+      let why: string | null = null;
+      for (const r of qr) if (pr.has(r)) { why = `shares "${r}"`; break; }
+      if (!why) {
+        const both = [...pw].filter((w) => qw.has(w)).length;
+        if (both >= 6 && both / Math.min(pw.size, qw.size) >= 0.6) why = `shares ${both} of its words`;
       }
+      if (why) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why });
     }
   }
   return out;
 }
 
-/** The repo files whose words reach agents: the prompt, the tool descriptions, the kit, CLAUDE.md and the rule files. */
-export function repoSources(root: string): Source[] {
-  const files: string[] = ['src/prompts.ts', 'src/mcp.ts', 'src/tripwire-blocks.ts', 'public/model-table.js', 'CLAUDE.md', 'AGENTS.md'];
-  const walk = (dir: string) => {
-    let names: string[] = [];
-    try { names = readdirSync(join(root, dir)).sort(); } catch { return; }
-    for (const n of names) {
-      const rel = `${dir}/${n}`;
-      const st = lstatSync(join(root, rel));
-      if (st.isDirectory()) { if (n !== 'node_modules') walk(rel); } else if (/\.(md|ts)$/.test(n)) files.push(rel);
-    }
-  };
-  walk('kit');
-  walk('.claude');
-  return files.flatMap((f) => {
-    try { return [{ label: f, text: readFileSync(join(root, f), 'utf8'), code: !f.endsWith('.md') }]; } catch { return []; }
+/**
+ * Markdown files (or those matching `re`) under a folder of a repo, as repo-relative paths; none when it is missing.
+ * The one walker for instruction files: the Decisions page (src/decisions-load.ts) reads its sources with it too.
+ */
+export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): string[] {
+  if (depth < 0) return [];
+  let names: string[];
+  try { names = readdirSync(join(repo, dir)); } catch { return []; }
+  return names.sort().flatMap((n) => {
+    const rel = dir ? `${dir}/${n}` : n;
+    let st;
+    // Never through a link: a linked file or folder could pull lines from outside the repo (as src/memory-files.ts refuses).
+    try { st = lstatSync(join(repo, rel)); } catch { return []; }
+    return st.isDirectory() ? mdFiles(repo, rel, depth - 1, re) : re.test(n) ? [rel] : [];
   });
+}
+
+const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
+const fileSources = (root: string, files: string[], href: (f: string) => string | null): Source[] =>
+  files.flatMap((f) => { const text = readIn(root, f); return text === null ? [] : [{ label: f, text, code: !f.endsWith('.md'), href: href(f) }]; });
+
+/** Citadel's own files whose words reach every scheme's agents: the prompt, the tool descriptions, the tripwire line, the model table and the kit. */
+const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
+
+/** The repo files whose words reach agents: Citadel's own (above), CLAUDE.md, AGENTS.md and the rule files. */
+export function repoSources(root: string): Source[] {
+  const files = [...CITADEL_FILES, 'CLAUDE.md', 'AGENTS.md', ...mdFiles(root, 'kit', 6, /\.(md|ts)$/), ...mdFiles(root, '.claude', 6, /\.(md|ts)$/)];
+  return fileSources(root, files, () => null);
+}
+
+/**
+ * What a Settings edit is checked against (#1162): the other Settings text, the edited text itself, Citadel's prompt,
+ * tool descriptions and kit (every scheme loads them), and the scheme repo's CLAUDE.md, AGENTS.md and rule files.
+ */
+export function settingsSources(o: { root: string; citadelUrl: string | null; pid: number; repo: string | null; repoUrl: string | null; scope: 'citadel' | 'scheme'; text: string; other: string }): Source[] {
+  const gh = (url: string | null) => (f: string) => githubHref(url, 'main', f);
+  const mine = o.scope === 'citadel' ? ['Citadel-wide instructions', 'app-instructions'] : ['Scheme instructions', 'instructions'];
+  const theirs = o.scope === 'citadel' ? ['Scheme instructions', 'instructions'] : ['Citadel-wide instructions', 'app-instructions'];
+  return [
+    { label: mine[0], text: o.text, href: `#/p/${o.pid}/${mine[1]}` },
+    { label: theirs[0], text: o.other, href: `#/p/${o.pid}/${theirs[1]}` },
+    ...fileSources(o.root, [...CITADEL_FILES, ...mdFiles(o.root, 'kit')], gh(o.citadelUrl)),
+    ...(o.repo ? fileSources(o.repo, ['CLAUDE.md', 'AGENTS.md', ...mdFiles(o.repo, '.claude/rules')], gh(o.repoUrl)).map((s) => ({ ...s, label: `Scheme repo: ${s.label}` })) : []),
+  ];
+}
+
+/** Whether a paragraph of a Settings text sits under its `## ` heading for a Citadel-wide home. */
+export function inSettingsHome(scope: 'citadel' | 'scheme', text: string) {
+  const lines = text.split('\n');
+  return (rule: RuleHome, p: Para): boolean => {
+    if (scope !== 'citadel' || rule.home.kind !== 'citadel') return false;
+    const want = norm(rule.home.section);
+    for (let i = p.line - 1; i >= 0; i--) if (/^#{1,6}\s/.test(lines[i])) return norm(lines[i]).includes(want);
+    return false;
+  };
 }
 
 /** Each rule's home text as the repo holds it (Citadel-wide homes are null here: they live in Settings). */
 export function repoHomes(root: string, citadel: string | null = null): Map<string, string | null> {
-  const read = (f: string) => { try { return readFileSync(join(root, f), 'utf8'); } catch { return null; } };
-  return new Map(RULE_HOMES.map((r) => [r.id, homeText(r, read, citadel)]));
+  return new Map(RULE_HOMES.map((r) => [r.id, homeText(r, (f) => readIn(root, f), citadel)]));
 }

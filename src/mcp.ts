@@ -316,7 +316,7 @@ const PROPOSE_MEMORY = {
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
   description:
-    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log.",
+    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log. One home per rule (#1162): first have a Sonnet Grunt list what already speaks to the same thing (the rest of both Settings texts, CLAUDE.md and the rule files, the kit, your prompt) and pass its findings as `overlaps`. The server checks the edit too, against each registered rule's one home and those places; when either finds something, nothing is saved and a card asks the person to save anyway, work it in where it is already said, or cancel.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -326,8 +326,9 @@ const EDIT_INSTRUCTIONS = {
         minItems: 1,
         items: { type: 'object', properties: { find: { type: 'string', description: 'Exact current text; must occur once' }, replace: { type: 'string', description: 'What it becomes (empty to delete)' } }, required: ['find', 'replace'] },
       },
+      overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: 'What your Grunt found already says it, one line each: where, and what it says ([] when it found nothing)' },
     },
-    required: ['scope', 'edits'],
+    required: ['scope', 'edits', 'overlaps'],
   },
 };
 
@@ -2378,7 +2379,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
     case 'edit_instructions': {
-      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits });
+      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
+      if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
     case 'propose_machine_notes': {

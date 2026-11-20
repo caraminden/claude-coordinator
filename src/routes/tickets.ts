@@ -28,6 +28,8 @@ import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
+import { shipRisk, shipRiskText } from '../ship-risk.ts';
+import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -452,6 +454,15 @@ export const ticketRoutes: Route[] = [
       const { res, app, ticket } = ctx;
       const { id } = ticket;
       return json(res, 200, { status: await app.ticketBranch(id) });
+    },
+  },
+  {
+    // ship_risk (#1196): ships by risk per scheme and Pacific week. The Citadel scheme's minions and Taskmaster read every scheme (its process digest); another scheme's, its own.
+    method: 'GET', path: '/api/tickets/:ticket/ship-risk', who: ['person', 'taskmaster', 'minion'],
+    handler({ res, url, app, ticket }) {
+      const weeks = Math.min(26, Math.max(1, Math.floor(Number(url.searchParams.get('weeks'))) || 4));
+      const r = shipRisk(app.store, ticket.project_id === GLOBAL_OWNER ? null : [ticket.project_id], weeks);
+      return json(res, 200, { ...r, text: shipRiskText(r) });
     },
   },
   {

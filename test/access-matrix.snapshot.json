@@ -3062,6 +3062,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/ship-risk": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/side": {
   "anon": "401 Not logged in",
   "person": "400 text is required",
@@ -3789,6 +3799,16 @@
   "outsider": "403 Only the minion itself can settle its question cards",
   "tmA": "200",
   "tmB": "403 Only the minion itself can settle its question cards",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/ship-risk": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

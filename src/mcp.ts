@@ -487,6 +487,13 @@ const CI_FILES = {
   },
 };
 
+/** ship_risk (#1196): ships by risk per scheme and Pacific week, counted from each ship's note. */
+const SHIP_RISK = {
+  name: 'ship_risk',
+  description: "Ships per scheme and per Pacific week (Mon-Sun) by risk (low, medium, high) with the high share, from each ship's \"Shipped … Risk <r>\" note: use it to see whether narrowing a scheme's high-risk list cut the changes waiting on a go. \"Merged\" (a feeder into a build branch) is shown apart from \"Shipped\" (onto main). The Citadel scheme reads every scheme; another scheme reads its own. Schemes that ship by pull request post no note, so they are named as having none, not shown as 0.",
+  inputSchema: { type: 'object', properties: { weeks: { type: 'integer', description: 'How many Pacific weeks back, this one included (default 4, max 26)' } } },
+};
+
 /** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
 const LIVE_FACTS = {
   name: 'live_facts',
@@ -497,6 +504,7 @@ const LIVE_FACTS = {
 const TOOLS = [
   LIST_TICKETS,
   LIVE_FACTS,
+  SHIP_RISK,
   {
     name: 'usage_split',
     description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings, side questions) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
@@ -1671,6 +1679,7 @@ const SEAM_FRESH = {
 
 const THREAD_TOOLS = [
   LIVE_FACTS,
+  SHIP_RISK,
   {
     name: 'set_thread_status',
     description:
@@ -2154,6 +2163,8 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'generate_image_codex':
       if (!CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args);
+    case 'ship_risk':
+      return (await call('GET', `/api/tickets/${TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
     case 'usage_split':
       return usageSplitText(await call('GET', '/api/costs/mine'));
     case 'log_learned': {

@@ -3732,6 +3732,13 @@ export class Store {
     });
   }
 
+  /** Every ship note ("Shipped …", "Merged …") posted at or after `since`, with its scheme (#1196): ship-risk's input. */
+  shipNotesSince(since: number): { project_id: number; created_at: number; text: string }[] {
+    const rows = this.db.prepare(`SELECT t.project_id, e.created_at, e.data FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.id >= ? AND e.created_at >= ? AND e.kind = 'note' AND (e.data LIKE '{"text":"Shipped %' OR e.data LIKE '{"text":"Merged %') ORDER BY e.id`).all(this.eventIdAt(since), since) as { project_id: number; created_at: number; data: string }[];
+    return rows.map((r) => ({ project_id: Number(r.project_id), created_at: Number(r.created_at), text: String(JSON.parse(r.data).text ?? '') }));
+  }
+
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;

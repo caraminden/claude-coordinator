@@ -437,6 +437,8 @@ export interface TurnFacts {
   homeContraptions: string[];
   /** Machines this minion may queue jobs on (#857): queue_job, job_status and stop_job are offered only with one. */
   jobMachines?: string[];
+  /** It is in the seam trial's fresh group (#1129): offered fresh_session, from its enrolment on so its tool list stays put. */
+  seamTrial?: boolean;
   /** It is the run of its scheme's app turns check working now: offered contraption_turns (#844). */
   appTurnsRun?: boolean;
   /** For the Citadel scheme's Taskmaster on a Citadel member's ask, what it may read in every scheme (#656); else null. */
@@ -629,6 +631,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // A minion may propose new notes for the machines its turn got (#617).
   if (ticket.kind !== 'coordinator' && machines.length) env.COORDINATOR_MACHINES = machines.map((m) => m.name).join(',');
   if (facts.jobMachines?.length) env.COORDINATOR_JOB_MACHINES = facts.jobMachines.join(',');
+  if (facts.seamTrial && ticket.kind !== 'coordinator') env.COORDINATOR_SEAM_TRIAL = '1';
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {

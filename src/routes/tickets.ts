@@ -1039,14 +1039,15 @@ export const ticketRoutes: Route[] = [
       return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name, Number((await readJson(req))?.turn)) });
     },
   },
-  // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session).
+  // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session),
+  // as a minion in the seam trial's fresh group does (#1129).
   {
     method: 'POST', path: '/api/tickets/:ticket/fresh-session', who: ['person', 'self'],
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const body = await readJson(req);
       const why = caller
-        ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000))
+        ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000), body.carry_on !== false)
         : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
       if (why) throw new HttpError(409, why);
       return json(res, 202, ticketView(app, ticket.id));

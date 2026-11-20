@@ -71,7 +71,7 @@ design.
 ## How the cost works
 
 Every model call re-reads the session's whole context, so a session's cost is roughly its calls
-times its context. A subagent starts with a fresh, small context (about 30 to 50k tokens, with the
+times its context. A subagent starts with a fresh, small context (about 15k tokens on average, with the
 brief). It makes its own calls and hands back a summary, and the session never carries what it
 read. When a session wakes after more than an hour idle, its prompt cache has lapsed, so the wake
 re-writes the whole context (about $2.40 at 300k on Opus). A lean session makes every later call
@@ -107,7 +107,7 @@ Ask one question: will the session need what this step reads, or only what it co
 - **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
   long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
   the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on
-  (code it is about to edit), stay in the session: the Grunt's own 30 to 50k start costs more than
+  (code it is about to edit), stay in the session: the Grunt's own 15k start costs more than
   they do. Hops where each result only names the next lookup are one script that prints only the
   answer (in the session or in the Grunt), capped with `| head -50`.
 - **The session is already big.** Past about 150k context, the savings grow quickly. Off a 90k

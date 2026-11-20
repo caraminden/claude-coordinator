@@ -2444,7 +2444,7 @@ const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ti
 /**
  * Tools every turn of a role uses (#710): Claude Code defers MCP tools behind ToolSearch, a whole round trip each, and again
  * after a resume or compaction. `_meta["anthropic/alwaysLoad"]` keeps these in the first prompt. Each 1k tokens of prefix costs
- * about $22 a week (#699), so test/mcp-always-load.test.ts pins this list.
+ * about $27 a week (#699, measured by #1263), so test/mcp-always-load.test.ts pins this list.
  */
 export const ALWAYS_LOAD = {
   thread: ['set_thread_status', 'set_properties', 'message_coordinator', 'ask_question', 'close_self'],

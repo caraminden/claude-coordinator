@@ -1,5 +1,5 @@
 // The tools every turn uses are never deferred behind ToolSearch (#710): the MCP server marks exactly these
-// `anthropic/alwaysLoad`. Each 1k tokens of prefix costs about $22 a week (#699), so growing the list is a decision.
+// `anthropic/alwaysLoad`. Each 1k tokens of prefix costs about $27 a week (#699, measured by #1263), so growing the list is a decision.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';

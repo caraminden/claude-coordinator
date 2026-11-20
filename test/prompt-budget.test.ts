@@ -49,7 +49,7 @@ for (const role of ['minion', 'taskmaster'] as const) {
     const size = prompts[role].length;
     assert.ok(size <= BUDGET[role], [
       `A ${role}'s starting prompt is ${size} characters, over its budget of ${BUDGET[role]} (about ${Math.round((size - BUDGET[role]) / 4)} tokens over).`,
-      'Each 1k tokens in it costs about $22 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
+      'Each 1k tokens in it costs about $27 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
       'What grew since test/prompt-baseline.json:',
       ...growth(baseline[role], lineSizes(prompts[role])),
     ].join('\n'));
@@ -68,8 +68,8 @@ test("a build minion's and a Taskmaster's prompt with builds on stay within the 
 test('saving instructions says what they cost, the same in the settings page and the Taskmaster tools', async () => {
   const { instructionCost } = await import('../src/prompt-cost.ts');
   const page = (await import('../public/prompt-cost.js')).instructionCost;
-  assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $22 a week across minions.');
-  assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $22 a week across minions.');
+  assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $27 a week across minions.');
+  assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $27 a week across minions.');
   assert.equal(instructionCost('  '), '');
   for (const n of [0, 400, 11_664, 32_000]) assert.equal(page('x'.repeat(n)), instructionCost('x'.repeat(n)));
 });
@@ -98,7 +98,7 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
   const total = sizes.reduce((s, x) => s + x.n, 0);
   assert.ok(total <= KIT_BUDGET, [
     `The kit's skill and agent descriptions are ${total} characters, over their budget of ${KIT_BUDGET} (about ${Math.round((total - KIT_BUDGET) / 4)} tokens over).`,
-    'Every minion API call re-reads them; each 1k tokens costs about $22 a week (#699: reads plus rewrites). A longer description is a deliberate choice: raise KIT_BUDGET in this file with the reason in the commit message.',
+    'Every minion API call re-reads them; each 1k tokens costs about $27 a week (#699: reads plus rewrites, measured by #1263). A longer description is a deliberate choice: raise KIT_BUDGET in this file with the reason in the commit message.',
     'Longest now:',
     ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
   ].join('\n'));

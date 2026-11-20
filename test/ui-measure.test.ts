@@ -61,6 +61,10 @@ document.getElementById('bad').onclick = async () => { all().forEach((b) => (b.d
 document.getElementById('good').onclick = () => document.getElementById('list').insertAdjacentHTML('beforeend', '<li>new</li>');
 document.getElementById('leave').onclick = () => { location.href = '/clean'; };
 </script>`,
+  // The changed control opens a dialog: the sweep still has to find the dead button behind it.
+  '/sweep-modal': `${STYLE}<button class="btn" id="open">Open</button> <button class="btn" id="dead">Pin</button>
+<dialog id="dlg"><button class="btn" id="shut" onclick="dlg.close()">Close</button></dialog>
+<script>document.getElementById('open').onclick = () => document.getElementById('dlg').show();</script>`,
   // A 36 px chip on a 40 px phone control height: the loop stops before a critic is spent.
   '/chip': `${STYLE}<button class="chip" id="chip36" style="height:36px;border:0">filter</button>`,
   // A modal dialog (position: fixed, scrolling itself) whose head scrolls away, rebuilt from Peek's before #175.
@@ -183,4 +187,10 @@ test('sweep: false keeps --click to its one control, and shot() leaves a hover t
     assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent !== null`), true);
     await page.close();
   } finally { await browser.close(); }
+});
+
+test('the sweep lists the view before --click changes it', { skip }, async () => {
+  const r = await measure(opts('/sweep-modal', { widths: [1440], click: '#open' }));
+  assert.ok(has(at(r, 1440), 'click-no-result', '#dead'), JSON.stringify(r.pages[0].sweep) + JSON.stringify(at(r, 1440)));
+  assert.equal(r.pages[0].sweep.skipped_changed, 0);
 });

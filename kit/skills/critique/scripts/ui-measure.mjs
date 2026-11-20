@@ -602,9 +602,7 @@ const SWEEP_CAP = 10;
 
 // Click each existing control in scope on a fresh load of the view; a control a fresh load doesn't show the same
 // way (a list that renders after a fetch) is skipped and counted.
-async function sweep(browser, url, width, o, slug, rec, first) {
-  const args = JSON.stringify({ scope: o.scope, skip: o.click });
-  const list = await first.evaluate(`(${sweepList})(${args}).map((x) => x.name)`);
+async function sweep(browser, url, width, o, slug, rec, list, args) {
   rec.sweep = { controls: list.length, clicked: 0, over_cap: Math.max(0, list.length - SWEEP_CAP), skipped_changed: 0 };
   for (const [i, name] of list.slice(0, SWEEP_CAP).entries()) {
     const page = await openPage(browser.send, url, width, o);
@@ -639,11 +637,17 @@ export async function measure(o) {
           const m = await page.evaluate(`(${inPage})(${JSON.stringify({ phone: page.phone, minTap, scope: o.scope })})`);
           const rec = { url, width, phone: page.phone, min_tap: page.phone ? minTap : 24, ...m };
           if (o.shots) rec.shot = await shot(page, join(o.shots, `${slug}-${width}.png`), { pointer: true });
+          // The control list comes from the view as loaded: a --click may open a dialog that hides the rest.
+          const sweepArgs = JSON.stringify({ scope: o.scope, skip: o.click });
+          const sweepNames = (o.click || o.sweep) && o.sweep !== false ? await page.evaluate(`(${sweepList})(${sweepArgs}).map((x) => x.name)`) : null;
           if (o.click) {
             rec.findings.push(...(await clickCheck(page, `document.querySelector(${JSON.stringify(o.click)})`, o.click)));
             if (o.shots) rec.shot_after_click = await shot(page, join(o.shots, `${slug}-${width}-click.png`), { network: false, pointer: true });
           }
-          if ((o.click || o.sweep) && o.sweep !== false) await sweep(browser, url, width, o, slug, rec, page);
+          if (sweepNames) {
+            await sweep(browser, url, width, o, slug, rec, sweepNames, sweepArgs);
+            if (rec.sweep.controls && !rec.sweep.clicked) console.error(`ui-measure: sweep clicked 0 of ${rec.sweep.controls} control(s) at ${width}: the view differs between loads`);
+          }
           pages.push(rec);
         } finally {
           await page.close().catch(() => {});

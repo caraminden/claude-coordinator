@@ -455,3 +455,43 @@ test("the desktop key's script on perigee answers its two questions and nothing 
   // Port 2, never the real emulator's: on perigee the live tunnel holds that one, and takeover would end it.
   assert.deepEqual([ask('takeover').status, ask('takeover').stdout], [0, '']);
 });
+
+// The explicit lease (#1128): lease / release / status.
+const runIn = (locks: string, who: string, ...args: string[]) => spawnSync(helper, args, { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: who }, encoding: 'utf8' });
+
+test('a lease keeps the screen from another caller until it is released, then they go one after the other', async () => {
+  const locks = join(root, 'lease-1');
+  const png = join(root, 'l1.png');
+  assert.equal(runIn(locks, 'A #1 (josh)', 'lease', '5', 'checking the', 'login page').status, 0);
+  assert.match(runIn(locks, 'B', 'status').stderr, /leased by A #1 \(josh\) for "checking the login page".*min left/);
+  assert.match(readFileSync(join(locks, 'android.lease'), 'utf8'), /^\d+\tA #1 \(josh\)\tchecking the login page\n$/);
+  // The holder's own steps go through; another caller's wait, though the holder's per-step lease would be long gone.
+  writeFileSync(join(locks, 'android.who'), `${Math.floor(Date.now() / 1000) - 5}\tA #1 (josh)\n`);
+  assert.equal(runIn(locks, 'A #1 (josh)', 'shot', png).status, 0);
+  const b = spawn(helper, ['shot', join(root, 'l1b.png')], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'B' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  b.stderr!.on('data', (d) => (err += d));
+  const done = new Promise<number | null>((r) => b.on('close', r));
+  await until("B to say who has it", async () => /A #1 \(josh\) has it leased for "checking the login page"/.test(err), 5000).catch((e) => { throw new Error(`${e.message}: ${err}`); });
+  // Someone else's release does nothing; the holder's frees it.
+  runIn(locks, 'B', 'release');
+  assert.match(runIn(locks, 'C', 'status').stderr, /leased by A/);
+  runIn(locks, 'A #1 (josh)', 'release');
+  assert.equal(await done, 0, err);
+  assert.match(runIn(locks, 'B', 'status').stderr, /leased by B|not leased/);
+});
+
+test('a lease whose holder died frees itself at its time; a bad length is refused', () => {
+  const locks = join(root, 'lease-2');
+  mkdirSync(locks, { recursive: true });
+  writeFileSync(join(locks, 'android.lease'), `${Math.floor(Date.now() / 1000) - 1}\tdead turn\tx\n`);
+  assert.match(runIn(locks, 'B', 'status').stderr, /not leased/);
+  assert.equal(runIn(locks, 'B', 'shot', join(root, 'l2.png')).status, 0);
+  assert.equal(runIn(locks, 'B', 'lease', '0').status, 2);
+  assert.equal(runIn(locks, 'B', 'lease', '999').status, 2);
+  assert.equal(runIn(locks, 'B', 'lease').status, 0);
+  assert.match(runIn(locks, 'B', 'status').stderr, /leased by B/);
+  // `down` by the holder ends the lease too.
+  assert.equal(runIn(locks, 'B', 'down').status, 0);
+  assert.match(runIn(locks, 'B', 'status').stderr, /not leased/);
+});

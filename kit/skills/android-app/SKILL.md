@@ -170,6 +170,11 @@ citadel-android down               # when you're done
   coordinates: `adb -s emulator-5554 exec-out uiautomator dump /dev/tty`, then tap the centre of the
   node's `bounds` (`exec-out` avoids a shared temp file). One app's log:
   `adb -s emulator-5554 logcat -d --pid=$(adb -s emulator-5554 shell pidof <pkg>)`.
+- **Take the lease before a test session** (#1128): `citadel-android lease [minutes] ["what for"]` (20 minutes
+  unless you say, at most 60; call it again to renew). Other turns' steps then wait, saying who holds it and for
+  what, however long you pause between your steps. `citadel-android release` gives it back (so does `down`, and so
+  does your turn ending); a turn that dies loses it at its time. `citadel-android status` says who has it, and the
+  Machines page shows it. Without a lease you still keep the screen 2 minutes after each step.
 - **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each
   call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
   holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.

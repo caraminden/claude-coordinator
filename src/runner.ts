@@ -19,6 +19,7 @@ import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
+import { releaseEmulatorLease } from './emulator-lease.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
@@ -3112,6 +3113,9 @@ export class Runner {
     if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
     rmSync(live.dir, { recursive: true, force: true });
     this.onFilesMayChange(ticketId);
+    // The emulator lease (#1128) ends with the turn that took it.
+    const endedTicket = this.store.getTicket(ticketId);
+    if (endedTicket) releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!);
     this.onTurnEnd(ticketId);
     // Re-read the ticket: the turn may have given it its first (or a new) session id.
     const after = this.store.getTicket(ticketId);

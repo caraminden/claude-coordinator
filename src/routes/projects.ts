@@ -1242,7 +1242,6 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
   // The ideas ledger (#1150): every idea the scheme was shown, its pick, handoff and minion. The list re-reads the
   // scheme's pages and handoffs in the background once it is a few minutes old; ?status= and ?q= filter.
   {
@@ -1275,10 +1274,10 @@ export const projectRoutes: Route[] = [
       }
       const by = caller ? (caller.kind === 'coordinator' ? 'Taskmaster' : `#${caller.number}`) : session.name;
       const updated = app.store.ideas.edit(row.id, by, change);
-      app.broadcast({ type: 'ideas', projectId: project.id });
       json(res, 200, { idea: ideaRow(app, project, updated) });
     },
   },
+  // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
   // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
   {
     method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],

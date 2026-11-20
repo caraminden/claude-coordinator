@@ -19,6 +19,7 @@ import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { memoryPage } from './memory.js';
 import { decisionsPage } from './decisions.js';
+import { ideasPage } from './ideas.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
 import { releasesPage, setReleasesPage } from './releases.js';
@@ -111,6 +112,7 @@ function renderCrumbs(main) {
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'memory' ? [projectLink, ' / ', settingsLink, ' / ', 'Memory']
       : main.kind === 'decisions' ? [projectLink, ' / ', settingsLink, ' / ', 'Decisions']
+      : main.kind === 'ideas' ? [projectLink, ' / ', settingsLink, ' / ', 'Ideas']
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
@@ -268,6 +270,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'properties' ? propertiesPage()
     : main.kind === 'memory' ? memoryPage()
     : main.kind === 'decisions' ? decisionsPage()
+    : main.kind === 'ideas' ? ideasPage()
     : main.kind === 'members' ? membersPage()
     : main.kind === 'people' ? peoplePage()
     : main.kind === 'contraptions' ? contraptionsPage()

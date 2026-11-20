@@ -265,9 +265,9 @@ export function sameDecision(a: Raw, b: Raw): boolean {
 
 // ---- the assembled list
 
-export type SourceKind = 'citadel' | 'scheme' | 'repo' | 'adr' | 'kit' | 'memory';
+export type SourceKind = 'citadel' | 'scheme' | 'repo' | 'adr' | 'kit' | 'memory' | 'ideas';
 export const SOURCE_LABEL: Record<SourceKind, string> = {
-  citadel: 'Citadel-wide instructions', scheme: 'Scheme instructions', repo: 'Repo CLAUDE.md and rules', adr: 'ADRs', kit: 'The kit', memory: 'Memory',
+  citadel: 'Citadel-wide instructions', scheme: 'Scheme instructions', repo: 'Repo CLAUDE.md and rules', adr: 'ADRs', kit: 'The kit', memory: 'Memory', ideas: 'Ideas ledger',
 };
 /** Where a decision is written: a source, a file in it and a line, and a link to open it. */
 export interface Place { kind: SourceKind; label: string; file?: string; line?: number; href: string | null }
@@ -374,7 +374,7 @@ export function assemble(docs: Doc[], names: string[], staleKinds: SourceKind[])
       for (const p of x.d.places) if (staleKinds.includes(p.kind) && !d.reversed!.stale.some((s) => s.href === p.href && s.line === p.line)) d.reversed!.stale.push(p);
     }
   }
-  const order: SourceKind[] = ['citadel', 'scheme', 'repo', 'adr', 'kit', 'memory'];
+  const order: SourceKind[] = ['citadel', 'scheme', 'repo', 'adr', 'kit', 'memory', 'ideas'];
   all.sort((a, b) => b.date.localeCompare(a.date) || (b.reversed ? 0 : 1) - (a.reversed ? 0 : 1));
   return {
     decisions: all,

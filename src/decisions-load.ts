@@ -93,6 +93,13 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
       docs.push({ kind: 'memory', place: { label: f.label, file, href: `#/p/${pid}/memory` }, text, title: memTitle(text) });
     }
   }
+  // A pick someone wrote a note on is a decision too (#1150, Josh 2026-11-20: "Two pages; noted picks feed it").
+  const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  for (const r of pid === GLOBAL_OWNER ? [] : store.ideas.list(pid)) {
+    if (!r.words || !r.decided_by || !r.decided_at) continue;
+    const text = `- ${r.title}: ${r.pick_label ?? r.pick ?? r.status} (${r.decided_by}, ${day(r.decided_at)}: "${r.words.replace(/"/g, "'")}")`;
+    docs.push({ kind: 'ideas', place: { label: 'Ideas ledger', file: r.card, href: `#/p/${pid}/ideas` }, text, title: r.title });
+  }
   const staleKinds: SourceKind[] = ['scheme', 'repo', 'memory', ...(pid === GLOBAL_OWNER ? ['kit', 'citadel'] as SourceKind[] : [])];
   const h = createHash('sha1');
   for (const d of names) h.update(d + '\0');

@@ -10,7 +10,7 @@ const day = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { mont
 const external = (href) => /^https?:/.test(href);
 let scope = 'scheme';
 const openRows = new Set();
-const SCHEME_KINDS = ['scheme', 'repo', 'adr', 'memory'];
+const SCHEME_KINDS = ['scheme', 'repo', 'adr', 'memory', 'ideas'];
 /** In the picked tab: its own scope, or a copy written there (as inScope in src/decisions.ts). */
 const shows = (d) => scope === 'all' || d.scope === scope || d.places.some((p) => (SCHEME_KINDS.includes(p.kind) ? 'scheme' : 'citadel') === scope);
 
@@ -130,6 +130,6 @@ export function decisionsPage() {
       h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(), meta),
-    h('div', { class: 'row decision-tools' }, search, pick),
+    h('div', { class: 'row decision-tools' }, search, pick, h('a', { href: `#/p/${p.id}/ideas`, class: 'small' }, 'Ideas ledger')),
     counts, list, empty);
 }

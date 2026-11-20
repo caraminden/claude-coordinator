@@ -1080,7 +1080,7 @@ build() {
   git checkout -q --detach "$pre" 9>&- 6>&-
   if [ "$mode" = build ]; then
     # A build takes $BRANCH in by merge: a rebase would flatten its merges of $BRANCH and change its feeders' commits.
-    if git merge-base --is-ancestor "$want" HEAD || git merge -q --no-edit "$want" 9>&- 6>&-; then
+    if git merge-base --is-ancestor "$want" HEAD || git merge -q -m "Merge $BRANCH into $build" "$want" 9>&- 6>&-; then
       printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
     else
       git merge --abort 2>/dev/null || true

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { until } from './wait.ts';
 import { git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
@@ -175,14 +176,8 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
       postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
       settle: () => {}, note: (t, text) => notes.push([t, text]), mail: (t, text) => mails.push([t, text]),
     });
-    const until = async (what: string, ok: () => boolean) => {
-      for (let i = 0; i < 200 && !ok(); i++) {
-        await ks.poll();
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      assert.ok(ok(), what);
-    };
-    await until('the checks end and the card is posted', () => cards.length > 0);
+    const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()), 10_000);
+    await polled('the checks end and the card is posted', () => cards.length > 0);
     const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
     assert.deepEqual(states(), { Green: 'green', Red: 'red', Elsewhere: 'green' });
     assert.equal(saved.round.kit, kitHead);
@@ -194,7 +189,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     await ks.poll();
     assert.equal(cards.length, 1, 'polling again posts no second card');
     await ks.decide({ ticket: 102, question: 'q1' }, SHIP, { id: 7, name: 'josh' });
-    await until('the green scheme ships', () => states().Green === 'shipped');
+    await polled('the green scheme ships', () => states().Green === 'shipped');
     const synced = saved.round.schemes.find((x: any) => x.name === 'Green').commit;
     assert.equal(git(join(projectsDir, '3/repo'), ['branch', '--list', 'kit-sync/*']).trim(), '', 'a shipped sync leaves no branch behind');
     assert.equal(git(join(projectsDir, '3/repo'), ['log', '-1', '--format=%(trailers:key=Kit-Sync,valueonly)', synced]).trim(), kitHead);

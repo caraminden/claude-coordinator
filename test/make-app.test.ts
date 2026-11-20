@@ -149,11 +149,21 @@ test("set_app_person: a scheme's Taskmaster switches its own apps for a person, 
 });
 
 test('freeAppPort skips taken and listening ports; schemeRunner reads the label its workflows use', async () => {
-  const busy = createServer().listen(0, '127.0.0.1');
-  await new Promise((ok) => busy.once('listening', ok));
-  const at = (busy.address() as { port: number }).port;
+  // Both ports come from the OS (#1225): a port next to a busy one may be held by a parallel suite, so the free one
+  // is one this test bound and let go of. The lower is kept listening; every other port in the range is `taken`.
+  const listen = async () => {
+    const s = createServer().listen(0, '127.0.0.1');
+    await new Promise((ok) => s.once('listening', ok));
+    return s;
+  };
+  const pair = [await listen(), await listen()].sort((a, b) => (a.address() as { port: number }).port - (b.address() as { port: number }).port);
+  const [busy, freed] = pair;
+  const [at, free] = pair.map((s) => (s.address() as { port: number }).port);
+  await new Promise((ok) => freed.close(ok));
+  const taken = new Set([at - 1]);
+  for (let p = at + 1; p < free; p++) taken.add(p);
   try {
-    assert.equal(await freeAppPort(new Set([at - 1]), [at - 1, at + 1]), at + 1);
+    assert.equal(await freeAppPort(taken, [at - 1, free]), free);
   } finally {
     busy.close();
   }

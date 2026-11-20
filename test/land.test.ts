@@ -266,7 +266,7 @@ test("a retro log that can't be written changes neither a landing's output nor i
     writeFileSync(blocker, 'a file, not a folder\n');
     const res = r.run({ COORDINATOR_SHARED_DIR: shared && blocker });
     assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
-    return { status: res.status, stderr: res.stderr.replace(/\b[0-9a-f]{7,40}\b/g, 'H').replace(/\d\d:\d\d/g, 'T').replace(/\/\d+\//g, '/N/') };
+    return { status: res.status, stderr: res.stderr.replace(/\b[0-9a-f]{7,40}\b/g, 'H').replace(/\d\d:\d\d/g, 'T').replace(/\/\d+\//g, '/N/').replace(/(passed in) \d+ s/g, '$1 N s') };
   });
   assert.deepEqual(runs[1], runs[0]);
   assert.equal(runs[0].status, 0);

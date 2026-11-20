@@ -46,9 +46,11 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
+/** Each ticket broadcast's live context size (#1193). */
+const shown: [number, number | null][] = [];
 const pushes: { ticket: number; text: string }[] = [];
 function makeRunner() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(store, (m: any) => { if (m.type === 'ticket') shown.push([m.ticket.id, m.ticket.context_live]); }, () => ({}), fake);
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
@@ -204,6 +206,7 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
     assert.equal(runner.view(t).context_tokens, 122005);
     // The chat's size meter (#1193): the window is the main model's, not a Grunt's; mid-turn the live size shows, and it drops with a smaller one.
+    assert.ok(shown.some(([tid, live]) => tid === id && live === 122005), 'the size went out while the turn ran');
     assert.equal(runner.view(t).context_window, 1000000);
     assert.equal(runner.view(t).context_live, null);
     (runner as any).contextSizes.set(id, 90000);

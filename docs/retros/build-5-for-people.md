@@ -18,7 +18,7 @@ went green on CI at 09:01Z, and again with main taken in (run 44706923935).
    Not made, proposed for the pipeline lane: a `--full` land refused at rebase only because `build/<n>` moved could merge
    the new tip and stay in line.
 2. **Main took the next `SCHEMA_HISTORY` number (and the prompt budget) out from under the build, again.**
-   #1123's host_samples and #1130's tickets.goal were renumbered twice, then a third time after the build's last merge of main, when the Fable review found main's `ideas` and `flake_fixes` holding 89 and 90. They ended at 91 and 92. The minion and Taskmaster
+   #1123's host_samples and #1130's tickets.goal were renumbered twice, then a third time after the build's last merge of main, when the Fable review found main's `ideas` and `flake_fixes` holding 89 and 90. They ended at 91 and 92, then main took 91 to 93 while the build waited for Josh's go: two more renumbers, ending at 94 and 95 (five in all). The minion and Taskmaster
    budgets in `test/prompt-budget.test.ts` went over on both merges of main (+47 and +17 chars).
    Both showed up only in CI on Cara's desktop, which compares with the newest origin/main. Build 2 and Build 4 hit the
    same schema clash. It is now a ledger row.
@@ -73,6 +73,27 @@ Left, all low:
 - **Core: #1149's mentions** show on the mentioned person's row and in Your move until they open the chat. The guard for
   a turn with no caller is untested.
 - Smaller: #1141's crop isn't drawn in Safari and is untested in Firefox.
+
+## Round two: Josh's preview feedback (2026-11-20)
+
+- **The preview never loaded** (Josh: "I dont seem to be able to load the preview"; Cara: 502 on webplatform, a hang on
+  citadel.zip). Cause: the preview's data copy used a stepped `backup()` from the live connection, and the db-writer
+  worker (#795) writes through its own connection, which restarts a stepped backup, so the copy never finished. #1204
+  copies with one step from a fresh read-only connection. My first diagnosis (the live restarts) was wrong. Watching the
+  copy's size stall at 196 MB settled it.
+- **Josh's six notes became two feeders.** #1218 (low) drops the word tips and colours Status by failure share. #1217
+  (medium) makes Home the normal minion list of everything waiting on you across schemes, with counts and 14-day ship
+  bars in the chat's space. The spec gap: #1140 had built a new pared-down Home that Josh hadn't asked for, and only the
+  preview showed it.
+- **#1217 broke `test/inbox.test.js` and its land into the build didn't see it.** home.js began importing the app
+  shell, and inbox.js imported home.js, so node couldn't load the inbox module. The feeder ran only its own files' tests.
+  Fixed in the build: inbox.js loads home.js lazily, as it already did sidebar.js. The map now runs the inbox tests on
+  a home.js change. Proposed, not made: `citadel-test --affected` also runs every test that imports a changed file.
+- **The second Fable review** confirmed six findings (a checker refuted three). #1218 was half done: Status's tiles
+  still went yellow on one failure, and the CI share counted every branch's runs. Home's 14-day buckets cost about 1.3 s
+  on the server's one thread at 2,000 notes. Two real hovers (the ship badge, the Turns switch) went with the word tips.
+  Home's count chips reflowed on a phone. All are fixed, and an Opus re-review of the fix diff found one more phone
+  slot and a CI headline, now fixed too.
 
 ## Keep
 

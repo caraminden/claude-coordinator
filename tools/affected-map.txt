@@ -27,6 +27,8 @@ src/routes/**: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
 public/**: test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+# home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
+public/home.js: test/inbox.test.js test/home.test.ts
 src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
 src/previews.ts: test/relative-urls.test.ts
 

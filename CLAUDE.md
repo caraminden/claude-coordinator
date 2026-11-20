@@ -59,6 +59,9 @@ skill step is skipped or uses its default.
   `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
   `citadel-heavy tools/prompt-eval run --base main` once before it ships; 2 or more cases fell makes it high risk
   (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`).
+- **Rule homes:** `src/rule-homes.ts` names each registered rule's one home and the pointer used
+  everywhere else; `test/rule-homes.test.ts` fails on a copy in the repo, and the Settings text is
+  checked when it is saved.
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
 - **Decisions log (ADRs):** `docs/adr/`.

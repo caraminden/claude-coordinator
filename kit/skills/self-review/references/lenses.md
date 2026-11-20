@@ -159,7 +159,9 @@ these are `citadel:writing-for-agents` and the kit's `README.md`):
 
 - **Contradiction** (Must fix): grep the kit, `CLAUDE.md` and `.claude/` for the line's key
   words. A line that says the opposite of another rule leaves each run to pick one: name both
-  file:lines. Saying the same thing twice is Should fix (one source of truth).
+  file:lines. Saying the same thing twice is Should fix (one source of truth); repeating a rule
+  that Project facts' **Rule homes** registry gives one home elsewhere is Must fix: the line
+  becomes that rule's pointer.
 - **Numbers** (Must fix when wrong): a cost, count, limit, threshold or percentage either cites
   where it comes from (a measurement, a dated decision, a config value) or you check it against
   that source; a number you can't trace to anything is Should fix.

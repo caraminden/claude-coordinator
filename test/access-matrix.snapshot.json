@@ -1673,6 +1673,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/instructions/overlaps/verdicts": {
+  "anon": "401 Not logged in",
+  "person": "400 scope must be \"scheme\" or \"citadel\"",
+  "member": "400 scope must be \"scheme\" or \"citadel\"",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only a person's own Settings save gets the Sonnet check, on their own Claude login",
+  "tmB": "403 Only a person's own Settings save gets the Sonnet check, on their own Claude login",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/instructions/sources": {
   "anon": "401 Not logged in",
   "person": "200",

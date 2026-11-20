@@ -31,12 +31,13 @@ import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
-import { turnPins } from '../turn-launch.ts';
+import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
-import { heldPlan, saveInstructions, settingsOverlaps, type FindReplace } from '../instructions-save.ts';
+import { heldPlan, readVerdicts, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
+import { runDescribe } from '../review-describe.ts';
 import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
 import { inScope, searchDecisions } from '../decisions.ts';
@@ -1062,6 +1063,29 @@ export const projectRoutes: Route[] = [
       const before = body.scope === 'citadel' ? app.store.appInstructions().text : project.instructions;
       const found = settingsOverlaps(app, project, body.scope, before, body.text.replace(/\r\n/g, '\n').trim());
       return json(res, 200, { found });
+    },
+  },
+  {
+    // The Sonnet check on a person's Settings save (#1211; Josh, 2026-11-20: "Matcher, then a Grunt"): asked after the
+    // matcher's list is on screen, only when it found something, on the saver's own Claude login (sender pays). No login
+    // or a failed check gives no verdicts and says why; the list stays and Save anyway still works ("Keep the matcher list").
+    method: 'POST', path: '/api/projects/:project/instructions/overlaps/verdicts', who: ['person'], refuse: 'Only a person\'s own Settings save gets the Sonnet check, on their own Claude login',
+    async handler({ req, res, app, session, project }) {
+      const body = await readJson(req);
+      if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
+      if (typeof body.text !== 'string' || body.text.length > MAX_INSTRUCTIONS * 2) throw new HttpError(400, 'text must be text');
+      const before = body.scope === 'citadel' ? app.store.appInstructions().text : project.instructions;
+      const text = body.text.replace(/\r\n/g, '\n').trim();
+      const found = settingsOverlaps(app, project, body.scope, before, text);
+      if (!found.length) return json(res, 200, { verdicts: [] });
+      const place = app.claude.place(session.uid);
+      if (!place) return json(res, 200, { unlinked: "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the check on" });
+      try {
+        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'repeat-check'), timeoutMs: 30_000 });
+        return json(res, 200, { verdicts: readVerdicts(reply, found.length) });
+      } catch (err: any) {
+        return json(res, 200, { failed: String(err.message).slice(0, 300) });
+      }
     },
   },
   {

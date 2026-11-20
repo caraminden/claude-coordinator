@@ -58,6 +58,32 @@ export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scop
   return overlapsFor(news, sources, inSettingsHome(scope, text), scope === 'scheme' ? [...RULE_HOMES, ...schemeRules(project.repo_dir)] : RULE_HOMES);
 }
 
+/** Sonnet's word on one matcher hit (#1211): whether the new words really repeat it, contradict it, or only share wording. */
+export interface Verdict { verdict: 'repeats' | 'conflicts' | 'fine'; why: string }
+
+/** What the Sonnet check reads: the edit's new paragraphs, then each place the matcher found, numbered. */
+export function verdictPrompt(scope: Scope, before: string, text: string, found: Overlap[]): string {
+  const where = scope === 'citadel' ? `the ${APP_NAME}-wide instructions` : "a scheme's instructions";
+  return [
+    `A person is saving an edit to ${where}, the standing rules every agent in it reads. A word matcher flagged places that already say something like the new words. Judge each place against the new words: "repeats" when it states the same rule, so the rule would be written twice; "conflicts" when it says something different about the same thing, so agents get two answers; "fine" when they only share wording and speak to different things.`,
+    `The new words:\n<new>\n${added(before, text).map((p) => p.text).join('\n\n')}\n</new>`,
+    `The places:\n<places>\n${found.map((o, i) => `${i + 1}. ${o.label}${o.line ? `, line ${o.line}` : ''}: "${o.excerpt}" (matcher: it ${o.why})`).join('\n')}\n</places>`,
+    'Reply with JSON only, no fences: {"verdicts": [{"n": <the place\'s number>, "verdict": "repeats" | "conflicts" | "fine", "why": "<one plain line for the person>"}]}, one for each place.',
+  ].join('\n\n');
+}
+
+/** Sonnet's reply as one verdict per place, in order (null where it gave none); throws when the reply isn't JSON. */
+export function readVerdicts(reply: string, count: number): (Verdict | null)[] {
+  const t = reply.trim();
+  let data: any;
+  try { data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch { throw new Error("Sonnet's answer wasn't the verdicts it should be"); }
+  const out: (Verdict | null)[] = Array(count).fill(null);
+  for (const v of Array.isArray(data?.verdicts) ? data.verdicts : []) {
+    if (Number.isInteger(v?.n) && v.n >= 1 && v.n <= count && ['repeats', 'conflicts', 'fine'].includes(v.verdict)) out[v.n - 1] = { verdict: v.verdict, why: typeof v.why === 'string' ? v.why.trim().slice(0, 300) : '' };
+  }
+  return out;
+}
+
 /** The line of the heading a 1-based line sits under (0 above the first heading). */
 function sectionStart(lines: string[], line: number): number {
   for (let i = line - 1; i >= 0; i--) if (/^#{1,6}\s/.test(lines[i])) return i + 1;

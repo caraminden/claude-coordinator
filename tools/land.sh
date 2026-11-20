@@ -484,7 +484,8 @@ if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
   renamed=$("$tools/citadel-node" --no-warnings "$tools/ship-numbers.ts" adr "$adr_onto") || refuse "renumbering this branch's ADRs failed (see above), so nothing landed. Run git status, put back what it left, then this again"
   if [ -n "$renamed" ]; then
     sed 's/^/land: /' <<<"$renamed" >&2
-    git commit -q -m "$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed"
+    n=${branch#ticket/} n=${n%%-*}
+    git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed"
   fi
 fi
 

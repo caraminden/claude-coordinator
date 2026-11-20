@@ -6,6 +6,8 @@
 # A test file goes here only if it imports nothing from outside test/, directly or through its fixtures, and every
 # tools/ file it reads is listed: test/pipeline-files.test.ts (on every land) checks both.
 tools/land.sh
+tools/ship-numbers.ts
+tools/ship-numbers.attributes
 tools/deploy.sh
 tools/deploy-queue.sh
 tools/kit-land-drift.sh
@@ -38,6 +40,7 @@ test/scheme-setup-land-fixture.ts
 test/land.test.ts
 test/lane.test.ts
 test/land-build.test.ts
+test/land-numbers.test.ts
 test/land-queue.test.ts
 test/land-deploy.test.ts
 test/land-recover.test.ts

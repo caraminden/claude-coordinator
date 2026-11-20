@@ -4,7 +4,6 @@ import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskm
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
-import { homeEvent, refreshHomeSoon } from './home.js';
 import { mountTips } from './ui/tip.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -30,7 +29,7 @@ const mentionKeys = (map) => [...map].map(([id, m]) => `${id}:${m.at}`).sort().j
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
   // Home's list (#1140) moves with the same news as every scheme's counts.
-  if (view.home) refreshHomeSoon();
+  if (view.home) import('./home.js').then((m) => m.refreshHomeSoon());
   const projectId = view.projectId;
   const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
@@ -78,7 +77,8 @@ const others = otherSchemes(() => {
 /** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
 export function inboxEvent(event) {
   if (view?.kind !== 'project') return;
-  homeEvent(event);
+  // Lazily, like the sidebar: home.js pulls in the app shell (core, sidebar), which a node test can't load.
+  if (view.home) import('./home.js').then((m) => m.homeEvent(event));
   if (!ticketOf(event.ticket_id)) {
     others.event(event);
     if (cardEvent(event) && inbox.items.some((i) => i.ticketId === event.ticket_id)) refreshSoon();
@@ -90,7 +90,7 @@ export function inboxTicket(before, after) {
   if (countMoved(before, after)) refreshSoon();
   else if (turnMoved(before, after)) {
     renderInbox();
-    if (view.home) refreshHomeSoon(); // Home's Working now
+    if (view.home) import('./home.js').then((m) => m.refreshHomeSoon()); // Home's Working now
   }
 }
 

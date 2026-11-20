@@ -377,7 +377,8 @@ test('after-call runner: on a recorded session it says and logs exactly what the
     said += lines(alone).length;
   }
   assert.ok(said >= 3, 'the session gave the batch, test-first and flail lines'); 
-  assert.deepEqual(logLines(now.shared), logLines(old.shared));
+  const untimed = (dir: string) => logLines(dir).map((l) => l.replace(/^- \d\d:\d\d:\d\dZ · /, '- '));
+  assert.deepEqual(untimed(now.shared), untimed(old.shared));
   assert.ok(logLines(old.shared).length > 0, 'the red runs were logged');
   // Calls no old entry took start nothing, and a broken input says nothing.
   for (const [event, tool] of [['PostToolUse', 'Agent'], ['PostToolUseFailure', 'Read'], ['PostToolUseFailure', 'Edit']]) assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);

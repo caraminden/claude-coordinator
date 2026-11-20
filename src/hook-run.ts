@@ -5,14 +5,21 @@
  * that order, from the same code its standalone hook runs (tripwireResult, sideGuardResult, hookResult), and fails the
  * way it did alone:
  *
- * - The tripwire and the side guard are hard: one that can't even load crashes the runner, and the hook's
- *   `onFailure: 'block'` blocks the call, as their own hooks did.
- * - Wording, scheme-refs and big-read are soft: one that can't load or throws lets the call through, as before.
+ * - The tripwire and the side guard are hard: one that can't even load crashes the runner (after the other checks
+ *   ran), and the hook's `onFailure: 'block'` blocks the call, as their own hooks did.
+ * - Wording, scheme-refs and big-read are soft: one that can't load or throws lets the call through, as before. A
+ *   soft check also passes when the runner is already past SOFT_UNTIL_S of its 10 s, so a slow start under load
+ *   can't make a soft check time the call out: alone, it would have timed out and passed.
+ * - The turn registers the runner twice with one matcher each (hookRunMatchers): the tools a hard check reads, with
+ *   `onFailure: 'block'`, and the message and card tools only the soft checks read, without it, so those still go
+ *   through when the runner times out. A call matches one of the two, so it still starts one process.
  *
  * Every matching check runs, even after one blocks, since wording and scheme-refs record what they sent back.
- * Their answers merge: any exit 2 blocks with the blockers' messages; otherwise one JSON answer is written as it is, a
- * deny beats an ask, and several denies become one deny with every reason. The checks load with dynamic imports, so a
- * Read call never loads the wording check. Node built-ins only, besides the pinned files beside it.
+ * Their answers merge: any exit 2 blocks with the blockers' messages and every deny's reason after them (Claude Code
+ * showed only one of the two when they were separate hooks, so a refusal wording had recorded as sent could go
+ * unseen); otherwise one JSON answer is written as it is, a deny beats an ask, and several denies become one deny
+ * with every reason. The checks load with dynamic imports, so a Read call never loads the wording check. Node
+ * built-ins only, besides the pinned files beside it.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,14 +44,32 @@ interface Check {
   run: () => Promise<HookResult>;
 }
 
-/** The runner hook's matcher: every tool on a side question, else the tools any of its checks reads. */
-export function hookRunMatcher(side: boolean): string {
-  if (side) return SIDE_GUARD_MATCHER;
-  return `^(?:${[TRIPWIRE_MATCHER, WORDING_MATCHER, SCHEME_REFS_MATCHER, BIG_READ_MATCHER].map((m) => m.replace(/^\^|\$$/g, '')).join('|')})$`;
+/** Seconds into the runner's life (node's start included) after which a soft check passes unrun: well inside the hook's 10 s. */
+export const SOFT_UNTIL_S = 6;
+
+const body = (m: string) => m.replace(/^\^|\$$/g, '');
+const anyOf = (ms: string[]) => `^(?:${ms.map(body).join('|')})$`;
+
+/**
+ * The runner's two matchers: `hard` (registered with onFailure 'block') takes every tool on a side question, else the
+ * tools the tripwire reads (big-read's and wording's file tools are among them); `soft` (no onFailure) takes the
+ * message and card tools only wording and scheme-refs read, or null when the hard one takes everything.
+ */
+export function hookRunMatchers(side: boolean): { hard: string; soft: string | null } {
+  if (side) return { hard: SIDE_GUARD_MATCHER, soft: null };
+  const hard = anyOf([TRIPWIRE_MATCHER, BIG_READ_MATCHER]);
+  return { hard, soft: `^(?!${body(hard)}$)${anyOf([WORDING_MATCHER, SCHEME_REFS_MATCHER]).slice(1)}` };
 }
 
-function checks(stdin: string, cfg: HookRunConfig): Check[] {
+/** Every tool the runner takes, hard and soft. */
+export function hookRunMatcher(side: boolean): string {
+  if (side) return SIDE_GUARD_MATCHER;
+  return anyOf([TRIPWIRE_MATCHER, WORDING_MATCHER, SCHEME_REFS_MATCHER, BIG_READ_MATCHER]);
+}
+
+function checks(stdin: string, cfg: HookRunConfig, softUntil: number): Check[] {
   const soft = async (load: () => Promise<HookResult>): Promise<HookResult> => {
+    if (process.uptime() > softUntil) return {};
     try {
       return await load();
     } catch {
@@ -85,10 +110,7 @@ function toolName(stdin: string): string {
 /** One answer from several checks' answers (see the file comment). */
 export function mergeResults(results: HookResult[]): HookResult {
   const stderr = results.map((r) => r.stderr ?? '').join('');
-  if (results.some((r) => r.code === 2)) return { stderr, code: 2 };
-  const out: HookResult = stderr ? { stderr } : {};
   const answers = results.map((r) => r.stdout).filter((s): s is string => !!s);
-  if (answers.length <= 1) return answers.length ? { ...out, stdout: answers[0] } : out;
   const decision = (s: string) => {
     try {
       return JSON.parse(s)?.hookSpecificOutput?.permissionDecision;
@@ -97,6 +119,9 @@ export function mergeResults(results: HookResult[]): HookResult {
     }
   };
   const denies = answers.filter((s) => decision(s) === 'deny');
+  if (results.some((r) => r.code === 2)) return { stderr: stderr + denies.map((s) => JSON.parse(s).hookSpecificOutput.permissionDecisionReason + '\n').join(''), code: 2 };
+  const out: HookResult = stderr ? { stderr } : {};
+  if (answers.length <= 1) return answers.length ? { ...out, stdout: answers[0] } : out;
   if (denies.length === 1) return { ...out, stdout: denies[0] };
   if (denies.length > 1) {
     const reason = denies.map((s) => JSON.parse(s).hookSpecificOutput.permissionDecisionReason).join('\n\n');
@@ -105,14 +130,20 @@ export function mergeResults(results: HookResult[]): HookResult {
   return { ...out, stdout: answers.find((s) => decision(s) === 'ask') ?? answers[0] };
 }
 
-/** The runner's answer to one raw call: every check whose matcher takes the call's tool, in order, merged. */
-export async function hookRun(stdin: string, cfg: HookRunConfig): Promise<HookResult> {
+/** The runner's answer to one raw call: every check whose matcher takes the call's tool, in order, merged. A hard check that failed to load throws once the rest have run. */
+export async function hookRun(stdin: string, cfg: HookRunConfig, softUntil = SOFT_UNTIL_S): Promise<HookResult> {
   const tool = toolName(stdin);
   const results: HookResult[] = [];
-  for (const c of checks(stdin, cfg)) {
+  const failed: unknown[] = [];
+  for (const c of checks(stdin, cfg, softUntil)) {
     if (!new RegExp(c.matcher).test(tool)) continue;
-    results.push(await c.run()); // a hard check's load failure throws out of here, on purpose
+    try {
+      results.push(await c.run());
+    } catch (e) {
+      failed.push(e); // only a hard check throws: the runner dies below, and the hook's onFailure blocks the call
+    }
   }
+  if (failed.length) throw failed[0];
   return mergeResults(results);
 }
 

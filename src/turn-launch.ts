@@ -14,7 +14,7 @@ import type { Project, Ticket } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { claudeConfigDir } from './sessions.ts';
 import type { TripwireConfig } from './tripwire.ts';
-import { hookRunMatcher, type HookRunConfig } from './hook-run.ts';
+import { hookRunMatchers, type HookRunConfig } from './hook-run.ts';
 import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATCHER } from './hook-matchers.ts';
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
@@ -207,7 +207,8 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
 }
 
 /**
- * The PreToolUse hook every turn gets (src/tripwire.ts): it stops known accidents such as writes to
+ * The tripwire as a hook of its own (src/tripwire.ts; every turn runs it inside hookRunHooks, #1296, and the tests
+ * hold the runner to this one): it stops known accidents such as writes to
  * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
  * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
@@ -218,7 +219,7 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
   return { PreToolUse: [{ matcher: TRIPWIRE_MATCHER, hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
 }
 
-/** The PreToolUse hook a side question's fork gets (#932): every tool goes through src/side-guard.ts, which refuses writes. */
+/** The side question's guard as a hook of its own (#932; a fork runs it inside hookRunHooks, #1296): every tool goes through src/side-guard.ts, which refuses writes. */
 export function sideGuardHook(script = turnPins().SIDE_GUARD) {
   return { matcher: SIDE_GUARD_MATCHER, hooks: [{ type: 'command', command: hookCommand(script), timeout: 10, onFailure: 'block' }] };
 }
@@ -237,7 +238,7 @@ export function linkCheckHooks(roots: string[], script = turnPins().LINK_CHECK, 
 export { WORDING_MATCHER };
 
 /**
- * The PreToolUse hook every turn gets (src/wording.ts): it refuses once a message, card, note or a
+ * The wording check as a hook of its own (src/wording.ts; every turn runs it inside hookRunHooks, #1296): it refuses once a message, card, note or a
  * .md or .html file written into `shared` that uses a retired or misused word ("fold", "merge" for main). `shared`
  * is the scheme's shared folder and the minion's own, since people read the files in both. `sent` is a file in the turn's folder listing the sentences already refused.
  */
@@ -247,7 +248,7 @@ export function wordingHooks(shared: string[], sent: string, script = turnPins()
 }
 
 /**
- * The PreToolUse hook every turn gets (src/scheme-refs.ts): it refuses once a message or card shown in
+ * The scheme-refs check as a hook of its own (src/scheme-refs.ts; every turn runs it inside hookRunHooks, #1296): it refuses once a message or card shown in
  * this scheme whose bare #N likely means another scheme's minion. `refs` is the snapshot (writeSchemeRefs),
  * `sent` a file in the turn's folder listing the numbers already refused.
  */
@@ -257,13 +258,20 @@ export function schemeRefsHooks(refs: string, sent: string, script = turnPins().
 }
 
 /**
- * The one PreToolUse hook a turn gets (#1296, src/hook-run.ts): the side question's guard, the tripwire, the wording
+ * The PreToolUse hooks a turn gets (#1296, src/hook-run.ts): the side question's guard, the tripwire, the wording
  * and scheme-refs checks and, when the turn loads the kit, its big-read guard, in one node process instead of one each.
- * Each check runs only on its own matcher (hook-matchers.ts). The tripwire's 10 s and `onFailure: 'block'` (#817) hold for
- * the whole runner: one that times out or dies blocks the call. `cfg` is each check's own config, as its old hook took it.
+ * Each check runs only on its own matcher (hook-matchers.ts). The runner is registered on two matchers that never
+ * overlap, so a call still starts one process: the tools a hard check reads keep the tripwire's 10 s and
+ * `onFailure: 'block'` (#817), and the message and card tools only the soft checks read go through when it fails, as
+ * before. `cfg` is each check's own config, as its old hook took it.
  */
 export function hookRunHooks(cfg: HookRunConfig, script = turnPins().HOOK_RUN) {
-  return { matcher: hookRunMatcher(!!cfg.side), hooks: [{ type: 'command', command: hookCommand(script, JSON.stringify(cfg)), timeout: 10, onFailure: 'block' }] };
+  const { hard, soft } = hookRunMatchers(!!cfg.side);
+  const command = hookCommand(script, JSON.stringify(cfg));
+  return [
+    { matcher: hard, hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] },
+    ...(soft ? [{ matcher: soft, hooks: [{ type: 'command', command, timeout: 10 }] }] : []),
+  ];
 }
 
 /**
@@ -657,7 +665,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const codexTripwire = join(dir, 'codex-tripwire.json');
   files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-    hooks: { ...linkCheck, PreToolUse: [preToolUse] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+    hooks: { ...linkCheck, PreToolUse: preToolUse }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {

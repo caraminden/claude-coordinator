@@ -1,4 +1,4 @@
-// The tripwire: a PreToolUse hook the runner adds to every turn (tripwireHooks in runner.ts), for
+// The tripwire: a PreToolUse hook the runner adds to every turn (inside src/hook-run.ts, from hookRunHooks in turn-launch.ts), for
 // Taskmasters and minions in every scheme. It stops the known accidents (writes to the live database,
 // the live checkout, the service's config and units, other schemes' folders; restarting or stopping
 // the app's services; reading SSH keys, the Claude, Codex or GitHub login, the service's env file or any

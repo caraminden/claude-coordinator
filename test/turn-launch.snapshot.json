@@ -91,13 +91,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/1/shared/project\"],\"sent\":\"<ROOT>/run/turns/1-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/1-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/1-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/1/shared/project\"],\"sent\":\"<ROOT>/run/turns/1-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/1-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -286,13 +296,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/2-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/2-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/2-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/2-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/2-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -513,13 +533,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]},\"wording\":{\"shared\":[\"<ROOT>/projects/3/shared/project\"],\"sent\":\"<ROOT>/run/turns/3-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/3-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/3-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]},\"wording\":{\"shared\":[\"<ROOT>/projects/3/shared/project\"],\"sent\":\"<ROOT>/run/turns/3-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/3-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -905,13 +935,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]},\"wording\":{\"shared\":[\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/4-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/4-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/4-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false,\"envFiles\":[\"<ROOT>\"]},\"wording\":{\"shared\":[\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/4-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/4-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -1263,13 +1303,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/4/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/5-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/5-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/4/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/5-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -1451,13 +1501,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/5/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/6-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/6-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/5/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/6-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -1645,13 +1705,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/6/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/7-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/7-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/6/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/7-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -1854,13 +1924,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/7/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/8-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/8-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/7/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/8-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -2066,13 +2146,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/8/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/9-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-2/9-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/8/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-2/9-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -2260,13 +2350,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/9/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-1/10-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/person-1/10-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/9/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/person-1/10-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -2458,13 +2558,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/10/shared/project\"],\"sent\":\"<ROOT>/run/turns/11-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/11-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/11-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/10/shared/project\"],\"sent\":\"<ROOT>/run/turns/11-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/11-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -2655,13 +2765,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/11/shared/project\"],\"sent\":\"<ROOT>/run/turns/12-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/12-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/12-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/11/shared/project\"],\"sent\":\"<ROOT>/run/turns/12-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/12-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }
@@ -2844,13 +2964,23 @@
     ],
     "PreToolUse": [
      {
-      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)|(Read|Bash))$",
+      "matcher": "^(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$",
       "hooks": [
        {
         "type": "command",
         "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/12/shared/project\"],\"sent\":\"<ROOT>/run/turns/13-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/13-<TIME>/pin/kit\"}'",
         "timeout": 10,
         "onFailure": "block"
+       }
+      ]
+     },
+     {
+      "matcher": "^(?!(?:(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)|(Read|Bash))$)(?:(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)|mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan))$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "NODE_COMPILE_CACHE='<ROOT>/run/turns/13-<TIME>/pin/.compile-cache' '<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/hook-run.ts' '{\"tripwire\":{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true},\"wording\":{\"shared\":[\"<ROOT>/projects/12/shared/project\"],\"sent\":\"<ROOT>/run/turns/13-<TIME>/wording-sent\"},\"schemeRefs\":{\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs-sent\"},\"kit\":\"<ROOT>/run/turns/13-<TIME>/pin/kit\"}'",
+        "timeout": 10
        }
       ]
      }

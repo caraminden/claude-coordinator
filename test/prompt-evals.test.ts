@@ -126,4 +126,6 @@ test('ablate() empties parts, removes lines and cuts tools to their first senten
   assert.deepEqual(parts, { system: { base: ['keep me'], files: [] }, turn: { files: [], pr: ['p'] } });
   assert.deepEqual(tools.map((t) => t.description), ['Ask people a card.', 'Stays. Whole.']);
   for (const bad of [{ parts: ['nope'] }, { lines: ['not there'] }, { tools: ['nope'] }]) assert.throws(() => ablate(parts, tools, bad), /drop: no/);
+  assert.throws(() => ablate(parts, [{ name: 'one', description: 'Only one sentence.' }], { tools: ['one'] }), /one sentence already/, 'a cut that leaves the text whole tests nothing');
+  for (const bad of [null, {}, { part: ['close'] }, { parts: 'close' }, { lines: [] }, { lines: [''] }]) assert.throws(() => ablate(parts, tools, bad as any), /drop: want/);
 });

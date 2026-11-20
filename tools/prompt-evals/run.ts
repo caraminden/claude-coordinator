@@ -422,7 +422,7 @@ async function main(argv: string[]) {
     if (cmd !== 'run') throw new Error(`unknown command ${cmd}; --help`);
     const n = num('--runs', 3), budget = num('--budget', 2);
     const now = side('now', arg('--ref'), model, effort, arg('--app') && readFileSync(arg('--app')!, 'utf8'), arg('--scheme') && readFileSync(arg('--scheme')!, 'utf8'));
-    if (arg('--drop')) now.drop = JSON.parse(readFileSync(arg('--drop')!, 'utf8'));
+    if (arg('--drop')) { now.drop = JSON.parse(readFileSync(arg('--drop')!, 'utf8')); now.name += `, minus ${JSON.stringify(now.drop)}`; }
     const tier = arg('--base-model') || arg('--base-effort');
     const sides = arg('--base') || tier ? [now, side('base', arg('--base') ?? arg('--ref'), arg('--base-model') ?? model, arg('--base-effort') ?? effort)] : [now];
     const list = cases().filter((c) => !only || re(only).test(c.id));

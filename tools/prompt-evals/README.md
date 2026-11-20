@@ -54,9 +54,11 @@ citadel-heavy --here tools/prompt-eval run --ref 268638ee --app tools/prompt-eva
 
 `--drop <file>` takes text out of the tested side only, after rendering: `{"parts": ["close"], "lines": ["A Grunt starts
 fresh"], "tools": ["ask_question"]}` empties those prompt parts (`promptParts` keys, in the system prompt and the turn
-note), removes every line containing each text, and cuts each tool's description to its first sentence. A drop that
-matches nothing stops the run. A Citadel-wide section goes the `--app` way: a copy of the instructions without it.
-Compare against a run of the same version without the drop (`--base` keeps `fixture/`, so pass `--app` to both).
+note), removes every prompt entry containing each text (an entry is one line of the minion prompt, but the Citadel-wide
+and scheme instructions are one entry each), and cuts each tool's description to its first sentence. A drop that
+matches or cuts nothing stops the run, so pick cases whose role has the part (`--case` with the minion cases: a
+Taskmaster's prompt has no `close`). A Citadel-wide section goes the `--app` way: a copy of the instructions without it.
+`--base` keeps `fixture/`, so compare against a second run of the same `--ref` and `--app` with no drop, not `--base`.
 `reports/prompt-ablation-2026-11.md` in the shared folder is the first per-section run.
 
 ## A case (`cases/<id>.json`)

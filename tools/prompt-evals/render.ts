@@ -12,12 +12,16 @@ export type Spec = {
   appText: string;        // the Citadel-wide instructions
   schemeText: string;     // the scheme's own
   dirs: { files: string; shared: string; tickets: string; cwd: string };
-  // Ablation (#1277): prompt parts to empty, lines to remove (any entry containing the text), tools cut to their first sentence.
+  // Ablation (#1277): prompt parts to empty, entries to remove (any entry containing the text; an instructions block is one entry), tools cut to their first sentence.
   drop?: { parts?: string[]; lines?: string[]; tools?: string[] };
 };
 
 /** Takes `drop` out of a rendering. A part, line or tool that matches nothing throws: a stale drop would test nothing. */
 export function ablate(parts: Record<'system' | 'turn', Record<string, string[]>>, tools: { name: string; description?: string }[], drop: NonNullable<Spec['drop']>) {
+  const keys = Object.keys(drop ?? {});
+  if (!drop || typeof drop !== 'object' || !keys.length || keys.some((k) => !['parts', 'lines', 'tools'].includes(k))
+    || keys.some((k) => !Array.isArray((drop as any)[k]) || !(drop as any)[k].length || (drop as any)[k].some((x: unknown) => typeof x !== 'string' || !x)))
+    throw new Error('drop: want {"parts"?, "lines"?, "tools"?}, each a non-empty list of non-empty strings');
   const all = { ...parts.system, ...parts.turn };
   for (const k of drop.parts ?? []) {
     if (!all[k]?.length) throw new Error(`drop: no prompt part "${k}" with text`);
@@ -31,7 +35,9 @@ export function ablate(parts: Record<'system' | 'turn', Record<string, string[]>
   for (const name of drop.tools ?? []) {
     const t = tools.find((x) => x.name === name);
     if (!t?.description) throw new Error(`drop: no tool "${name}" with a description`);
-    t.description = t.description.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? t.description;
+    const cut = t.description.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? t.description;
+    if (cut === t.description) throw new Error(`drop: tool "${name}" is one sentence already; nothing to cut`);
+    t.description = cut;
   }
 }
 

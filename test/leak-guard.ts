@@ -1,7 +1,8 @@
 // The global setup of npm test and of tools/run-tests.sh's full run: fail the run if it leaves processes behind, such as a fake claude whose
 // turn outlived its test (#271). It names and kills this user's processes that started during the run
-// and name a test's scratch folder that is gone: on a shared /tmp, another run's live work still has its own.
-import { existsSync } from 'node:fs';
+// and name a test's scratch folder that is gone, and are the run's own (descended from it, or orphaned by it): on a shared /tmp,
+// another run's or build's live work is left alone (#1223).
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { procsUnder } from './helpers.ts';
@@ -10,6 +11,36 @@ const tmp = tmpdir();
 const scratch = () => procsUnder([tmp]);
 /** A command line names a path under the temp folder whose top folder has been deleted. */
 const orphaned = (cmd: string) => cmd.split(' ').some((a) => a.startsWith(`${tmp}/`) && !existsSync(join(tmp, a.slice(tmp.length + 1).split('/')[0])));
+/** [ppid, comm] of a live process, or undefined when it is gone. */
+function parentOf(pid: number): [number, string] | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const open = stat.indexOf('(');
+    const close = stat.lastIndexOf(')');
+    return [Number(stat.slice(close + 2).split(' ')[1]), stat.slice(open + 1, close)];
+  } catch {}
+}
+/**
+ * Whether a process is this run's own: a descendant of `root` (the runner), or one whose parent has gone and left it to init or
+ * systemd (a detached fake claude outliving its server, #271). Another run's or build's live process has a parent of its own
+ * outside this run and is left alone, even if its command line names a temp folder this run can't see.
+ */
+export function ownedByRun(pid: number, root = process.pid): boolean {
+  let cur = pid;
+  for (let i = 0; i < 64; i++) {
+    const p = parentOf(cur);
+    if (!p) return false;
+    const [ppid] = p;
+    if (ppid === root) return true;
+    if (ppid <= 1) return cur === pid; // reparented to init: ours only if it is the leftover itself
+    if (cur === pid) {
+      const parent = parentOf(ppid);
+      if (parent && /^(systemd|init)$/.test(parent[1])) return true;
+    }
+    cur = ppid;
+  }
+  return false;
+}
 let before = new Set<number>();
 
 export async function globalSetup() {
@@ -22,7 +53,7 @@ export function globalTeardown() {
   let left: [number, string][] = [];
   // A process a test has just stopped may take a moment to go.
   for (let i = 0; i < 40; i++) {
-    left = [...scratch()].filter(([pid, cmd]) => !before.has(pid) && orphaned(cmd));
+    left = [...scratch()].filter(([pid, cmd]) => !before.has(pid) && orphaned(cmd) && ownedByRun(pid));
     if (!left.length) return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }

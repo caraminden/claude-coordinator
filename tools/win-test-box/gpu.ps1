@@ -101,8 +101,9 @@ public static class CitadelDxgi {
       hr = a.GetDesc1(out d);
       Marshal.ReleaseComObject(a);
       if (hr != 0) throw new Exception("GetDesc1 failed: 0x" + hr.ToString("X8"));
-      r.Add(string.Format("{0} ({1}, vendor {2:X4}, {3} MB of its own memory)", d.Description,
-        (d.Flags & 2) != 0 ? "software" : "hardware", d.VendorId, (ulong)d.DedicatedVideoMemory / 1048576));
+      // Microsoft's (vendor 1414) are the CPU: Basic Render says "hardware" but draws with WARP.
+      r.Add(string.Format("{0} ({1}, {2} MB of its own memory)", d.Description,
+        d.VendorId == 0x1414 ? "software, on the CPU" : "hardware, vendor " + d.VendorId.ToString("X4"), (ulong)d.DedicatedVideoMemory / 1048576));
     }
     Marshal.ReleaseComObject(f);
     return r;

@@ -1957,15 +1957,17 @@ async function approve(args: any): Promise<string> {
   return JSON.stringify({ behavior: 'deny', message });
 }
 
-/** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
 /**
  * The overlap check a person's Settings save gets (#1162), before the Taskmaster saves rule text (#1211): refused with
  * what already says the new words, unless it passes repeats_ok.
  */
-async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<void> {
-  if (args.repeats_ok === true) return;
-  const { found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text: wholeText(args) });
-  if (!found.length) return;
+async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<string> {
+  const text = wholeText(args);
+  if (args.repeats_ok === true) return '';
+  let found: any[];
+  // Like a Settings save, a check that fails never blocks the save: it says so instead.
+  try { ({ found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
+  if (!found.length) return '';
   const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
   throw new Error([
     `Nothing was saved: the new words repeat what is already written elsewhere.`,
@@ -1974,6 +1976,7 @@ async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<voi
   ].join('\n'));
 }
 
+/** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
 function wholeText(args: any): string {
   if (typeof args.instructions !== 'string') {
     throw new Error(`instructions is required and must be text: send the whole new text. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
@@ -2158,9 +2161,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
-      await repeatsFirst('citadel', args);
+      const unchecked = await repeatsFirst('citadel', args);
       const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
-      return app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`;
+      return (app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`) + unchecked;
     }
     case 'list_contraptions': {
       const all = await call('GET', '/api/contraptions');
@@ -2354,9 +2357,9 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'rotate_contraption_keys':
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
-      await repeatsFirst('scheme', args);
+      const unchecked = await repeatsFirst('scheme', args);
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
-      return project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.';
+      return (project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.') + unchecked;
     }
     case 'message_ticket': {
       const ticketId = await id(args);

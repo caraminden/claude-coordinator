@@ -49,8 +49,11 @@ export async function render(dir: string, s: Spec): Promise<{ system: string; tu
   const ticket = { id: 900_000 + s.number, project_id: 2, number: s.role === 'taskmaster' ? null : s.number, title: s.title,
     kind: s.role === 'taskmaster' ? 'coordinator' : 'ticket', status: 'idle', cwd: s.dirs.cwd, branch: `ticket/${s.number}-replay`,
     permission_mode: 'bypassPermissions', model: null, effort: null, workflow: 0, build: null, plugin_dirs: '', coordinator_of: null, created_by: 'replay' };
-  const parts = m.promptParts(project, ticket, s.dirs.files, s.dirs.shared, s.dirs.tickets, null, [], true, s.appText);
+  const args = [project, ticket, s.dirs.files, s.dirs.shared, s.dirs.tickets, null, [], true, s.appText];
   const text = (p: Record<string, string[]>) => Object.values(p).flat().join('\n');
+  // Before the turn note split off (#878), systemPrompt() returned the whole prompt as one string.
+  if (!m.promptParts) return { system: m.systemPrompt(...args), turn: '', tools: await tools(dir, s.role) };
+  const parts = m.promptParts(...args);
   return { system: text(parts.system), turn: text(parts.turn), tools: await tools(dir, s.role) };
 }
 

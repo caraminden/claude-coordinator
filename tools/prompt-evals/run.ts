@@ -132,14 +132,14 @@ const cleanEnv = (tmp: string) => ({ ...Object.fromEntries(Object.entries(proces
 // As a real turn's (src/runner.ts): tools Citadel turns never get.
 const DISALLOWED = ['AskUserQuestion', 'Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ListAgents', 'ReportFindings'];
 
-/** The prompt files (src, kit, CLAUDE.md, .claude) at a ref, or the working tree when there is none. */
+/** The prompt files (src, kit, CLAUDE.md, .claude, and public, which src imports) at a ref, or the working tree when there is none. */
 function version(ref: string | undefined, work: string): { dir: string; name: string } {
   if (!ref) return { dir: REPO, name: 'working tree' };
   const sha = git('-C', REPO, 'rev-parse', '--verify', `${ref}^{commit}`).trim();
   const dir = join(work, `v-${sha.slice(0, 10)}`);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
-    const paths = ['src', 'kit', 'CLAUDE.md', '.claude'].filter((p) => { try { git('-C', REPO, 'cat-file', '-e', `${sha}:${p}`); return true; } catch { return false; } });
+    const paths = ['src', 'kit', 'public', 'CLAUDE.md', '.claude'].filter((p) => { try { git('-C', REPO, 'cat-file', '-e', `${sha}:${p}`); return true; } catch { return false; } });
     execFileSync('bash', ['-c', 'git -C "$1" archive "$2" "${@:4}" | tar -x -C "$3"', '_', REPO, sha, dir, ...paths]);
   }
   return { dir, name: `${ref} (${sha.slice(0, 8)})` };

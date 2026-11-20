@@ -157,6 +157,8 @@ export function moveIn(line: number[], seqs: number[], moved: number): number[] 
 /** A landing's phase (queue_phase's words in land.sh and deploy.sh) as its stage, badge word and detail. */
 export function landPhase(phase: string): { stage: string; word: string; key: string; text: string } {
   const p = phase.replace(/ since \d\d:\d\d$/, '');
+  // CI gave no answer and perigee is too busy for the suite (#1254): it asks CI again until one of them is free.
+  if (/^waiting for CI or a quiet perigee/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p };
   if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit' };
   // land.sh runs the suite itself only when CI couldn't answer (its CI FALLBACK, #523).
   if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee' };

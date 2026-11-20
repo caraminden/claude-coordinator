@@ -1,10 +1,10 @@
 // tools/land.sh itself: the rebase, its test run or CI gate, conflicts and refusals.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
-import { land, env, git, setup, landAsync, tickets, issued, ci } from './land-fixture.ts';
+import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
@@ -23,7 +23,7 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
 test("a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)", () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
-  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');
@@ -53,7 +53,7 @@ test("the test run doesn't get the deploy lock's fd 9", () => {
   const r = setup();
   const tools = join(r.dir, 'tools');
   mkdirSync(tools);
-  for (const f of ['land.sh', 'deploy-queue.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(tools, f));
+  for (const f of ['land.sh', 'deploy-queue.sh', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(tools, f));
   writeFileSync(join(tools, 'run-tests.sh'), '#!/usr/bin/env bash\n[ -e /proc/self/fd/9 ] && echo open >"$FD9_NOTE" || echo closed >"$FD9_NOTE"\n', { mode: 0o755 });
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = spawnSync('bash', [join(tools, 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FD9_NOTE: join(r.dir, 'fd9') } });
@@ -511,6 +511,138 @@ test('after CI gave no answer in time, the landings of the next minutes skip the
   assert.equal(c.localRuns(), 2);
 });
 
+// #1254 (Josh, 2026-11-20: "only if and when perigee has plenty of resources, just make sure we play nice"): the suite runs
+// here only while perigee is quiet; until then the ship keeps waiting for CI, and a long busy spell refuses it.
+const procAt = (r: ReturnType<typeof setup>, o?: Parameters<typeof quietProc>[1]) => {
+  const proc = quietProc(join(r.dir, 'proc'), o);
+  return { LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(r.dir, 'heavy') };
+};
+test('on a quiet perigee the fallback runs the suite in citadel-heavy\'s slot, named, and lands', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const p = procAt(r);
+  const seen = join(r.dir, 'seen');
+  const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', TEST_SEEN: seen, ...p });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 1s/);
+  const cores = Number(spawnSync('nproc', { encoding: 'utf8' }).stdout.trim());
+  // nice 19, and half run-tests.sh's usual (cores + 1) / 2 files at once (the fixture's empty CPU weight makes no scope).
+  assert.equal(readFileSync(seen, 'utf8'), `nice 19 concurrency ${Math.floor((Math.floor((cores + 1) / 2) + 1) / 2)}\n`);
+  assert.doesNotMatch(res.stderr, /perigee is busy/);
+  assert.equal(c.localRuns(), 1);
+  assert.match(readFileSync(join(p.CITADEL_HEAVY_DIR, 'history'), 'utf8'), /\tland\.sh's suite for ticket\/1-x \(CI fallback\)\t/, 'the run held the heavy slot');
+});
+
+// Each flips its world (CI answers, a runner comes back, perigee goes quiet) only once land.sh has said perigee is busy.
+const once = (act: () => void) => { let done = false; return (s: string) => { if (!done && /perigee is busy/.test(s)) { done = true; act(); } }; };
+
+test('on a busy perigee the ship keeps waiting for CI, and lands on its answer without running the suite here', async () => {
+  for (const [name, o] of [['CPU pressure', { psi: 60 }], ['load', { load: 999 }], ['memory', { freePct: 5 }]] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const gate = join(r.dir, 'ci-gate');
+    const res = await c.runAsync({ FAKE_CI: 'green', FAKE_CI_GATE: gate, LAND_CI_TIMEOUT: '1', LAND_QUIET_POLL: '0.2', ...procAt(r, o) }, once(() => writeFileSync(gate, '')));
+    assert.equal(res.status, 0, `${name}: ${res.stderr}`);
+    assert.match(res.stderr, /waiting for CI or a quiet perigee: CI: CI didn't finish within 1s, but perigee is busy \(.+\), so this keeps asking CI/, name);
+    assert.match(res.stderr, /CI passed/, name);
+    assert.doesNotMatch(res.stderr, /CI FALLBACK/, name);
+    assert.equal(c.localRuns(), 0, name);
+  }
+});
+
+test('with no runner online and a busy perigee, the ship asks CI again until a runner is back, and lands on CI', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const runners = join(r.dir, 'runners');
+  writeFileSync(runners, '0');
+  const res = await c.runAsync({ FAKE_RUNNERS_FILE: runners, LAND_QUIET_POLL: '0.2', ...procAt(r, { load: 999 }) }, once(() => writeFileSync(runners, '1')));
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI: no citadel-ci-linux runner is online.*but perigee is busy/);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(c.localRuns(), 0);
+});
+
+test('a busy perigee that turns quiet runs the suite then, whether CI was waited on or never asked', async () => {
+  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1' }, { LAND_CI: '0' }]) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const p = procAt(r, { psi: 60 });
+    const res = await c.runAsync({ ...extra, ...p, LAND_QUIET_POLL: '0.2' }, once(() => quietProc(p.LAND_QUIET_PROC)));
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /but perigee is busy \(CPU pressure 60% \(quiet is under 20%\)\).*CI FALLBACK/s);
+    assert.equal(c.localRuns(), 1);
+    assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  }
+});
+
+// quiet() reads the load to the hundredth, and a reading it can't take counts as busy.
+test('quiet is under half the cores to the hundredth of a load, and a missing reading is busy', () => {
+  const cores = Number(spawnSync('nproc', { encoding: 'utf8' }).stdout.trim());
+  for (const [name, load, gone, busy] of [
+    ['just under half', cores / 2 - 0.01, '', null],
+    ['exactly half', cores / 2, '', new RegExp(`load ${(cores / 2).toFixed(2)} on ${cores} cores`)],
+    ['no pressure file', 0, 'pressure/cpu', /no CPU pressure reading/],
+    ['no meminfo', 0, 'meminfo', /no memory reading/],
+  ] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const p = procAt(r, { load });
+    if (gone) rmSync(join(p.LAND_QUIET_PROC, gone));
+    const res = c.run({ LAND_CI: '0', LAND_QUIET_LIMIT: '0', ...p });
+    if (busy) {
+      assert.equal(res.status, 1, `${name}: ${res.stderr}`);
+      assert.match(res.stderr, busy, name);
+      assert.equal(c.localRuns(), 0, name);
+    } else {
+      assert.equal(res.status, 0, `${name}: ${res.stderr}`);
+      assert.equal(c.localRuns(), 1, name);
+    }
+  }
+});
+
+test('CI with no answer and a perigee busy past the limit refuse the ship: main untouched, no suite run', async () => {
+  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1' }, { LAND_CI: '0' }]) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const main = git(r.source, 'rev-parse', 'main');
+    const heavy = join(r.dir, 'heavy');
+    mkdirSync(heavy);
+    // A heavy job holding the slot is busy too, and named.
+    writeFileSync(join(heavy, 'slot-0.who'), 'peek #9 cargo test');
+    const holder = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '30'], { stdio: 'ignore' });
+    try {
+      await until('the slot is held', () => spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status !== 0);
+      const res = c.run({ ...extra, ...procAt(r), LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2' });
+      assert.equal(res.status, 1, res.stderr);
+      assert.match(res.stderr, /CI and perigee both busy, try again: CI: .*; perigee for 0 min: perigee's heavy slot is taken \(peek #9 cargo test\)/);
+      assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+      assert.equal(c.localRuns(), 0);
+      assert.equal(git(r.source, 'rev-parse', 'main'), main);
+    } finally { holder.kill(); }
+  }
+});
+
+test("a busy perigee doesn't take the recent no-answer note's shortcut: it asks CI again and waits for it", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'one\n');
+  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', ...procAt(r) });
+  assert.equal(res.status, 0, res.stderr);
+  r.commit(r.wt, 'b.txt', 'two\n');
+  res = c.run({ ...procAt(r, { load: 999 }) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /so this one doesn't wait for it/);
+  assert.match(res.stderr, /CI passed/);
+  assert.equal(c.localRuns(), 1, 'only the first, quiet, landing ran the suite here');
+});
+
 // #900: a skewed runner clock lasts hours, and each landing spent a CI run on learning it again.
 test("a red in the runner's clock step leaves the note, so the next landing doesn't spend a CI run on it", () => {
   const r = setup();
@@ -880,9 +1012,11 @@ test('a deploy that fails before going live puts main back', () => {
 });
 
 // Other schemes' builds can hold every heavy slot for an hour. A landing that waited for one while
-// holding the deploy lock held up every other landing (#499): landings run their tests without one.
-test('two landings both land while other jobs hold every heavy slot', async () => {
+// holding the deploy lock held up every other landing (#499): a landing CI answers never touches a slot. One CI can't
+// answer waits for a quiet perigee (#1254), the free slot included, and is refused after LAND_QUIET_LIMIT, not an hour.
+test('two landings both land on CI while other jobs hold every heavy slot', async () => {
   const r = setup();
+  const c = ci(r);
   const wt2 = join(r.dir, 'wt2');
   git(r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-y', wt2);
   r.commit(r.wt, 'b.txt', 'one\n');
@@ -894,11 +1028,12 @@ test('two landings both land while other jobs hold every heavy slot', async () =
   const build = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '600'], { detached: true, stdio: 'ignore' });
   try {
     await until('the lock to be held', async () => spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status !== 0);
-    const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), CITADEL_HEAVY_DIR: heavy };
-    const [a, b] = await Promise.all([landAsync(r.wt, extra, 60_000), landAsync(wt2, extra, 60_000)]);
-    assert.equal(a.status, 0, `first landing: ${a.stderr}`);
-    assert.equal(b.status, 0, `second landing: ${b.stderr}`);
-    assert.doesNotMatch(a.stderr + b.stderr, /heavy slots .* busy/, 'neither waited on the build');
+    for (const wt of [r.wt, wt2]) {
+      const res = c.run({ CITADEL_HEAVY_DIR: heavy }, [], wt);
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stderr, /CI passed/);
+      assert.doesNotMatch(res.stderr, /heavy slot|perigee is busy/, 'it never waited on the build');
+    }
     assert.deepEqual(git(r.source, 'log', '--format=%s', 'main').split('\n').sort(), ['b.txt: one', 'base', 'c.txt: two']);
   } finally {
     try { process.kill(-build.pid!, 'SIGKILL'); } catch {}

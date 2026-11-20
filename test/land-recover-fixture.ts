@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { after } from 'node:test';
 import { scriptEnv } from './script-env.ts';
 import { git } from './git.ts';
+import { quietProc } from './quiet-proc.ts';
 import { until as waitUntil } from './wait.ts';
 export { git };
 
@@ -18,6 +19,7 @@ const root = mkdtempSync(join(tmpdir(), 'land-recover-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const env = {
   ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined,
+  CITADEL_HEAVY_DIR: join(root, 'heavy'), LAND_QUIET_PROC: quietProc(join(root, 'proc')), CITADEL_HEAVY_PRESSURE: join(root, 'proc', 'pressure', 'cpu'),
   NODE_TEST_CONTEXT: undefined, DEPLOY_TEST_CPU_WEIGHT: '', LAND_CI: '0', LAND_FIX: undefined, LAND_PREFLIGHT: undefined, DEPLOY_REMOTE: '', DEPLOY_NOW: undefined,
   DEPLOY_HEALTHY_WAIT: '2', DEPLOY_SETTLE: '1', DEPLOY_QUEUE_STALL: '120', DEPLOY_QUEUE_POLL: '1', DEPLOY_IDLE_TRIES: '30', DEPLOY_TEST_TIMEOUT: '120', DEPLOY_BACKUPS: '3',
   GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null',
@@ -31,7 +33,7 @@ export async function pipe(t: { after: (fn: () => void) => void }, worktrees: nu
   mkdirSync(join(source, 'tools'), { recursive: true });
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
-  for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(source, 'tools', f));
+  for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(tools, f), join(source, 'tools', f));
   // TEST_MARK gets a line per run; TEST_GATE holds a run until that file is there; TEST_FAIL makes it red.
   writeFileSync(join(source, 'test', 'ok.test.mjs'), `import { appendFileSync, existsSync } from 'node:fs';
 import { test } from 'node:test';

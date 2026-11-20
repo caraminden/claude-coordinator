@@ -106,11 +106,12 @@ async function main(argv: string[]): Promise<number> {
   let sha: string;
   try {
     sha = snapshot();
-    git('push', '-q', 'origin', `${sha}:${ref}`);
+    // --no-verify: a repo's own pre-push hook (Peek's runs its whole check) is for its branches, not this scratch ref (#1254).
+    git('push', '-q', '--no-verify', 'origin', `${sha}:${ref}`);
   } catch (e: any) {
     throw new Fallback(`pushing the snapshot to GitHub failed (${String(e.stderr || e.message).trim().split('\n').pop()})`);
   }
-  const unref = () => { try { git('push', '-q', 'origin', `:${ref}`); } catch { /* a stray ref costs nothing */ } };
+  const unref = () => { try { git('push', '-q', '--no-verify', 'origin', `:${ref}`); } catch { /* a stray ref costs nothing */ } };
   let runId: number | null = null;
   let started = false;
   let cancelled = false;

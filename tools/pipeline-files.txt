@@ -34,6 +34,7 @@ kit/skills/scheme-setup/templates/
 test/script-env.ts
 test/git.ts
 test/wait.ts
+test/quiet-proc.ts
 test/land-fixture.ts
 test/land-recover-fixture.ts
 test/scheme-setup-land-fixture.ts

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
-import { median, moveIn, procAlive, slotHeld, Waits } from '../src/waits.ts';
+import { landPhase, median, moveIn, procAlive, slotHeld, Waits } from '../src/waits.ts';
 import { spawn } from 'node:child_process';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
@@ -289,4 +289,9 @@ test('a move on a target that shows part of the line moves only that landing (#1
   assert.deepEqual(moveIn([5, 6, 7, 8], [7, 8, 6], 6), [5, 7, 8, 6], 'dragged to the back: just behind the one it goes after');
   assert.deepEqual(moveIn([5, 6, 7, 8], [6, 7, 8], 7), [5, 6, 7, 8], 'dropped where it was');
   assert.deepEqual(moveIn([5, 6], [9, 6], 6), [5, 6], 'the rest of what it names is gone: it keeps its place');
+});
+
+test("a ship waiting for CI or a quiet perigee shows that wait, how long so far included, not a plain CI wait (#1254)", () => {
+  assert.deepEqual(landPhase('waiting for CI or a quiet perigee, 5 min so far'), { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI or a quiet perigee, 5 min so far' });
+  assert.equal(landPhase('waiting for CI since 14:02').text, 'waiting for CI on the rebased commit');
 });

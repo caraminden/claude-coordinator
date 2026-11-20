@@ -110,6 +110,19 @@ test('a job runs the working copy on CI, prints its output, exits with its statu
   assert.deepEqual([line[1], line[3], line[6]], ['Peek #9', 'ci:o/r', '3']);
 });
 
+// Peek's pre-push hook runs its whole check.sh and failed every snapshot push, so its jobs always ran on perigee (#1254).
+test("the repo's own pre-push hook doesn't stop the snapshot push or its clean-up: the job still runs on CI", () => {
+  const r = repo();
+  const hooks = join(r.d, '.git', 'hooks');
+  writeFileSync(join(hooks, 'pre-push'), '#!/bin/sh\necho "warning: tools/land.sh has 1662 lines" >&2\nexit 1\n');
+  chmodSync(join(hooks, 'pre-push'), 0o755);
+  const res = run(r, 'ok');
+  assert.equal(res.status, 3, res.stderr);
+  assert.match(res.stderr, /running on o\/r's CI, not here/);
+  assert.doesNotMatch(res.stdout, /ran here/);
+  assert.equal(git(r.bare, 'for-each-ref'), '', 'the scratch ref is gone again');
+});
+
 test('a job no runner takes is cancelled on CI and runs here instead', () => {
   const r = repo();
   const res = run(r, 'queued', { CITADEL_HEAVY_CI_QUEUE: '0.3' });

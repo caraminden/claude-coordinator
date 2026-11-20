@@ -634,6 +634,7 @@ test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase('land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara\'s desktop (at most 6 min, then it runs here)\n'), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: only flakes failed (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: CI FALLBACK: no runner. Running the full suite on perigee instead.\n'), 'landing: running tests');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: waiting for CI or a quiet perigee: CI: no runner, but perigee is busy (load 40.00 on 16 cores (quiet is under half)), so this keeps asking CI\n'), 'landing: waiting for CI or a quiet perigee');
   assert.equal(landPhase('land: waiting for CI on abc\nqueue: waiting for the restart ahead to have its verdict; main and the live checkout stay as they are until then\n'), 'landing: in line');
   assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');
   assert.equal(landPhase('land: smoke: checking ticket/1-x before it queues\nland: smoke: running 5 test files\n'), 'landing: smoke check');

@@ -314,6 +314,7 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
 const PHASES: [RegExp, string][] = [
   [/^(deploy: |land: main is now at )/, 'deploying'],
+  [/^land: waiting for CI or a quiet perigee/, 'waiting for CI or a quiet perigee'],
   [/^land: (waiting for CI|only flakes failed.*running CI once more)/, 'waiting on CI'],
   [/^land: (running |CI FALLBACK)/, 'running tests'],
   [/^land: (rebasing|merging main)/, 'rebasing'],

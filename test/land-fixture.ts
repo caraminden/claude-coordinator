@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { after } from 'node:test';
 import { scriptEnv } from './script-env.ts';
 import { git } from './git.ts';
-export { git };
+import { quietProc } from './quiet-proc.ts';
+export { git, quietProc };
 
 // tools/land.sh on throwaway repos: a scheme repo on main, a minion worktree, and a live clone. The
 // worktree's tools/deploy.sh is a stand-in that notes whether it got the lock, and fails on request. FAKE_DEPLOY_LOG gets
@@ -21,7 +22,8 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_* would have the real deploy.sh report to the live server; CITADEL_HEAVY_* would queue it in the host's slots;
 // The variables the scripts export (test/script-env.ts), set when a real land runs these tests, would have a test's deploy.sh skip its own lock
 // ("flock: 9: Bad file descriptor") or its tests; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope.
-export const env = { ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), DEPLOY_TEST_CPU_WEIGHT: '', NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const quiet = quietProc(join(root, 'proc'));
+export const env = { ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), LAND_QUIET_PROC: quiet, CITADEL_HEAVY_PRESSURE: join(quiet, 'pressure', 'cpu'), DEPLOY_TEST_CPU_WEIGHT: '', NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 
 let n = 0;
 export function setup() {
@@ -30,8 +32,8 @@ export function setup() {
   mkdirSync(join(source, 'tools'), { recursive: true });
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
-  // TEST_RUNS: a file that gets a line per test run, naming the checkout it ran in.
-  writeFileSync(join(source, 'test', 'ok.test.mjs'), "import { appendFileSync } from 'node:fs';\nif (process.env.TEST_RUNS) appendFileSync(process.env.TEST_RUNS, process.cwd() + '\\n');\nif (process.env.FAIL_TESTS) throw new Error('red');\n");
+  // TEST_RUNS: a file that gets a line per test run, naming the checkout it ran in; TEST_SEEN: its niceness and how many files run at once.
+  writeFileSync(join(source, 'test', 'ok.test.mjs'), "import { appendFileSync } from 'node:fs';\nif (process.env.TEST_RUNS) appendFileSync(process.env.TEST_RUNS, process.cwd() + '\\n');\nif (process.env.TEST_SEEN) appendFileSync(process.env.TEST_SEEN, `nice ${(await import('node:os')).getPriority()} concurrency ${process.env.CITADEL_TEST_CONCURRENCY}\\n`);\nif (process.env.FAIL_TESTS) throw new Error('red');\n");
   writeFileSync(join(source, 'tools', 'deploy.sh'), `#!/usr/bin/env bash
 lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
 flock -n "$lock" true && held=no || held=yes
@@ -94,7 +96,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166);
-// FAKE_CI_GATE: every run stays in progress until that file exists.
+// FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
   git(r.dir, 'init', '-q', '--bare', hub);
@@ -128,7 +130,7 @@ case "$*" in
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
-  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; echo "\${FAKE_RUNNERS:-1}" ;;
+  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
     echo "not ok 1 - the red test's output (run $3)"
@@ -153,6 +155,8 @@ esac
   const testRuns = join(r.dir, 'test-runs');
   return {
     run: (extra: Record<string, string> = {}, args: string[] = [], cwd = r.wt) => r.run({ PATH: `${bin}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: testRuns, ...extra }, args, cwd),
+    // run, but asynchronous: seen(stderr so far) acts on what land.sh has said (#1254's busy perigee turns quiet).
+    runAsync: (extra: Record<string, string>, seen: (stderr: string) => void) => landAsync(r.wt, { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${bin}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: testRuns, ...extra }, 90_000, seen),
     calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8') : ''),
     localRuns: () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n').length : 0),
     refs: () => git(hub, 'for-each-ref', '--format=%(refname)'),

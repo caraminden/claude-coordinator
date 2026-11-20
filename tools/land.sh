@@ -18,9 +18,9 @@
 #    together make is refused in a second or two, before a CI run is spent on it.
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
 #    (.github/workflows/tests.yml) and this waits for that run; when CI can't answer it says CI FALLBACK and runs
-#    the suite here (tools/run-tests.sh). See "The gate" below. The run here is not in a citadel-heavy slot: the
-#    deploy lock already lets only one landing test at a time, and waiting on a slot other schemes' builds can
-#    hold for an hour, while holding the lock, starved every other landing (#499).
+#    the suite here (tools/run-tests.sh), but only once perigee is quiet (#1254: quiet() below), in citadel-heavy's
+#    slot at nice 19 and half concurrency. See "The gate" below. It waits for that slot only when quiet() saw it
+#    free: an hour's wait on a slot other schemes' builds held, while holding the lock, starved every landing (#499).
 # 3. Fast-forwards main in the scheme repo to the branch.
 # 4. Runs tools/deploy.sh (it inherits the lock, and skips its own test run when the live checkout
 #    lands on the commit that just passed). If that deploys nothing because a check failed and
@@ -789,6 +789,47 @@ CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
+# Perigee runs a ship's suite only while it is quiet (#1254, Josh 2026-11-20: "only if and when perigee has plenty of
+# resources, just make sure we play nice and that it doesnt affect performance"): CPU pressure (some avg60) under
+# QUIET_PSI %, the 1-minute load under half the cores, at least QUIET_MEM % of memory available, and citadel-heavy's
+# plain slot and line free. Otherwise the ship keeps waiting for CI, and after QUIET_LIMIT s of a busy perigee it is refused.
+# The kit's land template has no such rule because it has no fallback: with no answer from CI it exits 75 and runs nothing.
+# A reading it can't take counts as busy: no evidence of quiet is no quiet. LAND_QUIET_PROC points at a fake /proc, for tests.
+QUIET_PROC=${LAND_QUIET_PROC:-/proc} QUIET_PSI=${LAND_QUIET_PSI:-20} QUIET_MEM=${LAND_QUIET_MEM:-25}
+QUIET_LIMIT=${LAND_QUIET_LIMIT:-1800} QUIET_POLL=${LAND_QUIET_POLL:-30}
+heavy_dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
+busy='' busy_from='' busy_told=''
+# 0 when perigee is quiet; else 1, with what is busy in $busy.
+quiet() {
+  local line load cores total avail
+  busy=''
+  cores=$(nproc 2>/dev/null || echo 2)
+  if ! { line=$(grep -m 1 '^some ' "$QUIET_PROC/pressure/cpu" 2>/dev/null) && [[ $line =~ avg60=([0-9]+) ]]; }; then busy+="no CPU pressure reading, "
+  elif [ "$((10#${BASH_REMATCH[1]}))" -ge "$QUIET_PSI" ]; then busy+="CPU pressure ${BASH_REMATCH[1]}% (quiet is under $QUIET_PSI%), "; fi
+  # In hundredths, so 2.75 on 5 cores is busy.
+  if ! { read -r load _ 2>/dev/null <"$QUIET_PROC/loadavg" && [[ $load =~ ^([0-9]+)\.([0-9]{2}) ]]; }; then busy+="no load reading, "
+  elif [ $((10#${BASH_REMATCH[1]}${BASH_REMATCH[2]} * 2)) -ge $((cores * 100)) ]; then busy+="load $load on $cores cores (quiet is under half), "; fi
+  total=$(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null) avail=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null)
+  if ! [[ $total =~ ^[0-9]+$ && $avail =~ ^[0-9]+$ ]] || [ "$total" -le 0 ]; then busy+="no memory reading, "
+  elif [ $((avail * 100 / total)) -lt "$QUIET_MEM" ]; then busy+="$((avail * 100 / total))% of memory free (quiet is $QUIET_MEM% or more), "; fi
+  # Only looked at, not held: a job that takes it before the run below makes that run wait, but no longer than the busy limit.
+  if [ -e "$heavy_dir/slot-0" ] && ! flock -n "$heavy_dir/slot-0" true 2>/dev/null; then busy+="perigee's heavy slot is taken ($(head -c 120 "$heavy_dir/slot-0.who" 2>/dev/null || echo '?')), "; fi
+  if [ -e "$heavy_dir/queue" ] && ! flock -n "$heavy_dir/queue" true 2>/dev/null; then busy+="jobs are in line for that slot, "; fi
+  busy=${busy%, }
+  [ -z "$busy" ]
+}
+# Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
+busy_wait() {
+  [ -n "$busy_from" ] || busy_from=$SECONDS
+  local waited=$((SECONDS - busy_from))
+  [ "$waited" -lt "$QUIET_LIMIT" ] || refuse "CI and perigee both busy, try again: CI: $1; perigee for $((waited / 60)) min: $busy. So $untouched"
+  # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
+  if [ -z "$busy_told" ] || [ $((SECONDS - busy_told)) -ge 300 ]; then
+    say "waiting for CI or a quiet perigee: CI: $1, but perigee is busy ($busy), so this keeps asking CI and runs the suite here only once perigee is quiet (refused after $((QUIET_LIMIT / 60)) min, $((waited / 60)) min so far)"
+    queue_phase "waiting for CI or a quiet perigee, $((waited / 60)) min so far"
+    busy_told=$SECONDS
+  fi
+}
 # What gh or git said on stderr ($state/ci.err), as " (<its first lines>)" (git's "To <remote>" left out) for a reason (#553 F12d: a rate limit, a missing gh
 # and a rejected push all read alike). Nothing when it said nothing.
 ci_said() {
@@ -813,7 +854,7 @@ ci_done() {
 ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
 # 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online step stale='' started=$SECONDS waited ci_taken=''
+  local url online step stale='' started=$SECONDS waited ci_taken='' nap
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
@@ -822,7 +863,8 @@ ci_gate() {
   local down_at='' down_why='' now
   now=$(date +%s)
   read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
-  if [[ $down_at =~ ^[0-9]+$ ]] && [ $((now - down_at)) -lt "$CI_DOWN" ]; then
+  # While perigee is busy the note doesn't count: this landing asks CI itself rather than wait on perigee.
+  if [[ $down_at =~ ^[0-9]+$ ]] && [ $((now - down_at)) -lt "$CI_DOWN" ] && quiet; then
     why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
     return 2
   fi
@@ -838,7 +880,7 @@ ci_gate() {
     # Forced on purpose: land/<branch> is a scratch branch only this script writes and deletes, so there is no one's work to overwrite.
     hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
   fi
-  say "waiting for CI on $short: the full suite on Cara's desktop (at most $((CI_LIMIT / 60)) min, then it runs here)"
+  say "waiting for CI on $short: the full suite on Cara's desktop (at most $((CI_LIMIT / 60)) min, then it runs here once perigee is quiet)"
   queue_phase "waiting for CI since $(date +%H:%M)"
   while :; do
     ci_run || true # one missed answer is not a verdict: the limits below end the wait
@@ -846,9 +888,14 @@ ci_gate() {
     if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then ci_taken=1; land_mark cirun; fi # a runner took it
     [ "$ci_status" != completed ] || break
     waited=$((SECONDS - started))
-    if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"; ci_down; return 2; fi
-    if [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; ci_down; return 2; fi
-    sleep "$CI_POLL"
+    # Past a limit the suite runs here, but only on a quiet perigee: until then this keeps waiting for the run (busy_wait).
+    why=''
+    if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"
+    elif [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; fi
+    nap=$CI_POLL
+    # On a busy perigee it asks CI and perigee again every QUIET_POLL s, not every CI_POLL s (Josh: "re-checking every 30 s").
+    if [ -n "$why" ]; then quiet && { ci_down; return 2; }; busy_wait "$why"; nap=$QUIET_POLL; fi
+    sleep "$nap"
   done
   case $ci_result in
     success) rm -f "$state/ci-down"; say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
@@ -1077,6 +1124,14 @@ else
     train_drop
     tip=$own short=$(git rev-parse --short "$own")
   fi
+  # No answer from CI: the suite runs here only on a quiet perigee (#1254). Until then CI is asked again at every look,
+  # since a runner may come back (Cara's desktop logs on); busy_wait refuses once perigee has been busy QUIET_LIMIT s.
+  while [ "$rc" = 2 ] && ! quiet; do
+    busy_wait "$why"
+    sleep "$QUIET_POLL"
+    rc=0
+    gate "$tip" || rc=$?
+  done
 fi
 land_mark gate
 if [ "$rc" = light ]; then
@@ -1102,7 +1157,15 @@ else
   [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
   log="$state/land-test.log"
   trc=0
-  "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  # In citadel-heavy's slot on perigee (nice 19, idle IO) at half run-tests.sh's usual concurrency, so it yields (#1254).
+  # Its CPU weight is the embedder's 20, not run-tests.sh's 500, so turns outrank it. A job that took the slot since
+  # quiet() looked holds it up no longer than the busy limit's rest: then citadel-heavy gives up (75), and this refuses.
+  half=$(( ( ($(nproc 2>/dev/null || echo 2) + 1) / 2 + 1) / 2 ))
+  left=$((QUIET_LIMIT - (SECONDS - ${busy_from:-$SECONDS})))
+  CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=$((left > 60 ? left : 60)) \
+    CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
+    "$tools/citadel-heavy" --here "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  [ "$trc" != 75 ] || refuse "CI and perigee both busy, try again: CI: $why; perigee's heavy slot was taken just before the suite could start, and stayed taken (citadel-heavy's lines above), so no test ran. So $untouched"
   [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so $untouched"
   if [ "$trc" != 0 ]; then
     tail -n 40 "$log" >&2

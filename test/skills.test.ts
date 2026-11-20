@@ -185,6 +185,8 @@ test('an opened row: where it ran, its type\'s rate and misses with what they op
   const grill = mk(a.id, 'Grilled', 'feature'), told = mk(a.id, 'Told', 'feature'), quiet = mk(a.id, 'Quiet', 'feature'), bug = mk(a.id, 'Bug', 'bug');
   const tm = mk(a.id, 'Taskmaster', null, 'coordinator'), other = mk(b.id, 'Elsewhere', 'feature');
   store.addEvent(told.id, 'user_message', { text: 'Build the page.\nThis is design-shaped. Run citadel:grilling rounds with Josh, as cards. Then citadel:grilling again.' });
+  const later = store.addEvent(told.id, 'user_message', { text: 'Still no cards. Open citadel:grilling now.' });
+  store.db.prepare('UPDATE events SET created_at = created_at + 1000 WHERE id = ?').run(later.id);
   store.addEvent(tm.id, 'user_message', { text: 'Start a minion that runs citadel:grilling.' });
   store.addEvent(grill.id, 'user_message', { text: 'Use citadel:grilling first.' });
   store.addEvent(grill.id, 'claude', use('Skill', { skill: 'citadel:grilling' }));
@@ -199,14 +201,14 @@ test('an opened row: where it ran, its type\'s rate and misses with what they op
   store.addEvent(other.id, 'claude', use('Skill', { skill: 'citadel:grilling' }));
   store.addEvent(other.id, 'claude', result);
   const { scan, tickets } = scanSkills(store.db, 0, null);
-  assert.deepEqual(scan.mentions.filter((m) => m.ticket_id === told.id).map((m) => [m.name, m.quote]), [['citadel:grilling', 'Run citadel:grilling rounds with Josh, as cards.']], 'once per message');
+  assert.deepEqual(scan.mentions.filter((m) => m.ticket_id === told.id).map((m) => [m.name, m.quote]), [['citadel:grilling', 'Run citadel:grilling rounds with Josh, as cards.'], ['citadel:grilling', 'Open citadel:grilling now.']], 'once per message');
   const d = skillDetail(scan, tickets, a.id, 0, 'citadel:grilling', 'skill');
   assert.deepEqual(d.used.map((u) => [u.title, u.runs, u.phases]), [['Grilled', 2, { 'before any edit': 1, 'after edits': 1 }]], 'only this scheme');
   assert.deepEqual(d.types, [{ type: 'feature', active: 3, opened: 1 }, { type: 'bug', active: 1, opened: 0 }], 'the Taskmaster is no minion of a type');
   assert.equal(d.misses!.type, 'feature');
   assert.equal(d.misses!.total, 2);
   assert.deepEqual(d.misses!.rows.map((r) => [r.title, r.opened]).sort(), [['Quiet', []], ['Told', ['citadel:docs-and-mocks']]]);
-  assert.deepEqual(d.named.rows.map((r) => [r.title, r.quote]), [['Told', 'Run citadel:grilling rounds with Josh, as cards.']], 'not the Taskmaster, not a minion that opened it');
+  assert.deepEqual(d.named.rows.map((r) => [r.title, r.quote, r.at]), [['Told', 'Open citadel:grilling now.', later.created_at + 1000]], 'one row a minion, with its newest message; not the Taskmaster, not a minion that opened it');
   const never = skillDetail(scan, tickets, a.id, 0, 'citadel:upstream-check', 'skill');
   assert.equal(never.misses, null, 'no type to miss in when nothing opened it');
   assert.deepEqual(never.used, []);

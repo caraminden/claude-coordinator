@@ -381,8 +381,7 @@ export function skillDetail(scan: SkillScan, tickets: SkillTicket[], projectId: 
     const k = byId.get(m.ticket_id);
     if (m.name !== name || m.at <= since || !k || k.kind === 'coordinator' || used.has(k.id)) continue;
     const row = named.get(k.id);
-    if (!row) named.set(k.id, { ...minion(k, m.at), quote: m.quote });
-    else row.at = Math.max(row.at, m.at);
+    if (!row || m.at > row.at) named.set(k.id, { ...minion(k, m.at), quote: m.quote }); // the newest message's quote, with its time
   }
   const newest = <T extends { at: number }>(rows: T[]) => rows.sort((a, b) => b.at - a.at);
   return {

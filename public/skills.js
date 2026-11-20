@@ -20,6 +20,7 @@ let token = 0;
 // Rows are ordered by their runs only when the counts were there at the first draw; counts that fill in later keep the order
 // the person is looking at (no reflow without input) until they switch tab or scope.
 let ranked = false;
+const placed = new Map(); // a row's group, fixed while `ranked` holds: a skill someone else switches off keeps its place until this person moves
 
 export function skillsPage() {
   pageEl = h('section', { class: 'artifacts-main skills-main' });
@@ -46,6 +47,7 @@ async function load() {
     if (mine !== token) return;
     data = got;
     ranked = !!got.usage;
+    placed.clear();
   } catch (err) {
     if (mine !== token) return;
     data = { error: err.message };
@@ -76,7 +78,7 @@ function draw() {
   const counts = { kit: data.items.filter((i) => i.source === 'kit' && i.kind === 'skill').length, scheme: data.items.filter((i) => i.source === 'scheme').length, agents: data.items.filter((i) => i.source === 'kit' && i.kind === 'agent').length };
   const bar = h('div', { class: 'sk-bar' },
     h('div', { class: 'rules-seg sk-tabs', role: 'group', 'aria-label': 'Show' },
-      TABS.map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(tab === k), onclick: () => { tab = k; ranked = !!data.usage; draw(); } }, l, h('span', { class: 'sk-count' }, String(counts[k]))))),
+      TABS.map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(tab === k), onclick: () => { tab = k; ranked = !!data.usage; placed.clear(); draw(); } }, l, h('span', { class: 'sk-count' }, String(counts[k]))))),
     data.canKit ? h('div', { class: 'rules-seg sk-scope', role: 'group', 'aria-label': 'Counts from' },
       [['scheme', 'This scheme'], ['all', 'Every scheme']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': String(scope === k), onclick: () => { if (scope === k) return; scope = k; data.usage = null; data.usageError = null; load(); } }, l))) : null,
     h('span', { class: 'spacer' }),
@@ -99,9 +101,13 @@ function list() {
   // Grouped by health only when the counts were there at the first draw: counts that fill in later keep one list in the
   // order the person is looking at (no reflow without input) until they switch tab or scope.
   if (!ranked) return [intro, h('div', { class: 'settings-rows sk-rows' }, ...items.sort(byRuns).map((i) => row(i, max)))];
-  const groups = [['Needs a look', 'waiting', (i) => ['Quiet', 'Unused', 'Rare'].includes(health(i)[1])], ['Busy', 'done', (i) => health(i)[1] === 'Busy'], [`Off in ${view.project?.name ?? 'this scheme'}`, 'muted', (i) => health(i)[1] === 'Off']];
-  return [intro, ...groups.flatMap(([title, hue, test]) => {
-    const xs = items.filter(test).sort(byRuns);
+  const group = (i) => {
+    if (!placed.has(keyOf(i))) placed.set(keyOf(i), { Off: 'off', Busy: 'busy' }[health(i)[1]] ?? 'look');
+    return placed.get(keyOf(i));
+  };
+  const groups = [['Needs a look', 'waiting', 'look'], ['Busy', 'done', 'busy'], [`Off in ${view.project?.name ?? 'this scheme'}`, 'muted', 'off']];
+  return [intro, ...groups.flatMap(([title, hue, g]) => {
+    const xs = items.filter((i) => group(i) === g).sort(byRuns);
     return xs.length ? [h('h3', { class: 'settings-section', 'data-hue': hue }, title, h('span', { class: 'sk-count' }, String(xs.length))), h('div', { class: 'settings-rows sk-rows' }, ...xs.map((i) => row(i, max)))] : [];
   })];
 }
@@ -136,6 +142,8 @@ function health(item) {
 const details = new Map(); // `${scope}|${kind}|${name}` → the opened row's data, or a promise of it
 const opened = new Map(); // the same key → the tab a person picked in it
 const openRows = new Set();
+const bodies = new Map(); // the same key → the body on screen, which a late answer fills (a redraw replaces it)
+const drafts = new Map(); // the same key → a Tune brief the person edited
 const keyOf = (item) => `${scope}|${item.kind}|${item.name}`;
 
 /** One line per skill: its health, name and trigger, calls in the window on a bar, and the last call; it opens in place. */
@@ -167,10 +175,16 @@ function fill(item, body) {
   const u = usageOf(item);
   const r = rateOf(u);
   const hl = health(item);
+  bodies.set(key, body);
   let d = details.get(key);
   if (!d) {
-    const q = new URLSearchParams({ name: item.name, kind: item.kind, ...(scope === 'all' ? { all: '1' } : {}) });
-    d = api(`api/projects/${view.projectId}/skills/detail?${q}`).then((got) => details.set(key, got), (err) => details.set(key, { error: err.message })).then(() => { if (body.isConnected) fill(item, body); });
+    // A scheme's own skill counts only its own scheme: another scheme's skill of the same name is another skill.
+    const q = new URLSearchParams({ name: item.name, kind: item.kind, ...(scope === 'all' && item.source === 'kit' ? { all: '1' } : {}) });
+    d = api(`api/projects/${view.projectId}/skills/detail?${q}`).then((got) => details.set(key, got), (err) => details.set(key, { error: err.message })).then(() => {
+      const on = bodies.get(key);
+      if (on?.isConnected) fill(item, on);
+      if (details.get(key)?.error) details.delete(key); // shown once; the next open asks again
+    });
     details.set(key, d);
   }
   const ready = d instanceof Promise ? null : d;
@@ -224,8 +238,9 @@ function whyNot(item, u, d) {
       showFirst({ key: `${keyOf(item)}|named`, n: 3, noun: 'shown', items: d.named.rows.map((m) => hueRow({ hue: 'held', meta: ago(m.at) }, minionLink(m), h('q', { class: 'sk-quote' }, ...quote(m.quote, item.name)))) }),
       h('p', { class: 'look-prose' }, `A message to these minions named ${item.name} and they never opened it. A minion can still do the work without opening the skill (a grilling round asked as cards), so read the chat before calling it a miss.`));
   }
-  if (!parts.length) parts.push(u ? emptyCard('No misses to show', 'Every minion of the types that open it did, and none was told to and didn\'t.')
-    : emptyCard('Nothing named it either', `No minion opened it or was sent a message naming it in ${data.days} days.`, { mark: '0', hue: 'muted' }));
+  if (!parts.length) parts.push(u ? emptyCard('No misses to show', item.source === 'kit' ? 'Every minion of the type that uses it most did, and none was sent its name and didn\'t.' : 'Every minion of the type that uses it most did.')
+    : item.source === 'kit' ? emptyCard('Nothing named it either', `No minion opened it or was sent a message naming ${item.name} in ${data.days} days.`, { mark: '0', hue: 'muted' })
+      : emptyCard('No minion opened it', `Not in ${data.days} days. Messages are checked only for kit names (citadel:…), so one that asked for it by its bare name doesn't show here.`, { mark: '0', hue: 'muted' }));
   else parts.push(h('p', { class: 'look-prose' }, 'These say what happened, not what should have: a minion can be right not to use it.'));
   return h('div', { class: 'sk-pane' }, ...parts);
 }
@@ -241,12 +256,14 @@ function tune(item, u, r, d) {
   const kit = item.source === 'kit';
   if (kit && !data.canKit) return h('div', { class: 'sk-pane' }, emptyCard('Tuning a kit skill is for Citadel scheme members', 'A kit change reaches every scheme. Ask one of them, with what you see on this page.', { mark: 'i', hue: 'muted' }));
   const text = h('textarea', { class: 'cui-input sk-brief', rows: 12, 'aria-label': 'Brief' });
-  text.value = tuneBrief(item, u, r, d);
+  text.value = drafts.get(keyOf(item)) ?? tuneBrief(item, u, r, d);
+  text.addEventListener('input', () => drafts.set(keyOf(item), text.value));
   const err = h('p', { class: 'error', hidden: true });
   const start = h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: async () => {
     start.disabled = true;
     try {
       const t = await api(`api/projects/${kit ? data.kitScheme : view.projectId}/tickets`, { method: 'POST', body: { title: `Tune ${item.kind === 'agent' ? 'Grunt type' : 'skill'}: ${short(item.name)}`, message: text.value, properties: { type: 'chore' } } });
+      drafts.delete(keyOf(item));
       location.hash = threadHref(t);
     } catch (e) {
       err.textContent = e.message;

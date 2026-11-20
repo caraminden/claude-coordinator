@@ -78,7 +78,10 @@ const HOLD = `(() => {
   const real = window.fetch;
   window.fetch = (url, opts) => {
     if (!(opts?.method === 'POST' && /\\/messages$/.test(String(url)))) return real(url, opts);
-    return new Promise((ok, no) => held.push({ body: JSON.parse(opts.body), go: () => real(url, opts).then(ok, no), fail: () => no(new TypeError('Failed to fetch')),
+    return new Promise((ok, no) => held.push({ body: JSON.parse(opts.body), go: () => real(url, opts).then(ok, no),
+      // No connection (a send then waits for one, #1144), or the server saying no.
+      fail: () => no(new TypeError('Failed to fetch')),
+      refuse: () => ok(new Response(JSON.stringify({ error: 'refused' }), { status: 500 })),
       // The server takes it but the reply is lost: the failure lands first, the server's copy after.
       lose: () => { no(new TypeError('Failed to fetch')); real(url, opts); } }));
   };
@@ -123,8 +126,8 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
 
     await page.eval('held[0].go()');
     await waitFor(page, 'the second send', 'held.length === 2');
-    await page.eval('held[1].fail()');
-    // The failed one stays in the chat, not sent, its text kept; the third still goes.
+    await page.eval('held[1].refuse()');
+    // The refused one stays in the chat, not sent, its text kept; the third still goes.
     await waitFor(page, '"two" marked not sent', `${bubble('two')}?.classList.contains('not-sent')`);
     await waitFor(page, 'the third send', 'held.length === 3');
     await page.eval('held[2].go()');
@@ -147,7 +150,7 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     // ✎ on a failed one takes it back into the box, ahead of anything typed since.
     await type(page, 'four');
     await waitFor(page, 'the fourth send', 'held.length === 5');
-    await page.eval('held[4].fail()');
+    await page.eval('held[4].refuse()');
     await waitFor(page, '"four" marked not sent', `${bubble('four')}?.classList.contains('not-sent')`);
     await page.eval(`(() => { const b = document.querySelector('.composer textarea'); b.value = 'draft'; b.dispatchEvent(new Event('input')); })()`);
     await page.eval(`${bubble('four')}.querySelector('[aria-label="Take back to edit"]').click()`);
@@ -166,7 +169,10 @@ test('a chat whose history holds your own sent message opens after a reload', { 
   await waitFor(page, 'its message', `!!${bubble('mine')}`);
 });
 
-test('a message the server took after its send failed is marked sent, and a Retry then adds no copy', { skip }, async () => {
+const sending = `import(new URL('core.js', location.href)).then((m) => m.sending)`;
+const waitingTag = (text: string) => `${bubble(text)}?.querySelector('.waiting-tag')?.firstChild.textContent`;
+
+test('a message the server took after its send was cut off is marked sent, and its wait then sends no copy', { skip }, async () => {
   const t = await minion('Lost reply');
   const page = await open(1280, t);
   await type(page, 'lost');
@@ -174,14 +180,62 @@ test('a message the server took after its send failed is marked sent, and a Retr
   await page.eval('held[0].lose()');
   await until('the server to have it', async () => (await texts(t.id)).length === 2);
   await waitFor(page, 'the server\'s copy swapped in', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
-  const sending = `import(new URL('core.js', location.href)).then((m) => m.sending)`;
   assert.equal(await page.eval(sending), 0, 'nothing left sending, so the page can reload when idle');
-  // The failure toast's Retry is still up: it has nothing to send again.
-  await page.eval(`document.querySelector('.cui-toast-action').click()`);
+  // The device comes back online: the wait ends with nothing to send again.
+  await page.eval(`dispatchEvent(new Event('online'))`);
   await page.eval('new Promise((r) => setTimeout(r, 300))');
   assert.equal(await page.eval('held.length'), 1, 'not sent again');
+  assert.equal(await page.eval('!!document.querySelector(".cui-toast")'), false, 'no failure to report');
   assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length'), 0, 'no second bubble');
   assert.equal(await page.eval(`[...document.querySelectorAll('#log .msg.user')].filter((m) => m.textContent.includes('lost')).length`), 1);
   assert.equal(await page.eval(sending), 0);
   assert.deepEqual(await texts(t.id), ['hi', 'lost']);
+});
+
+for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
+  test(`at ${label} width, messages sent with no connection wait to send, in order, and go once it's back (#1144)`, { skip }, async () => {
+    const t = await minion(`Offline ${label}`);
+    const page = await open(width, t);
+    await type(page, 'first');
+    await type(page, 'second');
+    await waitFor(page, 'the first send', 'held.length === 1');
+    await page.eval('held[0].fail()');
+    await waitFor(page, '"first" waiting', `${waitingTag('first')} === 'waiting to send'`);
+    assert.equal(await page.eval(`${bubble('first')}.classList.contains('not-sent')`), false, 'not marked as failed');
+    assert.equal(await page.eval('!!document.querySelector(".cui-toast")'), false, 'no failure toast');
+    assert.equal(await page.eval('held.length'), 1, '"second" waits behind it');
+    assert.equal(await page.eval(sending), 2, 'a reload now would lose them, so the page stays');
+    assert.equal(await page.eval(`(() => { const t = document.querySelector('.typing'); return !!t && !t.hidden && t.textContent.includes('thinking'); })()`), false, 'nothing says it is thinking');
+    await shoot(page, `${label}-waiting.png`);
+    // Back online: it goes again with the same sendId, then the second.
+    await page.eval(`dispatchEvent(new Event('online'))`);
+    await waitFor(page, 'the second try', 'held.length === 2');
+    assert.equal(await page.eval('held[1].body.sendId === held[0].body.sendId && held[1].body.text'), 'first');
+    assert.equal(await page.eval(`${waitingTag('first')} ?? null`), null, 'no longer waiting');
+    await page.eval('held[1].go()');
+    await waitFor(page, 'the second message', 'held.length === 3');
+    await page.eval('held[2].go()');
+    await until('the server to have both', async () => (await texts(t.id)).length === 3);
+    assert.deepEqual(await texts(t.id), ['hi', 'first', 'second']);
+    await waitFor(page, 'nothing pending', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
+    assert.equal(await page.eval(sending), 0);
+  });
+}
+
+test('a message waiting to send can be taken back to the box, and then never goes', { skip }, async () => {
+  const t = await minion('Cancel');
+  const page = await open(1280, t);
+  await type(page, 'never mind');
+  await waitFor(page, 'the send', 'held.length === 1');
+  await page.eval('held[0].fail()');
+  await waitFor(page, 'it waiting', `${waitingTag('never mind')} === 'waiting to send'`);
+  await page.eval(`${bubble('never mind')}.querySelector('[aria-label="Take back to edit"]').click()`);
+  assert.equal(await page.eval('document.querySelector(".composer textarea").value'), 'never mind');
+  assert.equal(await page.eval(`!${bubble('never mind')}`), true, 'its bubble is gone');
+  await page.eval(`dispatchEvent(new Event('online'))`);
+  await page.eval('new Promise((r) => setTimeout(r, 300))');
+  assert.equal(await page.eval('held.length'), 1, 'not sent again');
+  assert.equal(await page.eval(sending), 0);
+  assert.equal(await page.eval('!!document.querySelector(".cui-toast")'), false, 'no failure toast');
+  assert.deepEqual(await texts(t.id), ['hi']);
 });

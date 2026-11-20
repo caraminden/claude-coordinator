@@ -3,7 +3,9 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { writeOffThread } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
+import { afterAllWrites, writes } from '../src/http.ts';
 import { Runner } from '../src/runner.ts';
 import { noteStrike, struckSource } from '../public/strike.js';
 import { stopTurns, testPins } from './helpers.ts';
@@ -81,6 +83,32 @@ test('searches only the newest 500 replies, counting replies with text, not tool
   // 501 replies back is past the search.
   assert.throws(() => runner.strike(minion.id, 'old wrong claim', 'x'), /None of your newest 500 replies/);
   runner.detachAll();
+});
+
+test('on a stalled disk, two strikes on one message sent at once both stick, and a sent message comes back as written (#1285)', async () => {
+  const store = new Store(join(root, 'stalled.db'));
+  const project = store.createProject('P', null);
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(minion.id, root, null);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const said = store.addEvent(minion.id, 'claude', reply('The deploy failed. And #12 is not merged.'));
+  const w = writeOffThread(store, { delayMs: 300 })!;
+  try {
+    // D2a: what send wrote, not a re-read, which the stalled write would leave on the message before it.
+    store.addEvent(minion.id, 'user_message', { author: 'Cara', text: 'earlier' });
+    const sent = runner.send(minion.id, 'Cara', '@Josh look', [], { typed: true }, false);
+    assert.equal(JSON.parse(sent.event.data).text, '@Josh look');
+    assert.equal(sent.event.kind, 'user_message');
+    // D2b: as the strike route does, each in a request of its own; the second reads after the first has landed.
+    const strike = (quote: string) => writes.request.run({ seq: 0 }, () => afterAllWrites(() => runner.strike(minion.id, quote, 'wrong')));
+    await Promise.all([strike('The deploy failed.'), strike('#12 is not merged.')]);
+    assert.ok(w.drain(10_000));
+    const data = JSON.parse(store.listEvents(minion.id).find((e) => e.id === said.id)!.data);
+    assert.deepEqual(data.strikes.map((s: { text: string }) => s.text).sort(), ['#12 is not merged.', 'The deploy failed.']);
+  } finally {
+    runner.detachAll();
+    await w.stop();
+  }
 });
 
 test('struck words render as ~~strikethrough~~ line by line, keeping list and quote markers', () => {

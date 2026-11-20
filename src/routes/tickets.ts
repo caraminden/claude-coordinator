@@ -45,7 +45,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '..
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
@@ -541,12 +541,12 @@ export const ticketRoutes: Route[] = [
         // A person's @mentions (#1149) of members who can open this chat: a minion's, or the scheme's shared Taskmaster.
         const mentions = !caller && (ticket.kind !== 'coordinator' || ticket.coordinator_of == null) ? mentionedIn(text, app.store.listMembers(ticket.project_id), session.name) : [];
         const r = runner.send(id, session.name, text, await saveImages(app, ticket, body.images), { ...(caller ? {} : { typed: true }), ...(sendId ? { sendId } : {}), ...(mentions.length ? { mentions } : {}), hold: true }, !caller && body.after !== true, files);
-        if (r === 'parked') held = 'parked';
-        // send is synchronous, so the chat's newest message is the one just sent.
-        const sent = mentions.length ? app.store.lastEventOf(id, 'user_message') : undefined;
-        for (const name of sent ? mentions : []) {
-          addMention(app.store, name, { ticketId: id, projectId: ticket.project_id, eventId: sent!.id, at: sent!.created_at, by: session.name, text });
-          app.notify(id, { kind: 'mention', by: session.name, text, eventId: sent!.id, to: name }, session.name);
+        if (r.parked) held = 'parked';
+        // The message just sent, as written: a re-read could miss it while the disk is slow.
+        const sent = r.event;
+        for (const name of mentions) {
+          addMention(app.store, name, { ticketId: id, projectId: ticket.project_id, eventId: sent.id, at: sent.created_at, by: session.name, text });
+          app.notify(id, { kind: 'mention', by: session.name, text, eventId: sent.id, to: name }, session.name);
         }
       });
       if (held !== undefined && held !== 'parked') return json(res, 202, { ...ticketView(app, id), held });
@@ -681,7 +681,8 @@ export const ticketRoutes: Route[] = [
       const text = str(body.text, 'Text', 10_000);
       const reason = str(body.reason, 'Reason', 1000);
       try {
-        return json(res, 200, runner.strike(id, text, reason));
+        // It rewrites the message's whole data: a strike still queued (two sent at once) would be written over.
+        return json(res, 200, await afterAllWrites(() => runner.strike(id, text, reason)));
       } catch (err: any) {
         throw new HttpError(/already/.test(err.message) ? 409 : 404, err.message);
       }

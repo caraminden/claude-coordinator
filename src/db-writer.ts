@@ -22,6 +22,7 @@ export const WRITES = [
   'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting',
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
+  'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
   'props.backfillOther', 'props.setBuild', 'schedules.ran', 'memory.deleteTicket',
 ];
 
@@ -29,7 +30,7 @@ export const WRITES = [
 export const VALUE_WRITES = [
   'createProject', 'renameProject', 'createUser', 'addOpenrouterCall', 'createContraption', 'deleteContraptionSession',
   'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'claimBrief', 'recap',
-  'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView',
+  'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView', 'addFlakeFix',
   'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
   'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index', 'reviews.create', 'reviews.save', 'reviews.restore',
 ];
@@ -123,8 +124,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   writes.settle = beforeRead;
   // A response waits for its own request's writes, however long they take, but off the event loop: a client's next
   // request (an invite link right after making the person) or a client reading the file itself finds them (#1244).
-  writes.landed = () => {
-    const own = writes.request.getStore()?.seq ?? 0;
+  writes.landed = (everyone = false) => {
+    const own = everyone ? seq : writes.request.getStore()?.seq ?? 0;
     if (!alive || applied() >= own) return null;
     return new Promise<void>((resolve) => {
       const w = { seq: own, done: () => (clearTimeout(timer), waiters.delete(w), resolve()) };

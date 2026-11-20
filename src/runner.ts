@@ -1755,7 +1755,7 @@ export class Runner {
    * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
    * runners back, a card's answer, GitHub) leave it off and start a turn as before.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): 'parked' | void {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
     const { asker: askedBy, fyi, light, hold, ...shown } = extra;
     extra = shown;
@@ -1763,9 +1763,9 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author, extra.from);
     if (refused) {
-      this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
+      const event = this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
       this.emit(ticketId, 'note', { text: refused });
-      return;
+      return { event };
     }
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
@@ -1803,7 +1803,7 @@ export class Runner {
       list.push({ ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
       this.store.setSetting(mailKey(ticketId), list);
       this.broadcastTicket(ticketId);
-      return 'parked';
+      return { event: row, parked: true };
     }
     if (steers) {
       const line = promptMessage([msg]);
@@ -1814,7 +1814,7 @@ export class Runner {
       this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }], typedBy });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from) this.turnFrom.delete(ticketId);
-      return;
+      return { event: row };
     }
     const q = this.queues.get(ticketId) ?? [];
     const limited = !!(ticket && this.limitWait(ticketId));
@@ -1833,10 +1833,11 @@ export class Runner {
         this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at)}, after the usage limit resets.` });
         this.broadcastTicket(ticketId);
       }
-      return;
+      return { event: row };
     }
     this.saveTurn(ticketId, { queued: q });
     this.broadcastTicket(ticketId);
+    return { event: row };
   }
 
   /** Take back a message still queued for the next turn; false once it has gone to Claude. */

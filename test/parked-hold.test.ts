@@ -75,9 +75,9 @@ function assertHeld(id: number, count: number) {
 
 test("a person's message to a parked minion is held; Unpark wakes it with the held messages in order", async () => {
   const m = minion();
-  assert.equal(runner.send(m.id, 'Cara', 'when you wake, check the logs', [], { hold: true }), 'parked');
+  assert.equal(runner.send(m.id, 'Cara', 'when you wake, check the logs', [], { hold: true }).parked, true);
   assertHeld(m.id, 1);
-  assert.equal(runner.send(m.id, 'Josh', 'and the tripwire test', [], { hold: true }), 'parked');
+  assert.equal(runner.send(m.id, 'Josh', 'and the tripwire test', [], { hold: true }).parked, true);
   assertHeld(m.id, 2);
   assert.equal(store.getTicket(m.id)!.state, 'parked', 'still parked');
 
@@ -125,7 +125,7 @@ test("another minion's message to a parked minion is held", () => {
 
 test('a minion that is not parked still wakes on a message', async () => {
   const m = minion(null);
-  assert.deepEqual(await turn(() => assert.equal(runner.send(m.id, 'Cara', 'hi', [], { hold: true }), undefined)), ['[Cara]: hi']);
+  assert.deepEqual(await turn(() => assert.equal(runner.send(m.id, 'Cara', 'hi', [], { hold: true }).parked, undefined)), ['[Cara]: hi']);
   await idle(m.id);
 });
 
@@ -156,7 +156,7 @@ test('a start_after minion holds messages, and its start delivers them after its
   const m = minion(null);
   w.chain({ ticket: m.id, after: tm.id, when: 'live', message: 'brief: build part two', from: 'Taskmaster', base: null, since: null });
   assert.ok(runner.heldFor(m.id));
-  assert.equal(runner.send(m.id, 'Cara', 'use the new schema', [], { hold: true }), 'parked');
+  assert.equal(runner.send(m.id, 'Cara', 'use the new schema', [], { hold: true }).parked, true);
   assertHeld(m.id, 1);
   assert.equal(runner.relay(m.id, m.id, 'Taskmaster', 'part one is merged'), 'parked');
 

@@ -48,13 +48,14 @@ test('Home lists what waits on a person across their schemes: Taskmasters first,
   assert.deepEqual(home.schemes.map((s) => s.name), ['Peek Auras', 'VoiceAnalyzer']);
 });
 
-test('Home\'s working minions and what shipped since, only in the person\'s schemes; build merges aren\'t ships', () => {
+test('Home\'s working minions and what shipped since, only in the person\'s schemes; build merges and failed pushes aren\'t ships', () => {
   const { store, josh, scheme, minion, approvals } = setup('shipped.sqlite');
   const peek = scheme('Peek Auras'), outside = scheme('Not theirs', false);
   const busy = minion(peek, 'busy one'), idle = minion(peek, 'idle one'), there = minion(outside, 'theirs');
   const start = Date.now();
   store.addEvent(idle.id, 'note', { text: 'Shipped abc1234: the fix. Risk low: tests. Live now.' });
   store.addEvent(idle.id, 'note', { text: 'Merged abc1235 into build/5: a feeder. Risk low: x.' });
+  store.addEvent(idle.id, 'note', { text: 'Shipped abc1237 "x": a push. Risk low. Shipped locally, not pushed to origin: the push failed.' });
   store.addEvent(there.id, 'note', { text: 'Shipped abc1236: elsewhere. Risk low: x.' });
 
   const home = homeView(store, approvals, { name: 'josh', uid: josh.id }, (t) => t.id === busy.id || t.id === there.id, start - 1000);

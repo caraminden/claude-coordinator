@@ -13,8 +13,9 @@ import { emptyCard, schemeHue, schemeTag, toneChip } from './look.js';
 
 const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
-let data = null; // the last answer: { items, schemes, shipped }
+let data = null; // the last answer: { items, schemes, shipped, me }, only ever drawn for the person it was fetched for
 try { data = JSON.parse(localStorage.getItem(CACHE)); } catch {}
+let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
 // This visit: each list's ids in the order shown, the ones there when it opened (the rest are "new"), and the rows as last seen.
 const visit = { rows: [], working: [], shipped: [], first: null, last: new Map(), fresh: false };
 let next = null; // the chat whose card you just answered, to move on from once the list agrees
@@ -60,9 +61,11 @@ export function refreshHomeSoon() {
 export async function refreshHome() {
   if (!view?.home) return;
   const got = await api('api/home').catch(() => null);
-  if (!got || !view?.home) return;
-  data = got;
-  try { localStorage.setItem(CACHE, JSON.stringify(got)); } catch {}
+  if (!view?.home) return;
+  failed = !got;
+  if (!got) return void drawPanel();
+  data = { ...got, me };
+  try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}
   // The first answer of a visit sorts it as the server does; the cached paint before it was only a stand-in.
   if (!visit.fresh) Object.assign(visit, { rows: [], working: [], shipped: [], first: null, fresh: true });
   drawPanel();
@@ -75,7 +78,8 @@ export function homeEvent(event) {
   if (!view?.home || event.ticket_id !== view.id) return;
   let d = {};
   try { d = JSON.parse(event.data); } catch {}
-  const who = (event.kind === 'user_message' && d.answer ? d.author : ['plan_result', 'approval_result'].includes(event.kind) ? d.by : null);
+  const who = event.kind === 'user_message' && d.answer ? d.author : ['plan_result', 'approval_result'].includes(event.kind) ? d.by
+    : event.kind === 'question_result' ? d.settled?.by : null; // a notice's "Got it" and a page's Send settle this way
   if (who && me && String(who).toLowerCase() === me.toLowerCase()) {
     next = event.ticket_id;
     refreshHomeSoon();
@@ -86,6 +90,9 @@ export function homeEvent(event) {
 
 /** `ids` in the order this visit shows them: the ones already shown keep their place (gone ones too), new ones join the bottom. */
 const stable = (shown, ids) => [...shown, ...ids.filter((id) => !shown.includes(id))];
+
+/** Forget an answer fetched for someone else (a sign-out and in on this browser doesn't reload the page). */
+const own = () => { if (data && data.me !== me) data = null; };
 
 function groups() {
   const rows = new Map();
@@ -100,6 +107,7 @@ const rowHref = (items) => inboxRow(items, { href: homeHash }).getAttribute('hre
 
 function drawPanel() {
   if (!panel) return;
+  own();
   const rows = groups();
   visit.rows = stable(visit.rows, [...rows.keys()]);
   visit.first ??= new Set(rows.keys());
@@ -109,7 +117,8 @@ function drawPanel() {
   const shipped = data?.shipped?.total ?? 0;
   // One line, always there: the numbers change, the line doesn't move.
   const status = h('div', { class: 'home-status' },
-    open ? toneChip('warn', `${open} need${open === 1 ? 's' : ''} you`) : toneChip('ok', 'Nothing needs you'),
+    open ? toneChip('warn', `${open} need${open === 1 ? 's' : ''} you`) : data ? toneChip('ok', 'Nothing needs you')
+      : toneChip(failed ? 'danger' : 'neutral', failed ? 'Not loaded' : 'Loading'),
     working ? toneChip('info', `${working} working`) : null,
     shipped ? toneChip('violet', `${shipped} shipped`) : null);
   const list = visit.rows.map((id) => {
@@ -123,12 +132,15 @@ function drawPanel() {
     } else if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
     return row;
   });
+  const retry = h('button', { type: 'button', class: 'link', onclick: () => { failed = false; drawPanel(); refreshHome(); } }, 'Try again');
   panel.replaceChildren(status, list.length ? h('div', { class: 'inbox-rows home-rows' }, ...list)
-    : emptyCard('Nothing needs you', data ? 'Cards and questions from any of your schemes show here.' : 'Loading what waits on you…'));
+    : failed && !data ? emptyCard('Couldn\'t load Home', h('span', {}, 'What waits on you didn\'t load. ', retry), { mark: '!', hue: 'danger' })
+      : emptyCard('Nothing needs you', data ? 'Cards and questions from any of your schemes show here.' : 'Loading what waits on you…'));
 }
 
 function drawOverview() {
   if (!overview) return;
+  own();
   const schemes = data?.schemes ?? [];
   const working = schemes.flatMap((s) => s.working.map((t) => ({ ...t, projectId: s.id, scheme: s.name })));
   visit.working = stable(visit.working, working.map((t) => t.id));
@@ -182,8 +194,9 @@ function moveOn() {
   if (rows.has(next)) return; // it still asks something else: stay
   const at = visit.rows.indexOf(next);
   const after = [...visit.rows.slice(at + 1), ...visit.rows.slice(0, Math.max(at, 0))].find((id) => rows.has(id));
+  const from = next;
   next = null;
   if (after == null) return;
-  // Long enough to see the card settle (Josh's "Move to the next card").
-  setTimeout(() => { if (view?.home) location.hash = rowHref(rows.get(after)); }, 800);
+  // Long enough to see the card settle (Josh's "Move to the next card"); a row you click meanwhile wins.
+  setTimeout(() => { if (view?.home && view.id === from) location.hash = rowHref(rows.get(after)); }, 800);
 }

@@ -36,6 +36,17 @@ import { homeOverview, homePanel, refreshHome, startVisit } from './home.js';
  * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
  * screen it swaps the main panel at once, the lists staying (its data is on the page already); else the scheme loads.
  */
+
+// The desktop app (#1186, Josh 2026-11-20: "Windows PCs only"): Citadel in its own window, where copying doesn't trip
+// Defender. Offered in a browser or the installed web app on Windows; the app itself says so through its preload.
+// Its install zip is #1148's feed for the Citadel scheme (2), which publishes it as "citadel".
+const DESKTOP_APP = 'api/desktop/2/citadel/install.zip';
+export const offersApp = (nav = navigator, desktop = window.citadelDesktop) =>
+  !desktop && /Windows/.test(nav.userAgentData?.platform ?? nav.userAgent ?? '');
+const getApp = () => offersApp()
+  ? h('a', { class: 'get-app', href: DESKTOP_APP, download: '', title: 'Citadel in its own window on this PC: unzip it and run citadel.exe' }, 'Download app')
+  : null;
+
 export async function showReleases(projectId, scope, hl) {
   setReleasesPage(scope, hl);
   if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
@@ -245,6 +256,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
       // Settings shows in the header beside the scheme; who is signed in sits with Sign out along the box's foot.
       h('div', { class: 'foot' },
         h('span', { class: 'who' }, me),
+        getApp(),
         h('button', { type: 'button', class: 'sign-out', onclick: logout }, 'Sign out'))),
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));

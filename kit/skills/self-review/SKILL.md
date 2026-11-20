@@ -106,6 +106,28 @@ touch no test. When the check command in Project facts runs one file in a way th
 guess (a wrapper, an env var), pass it as `--cmd '<command with {file}>'`. Its `Result:` line
 goes under the Risk line in 5.
 
+**Fresh eyes (medium or larger features only):** a feature that is not small gets a
+`citadel:fresh-eyes` Grunt before you call it ready, in the same message as the reviewer
+(`run_in_background: false`). It asks whether you built what the requester asked for, which the
+reviewer doesn't. A run costs about $1 (its pinned Opus at high), so the cut is strict
+(Josh, 2026-11-19: "Only on medium or larger features, not small ones"):
+
+- **Runs** when the work is a feature (its `type` property, or the brief's kind) and it is not
+  small. Medium is the size of the feature, not its risk label.
+- **Small, so it skips:** touches three files or fewer (tests and docs not counted) and changes
+  under about 150 lines, and adds no new screen, flow or table. Any one of those three broken
+  makes it not small. A doubt means it runs.
+- **Never runs** for bugs, chores, research, docs or art.
+- **Off** when the turn's "Kit reviewers" line says fresh eyes is switched off: no Grunt.
+
+Brief it as in the reviewer's brief (the Grunt line, branch, worktree, `<kit>`), with
+`Follow <kit>/agents/fresh-eyes.md`, the requester's own words verbatim with their times (or the
+path of a handoff that quotes them; never your summary of them), the diff `git diff main...HEAD`,
+and the done lines if your first reply showed any. Hand it the spec or PR text only as the
+agent's step 3 says. Its three lists (built but not asked, asked but not built, read
+differently) are findings like the reviewer's: fix them or list them under "Not fixed" with a
+reason. Record the run with `review_set` (slug `fresh-eyes`).
+
 ## 3. Fix what's real
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
@@ -175,6 +197,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`ui-screenshots critic: pass (round 1)`) and the base check's
   (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
+- **Fresh eyes (features that ran it):** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
 - **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything

@@ -57,7 +57,8 @@ async function up() {
   mkdirSync(SHOTS, { recursive: true });
   console.log(devCopy('start', '--data', 'empty').split('\n').filter((l) => !/password|cookie/i.test(l)).join('\n'));
   const dev = JSON.parse(devCopy('status', '--json'));
-  const host = (JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8' })).Self.DNSName as string).replace(/\.$/, '');
+  // RIG_HOST (perigee.tail59477f.ts.net) for a turn with no tailscale command, such as one in a container.
+  const host = process.env.RIG_HOST ?? (JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8' })).Self.DNSName as string).replace(/\.$/, '');
   writeFileSync(STATE, JSON.stringify({ token: randomBytes(12).toString('hex'), host, devPort: dev.port, devPid: dev.pid, cookie: dev.cookie, data: dev.data }));
   const log = openSync(join(DIR, 'server.log'), 'a');
   const server = spawn(process.execPath, [join(HERE, 'rig.ts'), 'serve'], { detached: true, stdio: ['ignore', log, log] });

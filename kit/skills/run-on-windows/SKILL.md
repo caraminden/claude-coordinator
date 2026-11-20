@@ -83,6 +83,15 @@ regions; only a real installed window can. The rig is `scripts/wco/` (`rig.ts`'s
 Use Edge, which the driver does. Chrome for Testing is a dead end: its app window never offers the overlay. A
 CDP `PWA.install` opens in a tab, so the driver installs through Edge's own address-bar chip and dialog.
 
+## Citadel's desktop app (Electron, #1186)
+
+`scripts/electron-app/drag.mjs` starts `desktop/` from the box's checkout on the WCO rig's dev copy (`rig.ts up`, no driver
+needed: pass the rig URL from its `run_task` line and a route), signed in. It then drags with the real mouse from each header's
+empty space in the title bar strip and from a point below it, and clicks each panel's ‹. It prints DRAGS or no drag per
+point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`, `kill -HUP` the rig's `devPid` (state.json):
+`rig.ts reload` wants the Edge driver. Electron is the one in `%LOCALAPPDATA%\defender-copy`. A turn without the
+`tailscale` command sets `RIG_HOST=perigee.tail59477f.ts.net` for `rig.ts up`.
+
 ## Links out of the installed app (#988)
 
 `scripts/firefox-link/` (`check.ps1`, `t.html`) proves the `citadel-firefox:` protocol on its own: an Edge app

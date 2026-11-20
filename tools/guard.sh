@@ -82,7 +82,7 @@ tokenize() {
       # A shell, eval or a run-time command word anywhere on the line makes its heredocs code
       # (shortcut: the whole line, not just the heredoc'\''s own pipeline).
       b = tolower(tok); sub(/[<>].*$/, "", b); sub(/.*[\/\\]/, "", b); sub(/\.exe$/, "", b)
-      if ((nw == 0 || prevw ~ /^(env|sudo|exec|command|builtin|nohup|time|nice|xargs|busybox|do|then|else|if|while|until|!|\{)$/ || prevw ~ /^[a-z_][a-z0-9_]*=/) &&
+      if ((nw == 0 || prevw ~ /^(env|sudo|exec|command|builtin|nohup|time|nice|citadel-heavy|setsid|xargs|busybox|do|then|else|if|while|until|!|\{)$/ || prevw ~ /^[a-z_][a-z0-9_]*=/) &&
           (b ~ /^(sh|bash|zsh|dash|ash|ksh|mksh|rbash|csh|tcsh|fish|pwsh|powershell|cmd|source|\.|eval)$/ || (tok ~ /\035\$/ && b !~ /^[a-z_][a-z0-9_]*=/))) shellline = 1
       nw++; prevw = b; tail = ""
       print tok; tok = ""; intok = 0
@@ -474,6 +474,9 @@ self_test() {
   t 0 Bash topic $'cat <<EOF\nbranch $B isn\'t main\nEOF\ngit push origin topic'
   t 2 Bash topic $'bash <<EOF\ngit push origin $B\nEOF'
   t 2 Bash topic $'bash <<EOF\ngit push origin main\nEOF'
+  t 2 Bash topic $'citadel-heavy bash <<EOF\ngit push origin main\nEOF'
+  t 2 Bash topic $'setsid bash <<EOF\ngit push origin main\nEOF'
+  t 0 Bash topic $'citadel-heavy bash <<EOF\ngit push origin topic\nEOF'
   t 2 Bash topic $'cat <<A; bash <<\'B\'\nit\'s\nA\ngit push origin main\nB'
   t 2 Bash topic $'cat <<A; git commit -F - <<B\nit\'s\nA\nso\'s this\nB\ngit push origin main'
   t 2 Bash topic $'git commit -F - <<$\'EOF\'\nit\'s\nEOF\ngit push origin main'

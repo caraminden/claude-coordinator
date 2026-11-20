@@ -60,7 +60,7 @@ import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
-import { AppServices, serviceOptions, ServiceError } from './src/app-services.ts';
+import { AppServices, folderHolds, manifestOn, serviceOptions, ServiceError } from './src/app-services.ts';
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
@@ -1141,7 +1141,9 @@ const landHandoffs = new LandHandoffs({
   apps: (id) => {
     const t = store.getTicket(id);
     if (!t || services.opts.off) return [];
-    return store.listContraptions().filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main').map((c) => c.name);
+    const dir = store.getProject(t.project_id)?.repo_dir;
+    // An app make_app registered (#1136) waits for the ship that puts its folder on main.
+    return store.listContraptions().filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main' && (!c.subdir || (!!dir && manifestOn(dir, c.subdir)))).map((c) => c.name);
   },
   deployOps: {
     running: (name) => !!services.running(name),
@@ -1161,17 +1163,12 @@ const landHandoffs = new LandHandoffs({
       return startDeploy(app, row, by, null, uid);
     },
     last: (name) => services.lastDeploy(name),
-    has: (name, landed, deployed) => {
+    has: async (name, landed, deployed) => {
       const row = store.getContraption(name);
-      return new Promise((done) => (row ? execFile('git', ['merge-base', '--is-ancestor', landed, deployed], { cwd: services.folder(row), timeout: 30_000 }, (err) => done(!err)) : done(false)));
-    },
-    // An app in a folder of its scheme's repo (#1136) goes out only when a ship touched that folder; read in the scheme's clone, which has both commits.
-    changed: async (name, deployed, landed) => {
-      const row = store.getContraption(name);
+      // An app in a folder of its scheme's repo (#1136) is held when the ship didn't touch its folder: it isn't redeployed.
       const dir = row?.subdir && row.home_scheme !== null ? store.getProject(row.home_scheme)?.repo_dir : null;
-      if (!row?.subdir || !dir) return true;
-      const out = await git(['diff', '--name-only', deployed, landed, '--', row.subdir], dir);
-      return out === null || !!out.trim();
+      if (dir && (await folderHolds(dir, row!.subdir!, landed, deployed))) return true;
+      return new Promise((done) => (row ? execFile('git', ['merge-base', '--is-ancestor', landed, deployed], { cwd: services.folder(row), timeout: 30_000 }, (err) => done(!err)) : done(false)));
     },
   },
 });

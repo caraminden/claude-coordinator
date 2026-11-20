@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
-import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
+import { AppServices, folderHolds, manifestOn, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
 import { until } from './wait.ts';
@@ -1202,4 +1202,31 @@ test('a deploy won\'t run over a hand-installed unit until an admin replaces it'
   assert.equal(d.state, 'failed');
   assert.match(d.said.join('\n'), new RegExp(`Hand-installed units run ${name}: ${name}.service. An admin installs it once with replace`));
   assert.ok(!existsSync(join(home, 'apps', name)), 'nothing cloned');
+});
+
+test("a folder app (#1136): a ship that changes nothing in its folder holds its deploy, and it deploys only once its manifest is on main", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'folder-app-'));
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'README.md'), 'x');
+    git('add', '-A');
+    git('commit', '-qm', 'start');
+    assert.equal(manifestOn(dir, 'apps/notes'), false, 'registered before its folder ships: not deployed yet');
+    mkdirSync(join(dir, 'apps', 'notes'), { recursive: true });
+    writeFileSync(join(dir, 'apps', 'notes', 'citadel-app.json'), '{}');
+    git('add', '-A');
+    git('commit', '-qm', 'the app');
+    assert.equal(manifestOn(dir, 'apps/notes'), true);
+    const deployed = git('rev-parse', 'HEAD');
+    writeFileSync(join(dir, 'README.md'), 'y');
+    git('commit', '-qam', 'outside the folder');
+    assert.equal(await folderHolds(dir, 'apps/notes', git('rev-parse', 'HEAD'), deployed), true);
+    writeFileSync(join(dir, 'apps', 'notes', 'server.ts'), '');
+    git('add', '-A');
+    git('commit', '-qm', 'inside the folder');
+    assert.equal(await folderHolds(dir, 'apps/notes', git('rev-parse', 'HEAD'), deployed), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

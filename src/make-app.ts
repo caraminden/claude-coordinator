@@ -43,6 +43,9 @@ export function schemeRunner(project: Pick<Project, 'name'>, repo: string): stri
   return readdirSync(dir).some((f) => /\.ya?ml$/.test(f) && readFileSync(join(dir, f), 'utf8').includes(label)) ? label : null;
 }
 
+/** Names and ports of make_app calls still between their checks and their registration: two at once never share one. */
+const making = { names: new Set<string>(), ports: new Set<number>() };
+
 export interface Made {
   name: string;
   port: number;
@@ -64,12 +67,26 @@ export async function makeApp(app: App, project: Project, caller: Ticket, by: st
   const asker = store.turnAsker(caller.id);
   const maker = asker === null ? null : store.listMembers(project.id).find((m) => m.id === asker);
   if (!maker) throw new HttpError(403, `make_app runs only on a turn a member of ${project.name} asked for`);
-  if (store.getContraption(name)) throw new HttpError(409, `There is already an app called ${name}`);
+  if (store.getContraption(name) || making.names.has(name)) throw new HttpError(409, `There is already an app called ${name}`);
   const repo = repoSlug(project.repo_url);
   if (!project.repo_dir || !repo) throw new HttpError(400, `${project.name} has no GitHub repo to keep the app in`);
   if (existsSync(join(project.repo_dir, appDir(name)))) throw new HttpError(409, `${appDir(name)} already exists in ${project.name}'s repo`);
-  const branch = (await run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: project.repo_dir }).catch(() => null))?.stdout.trim() || 'main';
-  const port = await freeAppPort(new Set(store.listContraptions().map((c) => c.port)));
+  making.names.add(name);
+  let port = 0;
+  try {
+    port = await freeAppPort(new Set([...store.listContraptions().map((c) => c.port), ...making.ports]));
+    making.ports.add(port);
+    return await make(app, project, caller, by, { name, title, idea, maker, repo, port });
+  } finally {
+    making.names.delete(name);
+    making.ports.delete(port);
+  }
+}
+
+async function make(app: App, project: Project, caller: Ticket, by: string, a: { name: string; title: string; idea: string; maker: { id: number; name: string }; repo: string; port: number }): Promise<Made> {
+  const { store } = app;
+  const { name, title, idea, maker, repo, port } = a;
+  const branch = (await run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: project.repo_dir! }).catch(() => null))?.stdout.trim() || 'main';
 
   // The minion first: its branch gets the app as its first commit, before its brief can start a turn.
   const table = pickFor('feature');
@@ -85,8 +102,8 @@ export async function makeApp(app: App, project: Project, caller: Ticket, by: st
     });
   } catch (err) {
     store.deleteTicket(id);
-    await run('git', ['worktree', 'remove', '--force', ticket.cwd!], { cwd: project.repo_dir }).catch(() => {});
-    if (ticket.branch) await run('git', ['branch', '-D', ticket.branch], { cwd: project.repo_dir }).catch(() => {});
+    await run('git', ['worktree', 'remove', '--force', ticket.cwd!], { cwd: project.repo_dir! }).catch(() => {});
+    if (ticket.branch) await run('git', ['branch', '-D', ticket.branch], { cwd: project.repo_dir! }).catch(() => {});
     throw new HttpError(500, `Could not write the app: ${(err as Error).message}`);
   }
 
@@ -116,7 +133,7 @@ export function brief(a: { name: string; title: string; idea: string; maker: str
     '',
     `make_app has registered it (port ${a.port}, deployed from apps/${a.name}/ of this repo) and switched it on for this scheme's members, and the first commit on your branch is the kit's starter: a server that checks who is signed in, migrations, a nightly backup, a health path and a first page on ${APP_NAME} UI${a.workflow ? ', with its own CI workflow' : ''}. Read apps/${a.name}/CLAUDE.md before anything else.`,
     '',
-    `1. Run its tests: \`npm test\` in apps/${a.name}/ (8 pass).`,
+    `1. Run its tests: \`npm test\` in apps/${a.name}/: all pass on the starter.`,
     `2. Ship it as this scheme ships. The ship deploys it; if /apps/${a.name}/ isn't up after, call deploy_contraption for ${a.name}. Check the page says "Signed in as" you at 1440 and 390 px.`,
     `3. Then build the idea in apps/${a.name}/, following its CLAUDE.md and the citadel:contraption-ui skill. It is design-shaped, so grill ${a.maker} first with citadel:grilling, and ship in small steps.`,
   ].join('\n');

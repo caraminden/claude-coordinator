@@ -818,7 +818,7 @@ const TOOLS = [
   {
     name: 'set_project_instructions',
     description:
-      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway).',
+      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway). To register a scheme rule\'s one home (a member asks, or offer it on a card when you write a standing rule), start a minion to add it to the scheme repo\'s `.claude/rule-homes.json` (`citadel:writing-for-agents`, Pruning).',
     inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose.' } }, required: ['instructions'] },
   },
   {

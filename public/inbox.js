@@ -124,13 +124,13 @@ export function schemeCount(p) {
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
-    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working && p.id !== 'home' ? h('b', {}, working) : null) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
 
 let pillTips = null;
 
-/** The Home line's pill (#1140): every shelf scheme's counts summed. Never purple (Josh, 2026-11-20: "Lets make the Home not go purple on unreads? it feels like duplicating information"): each scheme's own pill already shows what's new. */
+/** The Home line's pill (#1140): every shelf scheme's counts summed. Never purple and no working digit, only the spinner (Josh, 2026-11-20: "Lets make the Home not go purple on unreads? it feels like duplicating information", then "same for the working number actually"): each scheme's own pill already shows what's new. */
 export const homeCount = (schemes) => schemeCount({
   id: 'home',
   inbox: schemes.reduce((n, p) => n + (p.inbox || 0), 0),

@@ -30,6 +30,7 @@
 #       $BRANCH comes in by merge (not rebase), then the check, CI, the fast-forward and the push as for any land,
 #       then build/<n> is deleted, here and on origin. Only as the head of the line, never stacked, never in fast mode.
 #   A plain land refuses a branch that carries commits of a build/* that $BRANCH doesn't have: half a build would go live.
+#   Claims (#1159): with a build-claims.md on build/<n>, --into first checks the feeder's files against it (claims_check).
 #   Lock order: a build's lock (fd 6) before the land lock (fd 9); --into and --full take only the build's.
 # Fast mode (#1017): with LAND_FAST=1 (Citadel sets it for a low or medium risk land in a scheme whose Settings turn
 #    fast mode on), a branch that changes none of tools/land.sh, tools/land.local.sh, the LANES map, .github/* or the

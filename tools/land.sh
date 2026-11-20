@@ -38,6 +38,7 @@
 #       (not rebase: that would flatten the build's merges of main and change its feeders' commit hashes), then the gate,
 #       the fast-forward and the deploy as above, then build/<n> is deleted.
 #   A plain land refuses a branch that carries commits of a build/* that main doesn't have: half a build would go live.
+#   Claims (#1159): with a build-claims.md on build/<n>, --into first checks the feeder's files against it (claims_check).
 # Lock order: the deploy lock (fd 9) before a build's lock (fd 6), and --into takes only the build's, so none waits on the other.
 # Paths can be overridden with DEPLOY_LIVE and DEPLOY_SOURCE, as for deploy.sh (how it is tested).
 set -euo pipefail

@@ -8,8 +8,11 @@
 //   double-border  an element and one inside it both drawing a line on the same edge
 //   close-scrolls  an open dialog whose close button scrolls away with its body
 //   bare-link      a URL or DOI shown as plain text, or only in a title or data-tip (outside code)
-//   click-*        with --click: a click that shows nothing at once, or disables or covers other controls
-// Each finding names a selector and the numbers. Exit 0 clean, 1 findings, 2 a usage or browser error.
+//   click-*        with --click or --sweep: a click that shows nothing (--click: at once; the existing controls: ever), or
+//                  disables or covers other controls
+// A tap or overflow finding also sets "stop" and exits 3: the author fixes it and re-measures before any critic runs.
+// Each finding names a selector and the numbers. Exit 0 clean, 1 findings, 3 a tap or overflow finding (stop: fix
+// before a critic round), 2 a usage or browser error.
 // No installs: it drives Playwright's chrome-headless-shell (or --chrome) over the DevTools protocol on a
 // pipe, so it opens no port. Usage: node ui-measure.mjs --help
 import { spawn } from 'node:child_process';
@@ -25,7 +28,9 @@ const HELP = `node ui-measure.mjs <url> [<url>...] [options]
   --settle <ms>          extra wait after load (default 400)
   --before <js>          run this in the page before measuring (open a dialog, fill a list)
   --scope <selector>     measure only inside these (the part your change touched); sideways scroll stays page-wide
-  --click <selector>     click it with the network slowed to 3 s and check rule 23 (once per width)
+  --click <selector>     click it with the network slowed to 3 s and check rule 23 (once per width); it also does --sweep
+  --sweep                click the visible buttons, tabs and summaries already in --scope (up to 10 per width, each on a
+                         fresh load, skipping delete/remove/sign-out labels) and flag the ones that do nothing or freeze
   --cookie <name=value>  set a cookie for each url's host (repeatable)
   --header <Name: value> send this header with every request (repeatable)
   --ignore <check:text>  drop findings of that check whose selector contains text (repeatable);
@@ -52,6 +57,7 @@ function args(argv) {
     else if (a === '--settle') o.settle = Number(val());
     else if (a === '--before') o.before = val();
     else if (a === '--click') o.click = val();
+    else if (a === '--sweep') o.sweep = true;
     else if (a === '--scope') o.scope = val();
     else if (a === '--min-tap') o.minTap = Number(val());
     else if (a === '--dark') o.dark = true;
@@ -96,12 +102,14 @@ export function launch(bin) {
     gone = new Error(`Chromium exited (code ${code}): ${log.slice(-1500)}`);
     for (const p of pending.values()) p.no(gone);
   });
+  const listeners = new Set();
   let buf = '';
   output.setEncoding('utf8');
   output.on('data', (d) => {
     buf += d;
     for (let i; (i = buf.indexOf('\0')) >= 0; buf = buf.slice(i + 1)) {
       const m = JSON.parse(buf.slice(0, i));
+      if (!m.id) for (const l of listeners) l(m);
       const p = m.id && pending.get(m.id);
       if (!p) continue;
       pending.delete(m.id);
@@ -121,6 +129,7 @@ export function launch(bin) {
     }
     rmSync(dir, { recursive: true, force: true });
   };
+  send.listen = (fn) => listeners.add(fn);
   return { send, close };
 }
 
@@ -166,12 +175,50 @@ export async function openPage(send, url, width, o) {
   if (o.wait) await until(`!!document.querySelector(${JSON.stringify(o.wait)})`, o.wait);
   if (o.before) await evaluate(`(async () => { ${o.before} })()`);
   await sleep(o.settle);
-  return { s, evaluate, phone, width, height, close: () => send('Target.disposeBrowserContext', { browserContextId }) };
+  // Settle before a shot: pointer off the page's controls (a tooltip the click opened fades), finite animations
+  // done, images in, no request in flight for 300 ms. Spinners that never end are frozen at their first frame so
+  // a shot never catches one mid-draw. Never throws: a page that never goes idle (SSE, long-poll) is shot after
+  // 3 s with settled: false. { network: false } skips the request wait, for a shot of a click's held state.
+  const inflight = new Set();
+  send.listen?.((m) => {
+    if (m.sessionId !== sessionId) return;
+    const id = m.params?.requestId;
+    if (m.method === 'Network.requestWillBeSent' && m.params.type !== 'EventSource') inflight.add(id);
+    else if (m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') inflight.delete(id);
+  });
+  const settle = async ({ network = true } = {}) => {
+    const spot = await evaluate(`(() => {
+      const busy = 'a, button, input, select, textarea, summary, label, [role], [title], [data-tip], [tabindex]';
+      for (const [fx, fy] of [[0.99, 0.99], [0.01, 0.99], [0.5, 0.99], [0.99, 0.5], [0.01, 0.5], [0.99, 0.01]]) {
+        const x = Math.floor(innerWidth * fx), y = Math.floor(innerHeight * fy), hit = document.elementFromPoint(x, y);
+        if (!hit || !hit.closest(busy)) return { x, y };
+      }
+      return { x: innerWidth - 1, y: innerHeight - 1 };
+    })()`).catch(() => ({ x: width - 1, y: height - 1 }));
+    await s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y }).catch(() => {});
+    let ok = true;
+    for (let end = Date.now() + 3000, quiet = 0; ; await sleep(50)) {
+      const calm = await evaluate(`(() => {
+        let running = 0;
+        for (const a of document.getAnimations()) {
+          if (a.playState !== 'running') continue;
+          if (a.effect.getComputedTiming().endTime === Infinity) { a.pause(); a.currentTime = 0; } else running++;
+        }
+        return !running && [...document.images].every((i) => i.complete);
+      })()`).catch(() => true);
+      quiet = calm && (!network || !inflight.size) ? quiet + 50 : 0;
+      if (quiet >= 300) break;
+      if (Date.now() > end) { ok = false; break; }
+    }
+    return ok;
+  };
+  return { s, evaluate, settle, phone, width, height, close: () => send('Target.disposeBrowserContext', { browserContextId }) };
 }
 
 // What a person sees first, at the window's size: a full-page capture misplaces fixed bars and makes a
 // phone shot thousands of pixels tall. Scroll with --before to shoot further down.
-export async function shot(page, file) {
+export async function shot(page, file, { network = true } = {}) {
+  await page.settle?.({ network });
   const { data } = await page.s('Page.captureScreenshot', { format: 'png' });
   writeFileSync(file, Buffer.from(data, 'base64'));
   return file;
@@ -484,11 +531,32 @@ function inPage(opts) {
   return { viewport: vw, scroll_width: scrollW, findings: [...grouped.values()], truncated: truncated.slice(0, 20) };
 }
 
-// Rule 23: click with every request held for 3 s; at 250 ms the click shows something, and no other
-// control went disabled or under a cover.
-async function clickCheck(page, selector) {
+// The controls --sweep clicks: what a person presses in the part the change touched, never the one --click
+// names. Run in the page; names let a fresh load find the same control again.
+function sweepList({ scope, skip }) {
+  const sel = 'button, [role=button], [role=tab], summary';
+  const bad = /delete|remove|sign.?out|log.?out|discard|erase|destroy/i;
+  const name = (c) => c.localName + (c.id ? '#' + c.id : '') + [...c.classList].slice(0, 2).map((x) => '.' + x).join('') + ' "' + (c.textContent || c.getAttribute('aria-label') || '').trim().slice(0, 24) + '"';
+  const skipEl = skip ? document.querySelector(skip) : null;
+  return [...document.querySelectorAll(sel)].filter((c) => {
+    if (c.disabled || c.getAttribute('aria-disabled') === 'true' || c.closest('[inert]') || !c.checkVisibility()) return false;
+    if (scope && !c.closest(scope)) return false;
+    if (skipEl && (skipEl === c || skipEl.contains(c))) return false;
+    if (bad.test(c.textContent + ' ' + (c.getAttribute('aria-label') || ''))) return false;
+    const r = c.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    const hit = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1));
+    return !!hit && (hit === c || c.contains(hit) || hit.contains(c));
+  }).map((c) => ({ c, name: name(c) }));
+}
+
+// Rule 23: click with every request held (3 s for --click, 1 s per control in a sweep); at 250 ms the click shows
+// something, and no other control went disabled or under a cover. In a sweep a control that changed nothing by
+// the time its hold ends (a click that navigates counts as a result) has done nothing at all: click-no-result.
+// `target` is a JS expression for the element, run in the page.
+async function clickCheck(page, target, label, { hold = 3000, end = 250 } = {}) {
   const pre = await page.evaluate(`(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
+    const el = ${target};
     if (!el) return null;
     el.scrollIntoView({ block: 'center' });
     const T = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab]';
@@ -500,23 +568,56 @@ async function clickCheck(page, selector) {
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })()`);
-  if (!pre) return [{ check: 'click', selector, why: 'no element matches --click' }];
+  if (!pre) return [{ check: 'click', selector: label, why: 'no element matches --click' }];
   await sleep(250);
   const baseline = await page.evaluate('window.__uim.muts');
   await page.evaluate('window.__uim.muts = 0');
-  await page.s('Network.emulateNetworkConditions', { offline: false, latency: 3000, downloadThroughput: -1, uploadThroughput: -1 });
+  await page.s('Network.emulateNetworkConditions', { offline: false, latency: hold, downloadThroughput: -1, uploadThroughput: -1 });
   for (const type of ['mousePressed', 'mouseReleased']) await page.s('Input.dispatchMouseEvent', { type, x: pre.x, y: pre.y, button: 'left', clickCount: 1 });
   await sleep(250);
-  const after = await page.evaluate(`(() => {
+  const read = () => page.evaluate(`(() => {
     const u = window.__uim;
     const name = (c) => c.localName + (c.id ? '#' + c.id : '') + [...c.classList].slice(0, 2).map((x) => '.' + x).join('') + ' "' + (c.textContent || c.getAttribute('aria-label') || '').trim().slice(0, 24) + '"';
     return { muts: u.muts, off: u.others.filter((c) => c.isConnected && !u.on(c)).map(name), covered: u.reachable.filter((c) => c.isConnected && !u.top(c)).map(name) };
   })()`);
+  let after;
+  try {
+    after = await read();
+    if (end > 250 && after.muts === 0) {
+      await sleep(end - 250);
+      after.muts = (await read()).muts;
+    }
+  } catch {
+    return []; // the click left the page: that is a result
+  }
   const found = [];
-  if (after.muts === 0) found.push({ check: 'click-no-result', selector, baseline_mutations: baseline, why: 'nothing on the page changed 250 ms after the click while its request was held' });
-  if (after.off.length) found.push({ check: 'click-froze', selector, disabled: after.off.slice(0, 8), count: after.off.length, why: `${after.off.length} other control(s) went disabled while the request was held` });
-  if (after.covered.length) found.push({ check: 'click-froze', selector, covered: after.covered.slice(0, 8), count: after.covered.length, why: `${after.covered.length} other control(s) went under a cover while the request was held` });
+  if (after.muts === 0) found.push({ check: 'click-no-result', selector: label, baseline_mutations: baseline, why: end > 250 ? `nothing on the page changed in ${end} ms after the click` : 'nothing on the page changed 250 ms after the click while its request was held' });
+  if (after.off.length) found.push({ check: 'click-froze', selector: label, disabled: after.off.slice(0, 8), count: after.off.length, why: `${after.off.length} other control(s) went disabled while the request was held` });
+  if (after.covered.length) found.push({ check: 'click-froze', selector: label, covered: after.covered.slice(0, 8), count: after.covered.length, why: `${after.covered.length} other control(s) went under a cover while the request was held` });
   return found;
+}
+
+const SWEEP_CAP = 10;
+
+// Click each existing control in scope on a fresh load of the view; a control a fresh load doesn't show the same
+// way (a list that renders after a fetch) is skipped and counted.
+async function sweep(browser, url, width, o, slug, rec, first) {
+  const args = JSON.stringify({ scope: o.scope, skip: o.click });
+  const list = await first.evaluate(`(${sweepList})(${args}).map((x) => x.name)`);
+  rec.sweep = { controls: list.length, clicked: 0, over_cap: Math.max(0, list.length - SWEEP_CAP), skipped_changed: 0 };
+  for (const [i, name] of list.slice(0, SWEEP_CAP).entries()) {
+    const page = await openPage(browser.send, url, width, o);
+    try {
+      const now = await page.evaluate(`(${sweepList})(${args}).map((x) => x.name)`);
+      if (now[i] !== name) { rec.sweep.skipped_changed++; continue; }
+      rec.sweep.clicked++;
+      const f = await clickCheck(page, `(${sweepList})(${args})[${i}].c`, `existing control ${name}`, { hold: 1000, end: 1300 });
+      rec.findings.push(...f);
+      if (f.length && o.shots) rec.shots_after_click = [...(rec.shots_after_click || []), await shot(page, join(o.shots, `${slug}-${width}-existing-${i}.png`), { network: false })];
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
 }
 
 // --- main --------------------------------------------------------------------------------------------
@@ -538,9 +639,10 @@ export async function measure(o) {
           const rec = { url, width, phone: page.phone, min_tap: page.phone ? minTap : 24, ...m };
           if (o.shots) rec.shot = await shot(page, join(o.shots, `${slug}-${width}.png`));
           if (o.click) {
-            rec.findings.push(...(await clickCheck(page, o.click)));
-            if (o.shots) rec.shot_after_click = await shot(page, join(o.shots, `${slug}-${width}-click.png`));
+            rec.findings.push(...(await clickCheck(page, `document.querySelector(${JSON.stringify(o.click)})`, o.click)));
+            if (o.shots) rec.shot_after_click = await shot(page, join(o.shots, `${slug}-${width}-click.png`), { network: false });
           }
+          if (o.click || o.sweep) await sweep(browser, url, width, o, slug, rec, page);
           pages.push(rec);
         } finally {
           await page.close().catch(() => {});
@@ -560,7 +662,8 @@ export async function measure(o) {
   }
   const counts = {};
   for (const p of pages) for (const f of p.findings) counts[f.check] = (counts[f.check] || 0) + 1;
-  return { ok: !Object.keys(counts).length, counts, ignored, pages };
+  // After --ignore: a tap or overflow still standing means fix it and measure again before any critic is called.
+  return { ok: !Object.keys(counts).length, stop: !!(counts.tap || counts.overflow), counts, ignored, pages };
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('ui-measure.mjs')) {
@@ -581,7 +684,8 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     if (o.out) writeFileSync(o.out, json + '\n');
     else console.log(json);
     if (o.out) console.error(r.ok ? 'ui-measure: clean' : `ui-measure: ${Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')} (${o.out})`);
-    process.exit(r.ok ? 0 : 1);
+    if (r.stop) console.error('ui-measure: STOP: a tap or overflow finding stands. Fix it and measure again before a critic round is spent.');
+    process.exit(r.stop ? 3 : r.ok ? 0 : 1);
   }, (e) => {
     console.error(`ui-measure: ${e.message}`);
     process.exit(2);

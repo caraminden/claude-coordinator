@@ -3,9 +3,14 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from './browser.ts';
 // @ts-ignore: a kit script in plain JS, so other schemes run it with no type stripping
+import { launch, openPage, shot } from '../kit/skills/critique/scripts/ui-measure.mjs';
+// @ts-ignore
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const bin = chromium();
@@ -45,6 +50,19 @@ const all = () => document.querySelectorAll('button');
 document.getElementById('good').onclick = () => { document.getElementById('list').insertAdjacentHTML('beforeend', '<li>new</li>'); fetch('/slow'); };
 document.getElementById('bad').onclick = async () => { all().forEach((b) => (b.disabled = true)); await fetch('/slow'); all().forEach((b) => (b.disabled = false)); };
 </script>`,
+  // A spinner that never stops, an animation that ends, and a chip whose tooltip opens on hover.
+  '/busy': `${STYLE}<style>@keyframes r{to{transform:rotate(360deg)}} #sp{width:40px;height:40px;border:6px solid #ccc;border-top-color:#339;border-radius:50%;animation:r .8s linear infinite}
+#fade{animation:f .6s forwards} @keyframes f{from{opacity:0}to{opacity:1}} #tip{display:none} #h:hover #tip{display:block}</style>
+<div id="sp"></div><p id="fade">hello</p><button class="btn" id="h" style="position:fixed;right:0;bottom:0">hover<span id="tip">tip</span></button>`,
+  // Existing controls: one real no-op beside two that work (one changes the page, one navigates away).
+  '/sweep': `${STYLE}<ul id="list"><li>one</li></ul>
+<button class="btn" id="good">Add</button> <button class="btn" id="dead">Pin</button> <button class="btn" id="leave">Leave</button>
+<script>
+document.getElementById('good').onclick = () => document.getElementById('list').insertAdjacentHTML('beforeend', '<li>new</li>');
+document.getElementById('leave').onclick = () => { location.href = '/clean'; };
+</script>`,
+  // A 36 px chip on a 40 px phone control height: the loop stops before a critic is spent.
+  '/chip': `${STYLE}<button class="chip" id="chip36" style="height:36px;border:0">filter</button>`,
   // A modal dialog (position: fixed, scrolling itself) whose head scrolls away, rebuilt from Peek's before #175.
   ...Object.fromEntries(['static', 'sticky'].map((pos) => [`/modal-${pos}`, `${STYLE}
 <dialog id="m" style="width:400px;max-height:300px;padding:0"><div style="display:flex;padding:8px;position:${pos};top:0;background:#fff">
@@ -107,10 +125,48 @@ test('--click flags a click that disables the other controls, not one that shows
   const bad = at(await measure(opts('/clicks', { widths: [1440], click: '#bad' })), 1440);
   assert.ok(bad.some((f: any) => f.check === 'click-froze' && f.disabled?.length === 2), JSON.stringify(bad));
   const good = at(await measure(opts('/clicks', { widths: [1440], click: '#good' })), 1440);
-  assert.deepEqual(good.filter((f: any) => f.check.startsWith('click')), []);
+  assert.deepEqual(good.filter((f: any) => f.selector === '#good'), []);
 });
 
 test("a modal dialog's ✕ that scrolls away is found, and a pinned one isn't", { skip }, async () => {
   assert.ok(has(at(await measure(opts('/modal-static', { widths: [1440] })), 1440), 'close-scrolls', '#x'));
   assert.ok(!has(at(await measure(opts('/modal-sticky', { widths: [1440] })), 1440), 'close-scrolls', '#x'));
+});
+
+test('--click also clicks the existing controls: a dead one fails the check, one that works or navigates does not', { skip }, async () => {
+  const r = await measure(opts('/sweep', { widths: [1440], click: '#good' }));
+  const f = at(r, 1440).filter((x: any) => x.check.startsWith('click'));
+  assert.equal(f.length, 1, JSON.stringify(f));
+  assert.ok(f[0].check === 'click-no-result' && f[0].selector.includes('#dead'), JSON.stringify(f));
+  assert.equal(r.ok, false);
+  const sweep = at(await measure(opts('/sweep', { widths: [1440], sweep: true })), 1440);
+  assert.ok(has(sweep, 'click-no-result', '#dead') && !has(sweep, 'click-no-result', '#good') && !has(sweep, 'click-no-result', '#leave'), JSON.stringify(sweep));
+  const clean = await measure(opts('/clicks', { widths: [1440], sweep: true, ignore: ['click-froze:#bad'] }));
+  assert.ok(!has(at(clean, 1440), 'click-no-result', '#good'), JSON.stringify(at(clean, 1440)));
+});
+
+test('a tap or overflow finding stops the loop before a critic round; other findings do not', { skip }, async () => {
+  const chip = await measure(opts('/chip', { widths: [390] }));
+  assert.ok(has(at(chip, 390), 'tap', '#chip36'));
+  assert.equal(chip.stop, true);
+  assert.equal((await measure(opts('/broken', { widths: [390] }))).stop, true);
+  assert.equal((await measure(opts('/clean'))).stop, false);
+  assert.equal((await measure(opts('/chip', { widths: [390], ignore: ['tap:#chip36'] }))).stop, false, 'an ignored tap does not stop it');
+  assert.equal((await measure(opts('/modal-static', { widths: [1440] }))).stop, false, 'close-scrolls is a finding, not a stop');
+});
+
+test('a shot settles first: a spinner is frozen on its first frame and the pointer is off the page controls', { skip }, async () => {
+  const browser = launch(bin);
+  try {
+    const shots: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const page = await openPage(browser.send, base + '/busy', 390, { headers: [], cookies: [], settle: 50 });
+      try {
+        await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 385, y: 835 }); // hover the fixed button
+        shots.push(readFileSync(await shot(page, join(tmpdir(), `uim-busy-${process.pid}-${i}.png`))).toString('base64'));
+        assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent === null && getComputedStyle(document.getElementById('fade')).opacity`), '1');
+      } finally { await page.close(); }
+    }
+    assert.ok(shots.every((x) => x === shots[0]), 'three shots of the same view differ');
+  } finally { await browser.close(); }
 });

@@ -2,8 +2,8 @@
 name: ui-screenshots
 judges: front-end changes, from desktop and phone screenshots of each view the change touches and the measuring script's numbers
 when: "diff: public/**, **/*.css, **/*.html"
-input: each view the change touches at 1440 and 390 wide, taken by the checks' --shots (and an after-the-click shot for each action the change adds or changes, from --click)
-checks: ["node <kit>/skills/critique/scripts/ui-measure.mjs <url of each view the change touches> --scope <the part it changed> --shots $TMPDIR/ui-shots --out $TMPDIR/ui-measure.json"]
+input: each view the change touches at 1440 and 390 wide, taken by the checks' --shots (an after-the-click shot for each action the change adds or changes, from --click, and one for each existing control in the view that failed its click, from --sweep)
+checks: ["node <kit>/skills/critique/scripts/ui-measure.mjs <url of each view the change touches> --scope <the part it changed> --sweep --shots $TMPDIR/ui-shots --out $TMPDIR/ui-measure.json"]
 mode: blind
 model: sonnet
 effort: medium
@@ -51,7 +51,10 @@ ignored finding as a note, never a blocker.
    tall; on desktop 24 px each way. A text link in a sentence is exempt. See it: a `tap` finding (its
    `height` against `min`); in the phone shot, a row of small buttons or a ✕ the size of a letter.
    Seen: Citadel #289, a switch's touch target clipped by its table cell so a tap flipped the next
-   row; #361, the Plugins checkboxes on phones.
+   row; #361, the Plugins checkboxes on phones; TWIReader #20, #55 and its dialogue-voices work, chips at
+   36-37 px against 40; TripPresenter #5, 26 px pills. A `tap` or `overflow` finding **stops the loop**:
+   `ui-measure` exits 3 and sets `stop`, the author fixes it and measures again, and no critic round is spent
+   until it is gone. Seen (overflow): TripPresenter #12, 320 px wide.
 4. **One line per edge.** A box and something inside it never both draw a border, outline or ring on
    the same edge. See it: a `double-border` finding (the two selectors, the sides and the gap); in the
    shot, two parallel lines a few px apart, one of them hugging something inside the box (a field
@@ -68,7 +71,12 @@ ignored finding as a note, never a blocker.
    `click-no-result` finding from `--click`; in the after-the-click shot, other controls greyed out, a
    cover or spinner over more than the item clicked, or nothing changed at all. Seen: Theory of
    Crafting's Speculation reject froze the whole panel and shipped through review; Citadel #389 and
-   #391 moved two batches of Citadel's own clicks to `optimistic()`.
+   #391 moved two batches of Citadel's own clicks to `optimistic()`. The script also clicks the existing
+   buttons, tabs and summaries in `--scope` (`--sweep`, up to 10 a width, each on a fresh load): one that
+   does nothing or freezes the rest is a finding too, not only the changed control. Seen: Citadel #634, Image
+   cards required Send and broke selecting a card (Josh, 11-13: "You broke the ability to actually select
+   the cards"); #960, mark drawing worked on one button and not another (Cara, 11-18: "ok, try again, draw
+   on a different button").
 7. **Nothing covers what a person came for.** On a phone, no floating button, bar or menu sits over the
    content, the composer or another control, and a status line keeps its own room. See it: in the 390
    shot, something drawn over text or over a control. Seen: Citadel #212, the Latest pill covered
@@ -133,6 +141,10 @@ ignored finding as a note, never a blocker.
 
 ## Known blind spots
 
+- The shots are taken settled: the pointer is moved off the controls, finite animations finish, the network goes
+  idle (3 s at most) and a spinner that never ends is frozen on its first frame. Seen: TWIReader #20, a tooltip
+  the click opened; VoiceAnalyzer #31, a spinner caught mid-draw; TWIReader #36, a cut-off shot; VoiceAnalyzer
+  #27, a misframed one; TripPresenter #23's card, a shot flow that timed out in 3 of 4 runs.
 - What happens over time can't be seen in a still: a layout shift when a status changes (rule 13),
   motion, focus order. The script's `--click` covers the click; the rest stays with the author's own
   check (`citadel:contraption-ui`, `references/status.md`).

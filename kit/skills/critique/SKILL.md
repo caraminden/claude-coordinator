@@ -56,7 +56,8 @@ The rubric's other `when:` parts still match as above.
 2. **Make the artifacts** the rubric's `input:` names, each labelled so a finding can point into it
    (frame numbers, viewport widths, line numbers). Read an animation as frames, never as one still.
 3. **Run the `checks:`** from the repo root. Fix every failure before any model looks, and keep the
-   output for the critic.
+   output for the critic. A check that says to stop (ui-measure's `stop`, exit 3: a `tap` or overflow finding) ends the round
+   here: fix it, run the checks again, and call no critic until it clears.
 4. **Look yourself** at each artifact once and fix what is obvious. This doesn't replace the critic.
 
 ## 3. Run the critic

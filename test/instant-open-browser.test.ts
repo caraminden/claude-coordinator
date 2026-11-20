@@ -130,8 +130,10 @@ test('a ship reaches an open app by itself: the worker keeps the new version\'s 
 
   appendFileSync(join(copy, 'public', 'style.css'), '\n/* shipped */\n');
   srv.proc.kill('SIGHUP');
+  const shipped = Date.now();
   await waitFor(page, 'the new version', `!window.beforeTheShip && document.querySelector('meta[name="citadel-version"]')?.content !== ${JSON.stringify(v1)}`);
   const v2 = await page.eval(version);
+  console.log(`# the open app was on the new version ${Date.now() - shipped} ms after the ship`);
   assert.equal(v2, (await fetch(`${srv.base}/c/`)).headers.get('x-front-version'), 'the page is the version the server now runs');
   await waitFor(page, 'only the new files kept', `caches.keys().then((k) => k.join() === 'shell-${v2}')`);
   assert.equal(await page.eval(`fetch('style.css').then((r) => r.text()).then((t) => t.includes('/* shipped */'))`), true);

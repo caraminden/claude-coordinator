@@ -34,8 +34,10 @@ with step 1's three lines, and ask it to show, within its 15 lines:
 
 An app's own agent chat (a contraption's, like an aura or a planner agent) is in the app, not the
 database. `contraption_read` reads it, as the person, only on a turn that answers their own typed
-message: send a general-purpose Grunt (Sonnet, medium) with the window and step 2's three asks.
-On any other turn, say the chat was not reached and ask them to send the question in this chat.
+message: list its read commands first (no `command`), and when one reads the chat, send a
+general-purpose Grunt (Sonnet, medium) with that command, the window and step 2's three asks. On
+any other turn, or with no such command, say the chat was not reached (and why), and mark the turn
+point and the class as guesses until it is.
 
 Read its timeline, not the sources. When its turn point doesn't explain the complaint, send it one
 follow-up question about that gap; a third call means the case is two cases.
@@ -71,8 +73,9 @@ The fix stops the turn point from recurring, in this order of preference:
 
 Before proposing it, look for a twin: an open minion or a handoff in the shared folder that
 already covers it (`list_tickets`, the `handoffs/` folder). A twin means the fix is "finish #N", and
-a shipped fix that didn't hold means the next fix must be a mechanism. A shipped fix with no later
-case against it is the answer: report it and propose nothing new. Done when the fix names
+a shipped fix that didn't hold means the next fix must be a mechanism. A shipped fix is the answer only
+when it shipped after this turn point and no later case went wrong the same way: then report it
+and propose nothing new. Done when the fix names
 where it lives (which hook, test, tool or file kind) and what it would have done at the turn point.
 
 ## 5. Report and ask
@@ -81,14 +84,15 @@ Reply with:
 
 - the timeline (trim the investigator's lines to the ones that bear on the complaint), the cost
   total and the turn point, marked;
-- `Cause class: <class>: <one sentence pointing at the timeline>`, on its own line, so the
-  scheme's process digest can count them;
+- `Cause class: <class>: <one sentence pointing at the timeline>`, on its own line, in that
+  form, so cases can be counted across schemes;
 - the fix, and the twin or the past fix it replaces, if any.
 
 When there is a fix to build, one `ask_question` card, written for someone who didn't follow the case: the cause in one
 plain sentence, the fix in one, and three options: **Build it** (recommended), **Not now**, and
 **The cause is wrong** (its description asks what they saw). On Build it, write a handoff in the
 shared folder's `handoffs/` (why, with the timeline's evidence; the fix; done when the turn point
-can't recur) and send its path to the Taskmaster (`message_coordinator`, `need: start`); a fix in
-Citadel's own code or the kit is for the Citadel scheme, so say so and the Taskmaster relays it.
+can't recur) and start it: a minion sends the path to its Taskmaster (`message_coordinator`, `need: start`),
+a Taskmaster starts the minion itself. A fix in Citadel's own code or the kit belongs to the
+Citadel scheme: a minion says so, a Taskmaster relays it there.
 On The cause is wrong, take their account as a new lead: back to step 2 with it.

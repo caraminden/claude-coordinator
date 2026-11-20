@@ -1,0 +1,11 @@
+# Citadel's apps (contraptions: app-<name>.service) and their builds, in a slice of their own so one app can't
+# take the box (#1214). Top-level on purpose: a name starting "citadel-" would nest it under citadel.slice and
+# share Citadel's 20G. Not in use until the app units name it (Slice=contraptions.slice, after Build 6).
+# Measured 2026-11-19/20: each app at most about 0.35G (8 apps), builds up to 2.0G (peek-auras).
+[Unit]
+Description=Citadel's apps
+
+[Slice]
+MemoryHigh=4G
+MemoryMax=5G
+MemorySwapMax=2G

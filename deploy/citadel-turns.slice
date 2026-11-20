@@ -1,11 +1,13 @@
-# Host turns (src/turn-launch.ts TURN_SLICE) run here, under citadel.slice (8G and 8 cores for the
-# server and every turn together). MemoryHigh makes the kernel reclaim from and throttle turns before
-# they fill the box and push it into swap (2026-11-10: load ~100 with 19 GiB swapped out). 6G leaves
-# the server about 2G of citadel.slice's 8G, and the 29 GiB box still has room for the emulator, the
-# Godot editor and the containers. A starting value: tune it after watching MemoryCurrent.
-# No MemoryMax on purpose: it would OOM-kill turns. Container turns carry their own --cpus 4 --memory 6g.
+# Host turns (src/turn-launch.ts TURN_SLICE), lands and fast-verify (src/host-job.ts) run here, under
+# citadel.slice (MemoryMax=20G for everything Citadel runs). MemoryHigh makes the kernel reclaim from and
+# throttle these before they crowd out the server and the containers (2026-11-10: load ~100 with 19 GiB
+# swapped out). Measured 2026-11-19/20 (#1214): peak 19.8G + 11.2G swap, land units up to 4.3G each with up to
+# 6 at once, fast-verify 2.5G, host turns 1.1G. 10G holds two big lands and the rest without throttling;
+# past it, lands slow down rather than fail.
+# No MemoryMax on purpose: it would OOM-kill turns. citadel.slice's MemoryMax is the hard stop. Container
+# turns carry their own caps on their unit (src/claude-link.ts CONTAINER_MEMORY).
 [Unit]
 Description=Host turns of Citadel
 
 [Slice]
-MemoryHigh=6G
+MemoryHigh=10G

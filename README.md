@@ -229,9 +229,9 @@ journalctl --user -u claude-coordinator -f
 ```
 
 The service runs with `UMask=0077`, so the database and everything it writes are
-private (mode 600). `citadel.slice` caps the service and every turn it runs, at
-`MemoryMax=8G` and `CPUQuota=800%`, half of perigee, which is shared
-(`resources.conf` puts the service in it). `citadel-turns.slice` adds `MemoryHigh=6G` for host turns (throttled, never killed). `claude-coordinator.socket` holds port
+private (mode 600). `citadel.slice` caps the service and everything it runs (host turns, lands,
+each person's container) at `MemoryMax=20G` and `MemorySwapMax=6G` of perigee's 29G, which is shared
+(`resources.conf` puts the service in it; the numbers behind it are in the file). `citadel-turns.slice` adds `MemoryHigh=10G` for host turns (throttled, never killed), and each container's own unit caps it at 8G. `contraptions.slice` caps the apps at 5G, once their units name it. `claude-coordinator.socket` holds port
 8573 while the server restarts, so requests then wait instead of failing
 (`socket.conf` makes the service use it). `priority.conf` keeps the server out of swap and
 ahead of the turns for CPU; it and the host settings that go with it are in `deploy/priority.md`:
@@ -239,7 +239,7 @@ ahead of the turns for CPU; it and the host settings that go with it are in `dep
 ```sh
 mkdir -p ~/.config/systemd/user/claude-coordinator.service.d
 # link only files the live checkout has: a link to a missing unit file breaks every new turn's unit (#504)
-for f in citadel.slice citadel-turns.slice; do test -e ~/claude-coordinator/deploy/$f && ln -sf ~/claude-coordinator/deploy/$f ~/.config/systemd/user/ || echo "missing: $f, land it first"; done
+for f in citadel.slice citadel-turns.slice contraptions.slice; do test -e ~/claude-coordinator/deploy/$f && ln -sf ~/claude-coordinator/deploy/$f ~/.config/systemd/user/ || echo "missing: $f, land it first"; done
 ln -s ~/claude-coordinator/deploy/claude-coordinator.socket ~/.config/systemd/user/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/resources.conf ~/.config/systemd/user/claude-coordinator.service.d/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/socket.conf ~/.config/systemd/user/claude-coordinator.service.d/

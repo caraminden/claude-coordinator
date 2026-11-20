@@ -8,7 +8,8 @@
 // feed Citadel publishes after each deploy (src/apk-build.ts): android/latest.json, { "versionCode": N, "apk": "<file>",
 // "versionName"?, "commit"? }, the apk relative to the feed. When N is above the installed build (App.getInfo().build), it
 // shows "A new version of the app is ready" with an "Update the app" button that opens the APK in the system browser,
-// where Android's installer takes over. Offline, or with no feed, it shows nothing.
+// where Android's installer takes over. Offline, or with no feed, it shows nothing. An app built on Citadel's shared
+// Android shell (kit/android-shell, #1138) asks natively instead, so there the banner steps aside.
 
 /**
  * The update waiting for this app, or null: none newer, not inside the Android app, or the feed can't be read.
@@ -43,6 +44,7 @@ function openOutside(url) {
  * banner element, or null when there's nothing to show.
  */
 export async function mountUpdate(parent = document.body, opts = {}) {
+  if (globalThis.Capacitor?.isPluginAvailable?.('CitadelShell')) return null;
   const update = await checkUpdate(opts);
   if (!update) return null;
   const banner = document.createElement('div');

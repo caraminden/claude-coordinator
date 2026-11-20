@@ -3535,7 +3535,7 @@ export class Store {
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
     const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
         FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
-    // Through events_errors: the id range it used to walk read every event of the window (43 ms a day's window, #1178).
+    // Through events_errors: without it this read every event of the window (43 ms a day's window, #1178), eventIdAt or not.
     const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
       .get(from, to) as { n: number; first: number | null };
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);

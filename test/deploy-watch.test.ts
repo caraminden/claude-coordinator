@@ -444,7 +444,7 @@ test('report: a window already read is not read again; a newly due one is (#1178
   assert.equal(reads, once + 2);
 });
 
-test('turnOutcomes finds error events through their own index, not by walking every event of the window (#1178)', () => {
+test('turnOutcomes reads error events through their own index, not every event of the window (#1178)', () => {
   const { store } = setup();
   const sql: string[] = [];
   const prepare = store.db.prepare.bind(store.db);

@@ -488,6 +488,7 @@ function detail() {
     e.kit ? null : e.file ? (e.kind === 'teacher' ? null : section('With the others', onFailEditor(e))) : section('With the others', ...withOthers(e)),
     section('Record', e.calibrated ? h('p', {}, `Calibrated ${e.calibrated}`) : null, ...record(e)),
     e.verdicts?.length ? section('Verdicts', verdictList(e, false)) : null,
+    e.lessons ? section('Lessons', ...lessonList(e, false)) : null,
     h('div', { class: 'rv-actions' },
       h('button', { type: 'button', class: 'cui-btn', onclick: () => select(e.slug, 'edit') }, 'Edit by hand'),
       h('button', { type: 'button', class: 'cui-btn', 'aria-pressed': String(state.mode === 'history'), onclick: () => select(e.slug, state.mode === 'history' ? 'view' : 'history') }, 'History')),
@@ -740,9 +741,43 @@ function kitForm(e) {
     h('p', { class: 'muted' }, e.what),
     field("This scheme's additions", body, `Read with ${e.kit ? "the kit's own text" : `its file, ${e.file},`} and handed to its Grunt: what to look for here, what to let pass.`),
     e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
+    e.lessons?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Lessons'), ...lessonList(e, true)) : null,
     field('What changed', note),
     err,
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')));
+}
+
+/**
+ * The finding checker's lessons for the pre-ship review (#1158): kinds of finding it refuted here, which the reviewer
+ * reads once a kind has three refutes. Only a minion adds one; Edit by hand removes one.
+ */
+function lessonList(e, removable) {
+  const read = e.lessons.filter((l) => l.lesson);
+  const counting = e.lessons.length - read.length;
+  const note = h('p', { class: 'muted' }, read.length
+    ? `Findings the finding checker refuted here in 3 minions' reviews or more. The reviewer reads why each was wrong, and still raises one when a change makes that reason untrue.${counting ? ` ${counting} more kind${counting === 1 ? ' is' : 's are'} counting toward 3.` : ''}`
+    : counting ? `None yet: ${counting} kind${counting === 1 ? '' : 's'} of refuted finding ${counting === 1 ? 'is' : 'are'} counting toward 3, when the reviewer starts reading it.` : 'None yet. When the finding checker refutes the same kind of finding in 3 minions' reviews here, the reviewer reads why it was wrong.');
+  if (!read.length) return [note];
+  return [note, h('ul', { class: 'rv-verdicts' }, read.map((l) => h('li', {},
+    h('strong', {}, l.kind), ` ${l.why}`,
+    h('span', { class: 'muted' }, ` refuted ${l.count} times, last `, h('time', { title: pacific(l.last) }, ago(l.last))),
+    removable ? h('button', { type: 'button', class: 'cui-btn cui-small cui-ghost', onclick: () => removeLesson(e, l) }, 'Remove') : null)))];
+}
+
+async function removeLesson(e, l) {
+  const s = state;
+  const x = s.entries.find((y) => y.slug === e.slug);
+  const was = x?.lessons;
+  if (x) x.lessons = was.filter((y) => y.kind !== l.kind);
+  if (state === s) draw();
+  try {
+    await api(`${url(e.slug)}/lessons`, { method: 'DELETE', body: { kind: l.kind } });
+    toast('Removed: its count starts again from nothing');
+  } catch (err) {
+    if (x) x.lessons = was;
+    if (state === s) draw();
+    toast(`Couldn't remove it: ${err.message}`);
+  }
 }
 
 /**

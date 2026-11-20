@@ -554,3 +554,56 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   set.save(3, 'shader-critic', { gate: 'block' }, 'Josh', 'Blocks');
   assert.equal(set.save(3, 'shader-critic', { trial: true }, 'Josh', 'Trial').gate, 'advise');
 });
+
+test('lessons (#1158): a kind refuted 3 times with no 30-day gap reaches the reviewer as why it was wrong; 30 days quiet expires it; 30 at most', () => {
+  const { set } = fresh();
+  const day = 86_400_000;
+  const t0 = Date.UTC(2026, 10, 1);
+  const by = { ticketId: null, minion: '#4' };
+  // A scheme that never opened its page: the first refute makes the pre-ship review's row.
+  set.recordRefutes(3, { ...by, refuted: [{ kind: 'Missing build step.', why: 'the repo has no build step: Node runs the TypeScript' }] }, t0);
+  set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing  build step', why: 'the repo has no build step: Node runs the TypeScript' }] }, t0 + 10 * day);
+  assert.deepEqual(set.lessons(3, t0 + 11 * day), [], 'two refutes make no lesson');
+  assert.deepEqual(set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]), [['missing build step', 2]], 'the same words count together');
+  // One minion's review counts once per kind: three findings on one diff, or its later rounds, are one hit.
+  set.recordRefutes(3, { ticketId: 7, minion: '#7', refuted: [1, 2, 3].map(() => ({ kind: 'untested helper', why: 'the helper is tested through its caller' })) }, t0 + 10 * day);
+  set.recordRefutes(3, { ticketId: 7, minion: '#7', refuted: [{ kind: 'untested helper', why: 'the helper is tested through its caller' }] }, t0 + 10 * day);
+  assert.deepEqual(set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]), [['missing build step', 2], ['untested helper', 1]]);
+  set.removeLesson(3, 'untested helper');
+  set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing build step', why: 'there is no build: package.json has no build script' }] }, t0 + 20 * day);
+  const [l] = set.lessons(3, t0 + 21 * day);
+  assert.deepEqual([l.kind, l.count, l.last, l.why], ['missing build step', 3, t0 + 20 * day, 'there is no build: package.json has no build script']);
+  assert.deepEqual(set.lessons(9, t0 + 21 * day), [], "another scheme's reviewer reads none of this one's");
+
+  // The reviewer reads it in the pre-ship review's additions file, as a reason, never a ban.
+  const dir = join(root, 'lessons');
+  const line = kitLine(set.list(3), dir, new Map(), set.lessons(3, t0 + 21 * day));
+  assert.match(line, new RegExp(`${dir}/pre-ship-review\\.md\` \\(Pre-ship review\\)`));
+  const file = readFileSync(join(dir, 'pre-ship-review.md'), 'utf8');
+  assert.match(file, /^- missing build step: refuted 3 times, last 2026-11-21\. It was wrong because there is no build: package\.json has no build script\.$/m);
+  assert.match(file, /when this diff makes the reason untrue, raise the finding/);
+  set.save(3, 'pre-ship-review', { enabled: false }, 'Josh', 'Turned off');
+  assert.doesNotMatch(kitLine(set.list(3), dir, new Map(), set.lessons(3, t0 + 21 * day)), /pre-ship-review\.md/, 'no reviewer runs, so no lessons file');
+  set.save(3, 'pre-ship-review', { enabled: true }, 'Josh', 'Turned on');
+
+  // Thirty days with no hit expires it; a hit after that starts the count again.
+  assert.equal(set.lessons(3, t0 + 50 * day).length, 1);
+  assert.deepEqual(set.lessons(3, t0 + 51 * day, true), [], 'expired after 30 days without a hit');
+  set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing build step', why: 'the repo has no build step at all' }] }, t0 + 60 * day);
+  assert.deepEqual(set.lessons(3, t0 + 60 * day, true).map((l) => l.count), [1]);
+
+  // Never "don't look at X"; bad input refused whole.
+  assert.throws(() => set.recordRefutes(3, { ...by, refuted: [{ kind: 'unused helper', why: "Don't flag helpers in tools/" }] }), /a fact about the repo/);
+  assert.throws(() => set.recordRefutes(3, { ...by, refuted: [{ kind: 'x', why: 'a long enough reason here' }] }), /kind is/);
+  assert.throws(() => set.recordRefutes(3, { ...by, refuted: [] }), /1 to 25/);
+
+  // At most 30 lessons, most hits first.
+  for (let k = 0; k < 32; k++) for (let n = 0; n < 3 + (k % 3); n++) set.recordRefutes(3, { ticketId: 100 + n, minion: `#${100 + n}`, refuted: [{ kind: `kind ${k}`, why: `reason number ${k} holds here` }] }, t0 + 61 * day);
+  const capped = set.lessons(3, t0 + 61 * day);
+  assert.equal(capped.length, 30);
+  assert.equal(capped[0].count, 5);
+  assert.equal(set.lessons(3, t0 + 61 * day, true).length, 33, 'the minion still sees every kind counting');
+  set.removeLesson(3, 'Kind 2');
+  assert.ok(!set.lessons(3, t0 + 61 * day, true).some((x) => x.kind === 'kind 2'), 'a person removes one, and its count starts again');
+  assert.throws(() => set.removeLesson(3, 'kind 2'), /No lesson/);
+});

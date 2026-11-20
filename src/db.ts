@@ -1559,6 +1559,7 @@ export const SCHEMA_HISTORY = [
   [88, 'minion_index and handoff_index, full-text (#1156)'],
   [89, 'ideas (#1150)'],
   [90, 'flake_fixes (#1120)'],
+  [91, 'review_refutes (#1158)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

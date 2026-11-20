@@ -270,6 +270,18 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   assert.equal((await call(`${url}/look/verdicts/${v.data.id}`, { method: 'DELETE', as: minion.id })).status, 403);
   assert.equal((await call(`${url}/look/verdicts/${v.data.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual((await call(url)).data.entries.find((e: any) => e.slug === 'look').verdicts, []);
+
+  // The finding checker's refutes (#1158): only a minion records them, on the pre-ship review; a person removes a lesson.
+  const refutes = `${url}/pre-ship-review/refutes`;
+  const one = { kind: 'unescaped shell arg', why: 'the value is a ticket number, checked as an integer upstream' };
+  assert.equal((await call(refutes, { method: 'POST', body: { refuted: [one] } })).status, 403, 'people never add one');
+  assert.equal((await call(refutes, { method: 'POST', body: { refuted: [{ kind: 'x', why: 'y' }] }, as: minion.id })).status, 400);
+  for (let i = 0; i < 3; i++) assert.equal((await call(refutes, { method: 'POST', body: { refuted: [one] }, as: minion.id })).status, 201);
+  const pre = (await call(url)).data.entries.find((e: any) => e.slug === 'pre-ship-review');
+  assert.deepEqual(pre.lessons.map((l: any) => [l.kind, l.count, l.lesson]), [['unescaped shell arg', 1, false]], "one minion's rounds count once");
+  assert.equal((await call(`${url}/pre-ship-review/lessons`, { method: 'DELETE', body: { kind: 'unescaped shell arg' }, as: minion.id })).status, 403);
+  assert.equal((await call(`${url}/pre-ship-review/lessons`, { method: 'DELETE', body: { kind: 'unescaped shell arg' } })).status, 200);
+  assert.deepEqual((await call(url)).data.entries.find((e: any) => e.slug === 'pre-ship-review').lessons, []);
 });
 
 // Build 4 gap (Delve #127), in a scheme that isn't Citadel: the Taskmaster's tool sets kind, model, effort, on_fail and

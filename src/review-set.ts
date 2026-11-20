@@ -92,6 +92,20 @@ CREATE TABLE IF NOT EXISTS review_verdicts (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS review_verdicts_entry ON review_verdicts(entry_id, id);
+-- The reviewer's lessons (#1158): one row per finding the finding checker refuted, on the pre-ship review's entry. A kind
+-- refuted three times or more, with no 30-day gap, is a lesson its later reviews read (lessons()); a person removes one.
+CREATE TABLE IF NOT EXISTS review_refutes (
+  id INTEGER PRIMARY KEY,
+  entry_id INTEGER NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+  -- The kind of wrong finding, normalized (refuteKind): "missing build step".
+  kind TEXT NOT NULL,
+  -- Why it was wrong, as a fact about the repo: "the repo has no build step: Node runs the TypeScript".
+  why TEXT NOT NULL,
+  ticket_id INTEGER,
+  minion TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_refutes_entry ON review_refutes(entry_id, kind, at);
 `;
 
 export const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'] as const;
@@ -110,6 +124,14 @@ export const CRITIC_ON_FAIL: OnFail[] = [{ after: 2, to: 'professor' }, { after:
 export const VERDICTS = ['pass', 'fail', 'ask'] as const;
 export interface Run { id: number; minion: string; round: number; verdict: string; disagreed: boolean; at: number }
 export interface Verdict { id: number; person: string; words: string; minion: string; at: number }
+/** A kind of finding the finding checker refuted (#1158): its hits in the current streak, the last hit, and the last reason. */
+export interface Lesson { kind: string; count: number; last: number; why: string }
+// The handoff's numbers (Josh, 2026-11-19, idea E3): three refutes make a lesson, 30 days without one expire it, 30 at most.
+export const LESSON_HITS = 3;
+export const LESSON_MS = 30 * 24 * 60 * 60_000;
+export const LESSON_CAP = 30;
+/** A refuted finding's kind as stored: lower case, one space, no end punctuation, so the same words count together. */
+export const refuteKind = (s: unknown) => typeof s === 'string' ? s.toLowerCase().replace(/[`"']/g, '').replace(/\s+/g, ' ').trim().replace(/^[\s.,;:!?-]+|[\s.,;:!?-]+$/g, '') : '';
 
 export interface ReviewEntry {
   id: number;
@@ -676,6 +698,67 @@ export class ReviewSet {
     if (!this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
   }
 
+  /**
+   * Record the findings the finding checker refuted on a minion's review (#1158), on the pre-ship review's entry (made
+   * here when the scheme never opened its page). Each is a kind of mistake and why it was wrong; lessons() counts them.
+   */
+  recordRefutes(projectId: number, r: { ticketId: number | null; minion: string; refuted: { kind: string; why: string }[] }, at = Date.now()): Lesson[] {
+    if (!Array.isArray(r.refuted) || !r.refuted.length || r.refuted.length > 25) throw new ReviewError('refuted is a list of 1 to 25 {kind, why}, one per refuted finding');
+    const rows = r.refuted.map((x) => {
+      const kind = refuteKind(x?.kind);
+      const why = typeof x?.why === 'string' ? x.why.replace(/\s+/g, ' ').trim() : '';
+      if (kind.length < 3 || kind.length > 80) throw new ReviewError('kind is the kind of mistake in a few words, 3 to 80 characters, like "missing build step"');
+      if (why.length < 10 || why.length > 300) throw new ReviewError('why is the reason the finding was wrong, 10 to 300 characters');
+      // A lesson says why a finding was wrong, never "don't look at X", so a real case still gets raised (#1158).
+      if (/^(don'?t|do not|never|skip|ignore|avoid|stop)\b/i.test(why)) throw new ReviewError(`why says why it was wrong as a fact about the repo ("the repo has no build step"), not an instruction: "${why.slice(0, 40)}"`);
+      return { kind, why };
+    }).filter((x, i, all) => all.findIndex((y) => y.kind === x.kind) === i); // one review counts once per kind
+    if (!this.get(projectId, 'pre-ship-review')) this.ensureBuiltIns(projectId, at);
+    const e = this.kit(projectId, 'pre-ship-review');
+    if (!e) throw new ReviewError("This scheme's own entry took the slug pre-ship-review, so the kit's reviewer has no lessons here");
+    const ins = this.db.prepare('INSERT INTO review_refutes (entry_id, kind, why, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const x of rows) ins.run(e.id, x.kind, x.why, r.ticketId, r.minion, at);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return this.lessons(projectId, at, true);
+  }
+
+  /**
+   * The pre-ship review's lessons (#1158): each kind of refuted finding whose latest streak (hits no more than 30 days
+   * apart, the last within 30 days) has three hits or more, most hits first, at most 30. With `all`, every live kind,
+   * any count, uncapped: what a minion reads to reuse a kind's words.
+   */
+  lessons(projectId: number, now = Date.now(), all = false): Lesson[] {
+    const e = this.kit(projectId, 'pre-ship-review');
+    if (!e) return [];
+    const rows = this.db.prepare('SELECT kind, why, at, ticket_id FROM review_refutes WHERE entry_id = ? ORDER BY kind, at, id').all(e.id) as Row[];
+    const by = new Map<string, Lesson & { seen: Set<number> }>();
+    for (const r of rows) {
+      const was = by.get(r.kind);
+      // A gap of more than LESSON_MS starts the count again: the old streak expired.
+      if (!was || r.at - was.last > LESSON_MS) by.set(r.kind, { kind: r.kind, count: 1, last: r.at, why: r.why, seen: new Set(r.ticket_id == null ? [] : [r.ticket_id]) });
+      // One minion's reviews count once per kind, so three refutes need three minions' reviews, not three findings on one diff.
+      else if (r.ticket_id != null && was.seen.has(r.ticket_id)) Object.assign(was, { last: r.at, why: r.why });
+      else {
+        Object.assign(was, { count: was.count + 1, last: r.at, why: r.why });
+        if (r.ticket_id != null) was.seen.add(r.ticket_id);
+      }
+    }
+    const live = [...by.values()].filter((l) => now - l.last <= LESSON_MS).sort((a, b) => b.count - a.count || b.last - a.last).map(({ seen, ...l }) => l);
+    return all ? live : live.filter((l) => l.count >= LESSON_HITS).slice(0, LESSON_CAP);
+  }
+
+  /** Remove a lesson (a person's Edit by hand on the page): every refute of that kind goes, so its count starts again. */
+  removeLesson(projectId: number, kind: string): void {
+    const e = this.kit(projectId, 'pre-ship-review');
+    if (!e || !this.db.prepare('DELETE FROM review_refutes WHERE entry_id = ? AND kind = ?').run(e.id, refuteKind(kind)).changes) throw new ReviewError(`No lesson "${kind}" on the pre-ship review`);
+  }
+
   /** Every entry's recorded verdicts in a scheme, newest first by date (a backfilled one keeps its log's, #1095), by entry id. */
   verdicts(projectId: number): Map<number, Verdict[]> {
     const out = new Map<number, Verdict[]>();
@@ -809,6 +892,10 @@ export class ReviewSet {
  */
 const verdictsSection = (vs: Verdict[]) =>
   `## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${vs.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`;
+
+/** The reviewer's lessons as it reads them: why each kind was wrong here, never a ban, so a real case still gets raised. */
+export const lessonsSection = (ls: Lesson[]) =>
+  `## Lessons: findings the finding checker refuted here\n\nOn this repo's past reviews, the finding checker refuted each kind of finding below in ${LESSON_HITS} reviews or more, with no ${LESSON_MS / 86_400_000}-day gap, for the reason given. A lesson is not a rule to stop looking: when this diff makes the reason untrue, raise the finding and say in it why the reason doesn't hold here.\n\n${ls.map((l) => `- ${l.kind}: refuted ${l.count} times, last ${day(l.last)}. It was wrong because ${l.why.replace(/\.$/, '')}.`).join('\n')}`;
 
 export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null): number {
   rmSync(dir, { recursive: true, force: true });
@@ -976,14 +1063,16 @@ export function orderLine(entries: ReviewEntry[]): string {
  * The turn's line on the kit's built-ins (Q10): which ones this scheme switched off, what that means for the ship, and
  * the scheme's additions to the ones still on, written into `dir` as `<slug>.md`. Empty when all are on as the kit has them.
  */
-export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map()): string {
+export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), lessons: Lesson[] = []): string {
   rmSync(dir, { recursive: true, force: true });
   const kit = entries.filter(isKit);
   const off = kit.filter((e) => !e.enabled);
   // People's recorded verdicts reach a kit reviewer the way its additions do (Q13).
   const said = (e: ReviewEntry) => (readsVerdicts(e.context) && verdicts.get(e.id)) || [];
   const own = entries.filter(isAgentFile);
-  const added = entries.filter((e) => fromFile(e) && e.enabled && (e.body.trim() || said(e).length));
+  // The checker's lessons (#1158) go to the pre-ship review's reviewer with its additions.
+  const learned = (e: ReviewEntry) => (isKit(e) && e.slug === 'pre-ship-review' && lessons) || [];
+  const added = entries.filter((e) => fromFile(e) && e.enabled && (e.body.trim() || said(e).length || learned(e).length));
   const out: string[] = [];
   if (off.some((e) => e.slug === 'pre-ship-review')) {
     const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
@@ -1000,7 +1089,7 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   if (ownOn.length) out.push(`This scheme's own reviewing agents, whose text is their file: ${named(ownOn)}. Where a hand-off or a skill names one of these slugs, run that agent (subagent_type its name) instead of a kit one.`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
-    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : ''].filter(Boolean).join('\n\n')}\n`);
+    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : '', learned(e).length ? lessonsSection(learned(e)) : ''].filter(Boolean).join('\n\n')}\n`);
     out.push(`This scheme's additions to kit reviewers and its own agents, read with their own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
   }
   return out.length ? `Kit reviewers: ${out.join(' ')}` : '';

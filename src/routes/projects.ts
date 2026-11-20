@@ -13,7 +13,8 @@ import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_M
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
-import { pickFor, pickReason } from '../../public/model-table.js';
+import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
+import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
 import { inOrder } from '../../public/reorder.js';
 import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../../public/shipping.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
@@ -1094,7 +1095,16 @@ export const projectRoutes: Route[] = [
       model ??= table.model;
       effort ??= table.effort;
       const pickBy = byHand ? session.name : caller ? 'Taskmaster' : 'table';
-      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      let because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      // Third fix (#1157): a bug that looks like 2+ earlier fixes of the last 14 days starts with "diagnose first", one tier up from the table's pick.
+      const repeat = planned.type?.[0] === 'bug' ? await findRepeats(store, project, { title, brief: ownBrief(message), at: Date.now() }).catch(() => []) : [];
+      const stepped = repeat.length ? steppedTier({ model, effort }, table, project.fable_ok !== 'off') : null;
+      const tierWas = tierLabel(model, effort);
+      if (stepped) {
+        ({ model, effort } = stepped);
+        because = `third fix (${repeat.map((m) => `#${m.number}`).join(', ')}): one tier up → ${tierLabel(model, effort)}`;
+      }
+      const brief0 = repeat.length ? `${flagBlock(repeat)}${FLAG_RULE}${message}` : message;
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -1137,13 +1147,18 @@ export const projectRoutes: Route[] = [
       }
       if (follow) {
         const { leader, when } = follow;
-        waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
+        waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
         store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` });
         runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unpark starts it now.` });
         runner.broadcastTicket(id);
         notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
       } else {
-        runner.send(id, session.name, message, [], { brief: true });
+        runner.send(id, session.name, brief0, [], { brief: true });
+      }
+      if (repeat.length) {
+        const tier = stepped ? { from: tierWas, to: tierLabel(model, effort) } : null;
+        notes.push(flagNote(repeat, tier));
+        runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
       }
       // A brief an agent wrote (the Taskmaster's, or a handoff a person starts) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
       // A person's Start already carries its brief's text, and naming the file must not let another section of it count.

@@ -13,7 +13,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Project, Store } from './db.ts';
 import { subjectTicket } from './deploy-watch.ts';
-import { nextStep, tierLabel } from '../public/model-table.js';
+import { nextStep } from '../public/model-table.js';
 
 const git = promisify(execFile);
 
@@ -129,16 +129,24 @@ export function repeats(now: BugBrief, earlier: EarlierBug[], ctx: { df: Map<str
 /** The block a flagged brief starts with. */
 export function flagBlock(matches: RepeatMatch[]): string {
   const lines = matches.map((m) => {
-    const why = m.files.length ? `same files: ${m.files.join(', ')}` : `same words: "${m.words.slice(0, 3).join('", "')}"`;
+    const why = [m.cited && 'named in this brief', m.files.length && `same files: ${m.files.join(', ')}`, m.words.length && `same words: "${m.words.slice(0, 3).join('", "')}"`].filter(Boolean).join('; ');
     const did = m.subjects.length ? ` What it shipped: ${m.subjects.slice(0, 3).map((s) => `"${s}"`).join('; ')}${m.subjects.length > 3 ? ` and ${m.subjects.length - 3} more` : ''}.` : ' Nothing shipped from it yet.';
     return `- #${m.number} "${m.title}" (${why}).${did}`;
   });
   return [
-    `**Third fix: diagnose first.** ${matches.length} bug minions in the last 14 days look like they were about this same thing, so the earlier fixes may not have held:`,
+    `${FLAG_HEAD} ${matches.length} bug minions in the last 14 days look like they were about this same thing, so the earlier fixes may not have held:`,
     ...lines,
     'Before you change any code, run `citadel:diagnosing-bugs`: rebuild the failure from the evidence, check why each earlier fix didn\'t hold, and find the cause they missed. The match is by files and wording, so it can be wrong: if these minions are about something else, say so in one line and carry on with `citadel:bug-fixing`.',
   ].join('\n');
 }
+
+/** A brief's own words, its first 1,000 characters: a flagged brief's block (other minions' titles and numbers) is left out. */
+export function ownBrief(text: string): string {
+  const cut = text.startsWith(FLAG_HEAD) ? text.indexOf(FLAG_RULE) : -1;
+  return (cut < 0 ? text : text.slice(cut + FLAG_RULE.length)).slice(0, 1000);
+}
+const FLAG_HEAD = '**Third fix: diagnose first.**';
+export const FLAG_RULE = '\n\n---\n\n';
 
 type Commit = { n: string; s: string; files: string[] };
 
@@ -159,7 +167,7 @@ async function recentCommits(repoDir: string | null, now: number): Promise<Commi
  * bug briefs of the last 28 days, so one scheme's quiet fortnight doesn't make its everyday words look rare.
  */
 export async function findRepeats(store: Store, project: Project, now: { title: string; brief: string; at: number }): Promise<RepeatMatch[]> {
-  const pool = store.bugBriefs(now.at - 2 * REPEAT_WINDOW_MS);
+  const pool = store.bugBriefs(now.at - 2 * REPEAT_WINDOW_MS).map((b) => ({ ...b, brief: ownBrief(b.brief) }));
   const mine = pool.filter((b) => b.project_id === project.id && b.at >= now.at - REPEAT_WINDOW_MS);
   if (mine.length < REPEAT_FLAG_AT) return [];
   const commits = await recentCommits(project.repo_dir, now.at);
@@ -189,4 +197,3 @@ export function flagNote(matches: RepeatMatch[], tier: { from: string; to: strin
   return `Third-fix flag: ${list} look like earlier fixes for the same thing, so its brief starts with a "diagnose first" block (citadel:diagnosing-bugs). ${tier ? `It starts one tier up, on ${tier.to} instead of ${tier.from}; if the match is wrong, update_ticket it back.` : 'Its tier is as picked; step it up with update_ticket if the first turn stalls.'}`;
 }
 
-export { tierLabel };

@@ -406,7 +406,8 @@ export class LinuxSqueeze {
     const quota = Math.max(10, Math.round((this.cores * SQUEEZE_PERCENT) / busy));
     for (const r of runners) {
       const want = others.includes(r) ? `${quota}%` : '';
-      if ((this.set.get(r.unit) ?? '') === want) continue;
+      // A unit not set yet is set even to no quota: an agent before this one (restarted mid-ship) may have left one.
+      if (this.set.has(r.unit) && this.set.get(r.unit) === want) continue;
       const { code, output } = await this.run({ command: 'systemctl', args: ['set-property', '--runtime', r.unit, `CPUQuota=${want}`] }, process.env, 30_000);
       if (code === 0) this.set.set(r.unit, want);
       else this.log(`Couldn't set ${r.unit}'s CPUQuota to "${want}": ${output.split('\n').at(-1)}`);
@@ -495,6 +496,7 @@ async function main() {
   sample();
   if (os === 'windows') keepRunners(jobs.dir, log);
   const squeeze = os === 'linux' ? new LinuxSqueeze({ log }) : null;
+  squeeze?.next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
   if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
   let shipError = '';
   const ships = async (raw) => {

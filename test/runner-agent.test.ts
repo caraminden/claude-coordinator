@@ -268,6 +268,7 @@ test('Linux: while a ship runs, every other runner unit gets a CPUQuota sharing 
     await squeeze.update(cleanShips([{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]));
     // 16 cores: 30% is 480% of one core; one other unit (twireader's first) runs a job, so each other unit may use all of it.
     assert.deepEqual(calls.sort(), [
+      'citadel-runner-caraminden-claude-coordinator-2.service CPUQuota=',
       'citadel-runner-caraminden-claude-coordinator.service CPUQuota=480%',
       'citadel-runner-caraminden-twireader-2.service CPUQuota=480%',
       'citadel-runner-caraminden-twireader.service CPUQuota=480%',
@@ -301,6 +302,20 @@ test('Linux: a quota changes only when its share does, and the squeeze lifts whe
     tick(1);
     await squeeze.tick();
     assert.ok(calls.length === 3 && calls.every((c) => c.endsWith('CPUQuota=')), 'Citadel silent for 2 minutes: lifted');
+  } finally {
+    rmSync(units, { recursive: true, force: true });
+  }
+});
+
+test('Linux: a new agent clears every unit\'s quota at its first look, as one before it may have died mid-ship', async () => {
+  const { squeeze, calls, units } = linuxRunners();
+  try {
+    await squeeze.next();
+    assert.equal(calls.length, 4);
+    assert.ok(calls.every((c) => c.endsWith('CPUQuota=')), calls.join('; '));
+    calls.length = 0;
+    await squeeze.update([]);
+    assert.deepEqual(calls, [], 'once cleared, an empty list sets nothing');
   } finally {
     rmSync(units, { recursive: true, force: true });
   }

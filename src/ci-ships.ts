@@ -7,6 +7,8 @@ import type { GithubEnv } from './scheme-repo.ts';
 
 export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;
+/** How long a repo whose reads fail keeps its last ships: the agents' own hold, so a ship that ended unseen lifts. */
+const KEEP_FAILED_MS = 2 * 60_000;
 /** A ship run's branch: what every scheme's land.sh pushes (Cara, 2026-11-20: "No, ship branches only"). */
 export const SHIP_BRANCH = /^land\//;
 
@@ -27,7 +29,7 @@ export class ShipWatch {
   private get: GhGet;
   private cache = new Map<string, { etag: string | null; body: any }>();
   // Each repo's ships at its last good read: a read that fails keeps them, so a GitHub hiccup doesn't lift a squeeze.
-  private last = new Map<string, Ship[]>();
+  private last = new Map<string, { ships: Ship[]; at: number }>();
   private pausedUntil = 0;
   private busy = false;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -61,21 +63,25 @@ export class ShipWatch {
         const as = this.deps.as(repo);
         if (as === null) continue;
         try {
-          this.last.set(repo, await this.ships(repo, as, used));
+          this.last.set(repo, { ships: await this.ships(repo, as, used), at: now });
         } catch (err: any) {
           if (err instanceof RateLimited) throw err;
           failed = true;
+          if (now - (this.last.get(repo)?.at ?? now) >= KEEP_FAILED_MS) this.last.delete(repo);
           this.say(`Ship watch: ${repo}: ${err?.message ?? err}`);
         }
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
-      const ships = [...this.last.values()].flat();
+      const ships = [...this.last.values()].flatMap((l) => l.ships);
       this.deps.send(ships);
       if (!failed) this.said = '';
       return ships;
     } catch (err: any) {
       if (!(err instanceof RateLimited)) throw err;
       this.pausedUntil = now + RATE_LIMITED_MS;
+      // An empty list now, so the agents lift at once and one connecting meanwhile isn't handed the old list.
+      this.last.clear();
+      this.deps.send([]);
       this.say('Ship watch: GitHub says to slow down; looking again in 5 minutes (the agents lift any squeeze meanwhile).');
       return null;
     } finally {

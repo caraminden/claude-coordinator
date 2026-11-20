@@ -244,6 +244,8 @@ function Read-Ship {
 # held so that together the busy ones use about -SqueezePercent of the PC. A slot outside the shared job (nested in
 # another) gets its share of the PC itself.
 function Set-SlotRate {
+  # A function's one-item or empty list comes back as a lone string or nothing, which has no .Count under strict mode.
+  $ships = @($ships | Where-Object { $_ })
   $others = @($slots.Values | Where-Object { $ships -notcontains $_.Key })
   $busy = [math]::Max(1, @($others | Where-Object { $_.Busy }).Count)
   $share = $SqueezePercent / $busy
@@ -358,7 +360,7 @@ for (;;) {
       $slot.Inside = -not $member.Count -or [CitadelCiJob]::InJob($job, $member[0])
       $slot.Busy = $seen[$dir]
     }
-    $ships = Read-Ship
+    $ships = @(Read-Ship)
     Set-SlotRate
 
     $now = Get-Date
@@ -383,7 +385,7 @@ for (;;) {
   $next = (Get-Date).AddSeconds($EverySeconds)
   do {
     Start-Sleep -Seconds 2
-    $fresh = Read-Ship
+    $fresh = @(Read-Ship)
     if (($fresh -join ',') -ne ($ships -join ',')) {
       $ships = $fresh
       try { Set-SlotRate } catch { Write-Host "Couldn't change the shares: $($_.Exception.Message)" }

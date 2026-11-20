@@ -40,13 +40,14 @@ $slots = @{
   'C:\\d' = @{ Key = 'caraminden/gamedevtest|desktop-g248ij8'; Job = [IntPtr]4; Rate = -1; Busy = $false; Inside = $true }
   'C:\\e' = @{ Key = 'caraminden/mandate|desktop-g248ij8'; Job = [IntPtr]5; Rate = -1; Busy = $true; Inside = $false }
 }
-$ships = @('caraminden/claude-coordinator|desktop-g248ij8')
+# As the loop gets it from Read-Ship: one ship comes back a lone string, and no ship comes back as nothing.
+$ships = 'caraminden/claude-coordinator|desktop-g248ij8'
 Set-SlotRate
 $squeezed = @([CitadelCiJob]::Calls | Sort-Object)
 [CitadelCiJob]::Calls.Clear()
 Set-SlotRate
 $again = @([CitadelCiJob]::Calls)
-$ships = @()
+$ships = $null
 Set-SlotRate
 $lifted = @([CitadelCiJob]::Calls | Sort-Object)
 @{ squeezed = $squeezed; again = $again; lifted = $lifted } | ConvertTo-Json -Compress`, dir);

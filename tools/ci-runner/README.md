@@ -383,8 +383,9 @@ no ship is running: the 75% cap above is all there is.
   `systemctl set-property --runtime <unit> CPUQuota=` on every runner not on a ship: 30% of the VM's cores split among
   the ones running a job (with `processors=16`, 480% for one, 240% for two). An empty `CPUQuota=` lifts it.
 - **Lifting.** An empty list lifts the squeeze at once (both agents get one every 15 seconds); if Citadel goes quiet
-  (restart, GitHub hiccup, the agent's link down), it lifts after 2 minutes on its own. A rate limit from GitHub pauses
-  the watch for 5 minutes, so the squeeze lifts meanwhile.
+  (restart, GitHub hiccup, the agent's link down), it lifts after 2 minutes on its own. A repo whose reads keep failing
+  keeps its last ships for 2 minutes, then drops them. A rate limit from GitHub lifts the squeeze at once and pauses the
+  watch for 5 minutes. A restarted WSL agent clears every runner's quota at start, in case the one before died mid-ship.
 - **Every scheme.** Any repo with a runner on this PC is watched, through its own scheme's GitHub login; nothing is
   keyed to Citadel's repo. A squeezed build still runs, just slower, and returns to its normal share the moment the
   ship ends.

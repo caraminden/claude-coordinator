@@ -57,7 +57,7 @@ test('every look sends, an empty list too, so the agents lift the squeeze as soo
   assert.deepEqual(sent, [[{ repo: 'a/b', runner: 'r1' }], [{ repo: 'a/b', runner: 'r1' }], []]);
 });
 
-test('a repo no scheme has is never read, and a repo whose read fails keeps its last ships', async () => {
+test('a repo no scheme has is never read, and a repo whose read fails keeps its last ships for 2 minutes', async () => {
   const gh = github({
     [runs('a/b')]: { workflow_runs: [{ id: 1, head_branch: 'land/1' }] },
     [jobs('a/b', 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'r1' }] },
@@ -66,20 +66,28 @@ test('a repo no scheme has is never read, and a repo whose read fails keeps its 
   await w.tick(0);
   assert.ok(!gh.asked.some((p) => p.includes('not/ours')));
   gh.pages[runs('a/b')] = 502;
-  await w.tick(1);
-  await w.tick(2);
+  await w.tick(15_000);
+  await w.tick(119_999);
   assert.deepEqual(sent.at(-1), [{ repo: 'a/b', runner: 'r1' }]);
   assert.equal(logs.length, 1, 'a failing repo is said once, not every 15 seconds');
+  await w.tick(120_000);
+  assert.deepEqual(sent.at(-1), [], 'still failing after 2 minutes: the ship may have ended unseen, so it lifts');
 });
 
-test('a rate limit sends nothing for 5 minutes, then looks again', async () => {
-  const gh = github({ [runs('a/b')]: 403 });
+test('a rate limit sends an empty list once, then nothing for 5 minutes, then looks again', async () => {
+  const gh = github({
+    [runs('a/b')]: { workflow_runs: [{ id: 1, head_branch: 'land/1' }] },
+    [jobs('a/b', 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'r1' }] },
+  });
   const { w, sent, logs } = watch(gh, ['a/b']);
-  assert.equal(await w.tick(0), null);
-  assert.equal(await w.tick(60_000), null);
+  await w.tick(0);
+  gh.pages[runs('a/b')] = 403;
+  gh.asked.length = 0;
+  assert.equal(await w.tick(15_000), null);
+  assert.equal(await w.tick(75_000), null);
   assert.equal(gh.asked.length, 1);
   gh.pages[runs('a/b')] = { workflow_runs: [] };
-  assert.deepEqual(await w.tick(5 * 60_000), []);
-  assert.deepEqual(sent, [[]]);
+  assert.deepEqual(await w.tick(15_000 + 5 * 60_000), []);
+  assert.deepEqual(sent, [[{ repo: 'a/b', runner: 'r1' }], [], []], 'lifted at the limit, not held through the pause');
   assert.match(logs[0], /slow down/);
 });

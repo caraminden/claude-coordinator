@@ -65,7 +65,10 @@ function install(args) {
   const pkg = readJson(pkgFile);
   pkg.dependencies = { ...(pkg.dependencies ?? {}), [NAME]: `file:${relative(root, tgz)}` };
   writeFileSync(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
-  execFileSync('npm', ['install', '--no-audit', '--no-fund'], { cwd: root, stdio: 'inherit' });
+  // A re-pack of the same version (trying a change to the shell) keeps its name, so npm would keep the old copy: drop it
+  // and name the tarball, which also rewrites its lock entry.
+  rmSync(join(root, 'node_modules', ...NAME.split('/')), { recursive: true, force: true });
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', pkg.dependencies[NAME]], { cwd: root, stdio: 'inherit' });
   execFileSync('npx', ['--no-install', 'cap', 'sync', 'android'], { cwd: root, stdio: 'inherit' });
   console.log(`Pinned ${NAME} ${version}: ${relative('.', tgz)}. Commit it with ${relative('.', pkgFile)} and its lock file.`);
 }

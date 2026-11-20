@@ -2,7 +2,9 @@ package zip.citadel.shell;
 
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.net.Uri;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -16,8 +18,9 @@ import com.getcapacitor.BridgeWebViewClient;
  *   <li>Only a gateway error (502, 503, 504: Citadel or the app down) shows the offline page. Capacitor shows it for
  *       any HTTP error on the main page, which hid the app's own answers, such as Citadel's "you don't have this
  *       app" page (from Mandate).</li>
- *   <li>A load leaving for another document is watched by the {@link WatchdogListener}: no WebViewListener callback
- *       fires at that moment, so without this the offline page's Try again went unwatched (from Voice #64).</li>
+ *   <li>Every page event goes to the {@link WatchdogListener} from here (it can't be a Capacitor WebViewListener: see
+ *       its comment), including a load leaving for another document, which no WebViewListener callback reports, so
+ *       without it the offline page's Try again went unwatched (from Voice #64).</li>
  * </ul>
  */
 final class ShellWebViewClient extends BridgeWebViewClient {
@@ -66,5 +69,30 @@ final class ShellWebViewClient extends BridgeWebViewClient {
         int status = response.getStatusCode();
         String errorUrl = bridge.getErrorUrl();
         if (errorUrl != null && (status == 502 || status == 503 || status == 504)) view.loadUrl(errorUrl);
+    }
+
+    @Override
+    public void onPageStarted(WebView view, String url, Bitmap favicon) {
+        super.onPageStarted(view, url, favicon);
+        watchdog.onPageStarted(view);
+    }
+
+    @Override
+    public void onPageCommitVisible(WebView view, String url) {
+        super.onPageCommitVisible(view, url);
+        watchdog.onPageCommitVisible(view, url);
+    }
+
+    @Override
+    public void onPageFinished(WebView view, String url) {
+        super.onPageFinished(view, url);
+        watchdog.onPageLoaded(view);
+    }
+
+    @Override
+    public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+        super.onReceivedError(view, request, error);
+        // Capacitor loads the offline page itself for a main-frame error; a failed image or script settles nothing.
+        if (request.isForMainFrame()) watchdog.onReceivedError(view);
     }
 }

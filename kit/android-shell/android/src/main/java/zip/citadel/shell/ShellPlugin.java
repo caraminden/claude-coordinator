@@ -42,7 +42,6 @@ public class ShellPlugin extends Plugin {
         self = Links.selfPath(page);
         String citadel = Links.citadelHost(Uri.parse(bridge.getAppUrl()).getHost(), getConfig().getString("citadelHost"));
         watchdog = new WatchdogListener(bridge);
-        bridge.addWebViewListener(watchdog);
         bridge.setWebViewClient(new ShellWebViewClient(bridge, watchdog, self, citadel));
         watchdog.watchFirstLoad();
 

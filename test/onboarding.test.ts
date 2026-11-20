@@ -88,6 +88,19 @@ test('both plans name a skills survey for the stack, with every scheme\'s survey
   }
 });
 
+test('first-run interview asks the gaps and the plan carries them', () => {
+  const text = onboardingPrompt(project('interview', 'first-run'), '/shared');
+  assert.match(text, /sidebar \(a contraption: recommended for a web app/);
+  assert.match(text, /Whose GitHub account owns the repo/);
+  assert.match(text, /Anything only a person can do/);
+  assert.match(text, /not sure yet/);
+  assert.match(text, /Runs in: contraption <slug> \| title <title> \| repo <owner\/name> \| branch <branch>/);
+  assert.match(text, /\*\*By hand:\*\*/);
+  assert.match(text, /Send each By hand step at once as a card `to` its person/);
+  assert.match(text, /design minion/);
+  assert.doesNotMatch(onboardingPrompt(project('interview', 'tune-up'), '/shared'), /By hand/);
+});
+
 test('schemes from before onboarding read as done', () => {
   const store = new Store(join(root, 'old.db'));
   assert.equal(store.createProject('Old', null).onboarding, 'done');

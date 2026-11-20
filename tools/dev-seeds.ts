@@ -633,6 +633,21 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  'held-mail-working': {
+    about: 'a working minion with a message from another minion queued for its next turn (#1067): no inbox card, the light dashed "Not sent yet" bubble in the log',
+    seed(c) {
+      const from = minion(c, 'Aura success loop');
+      const t = minion(c, 'Aura replay harness', { status: 'running', last_activity: 'Running tests… 2/4', session_id: 'seed-held-working' });
+      const m = chat(c, t, 12);
+      m.asked('Build the replay harness for the aura tests.');
+      m.init();
+      m.said('Writing the harness; the first two tests pass.');
+      const text = `From #${from.number} (aura success loop): your brief's optional part 4 can reuse my fixture in test/aura.test.ts.`;
+      const id = m.put('user_message', { author: `#${from.number} Aura success loop`, text, mail: true, need: 'fyi', from: from.id });
+      c.store.setSetting(mailKey(t.id), [{ author: `#${from.number} Aura success loop`, text, images: [], id, from: from.id }]);
+      return route(c, t);
+    },
+  },
   'side-thread': {
     about: 'a minion mid-turn with side threads (#932): yours answered with a follow-up, and Josh\'s still looking; and an idle minion whose Ask on the side shows the cold cost first',
     seed(c) {

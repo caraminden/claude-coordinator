@@ -720,14 +720,20 @@ function shipLine(t) {
 
 /**
  * Held mail (#1067): a bubble the next turn hasn't read yet stays out of the log (the held-mail card over the composer
- * shows it), then shows with a small tag once a turn read it.
+ * shows it), then shows with a small tag once a turn read it. Queued into a working minion it shows dashed, tagged
+ * "not sent yet", and the tag turns to the read one in place.
  */
 function markHeld(bubble, ticket) {
   const line = heldLine(bubble.heldData, Number(bubble.dataset.event), ticket);
   if (!line) return;
   bubble.classList.add('held-msg');
   bubble.classList.toggle('held-waiting', line.waiting);
-  if (!line.waiting && !bubble.querySelector('.held-tag')) bubble.querySelector('.who')?.append(h('span', { class: 'msg-tag held-tag', title: line.title }, line.tag));
+  bubble.classList.toggle('held-queued', line.queued);
+  if (line.waiting) return;
+  let tag = bubble.querySelector('.held-tag');
+  if (!tag) bubble.querySelector('.who')?.append(tag = h('span', { class: 'msg-tag held-tag' }));
+  tag?.replaceChildren(line.queued ? 'not sent yet' : line.tag);
+  tag?.setAttribute('title', line.queued ? line.text : line.title);
 }
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
@@ -1198,7 +1204,7 @@ function addHeld(group, bubble) {
   return sumRun(group);
 }
 
-/** A run's summary counts what turns have read (the card shows the rest): the count, the senders, the newest as the preview; hidden while none is read. */
+/** A run's summary counts what the log shows (the card shows the rest): the count, the senders, the newest as the preview; hidden while none is read. */
 function sumRun(group) {
   const read = [...group.querySelectorAll(':scope > .mc-list > .held-msg:not(.held-waiting)')];
   group.hidden = !read.length;

@@ -12,6 +12,14 @@ test('heldLine: waiting while the chat lists it as held, then a read tag; never 
   assert.equal(heldLine({ text: 'hi' }, 1, { held_ids: [1] }), null);
 });
 
+test('heldLine: held for a working minion is queued, shown in the log, not waiting on the card', () => {
+  const q = heldLine({ mail: true }, 7, { status: 'running', held_ids: [7] });
+  assert.deepEqual([q.waiting, q.queued], [false, true]);
+  assert.match(q.text, /Not sent yet/);
+  const read = heldLine({ mail: true }, 7, { status: 'running', held_ids: [] });
+  assert.deepEqual([read.waiting, read.queued], [false, false]);
+});
+
 const item = (author, text, extra = {}) => ({ id: 1, author, from: null, need: null, note: false, parked: false, at: 1, text, ...extra });
 
 test('heldModel: nothing held, no card; mail grouped by sender, newest as the preview with the tracking words gone', () => {
@@ -26,13 +34,15 @@ test('heldModel: nothing held, no card; mail grouped by sender, newest as the pr
   assert.deepEqual(m.footer, { text: 'All 3 go in one turn', action: 'deliver' });
 });
 
-test('heldModel: a loop hold alone is a Needs-you card; parked offers Unpark and no kinds; running and dismissed offer nothing', () => {
+test('heldModel: a loop hold alone is a Needs-you card; parked offers Unpark and no kinds; dismissed offers nothing; working shows no mail', () => {
   const loop = heldModel({ kind: 'ticket', number: 4, status: 'idle', held_mail: null, loop_hold: { n: 2, at: 1, text: 'x' } });
   assert.deepEqual([loop.count, loop.sub, loop.footer, loop.sections.length], [1, 'Held by the loop guard', null, 0]);
   const mail = { until: null, items: [item('Taskmaster', 'hi', { need: 'ask', parked: true })] };
   const parked = heldModel({ kind: 'ticket', number: 4, status: 'idle', state: 'parked', held_mail: mail });
   assert.deepEqual([parked.sub, parked.footer.action, parked.sections[0].kinds], ["It's parked: read when it's unparked", 'unpark', []]);
-  assert.equal(heldModel({ kind: 'ticket', number: 4, status: 'running', held_mail: mail }).footer.action, null);
+  assert.equal(heldModel({ kind: 'ticket', number: 4, status: 'running', held_mail: mail }), null, 'queued into a working turn: the light view, no card');
+  const both = heldModel({ kind: 'ticket', number: 4, status: 'running', held_mail: mail, loop_hold: { n: 1, at: 1, text: 'x' } });
+  assert.deepEqual([both.count, both.sections.length, both.footer], [1, 0, null], 'a loop hold still needs a person while it works');
   assert.equal(heldModel({ kind: 'ticket', number: 4, status: 'closed', held_mail: mail }).footer.action, null);
 });
 

@@ -485,6 +485,9 @@ details.recap-group:not([open]) > summary { margin: 0; }
    of the log until then; a run of read ones is one collapsed row (thread.js sumRun). An open loop-guard card in the log
    gives way to the held-mail card's Needs-you row. */
 .msg.user.held-waiting, .held-run[hidden] { display: none; }
+/* Queued into a working minion (Josh, 2026-11-19, the old lighter view): dashed, tagged "not sent yet" (thread.js markHeld). */
+.msg.user.held-queued { border-style: dashed; }
+.msg.user.held-queued .held-tag { color: var(--ink); }
 .chat:has(#chat-held .hc-need:not([hidden])) .log .lcard:has(button) { display: none; }
 /* Mine and Everyone (#920, board C of #917's takes): the Mine / Everyone switch in your Taskmaster's title row; the
    Overlord's items carry a violet band down their left edge; a message in another session names whose it went to. */

@@ -13,6 +13,31 @@ export function fileChangedAt(repoDir: string, file: string): Promise<number | n
   }));
 }
 
+/** The same-flake alarm (#1245): one test passing alone on this many different branches inside the window wakes the Taskmaster, once per test per day or until its file changes on main. */
+export const ALARM_BRANCHES = 3;
+export const ALARM_WINDOW_MS = 30 * 60_000;
+export const ALARM_QUIET_MS = 24 * 60 * 60_000;
+
+/** The commits a same-flake alarm names: the newest on main before the first sighting, and the newest that touched the test file (the same one is named once). */
+export function suspectCommits(repoDir: string, file: string, firstAt: number): Promise<string | null> {
+  const before = new Date(firstAt).toISOString();
+  const one = (...extra: string[]) => new Promise<string>((done) => execFile('git', ['log', '-1', '--format=%h %s', `--before=${before}`, 'main', ...extra], { cwd: repoDir, timeout: 15_000 }, (err, out) => done(err ? '' : String(out).trim())));
+  return Promise.all([one(), one('--', file)]).then(([last, touched]) => {
+    const parts = [last && `last on main before the first sighting: ${last}`, touched && touched !== last && `last to touch ${file}: ${touched}`].filter(Boolean);
+    return parts.length ? parts.join('; ') : null;
+  });
+}
+
+/** The earliest sighting at which `sights` (one file's, oldest first) show ALARM_BRANCHES different branches inside ALARM_WINDOW_MS, with the window's sightings; null when none do. */
+export function sameFlake(sights: { at: number; branch?: string }[]): { at: number; branches: string[]; first: number } | null {
+  for (let i = 0; i < sights.length; i++) {
+    const inWin = sights.filter((s) => s.at <= sights[i].at && s.at > sights[i].at - ALARM_WINDOW_MS && s.branch);
+    const branches = [...new Set(inWin.map((s) => s.branch!))];
+    if (branches.length >= ALARM_BRANCHES) return { at: sights[i].at, branches, first: Math.min(...inWin.map((s) => s.at)) };
+  }
+  return null;
+}
+
 export const FLAKE_WINDOW_MS = 14 * 24 * 60 * 60_000;
 /** The third sighting of one file inside this window starts its fix minion (#1120). */
 export const FLAKE_REPEAT = 3;
@@ -42,13 +67,16 @@ export function parseFlakes(output: string): { file: string; source: string; det
  * land that saw it was one the server read (a minion's own test run, a deploy's, a land that ended while the server was down),
  * which is the undercount #1120 fixes. "flake rerun" lines are no sightings.
  */
-export function parseRetroFlakes(md: string, day: string): { file: string; at: number; source: string }[] {
-  const out: { file: string; at: number; source: string }[] = [];
+export function parseRetroFlakes(md: string, day: string): { file: string; at: number; source: string; branch?: string }[] {
+  const out: { file: string; at: number; source: string; branch?: string }[] = [];
   for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · flake · (.+)$/gm)) {
     const parts = m[2].split(' · ');
     const at = Date.parse(`${day}T${m[1]}Z`);
     if (!FILE.test(parts[0]) || Number.isNaN(at)) continue;
-    out.push({ file: parts[0], at, source: parts.includes('in CI') ? 'in CI' : parts[1] === 'smoke' ? 'smoke' : 'run-tests' });
+    const source = parts.includes('in CI') ? 'in CI' : parts[1] === 'smoke' ? 'smoke' : 'run-tests';
+    // land.sh and run-tests.sh write the branch after the load: `· load 16.4 · ticket/945-x · in CI`.
+    const branch = source === 'smoke' ? undefined : parts.slice(1).find((x) => x !== 'in CI' && !x.startsWith('load '));
+    out.push({ file: parts[0], at, source, ...(branch ? { branch } : {}) });
   }
   return out;
 }

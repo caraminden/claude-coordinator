@@ -1279,6 +1279,7 @@ const flakeFixes = new FlakeFixes({
     runner.send(id, APP_NAME, brief.message, [], { brief: true });
     return { id };
   },
+  wake: (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); },
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
 });

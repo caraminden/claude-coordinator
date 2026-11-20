@@ -8,9 +8,10 @@
 // No test is skipped or quarantined (Cara, 2026-11-10: "Keep failing, log it").
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
-import { FLAKE_REPEAT, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
+import { ALARM_QUIET_MS, ALARM_WINDOW_MS, FLAKE_REPEAT, sameFlake, suspectCommits, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
 /** Minions one scheme's pass starts at most. */
@@ -28,6 +29,10 @@ export interface FlakeFixDeps {
   jobs: (project: Project, run: Run) => Promise<Job[] | null>;
   /** When the test file last changed on main (ms; default: git log in the scheme's repo). Sightings before it don't count toward a new fix (#1219). */
   changedAt?: (project: Project, file: string) => Promise<number | null>;
+  /** Wake the scheme's Taskmaster with the same-flake alarm (#1245); true once the send went through. */
+  wake?: (project: Project, text: string) => boolean;
+  /** The commits most likely to have brought the flake (default: git in the scheme's repo). */
+  suspect?: (project: Project, file: string, firstAt: number) => Promise<string | null>;
   now?: () => number;
 }
 
@@ -56,6 +61,44 @@ export class FlakeFixes {
     // After the check, so two log lines of one file close together both count the first time.
     for (const s of fresh) this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '' }]);
     return fresh.length;
+  }
+
+  /**
+   * The same-flake alarm (#1245): a test file that passed alone on 3 different branches inside 30 minutes wakes the Taskmaster
+   * once, naming the file, the branches and the commit that likely brought it, so a fix starts in minutes: Nov 19's review-set-api
+   * went red 23 times in 2.5 hours. It reads the retro log's own lines (the branch is there; flake_events rows keep none), and
+   * counts only sightings after the file's newest commit on main (#1219). One alarm per file until a day passes or the file changes on main.
+   */
+  async alarm(project: Project, now: number): Promise<number> {
+    const dir = this.d.sharedDir(project.id);
+    if (!dir || !this.d.wake) return 0;
+    const root = join(dir, 'retro-log');
+    let days: string[];
+    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    const since = now - 2 * ALARM_QUIET_MS;
+    const byFile = new Map<string, { at: number; branch?: string }[]>();
+    for (const day of days) {
+      if (Date.parse(`${day}T23:59:59Z`) < since) continue;
+      let md: string;
+      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      for (const s of parseRetroFlakes(md, day)) if (s.at >= since && s.at <= now) byFile.set(s.file, [...(byFile.get(s.file) ?? []), s]);
+    }
+    let woke = 0;
+    for (const [file, all] of byFile) {
+      const key = `flake-alarm:${project.id}:${file}`;
+      const last = this.d.store.getSetting<number>(key) ?? 0;
+      const changed = await (this.d.changedAt ?? ((p, f) => (p.repo_dir ? fileChangedAt(p.repo_dir, f) : Promise.resolve(null))))(project, file);
+      if (last && now - last < ALARM_QUIET_MS && !(changed != null && changed > last)) continue;
+      const sights = all.filter((s) => s.at > last && (changed == null || s.at > changed)).sort((a, b) => a.at - b.at);
+      const hit = sameFlake(sights);
+      if (!hit) continue;
+      const commits = await (this.d.suspect ?? ((p, f, t) => (p.repo_dir ? suspectCommits(p.repo_dir, f, t) : Promise.resolve(null))))(project, file, hit.first);
+      const text = `Same-flake alarm: ${file} failed in the full run and passed alone on ${hit.branches.length} different branches inside ${ALARM_WINDOW_MS / 60_000} minutes (${hit.branches.join(', ')}), the first at ${pacificStamp(hit.first)}. `
+        + `That is a bug in the test or the code it tests, not load: every ship meanwhile pays a red run. ${commits ? `Likely cause: ${commits}. ` : ''}`
+        + `Start a minion to fix it now (the Test health tab on the CI page has the button). It rings once for this file until a day passes or the file changes on main.`;
+      if (this.d.wake(project, text)) { this.d.store.setSetting(key, now); woke++; }
+    }
+    return woke;
   }
 
   /** The Test health tab's and the escalation's rules; the minions it starts. */
@@ -142,6 +185,7 @@ export class FlakeFixes {
         try {
           this.seedPast(p);
           this.ingest(p, now);
+          await this.alarm(p, now);
           await this.escalate(p, now);
           await this.prove(p, now);
         } catch (err: any) {

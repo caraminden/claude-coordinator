@@ -41,7 +41,9 @@ export const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
 
 let stream = null;
-let assetVersion = null;
+// The front end's version: the page's own (index.html fills it in, #1144), so a page the service worker kept from before
+// a ship finds itself stale at the stream's first hello. A page the server didn't fill in takes the first hello's.
+let assetVersion = /^[0-9a-f]+$/.test(document.querySelector('meta[name=citadel-version]')?.content ?? '') ? document.querySelector('meta[name=citadel-version]').content : null;
 
 function unescapeHtml(s) {
   return s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
@@ -301,8 +303,10 @@ function connectStream(catchUp = false) {
     if (msg.type === 'hello') {
       // The server restarted with a different front end; load it instead of running stale code.
       if (assetVersion && msg.version !== assetVersion) {
-        reloadPending = true;
+        reloadPending = msg.version;
         reloadWhenIdle();
+      } else if (msg.version) {
+        try { sessionStorage.removeItem('cc-stale'); } catch {}
       }
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
@@ -367,7 +371,7 @@ function connectStream(catchUp = false) {
 
 // A new front end only loads between messages: never while something is half-written or
 // being typed, so an update can't yank the page out from under you.
-let reloadPending = false;
+let reloadPending = false; // or the version the server now runs
 let lastInputAt = 0;
 export let sending = 0;
 export function setSending(n) {
@@ -393,12 +397,38 @@ function unsentWork() {
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
 }
 
-export function reloadNow() {
+let reloading = false;
+export async function reloadNow() {
+  if (reloading) return; // reloadWhenIdle asks every 2 s while the worker is fetching
+  reloading = true;
   // Put the cursor back in the composer if that is where it was.
   if (document.activeElement?.matches('.composer textarea')) {
     try { sessionStorage.setItem('cc-refocus', '1'); } catch {}
   }
+  await freshShell(typeof reloadPending === 'string' ? reloadPending : null).catch(() => {});
   location.reload();
+}
+
+/**
+ * Before a reload (#1144): the service worker fetches its newest copy and, for a ship, keeps the new front end's files,
+ * so the reload opens the new version. A page already reloaded for this version and still stale (the worker couldn't
+ * keep the files) drops the kept ones, and loads from the network.
+ */
+async function freshShell(to) {
+  const reg = await navigator.serviceWorker?.getRegistration();
+  if (!reg) return;
+  let again = false;
+  try {
+    again = !!to && sessionStorage.getItem('cc-stale') === to;
+    if (to) sessionStorage.setItem('cc-stale', to);
+  } catch {}
+  if (again) return Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-')).map((k) => caches.delete(k)));
+  const settled = () => new Promise((done) => {
+    const w = reg.installing ?? reg.waiting;
+    if (!w) return done();
+    w.addEventListener('statechange', () => ['activated', 'redundant'].includes(w.state) && done());
+  });
+  await Promise.race([reg.update().then(settled), new Promise((done) => setTimeout(done, 8000))]);
 }
 
 export function reloadWhenIdle() {

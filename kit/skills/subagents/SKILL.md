@@ -35,6 +35,7 @@ design.
 | `citadel:reviewer` on a build's final review | fable | medium |
 | `citadel:finding-checker` | opus | medium |
 | `citadel:finding-checker` on a high-risk change | fable | medium |
+| `citadel:investigator` | sonnet | medium |
 | `citadel:fresh-eyes` | opus | high |
 | `citadel:professor` | opus | high |
 | `citadel:critic` | from the rubric | from the rubric |
@@ -92,6 +93,11 @@ Ask one question: will the session need what this step reads, or only what it co
   tokens or more. The session would re-read all of that on every later call. A check whose raw
   output is long (an untrimmed build or test log) goes to the `citadel:check-runner` agent; a
   wrapper that already trims output (`citadel-test`, a scheme's check script) runs inline.
+- **"What happened" about a minion, a ship or a turn.** The database, the transcripts, the service
+  and ship logs and the retro log are one job for the `citadel:investigator` agent, not a
+  hand-written general-purpose brief: ask it the question, with the minion's #N and the window, and
+  take back its Pacific-time timeline (at most 15 lines). It works in a person's container too
+  (it uses `host_check` there).
 - **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
   long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
   the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on

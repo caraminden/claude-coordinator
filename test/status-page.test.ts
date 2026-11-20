@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
-import { APP_ERRORS_WARN, StatusPage, rateTone, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
+import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
+import type { Storm } from '../src/memory-storms.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
 // A database backup that is never stale for these tests' clocks, so the backups line stays out of their verdicts.
@@ -154,6 +155,26 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.deepEqual(c.verdict.reasons, ['claude-coordinator-prune.timer failed', 'a 6.2 s stall in the last day', 'under 10% of memory free', 'under 10% of disk free']);
   assert.ok(c.slots.some((s) => s.key === 'line') && !c.slots.some((s) => s.key === 'backups'), 'the backups slot became the real tile');
   assert.deepEqual(c.backup.problems, []);
+});
+
+test('memory-limit storms (#1280): per day with their stalled seconds, the last one, those going now, and a warn past STORM_WARN_S', async () => {
+  const { store, josh, citadel } = setup('storms');
+  const now = sameDayNow();
+  const storm = (stalled: number) => JSON.stringify({ group: 'citadel-turns.slice', seconds: 120, stalled, highs: 9000, peak: 0.8, limit: 10_737_418_240, unit: 'citadel-land-a-1.service', unitBytes: 2.4e9 });
+  store.addHealthEvent('memory-high', now - 30 * 60_000, 'x', storm(20));
+  store.addHealthEvent('memory-high', now - 10 * 60_000, 'x', storm(25));
+  store.addHealthEvent('memory-high', now - 9 * 60_000, 'x', 'not json');
+  let going: Storm[] = [];
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, storms: () => going });
+  let c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.storms.counts.at(-1), 2);
+  assert.equal(c.storms.stalled.at(-1), 45);
+  assert.equal(c.storms.last?.unit, 'citadel-land-a-1.service');
+  assert.deepEqual(c.verdict.reasons, [], '45 s is under the line');
+  going = [{ ...JSON.parse(storm(30)) }];
+  c = (await page.build(viewer(store, josh.id, true), now + 1)).citadel;
+  assert.equal(c.storms.now.length, 1);
+  assert.deepEqual(c.verdict.reasons, [`75 s stalled at a memory limit in the last day`], `a storm going now counts toward ${STORM_WARN_S} s`);
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {

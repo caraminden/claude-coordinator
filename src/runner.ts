@@ -2228,7 +2228,7 @@ export class Runner {
     if (!f) return;
     const ticket = this.store.getTicket(ticketId);
     const who = ticket ? roleWord(ticket) : 'Taskmaster';
-    // A minion has no fresh_session: its handoff turn's reply is its handoff (#937), the status line left out.
+    // A minion's /fresh has no fresh_session (only the seam trial's fresh group has the tool, which records the summary first): its handoff turn's reply is its handoff (#937), the status line left out.
     const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
       ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };

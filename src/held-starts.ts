@@ -58,6 +58,12 @@ export class HeldStarts {
     return true;
   }
 
+  /** What wakes a held minion by itself (runner.wakesOn: the Waiting look and the Taskmaster's sheet), or null. */
+  wakesOn(ticket: number): string | null {
+    const h = this.list().find((o) => o.ticket === ticket);
+    return h ? `the box has room, or by ${clockTime(h.since + HOLD_MAX_MS)}` : null;
+  }
+
   /** Take one entry out of the list, once. Null when it is gone already (sent, or never held). */
   private claim(ticket: number): HeldStart | null {
     const all = this.list();
@@ -72,9 +78,10 @@ export class HeldStarts {
     const h = this.claim(ticket);
     if (!h) return false;
     const t = this.d.store.getTicket(ticket);
-    if (!t || t.status === 'closed') return true; // dismissed meanwhile: nothing to send
+    // Dismissed meanwhile, or someone took it out of parked another way: it is theirs now, so no second brief.
+    if (!t || t.status === 'closed' || t.state !== 'parked') return true;
     const mins = Math.max(0, Math.round((this.now() - h.since) / 60_000));
-    if (t.state === 'parked') this.d.store.updateTicket(ticket, { state: null, note: null });
+    this.d.store.updateTicket(ticket, { state: null, note: null });
     if (h.schedule !== undefined) this.d.store.schedules.heldNote(h.schedule, `Held ${mins} min for the box, then started (${why})`);
     this.d.runner.emit(ticket, 'note', { text: `Held ${mins} min for the box; ${why}, so this minion started.` });
     this.d.runner.send(ticket, h.from, h.message, [], h.opts);

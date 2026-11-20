@@ -622,7 +622,7 @@ runner.heldFor = (id) => waiters.heldFor(id);
 runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
-  return waiters.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
+  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {

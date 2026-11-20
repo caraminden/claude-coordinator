@@ -52,6 +52,7 @@ test('Unpark (release) sends at once with no pressure check, and only once', asy
   const s = setup();
   const id = mkTicket(s).id;
   await s.held.start({ ticket: id, from: 'Citadel', message: 'b', opts: {} }, () => {});
+  assert.match(s.held.wakesOn(id) ?? '', /^the box has room, or by /);
   assert.equal(s.held.release(id, 'Cara unparked it'), true);
   assert.equal(s.held.release(id, 'again'), false);
   assert.equal(s.sent.length, 1);

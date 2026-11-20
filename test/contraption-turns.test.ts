@@ -706,7 +706,7 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   const app = contraptions.register({ name: 'kept-app', ...fields, home_scheme: home.id });
   store.setContraptionUser(app.id, cara.id, true, cara.id);
   const dir = join(data, 'projects', String(home.id), 'shared', 'project', '.replay', 'kept-app');
-  await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
+  await turn(app, { session: 'k1', system: 'Be an aura.', keep: true, effort: 'low', toolSearch: true });
   const files = readdirSync(dir);
   assert.equal(files.length, 1);
   assert.match(files[0], /^[0-9a-f]{12}-k1-[0-9a-f]{8}\.jsonl$/, 'named by a hashed person, the session and its Claude session');
@@ -717,8 +717,8 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   assert.deepEqual(t.calls, [{ name: 'mcp__mandate__move', input: { to: 'Thursday' }, ok: true, result: 'SECRET TOOL OUTPUT' }]);
   assert.match(t.text, /Moved it[\s\S]*to Thursday\./);
   assert.equal(t.system.length, 64, 'a hash of the system text, not the text');
-  assert.equal(t.effort, null, 'the levers a replay reruns with (#1084)');
-  assert.equal(t.toolSearch, false);
+  assert.equal(t.effort, 'low', 'the levers a replay reruns with (#1084)');
+  assert.equal(t.toolSearch, true);
   for (let i = 0; i < 6; i++) await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
   assert.equal(lines(join(dir, files[0])).length, 5, 'only the first five');
   // Without keep, on an app with no home scheme, or for a person who opted out: nothing.

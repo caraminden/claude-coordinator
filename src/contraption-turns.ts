@@ -139,7 +139,7 @@ interface Blind { root: string | null; cwd: string }
 const SESSION_NAME = /^[\w.:@-]{1,100}$/;
 const MODEL = /^[\w.\[\]-]{1,60}$/;
 /** Effort an app may ask for: nothing above high (Citadel-wide "Usage, effort and models"). */
-export const TURN_EFFORTS = ['low', 'medium', 'high'];
+const TURN_EFFORTS = ['low', 'medium', 'high'];
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,40}$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,100}$/;
 

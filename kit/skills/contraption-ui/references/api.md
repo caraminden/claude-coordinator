@@ -288,7 +288,7 @@ there: Citadel passes it through and never reads it.
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
 own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
 a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, WebSearch and WebFetch
-if `webSearch` is `true`, ToolSearch if `toolSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image`, `generate_audio` and `generate_speech` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
+if `webSearch` is `true`, ToolSearch if `toolSearch` is `true` (on Claude; Codex has no tool search), and `mcp__citadel__generate_image`, `edit_image`, `generate_audio` and `generate_speech` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
 

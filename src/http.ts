@@ -97,13 +97,16 @@ export const writes = {
 /** Wait for this request's own DB writes: a handler that answers from a re-read of rows it just wrote awaits this first. */
 export const ownWrites = async () => { await writes.landed?.(); };
 /**
- * Run `f` once no one's DB writes are queued, at most 30 s on: for a read-then-write of a row another request may
- * have just written (two strikes on one message, sent at once). The last check and `f` run with no await between,
- * so two of these never both read before either has written.
+ * Run `f` once no one's DB writes are queued: for a read-then-write of a row another request may have just written
+ * (two strikes on one message, sent at once). The last check and `f` run with no await between, so two of these never
+ * both read before either has written. Still queued after 30 s: a 503 rather than `f` on stale data.
  */
 export const afterAllWrites = async <T>(f: () => T): Promise<T> => {
   const until = Date.now() + 30_000;
-  for (let p; (p = writes.landed?.(true)) && Date.now() < until;) await p;
+  for (let p; (p = writes.landed?.(true));) {
+    if (Date.now() >= until) throw new HttpError(503, 'The database is still writing: try again in a moment');
+    await p;
+  }
   return f();
 };
 // Responses held back for their request's writes: a second send (the error handler's, after a throw) is dropped.

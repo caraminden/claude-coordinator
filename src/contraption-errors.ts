@@ -7,6 +7,7 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContraptionErrorRow, ContraptionRow, Store } from './db.ts';
+import { afterAllWrites } from './http.ts';
 import { pacific, pacificDay, ZONE } from './pacific.ts';
 import { redact } from './timer-alerts.ts';
 
@@ -118,6 +119,8 @@ export class ErrorDigest {
     this.busy = true;
     try {
       if (this.deps.journal) await this.readJournals();
+      // The rows just read go through the write queue: the day files below read them back.
+      await afterAllWrites(() => {});
       const today = pacificDay(this.now());
       const yesterday = addDays(today, -1);
       const last = this.store.getSetting<string>(FINAL);

@@ -684,6 +684,7 @@ export const ticketRoutes: Route[] = [
         // It rewrites the message's whole data: a strike still queued (two sent at once) would be written over.
         return json(res, 200, await afterAllWrites(() => runner.strike(id, text, reason)));
       } catch (err: any) {
+        if (err instanceof HttpError) throw err;
         throw new HttpError(/already/.test(err.message) ? 409 : 404, err.message);
       }
     },

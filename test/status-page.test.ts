@@ -121,8 +121,8 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   store.addHealthEvent('loop-lag', now - 10 * 60_000, 'x', 'The event loop was held for 6.2 s: sqlite');
   store.addHealthEvent('loop-lag', now - 20 * 60_000, 'x', 'The event loop was held for 1.5 s: json');
   store.addHealthEvent('client-error', now - 20 * 60_000, 'x', 'not a stall');
-  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A fix"}]', started_at: now - 30 * 60_000, live_at: now - 28 * 60_000, outcome: 'live', stages: '{}' });
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v2'.padEnd(40, '0'), changes: '[]', started_at: now - 20 * 60_000, live_at: now - 16 * 60_000, outcome: 'live', stages: '{}' });
+  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A fix"}]', started_at: now - 30 * 60_000, live_at: now - 28 * 60_000, outcome: 'live', stages: '{}' });
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v3'.padEnd(40, '0'), changes: '[]', started_at: now - 5 * 60_000, live_at: null, outcome: 'failed', stages: '{}' });
   let mem = { total: 100, avail: 50 };
   const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
@@ -137,6 +137,7 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.match(c.stalls.last?.detail ?? '', /6\.2 s/);
   assert.equal(c.ships.counts.at(-1), 2, 'the failed release is no ship');
   assert.equal(c.ships.median.at(-1), 180);
+  assert.equal(c.ships.last?.version, 'v2000000', 'the last ship is the newest live one, not the newest row');
   assert.equal(c.host.series.length, 1);
   assert.deepEqual(c.host.series[0].slice(1), [95, 95]);
   assert.equal(c.verdict.tone, 'bad');
@@ -149,9 +150,12 @@ test('a viewer outside Citadel sees its health but not its CI', async () => {
   const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
   const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id,
     ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any }] : []) });
-  assert.equal((await page.build(viewer(store, mia.id))).citadel.ci, null);
+  const outside = (await page.build(viewer(store, mia.id))).citadel;
+  assert.equal(outside.ci, null);
+  assert.equal(outside.ciVisible, false, 'the page says "not yours to see", not "no reading yet"');
   const admin = (await page.build({ canSee: () => true, admin: true, key: 'a' })).citadel;
   assert.equal(admin.ci?.workflows[0].conclusion, 'failure');
+  assert.equal(admin.ciVisible, true);
   assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests']);
 });
 

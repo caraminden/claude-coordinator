@@ -215,9 +215,10 @@ export class StatusPage {
       ships[d]++;
       if (r.started_at) shipTimes[d].push((r.live_at! - r.started_at) / 1000);
     }
-    const lastShip = releases.at(-1);
+    const lastShip = releases.reduce<ReleaseRow | undefined>((l, r) => (!l || r.live_at! > l.live_at! ? r : l), undefined);
     // CI: Citadel's workflows' verdicts on main and how many of the runs the last poll saw passed.
-    const view = own && viewer.canSee(own) ? this.deps.ciSnapshot?.((id) => id === own && viewer.canSee(id)).find((s) => s.id === own)?.view : undefined;
+    const ciVisible = !!own && viewer.canSee(own);
+    const view = ciVisible ? this.deps.ciSnapshot?.((id) => id === own && viewer.canSee(id)).find((s) => s.id === own)?.view : undefined;
     const done = (view?.runs ?? []).filter((r: any) => r.status === 'completed' && r.conclusion && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped');
     const ci = view ? {
       at: view.at, url: `https://github.com/${view.slug}/actions`,
@@ -243,6 +244,7 @@ export class StatusPage {
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), detail: lastStall.detail.slice(0, 300) } : null },
       host: { series, latest, sampledFrom: samples[0]?.at ?? null },
+      ciVisible,
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: shipChanges(lastShip) } : null },
       ci,
       units: citadelUnits.map((u) => ({ unit: u.unit, load: u.load, active: u.active, sub: u.sub })),
@@ -338,6 +340,8 @@ export interface CitadelStatus {
   /** series: [hour, memory used %, disk used %], the hour's worst. */
   host: { series: [number, number, number][]; latest: HostSample | null; sampledFrom: number | null };
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
+  /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
+  ciVisible: boolean;
   ci: { at: number; url: string; workflows: { name: string; conclusion: string | null; status: string | null; at: string | null; url: string | null }[]; runs: number; green: number } | null;
   units: { unit: string; load: string; active: string; sub: string }[];
   desktops: { host: string; verdict: PcView['verdict']; now: PcView['now']; restarts: number[]; seen: boolean }[];

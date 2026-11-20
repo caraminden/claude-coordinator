@@ -2,6 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciPage } from './ci.js';
+import { statusPage } from './status.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, isOrdersPage, myInstructionsEditor, notificationsPage, ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { machinesPage } from './settings-machines.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
@@ -124,6 +125,7 @@ function renderCrumbs(main) {
       : main.kind === 'reviews' ? [projectLink, ' / ', settingsLink, ' / ', 'Reviewers and critics']
       : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
+      : main.kind === 'status' ? [projectLink, ' / ', 'Status']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
@@ -280,6 +282,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'reviews' ? reviewsPage()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
     : main.kind === 'ci' ? ciPage(projectId, main.tab)
+    : main.kind === 'status' ? statusPage(projectId)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

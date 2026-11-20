@@ -12,6 +12,8 @@ import { projectDir } from '../src/workspace.ts';
 import { readAgentFiles } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
+import { inviteHash } from '../src/auth.ts';
+import { pacificDay } from '../src/contraption-errors.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 
@@ -1119,6 +1121,58 @@ mock.boards('#takes', { boards: [
       const states = ['ready', 'complete', 'try'] as const;
       for (let i = 1; i <= 25; i++) minion(c, `Waiting minion ${i}`, { state: states[i % 3], note: `needs you ${i}` });
       return `#/p/${c.project.id}`;
+    },
+  },
+  status: {
+    about: 'the Status page (#1123): a week of memory and disk samples, boots (one a crash), stalls and ships on this copy\'s own scheme, and two apps with deploys (one failed), errors and turns; one app sits in a second scheme whose only member is Mia, signed in by POSTing a password to /api/invite/statusseedstatusseedstatusseed01, to see the page as a member of another scheme',
+    seed(c) {
+      const now = Date.now();
+      const HOUR = 3_600_000;
+      const db = c.store.db;
+      // This copy runs this repo, so the Seeded scheme counts as Citadel's own: its releases are the ships.
+      c.store.setProjectRepoDir(c.project.id, process.cwd());
+      for (let t = now - 8 * 24 * HOUR; t <= now; t += 15 * 60_000) {
+        const wave = Math.sin(t / (6 * HOUR));
+        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6 });
+      }
+      const sha = (n: number) => `${n}`.repeat(40).slice(0, 40);
+      c.store.addHealthEvent('boot', now - 6 * 24 * HOUR, sha(1), 'a ship: new code 11111111');
+      c.store.addHealthEvent('boot', now - 3 * 24 * HOUR, sha(2), 'a ship: new code 22222222');
+      c.store.addHealthEvent('boot', now - 3 * 24 * HOUR + 4 * HOUR, sha(2), 'a restart on the same code: a crash, the watchdog or by hand');
+      c.store.addHealthEvent('boot', now - 9 * HOUR, sha(3), 'a ship: new code 33333333');
+      for (const [ago, s] of [[5, 0.8], [30, 1.4], [50, 6.2], [100, 2.1], [140, 0.6], [150, 0.9], [175, 3.3]] as const)
+        c.store.addHealthEvent('loop-lag', now - ago * HOUR, sha(3), `The event loop was held for ${s} s: sqlite`);
+      for (let i = 0; i < 22; i++) {
+        const start = now - (i * 8.3 + 2) * HOUR;
+        c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(i % 9), changes: JSON.stringify([{ title: `#${1100 + i}: a seeded change` }]), started_at: start, live_at: start + (240 + (i % 5) * 90) * 1000, outcome: 'live', stages: '{}' });
+      }
+      const mia = c.store.listUsers().find((u) => u.login === 'mia') ?? c.store.createUser({ name: 'Mia', login: 'mia' });
+      const token = 'statusseedstatusseedstatusseed01'; // the about line names it
+      c.store.updateUser(mia.id, { invite_hash: inviteHash(token), invite_expires: now + 7 * 24 * HOUR });
+      // Scheme 2 is Citadel's (GLOBAL_OWNER: its members see every scheme), so Mia's scheme must not take that id.
+      if (!c.store.getProject(2)) c.store.createProject('Citadel', null, null);
+      const peekScheme = c.store.listProjects().find((p) => p.name === 'Peek Auras') ?? c.store.createProject('Peek Auras', null, mia.id);
+      c.store.addMember(peekScheme.id, mia.id);
+      const me = c.store.listUsers().find((u) => u.name === c.who) ?? mia;
+      c.store.addMember(peekScheme.id, me.id);
+      const app = (name: string, title: string, home: number, port: number) => c.store.getContraption(name) ?? (c.store.createContraption({ name, title, icon: null, port, home_scheme: home, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `${name}-${hex()}`, keys_at: now }), c.store.getContraption(name)!);
+      const peek = app('peek-auras', 'Peek Auras', peekScheme.id, 29_311);
+      const ledger = app('ledger', 'Ledger', c.project.id, 29_312);
+      const deploy = (name: string, ago: number, took: number, outcome: string) => c.store.addContraptionDeploy({ name, from_sha: null, to_sha: hex().padEnd(40, '0'), by: 'Mia', started_at: now - ago * HOUR, finished_at: now - ago * HOUR + took * 1000, outcome, stages: '{}', changes: '[]' });
+      for (const [ago, took, out] of [[150, 70, 'deployed'], [120, 95, 'deployed'], [74, 64, 'deployed'], [50, 180, 'failed'], [49, 88, 'deployed'], [26, 72, 'deployed'], [3, 81, 'deployed']] as const) deploy('peek-auras', ago, took, out);
+      deploy('ledger', 30, 140, 'deployed');
+      deploy('ledger', 2, 210, 'failed');
+      const err = (id: number, ago: number, kind: string, key: string, sample: string) => c.store.addContraptionError(id, pacificDay(now - ago * HOUR), kind, key, sample, now - ago * HOUR);
+      for (let i = 0; i < 14; i++) err(peek.id, 2 + i * 9, i % 3 ? 'http 5xx' : 'client', i % 3 ? 'GET /api/auras' : 'TypeError', i % 3 ? '502 from the aura service' : "Cannot read properties of null (reading 'glow')");
+      err(ledger.id, 1, 'tool', 'search', 'no tool named search');
+      const turn = (id: number, uid: number, ago: number, tokens: number) => {
+        const t = c.store.startContraptionTurn(id, uid, hex());
+        c.store.endContraptionTurn(t, 'done', { input: tokens / 10, output: tokens / 20, cacheRead: tokens * 0.85, cacheWrite: 0 });
+        db.prepare('UPDATE contraption_turns SET started_at = ? WHERE id = ?').run(now - ago * HOUR, t);
+      };
+      for (let i = 0; i < 30; i++) turn(peek.id, i % 4 ? mia.id : me.id, 1 + i * 6, 40_000 + (i % 7) * 9000);
+      for (let i = 0; i < 6; i++) turn(ledger.id, me.id, 3 + i * 20, 25_000);
+      return `#/p/${c.project.id}/status`;
     },
   },
 };

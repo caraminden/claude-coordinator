@@ -18,6 +18,7 @@ import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onClaims, onReleases } from './releases.js';
 import { ciChip } from './ci.js';
+import { statusChip } from './status.js';
 import { inAppHash, jumpParts, showParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
@@ -898,6 +899,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(members|memory|decisions|people|contraptions|account|usage|notifications|skills|reviews)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/status$/))) await showProject(Number(m[1]), { kind: 'status' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health))?$/))) await showProject(Number(m[1]), { kind: 'ci', tab: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/releases\/(all|\d+)(?:\/(\d+))?$/))) await showReleases(Number(m[1]), m[2] === 'all' ? 'all' : Number(m[2]), m[3] ? Number(m[3]) : null);
@@ -1088,7 +1090,8 @@ export function start(who) {
   loadPrs();
   // The top bar's CI chip (#968), beside its usage meter: the one phones see.
   const meters = document.querySelector('.topbar .meters');
-  if (!meters.querySelector('.ci-chip')) meters.append(ciChip());
+  if (!meters.querySelector('.ci-chip:not(.status-chip)')) meters.append(ciChip());
+  if (!meters.querySelector('.status-chip')) meters.append(statusChip());
   route();
   showRail();
   initAppSwitch(me);

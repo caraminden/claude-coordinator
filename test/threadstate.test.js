@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount } from '../public/base.js';
-import { askWhy, byUrgency, cardChip, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
+import { askWhy, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -64,6 +64,13 @@ test('rowState: amber only for a card or replies of yours; another person\'s say
     assert.deepEqual(pill({ replies: ['Go'], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's go");
     assert.equal(rowState(t({}), null, NOW).label, 'Idle');
     assert.equal(rowState(t({ state: 'try' }), null, NOW).label, 'Ready to try');
+    // An approval is the assignee's, as the server counts it; the badge and the popover link go by whose card it is.
+    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's approval");
+    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'josh' } }), [0, 'you', 'approve 5m'], 'your approval');
+    const mixed = { ...age, open_cards: [card({ to: 'Cara', href: '#cara' }), card({ to: 'Josh', href: '#josh' })] };
+    assert.deepEqual(cardsYours(t(mixed)).map((c) => c.href), ['#josh']);
+    assert.equal(rowWhy(t(mixed), rowState(t(mixed), null, NOW), NOW).link.href, '#josh', 'the popover opens your card, not the older one of Cara\'s');
+    assert.deepEqual(cardsYours(t({ ...age, open_cards: [card({ to: 'Cara' })] })), [], 'none of yours: the badge goes violet');
   } finally {
     setAccount(null);
   }

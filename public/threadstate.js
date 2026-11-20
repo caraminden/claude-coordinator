@@ -68,11 +68,15 @@ export const LOOK = 0.5;
 /** Whose answer a card waits on (#1121): its `to`, else the minion's assignee; '' for anyone's, which is yours. */
 const cardFor = (c, t) => String(c?.to || t.properties?.assigned || '').trim();
 const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
+/** The minion's open cards that wait on you, oldest first. */
+export const cardsYours = (t) => (t.open_cards ?? []).filter((c) => isYou(cardFor(c, t)));
 
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
-  if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Answer needed: approve or deny' };
+  // An approval is its assignee's to answer, as the server's Needs you counts it (src/inbox.ts).
+  if (t.approvals) { const who = cardFor(null, t);
+    return isYou(who) ? { rank: 0, fam: 'you', cell: waited('approve'), label: 'Answer needed: approve or deny' } : { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who} to approve or deny` }; }
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
   // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
@@ -157,7 +161,7 @@ export function rowWhy(t, st, now = Date.now()) {
   const at = (ms) => `${pacific(ms, now)}, ${span(now - ms)} ago`;
   const lines = [];
   let more = null, link = null;
-  const card = t.open_cards?.[0], w = t.status !== 'closed' && !st.quiet ? t.wait : null;
+  const card = cardsYours(t)[0] ?? t.open_cards?.[0], w = t.status !== 'closed' && !st.quiet ? t.wait : null;
   if (st.quiet) {
     const a = t.activity, tool = a.tool;
     lines.push(`No output for ${span(now - a.at)}, since ${pacific(a.at, now)}.`);

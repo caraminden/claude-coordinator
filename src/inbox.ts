@@ -73,11 +73,11 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }
 
-/** The items the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): a ready/try or replies item they opened since it changed stops counting, as in public/inbox.js. */
+/** The items the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): a replies item they opened since it changed stops counting, as in public/inbox.js. */
 export function inboxWaiting(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): InboxItem[] {
   const updated = new Map(store.listTickets(projectId).map((t) => [t.id, t.updated_at]));
   return inboxItems(store, approvals, projectId, person)
-    .filter((i) => !((i.kind === 'state' || i.kind === 'replies') && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
+    .filter((i) => !(i.kind === 'replies' && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
 }
 
 /** How many minions the badge counts: one with any item left in `inboxWaiting` (minions, not items: Cara, 2026-11-01). */

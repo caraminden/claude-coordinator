@@ -8,7 +8,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
-import { byUrgency, cardChip, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
+import { byUrgency, cardChip, cardsYours, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
 import { pendingRelease, releaseOrder } from './releases.js';
@@ -401,7 +401,7 @@ export function threadRow(t, href = threadHref(t)) {
   const bar = !barOf ? '' : progressTrack(barOf) || waitBar(barOf);
   // A running turn's unanswered spend alert (#723) leads the card badge, in red, and tints the row.
   const spend = !coord && t.spend_alert;
-  const card = cardBadge([...(spend ? [{ kind: 'spend alert', what: `! $${spend.usd}`, href: spend.href }] : []), ...(t.open_cards ?? [])], spend);
+  const card = cardBadge([...(spend ? [{ kind: 'spend alert', what: `! $${spend.usd}`, href: spend.href }] : []), ...(t.open_cards ?? [])], spend, !spend && !cardsYours(t).length);
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
@@ -487,7 +487,7 @@ function ownerChip(t, coord) {
  * clicking that indicator specifically would open to the card"): it stays until the cards are answered or settled,
  * read or not, and opens the oldest. `cards` is the row's open_cards (Runner.cardLinks), oldest first.
  */
-function cardBadge(cards, spend = null) {
+function cardBadge(cards, spend = null, theirs = false) {
   if (!cards.length) return '';
   const go = (e) => {
     // The row is a link to the chat; this goes to the card in it instead, in a new tab as a link would on ctrl or middle click.
@@ -498,7 +498,7 @@ function cardBadge(cards, spend = null) {
   };
   const what = spend ? `spend alert: this turn passed $${spend.stage} and has used about $${spend.usd}` : `${cards[0].what ?? cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
   return h('span', {
-    class: `card-badge${spend ? ' spend' : ''}`, role: 'link', tabindex: 0,
+    class: `card-badge${spend ? ' spend' : theirs ? ' theirs' : ''}`, role: 'link', tabindex: 0,
     title: cards.length > 1 ? `${cards.length} cards wait: open the oldest, the ${what}` : `Open the ${what}`,
     onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
   }, cardChip(cards));

@@ -8,13 +8,21 @@
  *    propose_plan, or message to the Taskmaster or a minion.
  *  - Placeholder in a command: a fenced block tagged powershell, powershell-admin, wsl, fish, bash or
  *    cmd holds a `<like this>` placeholder. Values you can look up go in filled (Cara, 2026-11-17, #900).
- * A trial: each hit writes one `would refuse` line to the retro log and refuses nothing. The weekly
- * process digest counts them and how many were false alarms; refusal turns on only for a check with
- * under one false alarm in five. A `Process:` line in the final text (self-review's, not `none`) is also
+ *  - Live-state claim without a read (#1113): the final text states another minion's, CI's or a deploy's
+ *    state, or that something waits on a person, and the turn made no call that reads it (live_facts,
+ *    read_ticket, list_tickets, host_check, gh, git…) nor got it in its prompt from Citadel or that minion.
+ * Each hit writes one `would refuse` line to the retro log. The weekly process digest counts them and
+ * how many were false alarms; refusal turns on only for a check with under one false alarm in five.
+ * Refusing is on for one shape, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106): the
+ * stop is sent back once per prompt, never twice, and logs a `refused stop` line instead. The other
+ * shapes only count. (A choice asked in prose is refused by src/link-check.ts, a different hook.)
+ * A `Process:` line in the final text (self-review's, not `none`) is also
  * logged, as a `process` line. A turn a person's message reached mid-turn (a steer) is skipped:
  * its short end may be the steer cutting it off, not a broken rule (#280).
  */
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { note } from './retro-log.ts';
 
 export const MIN_TOOL_CALLS = 5;
@@ -24,8 +32,9 @@ export const MIN_ANSWER_CHARS = 200;
 const ACTIONS = ['ask_question', 'propose_plan', 'message_coordinator', 'message_taskmaster', 'message_ticket', 'create_ticket'];
 
 /** What one turn did, read from its transcript. */
-export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string };
+export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string; commands?: string[]; prompt?: string };
 // `cardText`: the question and option description text of the turn's ask_question calls, where a command can sit too.
+// `commands` and `prompt`: the turn's Bash commands and its prompt's text, for the live-claim check's reads.
 // `steered` covers every turn cut short rather than ended: a steer, a stop, a usage-limit or API error.
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);
@@ -51,6 +60,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
   let start = promptId ? entries.findIndex((e) => e?.promptId === promptId) : -1;
   if (start < 0) start = entries.findLastIndex(isPrompt);
   const turn: Turn = { toolCalls: [], finalText: '', steered: false };
+  if (start >= 0) turn.prompt = textOf(entries[start]?.message?.content);
   let waiting = 0;
   for (const e of entries.slice(Math.max(start, 0) + 1)) {
     if (e?.isSidechain) continue;
@@ -63,6 +73,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b?.type === 'tool_use') {
           turn.toolCalls.push(String(b.name ?? ''));
+          if (b.name === 'Bash' && typeof b.input?.command === 'string') (turn.commands ??= []).push(b.input.command);
           if (/(^|__)ask_question$/.test(String(b.name ?? ''))) {
             const qs = Array.isArray(b.input?.questions) ? b.input.questions : [];
             const parts = qs.flatMap((q: any) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: any) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
@@ -133,27 +144,114 @@ export function placeholderInCommand(text: string): string | null {
   return null;
 }
 
+// The live-claim check (#1113): a sentence stating live state (a minion's, CI's, a deploy's, a person's turn)
+// in a turn that read none of it. The shapes come from the replies struck in the week to 2026-11-19.
+const LIVE_CLAIMS = [
+  // Another minion's state: "#1002 has been live since 20:18", "#993 is parked".
+  /#\d{2,5}\b[^.?!\n]{0,40}?\b(?:is|was|are|has(?: been)?|have(?: been)?|'s|isn't|aren't|hasn't|haven't|never|already|still)\s+(?:now\s+|already\s+|still\s+|not\s+|been\s+)?(?:live|shipped|landed|deployed|merged|parked|running|idle|closed|done|blocked|stuck|waiting|ready|green|red|failed|failing)\b/i,
+  // CI, runners, jobs and lands with a result: "the last four lands all failed", "the test job never got a runner".
+  /\b(?:CI|runs?|runners?|jobs?|lands?|landings?|workflows?|queue|checks?)\b[^.?!\n]{0,50}?\b(?:failed|fails|failing|passed|passes|passing|green|red|queued|stuck|cancell?ed|never got|timed out|hung|hangs|finished|is busy|are busy|waits? its turn|still running|still in the queue)\b/i,
+  /\b(?:flaky|broken|offline|busy)\s+(?:runner|machine|box|CI)\b/i,
+  /\b(?:machine|box|runner)\b[^.?!\n]{0,60}?\b(?:isn't|is not|is|are|aren't)\s+(?:lent|online|offline|down|connected|free)\b/i,
+  // Deploys and live-ness: "is live", "live since", "isn't actually taking effect".
+  /\b(?:is|are|went|been|isn't|aren't|not|now)\s+live\b|\blive (?:since|now)\b|\btaking effect\b|(?:\b(?:was|were|got|is|are|been|now)\s+|'(?:re|s)\s+(?:now\s+)?)(?:deployed|restarted)\b/i,
+  // Someone else's moves: "Josh's Taskmaster started that build", "the Taskmaster closed #12".
+  /(?<!\b(?:the|a|an)\s)\b(?:started|closed|stopped|parked|unparked)\s+(?:#\d+|(?:that|the|this) build|Build \d+)/i,
+  // A person's turn: "waiting on you", "it needs your go".
+  /\b(?:waits?|waiting|blocked)\s+on\s+(?:you\b|your\b|Cara\b|Josh\b)|\bneeds? (?:your|Cara's|Josh's) (?:go|answer|pick|OK)\b/i,
+];
+// Hedged, future or conditional sentences claim nothing now.
+const HEDGE = /\b(?:I think|probably|likely|maybe|might|may|guess|not sure|I don't know|seems?|looks like|once|if|until|when|after|before|unless|will|would|could|expect)\b/i;
+// Calls that read live state: the facts tool, a minion or the minions list, the database, CI, machines, a Grunt,
+// and the turn's own starts and deploys ("#625 is running now" right after starting it).
+const READS = /(?:^|__)(?:live_facts|read_ticket|read_minion|list_tickets|host_check|ci_runners|ci_files|ci_status|job_status|check_machine|list_machines|contraption_read|hand_off_land|land|create_ticket|deploy_contraption)$|^(?:Agent|Task)$/;
+const READ_COMMANDS = /\b(?:git|gh|sqlite3|curl|journalctl|systemctl|ci-failures|citadel-[\w-]+|ss|ps|pgrep|uptime|free|df|nproc|land\.sh|deploy\.sh)\b/;
+
+/** The sentences of `text` that state live state, outside code, quotes and comments; hedged ones and questions left out. */
+export function liveClaims(text: string): string[] {
+  const prose = text.replace(/^[ \t]*```[\s\S]*?^[ \t]*```/gm, '').replace(/<!--[\s\S]*?-->/g, '').replace(/`[^`\n]*`/g, '`…`')
+    .split('\n').filter((l) => !/^\s*>/.test(l)).join('\n');
+  const out: string[] = [];
+  for (const raw of prose.split(/(?<=[.!?])\s+|\n+/)) {
+    const s = raw.replace(/~~[^~]*~~/g, '').trim();
+    // A question, a hedge, or the turn's own act ("I started #630") claims nothing about someone else's state.
+    if (!s || s.endsWith('?') || HEDGE.test(s) || /^(?:[-*]\s+)?(?:I|I've|I'm|I'll|We|We've)\b/.test(s)) continue;
+    if (LIVE_CLAIMS.some((re) => re.test(s))) out.push(s);
+  }
+  return out;
+}
+
+/** The parts of a prompt Citadel, GitHub, a Taskmaster or a minion wrote (`[Citadel]:`, `[#N title]:`, a quoted Taskmaster), not a person's words. */
+function toldBy(prompt: string): string {
+  return prompt.split(/^(?=\[[^\]\n]+\]:)/m).filter((b) => /^\[(?:System|Citadel|GitHub|Taskmaster|#\d)/.test(b) || b.includes('(Quoted from ')).join('\n');
+}
+const numbers = (s: string) => new Set(s.match(/#\d{2,5}\b/g) ?? []);
+
+/** The live-claim check's hits for a turn that read no live state: count only, never sent back. */
+export function liveClaimCheck(turn: Turn): string[] {
+  if (turn.steered) return [];
+  if (turn.toolCalls.some((n) => READS.test(n)) || (turn.commands ?? []).some((c) => READ_COMMANDS.test(c))) return [];
+  // A claim the prompt's own notes or a minion's report state (#655 is live, CI passed) passes them on; a person's question doesn't.
+  const told = toldBy(turn.prompt ?? '');
+  const toldNumbers = numbers(told);
+  const toldLive = LIVE_CLAIMS.some((re) => re.test(told));
+  const passedOn = (s: string) => toldLive && [...numbers(s)].every((n) => toldNumbers.has(n));
+  return liveClaims(turn.finalText).filter((s) => !passedOn(s)).slice(0, 3).map((s) => `live-state claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
+}
+
 /** The text of a `Process:` line (self-review's last line) at the start of a line, or null for none or no such line. */
 export function processLine(text: string): string | null {
   const m = text.match(/^Process:[ \t]*(.*\S)[ \t]*$/m);
   return m && !/^none\b\.?$/i.test(m[1]) ? m[1] : null;
 }
 
+/** The shapes whose stop is sent back, once per prompt. */
+const REFUSED = /^proposal without a card/;
+
 /**
- * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits. Never refuses.
+ * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits.
  * job-check.ts calls it, only for a stop it lets through: a refused stop isn't the turn's end.
+ * `refusal` (job-check.ts passes it) lets a REFUSED shape send the stop back, once per prompt.
  */
-export function answerHook(input: any, env = process.env): string[] {
+export function answerHook(input: any, env = process.env, refusal?: { stateDir?: string; out: { block?: string } }): string[] {
   const role = env.COORDINATOR_ROLE;
   if (role !== 'thread' && role !== 'coordinator') return [];
   let turn: Turn = { toolCalls: [], finalText: '', steered: false };
   if (input?.transcript_path) turn = readTurn(readFileSync(input.transcript_path, 'utf8'), input.prompt_id ?? undefined);
   // Claude Code's own copy of the last message beats the transcript, which may not be flushed yet.
   if (typeof input?.last_assistant_message === 'string' && input.last_assistant_message.trim()) turn.finalText = input.last_assistant_message;
-  const hits = answerCheck(turn);
-  for (const hit of hits) note(input, 'would refuse', hit, env);
+  const hits = [...answerCheck(turn), ...liveClaimCheck(turn)];
+  const refuse = refusal ? refusalFor(input, hits, refusal.stateDir ?? join(tmpdir(), 'citadel-kit')) : null;
+  for (const hit of hits) {
+    if (refuse && REFUSED.test(hit)) {
+      note(input, 'refused stop', hit, env);
+      refusal!.out.block = refuse;
+    } else if (!refuse) note(input, 'would refuse', hit, env); // a stop sent back is judged again when it ends
+  }
   // self-review's Process: line goes to the log for the process digest, whatever the checks said.
   const process = turn.steered ? null : processLine(turn.finalText);
-  if (process) note(input, 'process', process, env);
+  if (process && !refusal?.out.block) note(input, 'process', process, env);
   return hits;
+}
+
+/** The reason to send this stop back for, the first time this prompt hits a REFUSED shape; else null. Without a prompt id, only a first stop. */
+function refusalFor(input: any, hits: string[], stateDir: string): string | null {
+  if (!hits.some((h) => REFUSED.test(h))) return null;
+  const prompt = input?.prompt_id ?? null;
+  const file = join(stateDir, `answer-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);
+  if (!prompt && input?.stop_hook_active) return null;
+  try {
+    if (prompt && JSON.parse(readFileSync(file, 'utf8')).prompt === prompt) return null;
+  } catch {
+    // Nothing refused yet this session.
+  }
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ prompt }));
+  } catch {
+    return null; // no marker to stop a second refusal: let the turn end
+  }
+  return '[citadel answer check] Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. '
+    + 'Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card\'s link. '
+    + 'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.';
 }

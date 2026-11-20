@@ -1723,6 +1723,36 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/memory-proposals": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/memory-proposals/1/decide": {
+  "anon": "401 Not logged in",
+  "person": "404 No such memory tidy",
+  "member": "404 No such memory tidy",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/memory-proposals/1/restore": {
+  "anon": "401 Not logged in",
+  "person": "404 No such memory tidy",
+  "member": "404 No such memory tidy",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/memory?q=one": {
   "anon": "401 Not logged in",
   "person": "409 A's chats aren't indexed for search by meaning yet",
@@ -2692,6 +2722,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/facts": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/file": {
   "anon": "401 Not logged in",
   "person": "404 That file is no longer there",
@@ -2830,6 +2870,16 @@
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "400 image is required",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/memory-proposal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "member": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "outsider": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "tmA": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "tmB": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "m1": "404 This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself",
   "m2": "403 A minion may only update itself"
  },
  "GET /api/tickets/:minion1/messages": {
@@ -3402,6 +3452,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:taskmasterA/facts": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:taskmasterA/file": {
   "anon": "401 Not logged in",
   "person": "404 That file is no longer there",
@@ -3539,6 +3599,16 @@
   "outsider": "403 Not for people",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/memory-proposal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "member": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "outsider": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "tmA": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "tmB": "403 Only the curator run itself can propose a memory tidy in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

@@ -237,12 +237,16 @@ test('a machine set up before ticks starts from what it lent when its agent firs
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
   const before = await until('the old agent\'s check', async () => { const m = await find(); return m.status === 'ready' && m.checked.results.length === 2 && !m.checking && m; });
   assert.deepEqual([before.managed, before.lend, before.mcp_kind, before.mcp_command], [false, null, 'claude', 'godot-ai'], 'an agent set up the old way lends what its command line says');
+  // Its GPU jobs switched off (#1175): only the switch is saved, and what it lends stays as its command line says.
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: null, workspaces: [], before_ticks: true, gpu_off: true } } });
+  const off = await find();
+  assert.deepEqual([off.lend, off.reason, off.checked.results.length], [{ server: null, workspaces: [], gpu_off: true, before_ticks: true }, before.reason, 2], 'the switch keeps its MCP server\'s check');
   old.agent.kill();
   await until('it to go offline', async () => !(await find()).online);
   // Reinstalled with the new line: the same server and folders are ticked, so minions get what they got.
   startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: dir });
-  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && m; });
-  assert.deepEqual(after.lend, { server: 'godot-ai', workspaces: ['w'] });
+  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && !m.lend.before_ticks && m; });
+  assert.deepEqual(after.lend, { server: 'godot-ai', workspaces: ['w'], gpu_off: true }, 'its ticks start from what it lent, and GPU jobs stay off');
   assert.equal((await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; })).reason, before.reason);
   // A folder added later starts unticked.
   mkdirSync(join(dir, 'later'), { recursive: true });

@@ -16,7 +16,7 @@ export interface InboxItem {
   key: string;
   /** The chat event that posted the card, to open the chat at it. */
   eventId?: number;
-  /** On a card addressed to you from another scheme (directCards, #687): where it asks from, to draw its row. */
+  /** On a card from another scheme (directCards, #687; no route serves it since 2026-11-19, docs/adr/0015): where it asks from. */
   from?: { projectId: number; scheme: string; number: number | null; kind: string; title: string };
 }
 
@@ -90,8 +90,9 @@ export function inboxCount(store: Store, approvals: Approvals, projectId: number
 
 /**
  * Cards addressed to `person` from their other schemes (#687; Cara, 2026-11-14, "Keep, add cross-scheme"): every
- * scheme's Needs-you list shows them as rows linking to the card in its chat (#697), though only the asking scheme's
- * count includes them.
+ * scheme's Needs-you list showed them as rows linking to the card in its chat (#697). Josh, 2026-11-19: "you shouldnt
+ * see others schemes stuff in inbox unless/until we have the citadel wide page", so no route serves this now; it waits
+ * for that page.
  */
 export function directCards(store: Store, projectId: number, person: string): InboxItem[] {
   const user = store.findUser('name', person);

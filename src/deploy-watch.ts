@@ -120,6 +120,8 @@ export function countsAsServerFault(status: number, err: unknown): boolean {
 export class DeployWatch {
   private d: WatchDeps;
   private ticking = false;
+  /** report()'s readings of windows wholly in the past, by `at:len`: their rows never change, and the page asks on every release event (#1178). */
+  private settled = new Map<string, Reading[]>();
 
   constructor(d: WatchDeps) {
     this.d = d;
@@ -224,17 +226,27 @@ export class DeployWatch {
   report(): { commit: string; prev: string; at: number; alerted: boolean; checks: { offset: number; len: number | null; readings: Reading[] }[] }[] {
     const now = this.now();
     const deploys = this.state().deploys;
-    return deploys.map((w) => {
+    const kept = new Map<string, Reading[]>();
+    const read = (at: number, len: number) => {
+      const key = `${at}:${len}`;
+      const r = this.settled.get(key) ?? kept.get(key) ?? this.readings(at, len).map((r) => ({ ...r, first: null, top: [] }));
+      if (at + len <= now) kept.set(key, r);
+      return r;
+    };
+    const out = deploys.map((w) => {
       const next = deploys.filter((o) => o.at > w.at).reduce((a, o) => Math.min(a, o.at), Infinity);
       const checks = CHECKS.map((offset) => {
         if (w.at + offset > now && next === Infinity) return { offset, len: null, readings: [] };
         const len = Math.min(w.at + offset, next, now) - w.at;
         // An alert ends the watch: checks past the one that raised it never ran.
         if (w.alerted && len > w.len) return { offset, len: null, readings: [] };
-        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: this.readings(w.at, len).map((r) => ({ ...r, first: null, top: [] })) };
+        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: read(w.at, len) };
       });
       return { commit: w.commit, prev: w.prev, at: w.at, alerted: !!w.alerted, checks };
     }).sort((a, b) => b.at - a.at);
+    // Only the windows still shown, so deploys that left the watch leave the cache too.
+    this.settled = kept;
+    return out;
   }
 
   /**

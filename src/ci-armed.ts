@@ -12,7 +12,7 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; /** A plain ask_question card: later questions of the same turn join it (mergeCard). */ mergeable?: true; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
+export interface Card { questions: unknown[]; kind?: 'merge'; /** Set on a feeder's go card: the build it merges into (Merge, not Ship It). */ into?: number; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** A kit sync's ship card (#1100): the kit commit; the server answers it, with no turn. */ kitSync?: string; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; /** A plain ask_question card: later questions of the same turn join it (mergeCard). */ mergeable?: true; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
 export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
@@ -21,10 +21,10 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, to, notice, doc, secret, asker, job, recipe, mergeable } = card;
+  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(to ? { to } : {}), ...(mergeable ? { mergeable } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
+    id, questions, ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(kitSync ? { kitSync } : {}), ...(to ? { to } : {}), ...(mergeable ? { mergeable } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
   });
   runner.broadcastTicket(ticket.id);
   app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });

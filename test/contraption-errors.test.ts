@@ -107,8 +107,11 @@ test('counts per app, day and group, written to the owning scheme\'s shared fold
   assert.match(text, /## Peek Auras \(peek-auras\): 14/);
   const counts = [...text.matchAll(/^- (\d+) × (\w+)/gm)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual([...counts.slice(0, 2), ...counts.slice(2).sort()], ['10 tool', '2 http', '1 log', '1 tool'], 'biggest first (the two 1s share a time)');
+  assert.match(text, /Unknown-tool calls \(#1174\): 10 \(mcp__peek__roll ×10\)/, 'the calls to tools the agent has not got, counted per app, with their names');
+  assert.doesNotMatch(text.split('## ')[1]!.replace(/Unknown-tool.*/, ''), /Unknown-tool/);
   assert.doesNotMatch(text, /token=abc/);
   assert.match(readFileSync(join(shared(quiet.id), 'reports', 'contraption-errors', '2026-11-15.md'), 'utf8'), /## Calm \(calm\): 0/);
+  assert.doesNotMatch(readFileSync(join(shared(quiet.id), 'reports', 'contraption-errors', '2026-11-15.md'), 'utf8'), /Unknown-tool/, 'no line when there were none');
   assert.ok(existsSync(join(shared(peekScheme.id), 'reports', 'contraption-errors', '2026-11-16.md')), 'the 16th is written too');
 
   // The Taskmaster's morning count: yesterday's total for its scheme's apps, and the file.

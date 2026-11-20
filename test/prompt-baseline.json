@@ -64,7 +64,7 @@
   "Before starting a minion for someone, read their own instruc": 242,
   "The scheme instructions (shown at the end of this prompt whe": 327,
   "The Citadel-wide instructions (shown right before the scheme": 560,
-  "Each minion is a separate Claude Code session with its own g": 712,
+  "Each minion is a separate Claude Code session with its own g": 957,
   "Minion titles are the short ask, about 30 characters (\"Usage": 469,
   "Minions run in the background. To see progress, read them; d": 139,
   "The scheme's main checkout is at /repo and minion worktrees ": 372,

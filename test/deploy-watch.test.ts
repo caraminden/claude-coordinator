@@ -429,3 +429,38 @@ test('report: an alert ends the watch, later checks show as not run, and no erro
   assert.ok(d.checks.every((c) => c.readings.every((r) => r.first === null && r.top.length === 0)));
   void store;
 });
+
+test('report: a window already read is not read again; a newly due one is (#1178)', () => {
+  const { store, clock, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  const at = clock.now;
+  deploy(sha('1'));
+  errors(14, at + 5 * MIN);
+  clock.now = at + 25 * MIN;
+  let reads = 0;
+  const turnOutcomes = store.turnOutcomes.bind(store);
+  store.turnOutcomes = (from, to) => (reads++, turnOutcomes(from, to));
+  const first = w.report();
+  const once = reads;
+  assert.ok(once > 0);
+  clock.now += 5 * MIN; // a poll later: the same +20 min window, nothing new due
+  assert.deepEqual(w.report(), first);
+  assert.equal(reads, once, 'the second report read no rows');
+  clock.now = at + 61 * MIN; // +1 h came due: only its window is new
+  w.report();
+  assert.equal(reads, once + 2);
+});
+
+test('turnOutcomes reads error events through their own index, not every event of the window (#1178)', () => {
+  const { store } = setup();
+  const sql: string[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((q: string) => (sql.push(q), prepare(q))) as typeof store.db.prepare;
+  store.turnOutcomes(0, 1);
+  store.db.prepare = prepare;
+  const errs = sql.find((q) => q.includes("kind = 'error'"));
+  assert.ok(errs, 'turnOutcomes reads error events');
+  const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`).all(...Array(errs.split('?').length - 1).fill(0)).map((r: any) => r.detail).join(' | ');
+  assert.match(plan, /USING (COVERING )?INDEX events_errors/);
+});

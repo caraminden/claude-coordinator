@@ -107,27 +107,42 @@ export function backfillStandardAudits(store: Store, dataDir: string, templates:
 }
 
 /**
- * The weekly app turns check (kit/schedules/app-turns.md) for a scheme home to an app (Cara, 2026-11-16: "automatically
- * add this turn audit and the audit of the audit to new schemes when they add a contraption"). Once per scheme, so a
- * check someone deletes stays deleted; a scheme that already has one is left alone. Returns a line when it added one.
+ * Add a scheme's row for one kit template, once per scheme (the setting `key`), so a row someone deletes stays deleted;
+ * a scheme that already has one is left alone. Returns a line when it added one.
  */
-export function addAppTurnsCheck(store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()): string | null {
-  const key = `app_turns_check:${projectId}`;
+function addOnce(store: Store, dataDir: string, projectId: number, slug: string, key: string, templates: Map<string, ScheduleTemplate>, now: number): string | null {
   const p = store.getProject(projectId);
   if (!p || store.getSetting(key)) return null;
-  const t = templates.get('app-turns');
-  // Not a throw: the caller has already saved the app. The flag stays unset, so the next boot tries again.
+  const t = templates.get(slug);
+  // Not a throw: the caller has already saved what triggered it. The flag stays unset, so the next boot tries again.
   if (!t) {
-    console.error('kit/schedules/app-turns.md is missing: no app turns check added');
+    console.error(`kit/schedules/${slug}.md is missing: no "${slug}" schedule added`);
     return null;
   }
-  const has = store.schedules.list(p.id).some((s) => s.template === 'app-turns');
+  const has = store.schedules.list(p.id).some((s) => s.template === slug);
   const owner = p.owner_id == null ? undefined : store.getUser(p.owner_id);
   const fields = templateFields(t, p, '', templateVars(store, dataDir, p.id));
   if (!has) store.schedules.create({ project_id: p.id, ...fields, created_by: owner?.name ?? 'Citadel' }, now);
   store.setSetting(key, now);
   if (has) return null;
   return `${p.name}: added "${t.name}" (${fields.cron})`;
+}
+
+/**
+ * The weekly app turns check (kit/schedules/app-turns.md) for a scheme home to an app (Cara, 2026-11-16: "automatically
+ * add this turn audit and the audit of the audit to new schemes when they add a contraption").
+ */
+export const addAppTurnsCheck = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
+  addOnce(store, dataDir, projectId, 'app-turns', `app_turns_check:${projectId}`, templates, now);
+
+/** The weekly memory curator (kit/schedules/memory-curator.md, #1111) for a scheme: every scheme gets one (Josh, 2026-11-19, "Every scheme, quiet skip"). */
+export const addMemoryCurator = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
+  addOnce(store, dataDir, projectId, 'memory-curator', `memory_curator:${projectId}`, templates, now);
+
+/** At boot: every scheme gets its memory curator (once each, as above). */
+export function addMemoryCurators(store: Store, dataDir: string): string[] {
+  const templates = loadTemplates();
+  return store.listProjects().map((p) => addMemoryCurator(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
 }
 
 /** At boot: every scheme already home to an app gets its check (once each, as above). */
@@ -148,7 +163,7 @@ export function checkAudits(store: Store, projectId: number, templates: Map<stri
   const p = store.getProject(projectId);
   const picks = p ? STANDARD_AUDITS[p.name] : undefined;
   const rows = store.schedules.list(projectId);
-  // The app turns check has its own rule (addAppTurnsCheck), so it is not part of this list.
+  // The app turns check and the memory curator have their own rules (addOnce), so they are not part of this list.
   return [...templates.values()].filter((t) => t.slug in COPY_NAMES).map((t) => {
     const mine = rows
       .filter((s) => s.template === t.slug || (!s.template && COPY_NAMES[t.slug].includes(s.name)))

@@ -16,7 +16,7 @@ const ROOT = join(import.meta.dirname, '..');
 const HISTORY = 2000;
 
 /** Every Claude login's config dir, labelled: the one list the Memory page and this page read memory folders from. */
-export function memoryLogins(app: App): MemoryLogin[] {
+export function memoryLogins(app: Pick<App, 'store' | 'claude'>): MemoryLogin[] {
   return app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
     const configDir = app.claude.configDir(u.id, a.n);
     return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];

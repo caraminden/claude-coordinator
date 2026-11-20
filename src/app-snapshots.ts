@@ -1,4 +1,4 @@
-// Snapshots of an app's DATA_DIR around a deploy that changes its migrations (#1137, docs/adr/0015-app-data-snapshots.md;
+// Snapshots of an app's DATA_DIR around a deploy that changes its migrations (#1137, docs/adr/0018-app-data-snapshots.md;
 // Josh, 2026-11-19, picked "Build it" on #1093's idea A6, reversing #828's "Citadel never snapshots app data").
 // A deploy whose commit changes a path the app's manifest lists under `migrations` copies its data first, with the app
 // stopped, so a roll back (the failed health check's, or Roll back to last green's) can put code and data back together.

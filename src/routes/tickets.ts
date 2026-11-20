@@ -21,10 +21,12 @@ import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { offSkills } from '../skills.ts';
-import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
+import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
+import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -51,6 +53,7 @@ import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } fr
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
 import { MachineJobs } from '../machine-jobs.ts';
+import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -87,7 +90,8 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (Object.keys(fields).length) {
     // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
     if ('model' in fields || 'effort' in fields) {
-      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort);
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because);
     }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -221,7 +225,7 @@ function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
  * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
  * your own minions should initiate a response from that minion"; #702 undid #687's held mail for answers).
  */
-function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
+export function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a parked minion too (#718): answering is as deliberate as Unpark.
   app.runner.send(ticketId, author, text, images, extra, false, files);
 }
@@ -316,9 +320,9 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
  * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
  * and a release key card (#837) that app's.
  */
-function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; hostTool?: { source: string; package: string } }) {
+export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; hostTool?: { source: string; package: string }; memory?: object }) {
   const { store, runner } = app;
-  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.hostTool ? `tool:${c.hostTool.source}:${c.hostTool.package}` : 'plan');
+  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.hostTool ? `tool:${c.hostTool.source}:${c.hostTool.package}` : c.memory ? 'memory' : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {
     const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
@@ -392,7 +396,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { res, ticket, app } = ctx;
       const { store } = app;
-      return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+      return json(res, 200, { ticket, picks: store.picksOf(ticket.id), project: store.getProject(ticket.project_id) });
     },
   },
   {
@@ -449,6 +453,21 @@ export const ticketRoutes: Route[] = [
       const { res, app, ticket } = ctx;
       const { id } = ticket;
       return json(res, 200, { status: await app.ticketBranch(id) });
+    },
+  },
+  {
+    // live_facts (#1113): a minion's live facts in one read. A minion asks as itself, for a minion of its scheme by ?number=.
+    method: 'GET', path: '/api/tickets/:ticket/facts', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    async handler({ res, url, app, caller, ticket }) {
+      let id = ticket.id;
+      if (caller && caller.kind !== 'coordinator' && url.searchParams.has('number')) {
+        const n = Number(url.searchParams.get('number'));
+        const target = Number.isInteger(n) && n > 0 ? app.store.getTicketByNumber(ticket.project_id, n) : undefined;
+        if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
+        id = target.id;
+      }
+      const facts = await liveFacts(app, id);
+      return json(res, 200, { facts, text: factsText(facts) });
     },
   },
   {
@@ -598,8 +617,11 @@ export const ticketRoutes: Route[] = [
       // A card asking for the go to ship says so, for the minions list's chip (#575). "ship" is the word people read
       // (Cara, 2026-11-19, picked "Ship" on #1020's card); it is stored as the older kind "merge", and "land" still counts.
       const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? 'merge' as const : null;
+      // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
+      const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
+      const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
-      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {
@@ -695,6 +717,22 @@ export const ticketRoutes: Route[] = [
         if (!choice) throw new HttpError(400, 'Pick one of the card\'s options');
         app.jobs.decide(data.job, choice, { uid: session.uid ?? -1, name: session.name, admin: !!session.admin }, true);
         runner.send(id, session.name, `My answer to job #${data.job}'s go card: ${answers[0].selected[0]}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
+      // A kit sync's ship card (#1100): the server ships or drops the syncs itself, pushed as whoever answered, with no
+      // turn. The answer is held mail for the Taskmaster, as a machine job's is.
+      if (data.kitSync) {
+        const choice = answers[0]?.selected[0];
+        if (choice !== KIT_SHIP && choice !== KIT_NOT_NOW) throw new HttpError(400, "Pick one of the card's options");
+        let line: string;
+        try {
+          line = await app.kitSync.decide({ ticket: id, question: data.id }, choice, { id: session.uid ?? -1, name: session.name });
+        } catch (err: any) {
+          throw new HttpError(409, err.message);
+        }
+        runner.send(id, session.name, `My answer to the kit sync card: ${choice}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.emit(id, 'note', { text: line });
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }
@@ -838,6 +876,8 @@ export const ticketRoutes: Route[] = [
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
+      // A memory tidy card (#1111) is decided change by change on the Memory page, never with Approve on the card.
+      if (card.memory) throw new HttpError(409, 'Review the memory tidy on the Memory page: each change is ticked there');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       // A host tool card (#1147) too.
       const fixed = card.machine || card.releaseKey || card.hostTool;

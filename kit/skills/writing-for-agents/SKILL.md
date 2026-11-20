@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Writing, testing and vetting documents for agents. Use before adding or changing a rule in CLAUDE.md, AGENTS.md or .claude/rules/ (a one-liner asked for in a hurry too), creating or rewriting a skill, or adding a downloaded or third-party skill to a repo.
+description: Writing, testing and vetting documents for agents. Use before creating or rewriting a skill (one that encodes a process you just did too), adding or changing a rule in CLAUDE.md, AGENTS.md or .claude/rules/ (a one-liner asked for in a hurry too), or adding a downloaded or third-party skill to a repo.
 ---
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs; the writing does not: the same levers make each one predictable, since the agent takes the same _process_ every run rather than producing the same output.
@@ -119,7 +119,7 @@ Guidance is a fix for a failure you have watched happen. Before writing it, run 
 
 1. Write only what fixes the failure you saw, in the form that fits it ([`TESTING.md`](TESTING.md), "Match the form to the failure"): a guardrail for a rule skipped under pressure, a recipe for output of the wrong shape, a required slot for a missing part, a condition on something observable for behaviour that should vary.
 2. Re-run the same task with the guidance in 3 to 5 fresh Grunts, and read every output. **Variance** is the signal: reps that land on one shape mean the wording binds; five readings mean it doesn't, and the fix is a tighter form, not more words.
-3. A description is a pointer, so test what it fires on: a **trigger eval** of about 20 prompts, half that should fire it and half near-misses that share its words ([`TESTING.md`](TESTING.md), "Trigger evals").
+3. A description is a pointer, so test what it fires on: a **trigger eval** of about 20 prompts, half that should fire it and half near-misses that share its words ([`TESTING.md`](TESTING.md), "Trigger evals"), and for a kit skill the live rerun there.
 
 *Done when* the baseline failed, the reps with the guidance pass and agree, and every description you touched has a trigger eval whose misfires are fixed or named.
 

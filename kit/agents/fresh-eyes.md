@@ -24,6 +24,8 @@ only what the verbatim parts support. A summary is not evidence that something w
 each thing the diff builds that only the summary backs goes under its heading as "not judged:
 no words of theirs", never as "none".
 
+- **Done lines,** if the work shows any (its first reply, task list or PR description): after the three questions, tick each against the diff and name every line that is not met.
+
 ## Procedure
 
 1. Read their words first, before anything else, and write down what they would expect to see

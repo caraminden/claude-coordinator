@@ -85,11 +85,36 @@ export function tierLabel(model, effort) {
  * The "Picked because" line on a minion (#1061). `by` says who chose: 'table' (the table's pick for its type, from the Taskmaster's
  * call or a start with none), a person's name (they set it by hand), or 'step-up' (the Taskmaster changed it later).
  */
-export function pickReason(by, type, model, effort) {
+export function pickReason(by, type, model, effort, why = '') {
+  const line = pickLine(by, type, model, effort);
+  const w = String(why ?? '').replace(/\s+/g, ' ').trim();
+  return w ? `${line}: ${w}` : line;
+}
+
+function pickLine(by, type, model, effort) {
   const tier = tierLabel(model, effort);
   if (by === 'step-up') return `changed by the Taskmaster (a stall step-up or someone's ask): ${tier}`;
   if (by !== 'table') return `set by ${by}: ${tier}`;
   return type ? `${type} → ${tier}` : tier;
+}
+
+/**
+ * The step-up for a stalled minion (#1139), following the tiers' `then` and the advisor row (test/stall-signals.test.ts
+ * checks each step it names is a TIERS model): Sonnet → (the advisor, during its
+ * trial) → Opus medium → Opus high → Fable medium → Fable xhigh ("xhigh stays for a Fable run that failed twice"). Null at the
+ * top, with no model set, or a model outside the Claude families. `fable` false: the scheme has Fable off, so Opus high is the top.
+ */
+export function nextStep(model, effort, fable = true, today = new Date().toISOString().slice(0, 10)) {
+  const rank = EFFORT_LEVELS.indexOf(effort ?? 'medium');
+  const trial = (advisorTrialEnd() ?? '') >= today;
+  if (!model) return null;
+  if (/haiku/.test(model)) return { model: 'claude-sonnet-5-5', effort: 'medium' };
+  if (/\+opus-advisor$/.test(model) || (/sonnet/.test(model) && !trial)) return { model: 'claude-opus-5-5', effort: 'medium' };
+  if (/sonnet/.test(model)) return { model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' };
+  if (/opus/.test(model) && rank < 2) return { model, effort: 'high' };
+  if (/opus/.test(model)) return fable ? { model: 'claude-fable-5-2', effort: 'medium' } : null;
+  if (/fable/.test(model) && rank < 3) return { model, effort: 'xhigh' };
+  return null;
 }
 
 /** The table as one line of prose, for the Taskmaster's prompt. */

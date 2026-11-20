@@ -213,6 +213,14 @@ export function render(scheme: string, day: string, apps: ContraptionRow[], rows
     const mine = rows.filter((r) => r.contraption_id === app.id);
     out.push('', `## ${app.title} (${app.name}): ${mine.reduce((n, r) => n + r.count, 0)}`, '');
     if (!mine.length) out.push('No errors.');
+    // Calls to a tool the agent has not got (#1174), so it shows whether the did-you-mean note helped.
+    const phantom = mine.filter((r) => r.kind === 'tool' && /No such tool available/.test(r.key));
+    if (phantom.length) {
+      const byTool = new Map<string, number>();
+      for (const r of phantom) byTool.set(r.key.split(': ')[0]!, (byTool.get(r.key.split(': ')[0]!) ?? 0) + r.count);
+      const names = [...byTool].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `${tick(t)} ×${n}`).join(', ');
+      out.push(`Unknown-tool calls (#1174): ${phantom.reduce((n, r) => n + r.count, 0)} (${names})`, '');
+    }
     for (const r of mine) out.push(`- ${r.count} × ${r.kind} · \`${tick(r.key)}\``, `  - sample, ${pacific(r.first_at)}${r.count > 1 ? `, last ${pacific(r.last_at)}` : ''}: \`${tick(r.sample)}\``);
   }
   return `${out.join('\n')}\n`;

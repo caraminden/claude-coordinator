@@ -103,3 +103,17 @@ test('indexNote appends a linked line once, makes MEMORY.md when missing, and re
   assert.throws(() => indexNote(dir, 'a.md'), (e: any) => e.status === 409 && /full/.test(e.message));
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), lines(200));
 });
+
+test('a note counts as listed when MEMORY.md links it by [[name]] or through a note it links (a topic index)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'memory-hop-'));
+  writeFileSync(join(dir, 'topic-index.md'), '---\nname: topic-index\n---\n- [[deep-note]] and [[by-stem]]\n');
+  writeFileSync(join(dir, 'deep-note.md'), '---\nname: deep-note\n---\nreached in one hop; see [[two-hops]]\n');
+  writeFileSync(join(dir, 'by-stem.md'), '---\nname: Some Title\n---\nlinked by its file stem\n');
+  writeFileSync(join(dir, 'named.md'), '---\nname: named\n---\nlinked by name from MEMORY.md\n');
+  writeFileSync(join(dir, 'two-hops.md'), '---\nname: two-hops\n---\nonly deep-note links it: two hops is too far\n');
+  writeFileSync(join(dir, 'orphan.md'), '---\nname: orphan\n---\nnothing links it\n');
+  writeFileSync(join(dir, 'MEMORY.md'), '- [Topics](topic-index.md) — every note by topic\n- see [[named]]\n');
+  const listed = Object.fromEntries(readFolder({ label: 'x', dir }, () => false).notes.map((n) => [n.file, n.inIndex]));
+  assert.deepEqual(listed, { 'topic-index.md': true, 'named.md': true, 'deep-note.md': true, 'by-stem.md': true, 'two-hops.md': false, 'orphan.md': false });
+  rmSync(dir, { recursive: true, force: true });
+});

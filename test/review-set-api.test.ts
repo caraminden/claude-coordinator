@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, REPO, stopProcs, stopTurns, until } from './helpers.ts';
+import { agentToken, bootServer, REPO, stopProcs, stopTurns } from './helpers.ts';
+import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-api-'));
 const procs: ChildProcess[] = [];
@@ -402,11 +403,8 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   assert.equal((await call(url, { method: 'POST', body: { slug: 'src-critic', name: 'Src critic', kind: 'critic', when: 'diff: src/**', body: '## Rules\nTidy.' } })).status, 201);
   const a = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'one', properties: { type: 'chore' } } })).data;
   const b = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'two', properties: { type: 'chore' } } })).data;
-  // Each new minion's first turn fails (the fake Claude) and sets its status when it ends: let both end first, or under
-  // load that write lands after the close below and takes the minion out of the week's count.
-  for (const t of [a, b]) {
-    await until(`#${t.number}'s first turn to end`, async () => !['new', 'running'].includes((await call(`/api/tickets/${t.id}`)).data.ticket.status));
-  }
+  // The fake claude fails each new minion's first turn, which writes status 'error' when it ends: let both finish before closing them by hand, or the late write undoes the close (a flake under load).
+  for (const m of [a, b]) await until(`#${m.number}'s first turn to fail`, async () => (await call(`/api/tickets/${m.id}`)).data.ticket.status === 'error');
   const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
   db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
   db.prepare('UPDATE projects SET owner_id = NULL WHERE id = ?').run(away.id);

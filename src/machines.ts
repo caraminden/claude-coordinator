@@ -43,8 +43,15 @@ const WORKSPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 /** What the setup lines ran for a machine added as a Claude Code server with no name typed (#308). */
 const DEFAULT_CLAUDE_MCP = 'godot-ai';
 
-/** What a person ticked for a machine to lend (#439): one of the MCP servers its agent found, and its workspaces, by name. */
-export type Lend = { server: string | null; workspaces: string[] };
+/**
+ * What a person ticked for a machine to lend (#439): one of the MCP servers its agent found, and its workspaces, by name.
+ * gpu_off (#1175): GPU jobs switched off, so a GPU_TASK is refused and one running is stopped.
+ * before_ticks: saved for an agent from before #439, only to hold gpu_off; its ticks start fresh once it is managed.
+ */
+export type Lend = { server: string | null; workspaces: string[]; gpu_off?: true; before_ticks?: true };
+/** The workspace task that runs a job with the machine's GPU on (tools/win-test-box/gpu.ps1 adds it). */
+export const GPU_TASK = 'run-gpu';
+const GPU_OFF_WHO = 'the GPU jobs switch on the Machines page';
 /** An MCP server an agent found on its computer: in Claude Code's config, or in its own machine-agent.json. */
 export type FoundServer = { name: string; from: 'claude' | 'file' };
 
@@ -53,7 +60,7 @@ export function cleanLend(v: any): Lend | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
   if (v.server !== null && !(typeof v.server === 'string' && SERVER_NAME.test(v.server))) return null;
   if (!Array.isArray(v.workspaces) || v.workspaces.length > 50 || !v.workspaces.every((w: unknown) => typeof w === 'string' && WORKSPACE_NAME.test(w))) return null;
-  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)] };
+  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}) };
 }
 
 function storedLend(m: Machine): Lend | null {
@@ -218,6 +225,8 @@ interface Session {
   /** Which minion, for the agent's log and its workspace lock ("#90 in Citadel"). */
   who: string;
   res: ServerResponse;
+  /** Its GPU_TASK calls waiting on the agent's answer, by JSON-RPC id, to learn the job's id. */
+  gpuAsks?: Set<unknown>;
 }
 
 /** The workspaces an agent reports, cut down to what the Machines page shows. */
@@ -261,6 +270,11 @@ export class MachineRelay {
   private sessions = new Map<string, Session>();
   /** Runner jobs sent to an agent and waiting on its answer, by job id. */
   private jobs = new Map<string, { machineId: number; done: (r: RunnerJobResult) => void }>();
+  /**
+   * GPU_TASK jobs a machine said were still running, by machine: the GPU jobs switch stops them.
+   * shortcut: a job switched off inside its run_task call's first wait (50 s at most) is stopped when that answer comes, not at once.
+   */
+  private gpuJobs = new Map<number, Set<string>>();
   /** Checks running now, by machine: one at a time each (#437). */
   private checks = new Map<number, Promise<CheckResult[]>>();
   private store: Store;
@@ -457,9 +471,10 @@ export class MachineRelay {
     }
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
-      if (!storedLend(machine)) {
+      const prev = storedLend(machine);
+      if (!prev || prev.before_ticks) {
         const was = machine.mcp_kind === 'claude' ? machine.mcp_command || DEFAULT_CLAUDE_MCP : null;
-        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [] };
+        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [], ...(prev?.gpu_off ? { gpu_off: true as const } : {}) };
         this.store.updateMachine(machine.id, { lend: JSON.stringify(lend) });
       }
       this.sendLend(machine.id);
@@ -486,10 +501,12 @@ export class MachineRelay {
   setLend(machineId: number, lend: Lend) {
     const machine = this.store.getMachine(machineId);
     if (!machine) return;
-    const swapped = storedLend(machine)?.server !== lend.server;
+    // An agent from before #439 lends what its command line says: only its GPU switch is saved here.
+    const swapped = !lend.before_ticks && storedLend(machine)?.server !== lend.server;
     const check = swapped && storedCheck(machine);
     this.store.updateMachine(machineId, { lend: JSON.stringify(lend), ...(check ? { last_check: JSON.stringify({ ...check, results: check.results.filter((r) => r.server !== 'mcp') }) } : {}) });
     this.sendLend(machineId);
+    if (lend.gpu_off) for (const job of this.gpuJobs.get(machineId) ?? []) this.stopGpuJob(machineId, job);
     const offers = this.online().find((m) => m.id === machineId)?.servers ?? [];
     for (const server of ['mcp', 'ws'] as const) if ((server === 'mcp' && swapped) || !offers.includes(server)) this.endServer(machineId, server);
     this.checkIfDue(machineId);
@@ -588,6 +605,26 @@ export class MachineRelay {
   }
 
   private checkServer(machineId: number, holder: SessionHolder, server: MachineServer, who: string, timeoutMs: number): Promise<CheckResult> {
+    return this.converse(machineId, holder, server, who, timeoutMs, async (ask) => {
+      const list = await ask(2, 'tools/list', {});
+      if (list?.error) throw new Error(`tools/list failed: ${list.error.message ?? JSON.stringify(list.error)}`);
+      if (!Array.isArray(list?.result?.tools)) throw new Error(`tools/list sent no tools: ${JSON.stringify(list).slice(0, 300)}`);
+      return list.result.tools.map((t: any) => String(t?.name));
+    });
+  }
+
+  /** Stop a GPU_TASK job (the GPU jobs switch went off) over a session of its own: the turn that ran it may be gone. */
+  private stopGpuJob(machineId: number, job: string) {
+    this.gpuJobs.get(machineId)?.delete(job);
+    this.converse(machineId, { check: machineId }, 'ws', GPU_OFF_WHO, CHECK_MS, async (ask) => {
+      const r = await ask(2, 'tools/call', { name: 'stop_job', arguments: { id: job } });
+      if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
+      return [];
+    }).then((r) => r.ok || console.error(`[machines] couldn't stop GPU job ${job} on machine ${machineId}: ${r.error}`));
+  }
+
+  /** Open a session on a machine's server as a turn's proxy does, initialize it, run `talk`, and close it. */
+  private converse(machineId: number, holder: SessionHolder, server: MachineServer, who: string, timeoutMs: number, talk: (ask: (id: number, method: string, params: object) => Promise<any>) => Promise<string[]>): Promise<CheckResult> {
     const started = Date.now();
     return new Promise((resolve) => {
       // Stands in for the proxy's stream: the session id, then the machine's replies, as server-sent events.
@@ -634,11 +671,8 @@ export class MachineRelay {
         const init = await ask(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'citadel-check', version: '1' } });
         if (init?.error) return finish(false, [], `initialize failed: ${init.error.message ?? JSON.stringify(init.error)}`);
         send({ method: 'notifications/initialized' });
-        const list = await ask(2, 'tools/list', {});
-        if (list?.error) return finish(false, [], `tools/list failed: ${list.error.message ?? JSON.stringify(list.error)}`);
-        if (!Array.isArray(list?.result?.tools)) return finish(false, [], `tools/list sent no tools: ${JSON.stringify(list).slice(0, 300)}`);
-        finish(true, list.result.tools.map((t: any) => String(t?.name)), null);
-      })();
+        finish(true, await talk(ask), null);
+      })().catch((err) => finish(false, [], err.message));
     });
   }
 
@@ -666,7 +700,23 @@ export class MachineRelay {
       // Its proxy gives up rather than reconnecting, which would start the server again.
       s.res.write(`data: ${JSON.stringify({ closed: true })}\n\n`);
       this.endSession(sessionId, false);
-    } else s.res.write(`data: ${JSON.stringify({ message: body.message })}\n\n`);
+      return true;
+    }
+    const reply = body.message as any;
+    if (s.gpuAsks?.delete(reply?.id)) {
+      // The agent's report of a job that outlasted the call's wait: "... still running after 50 s (job 1a2b3c4d)."
+      const job = /still running after \d+ s \(job ([0-9a-f]+)\)/.exec(String(reply?.result?.content?.[0]?.text ?? ''))?.[1];
+      if (job) {
+        const jobs = this.gpuJobs.get(s.machineId) ?? new Set();
+        this.gpuJobs.set(s.machineId, jobs.add(job));
+        // Ended ones aren't told apart; stopping one is harmless, and a job runs 30 min at most, so the newest few cover it.
+        for (const old of jobs) if (jobs.size > 20) jobs.delete(old);
+        // Switched off while the call was on its way.
+        const now = this.store.getMachine(machine.id);
+        if (now && storedLend(now)?.gpu_off) this.stopGpuJob(s.machineId, job);
+      }
+    }
+    s.res.write(`data: ${JSON.stringify({ message: body.message })}\n\n`);
     return true;
   }
 
@@ -693,6 +743,16 @@ export class MachineRelay {
   fromSession(sessionId: string, holder: SessionHolder, message: unknown): boolean {
     const s = this.sessions.get(sessionId);
     if (!s || s.holder !== holderKey(holder)) return false;
+    const call = message as any;
+    if (s.server === 'ws' && call?.method === 'tools/call' && call.params?.name === 'run_task' && call.params?.arguments?.task === GPU_TASK) {
+      const machine = this.store.getMachine(s.machineId);
+      if (machine && storedLend(machine)?.gpu_off) {
+        const text = `GPU jobs are switched off for ${machine.name} on Citadel's Machines page. Nothing was run. Don't retry: use the run task (software drawing), or ask a person to switch GPU jobs back on.`;
+        s.res.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text }], isError: true } } })}\n\n`);
+        return true;
+      }
+      (s.gpuAsks ??= new Set()).add(call.id);
+    }
     const agent = this.agents.get(s.machineId);
     if (!agent) return false;
     if (agent.res.writableLength > MAX_BACKLOG) {

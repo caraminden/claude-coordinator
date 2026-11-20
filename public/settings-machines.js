@@ -17,8 +17,9 @@ export function onMachinesUpdate(machines) {
 
 /** A machine's status line as the server words it (#437): "Asleep · seen 3h ago". */
 function machineStatusText(m) {
-  if (!m.when) return m.reason;
-  return `${m.reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
+  const reason = m.lend?.gpu_off ? `${m.reason} · GPU jobs off` : m.reason;
+  if (!m.when) return reason;
+  return `${reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
 }
 
 /** Whether this scheme's minions get a machine for the viewer: a shared one lent here, or their own (their turns get it). */
@@ -300,6 +301,19 @@ function workspaceDetail(w) {
 }
 
 /**
+ * One switch for the machine's GPU jobs (#1175, Josh's pick): shown once a lent folder has the GPU task, and while off.
+ * next(off) is the lend to save.
+ */
+function gpuSwitch(lend, lent, next, save) {
+  if (!lend?.gpu_off && !lent.some((w) => w.tasks?.some((t) => t.name === 'run-gpu'))) return '';
+  const box = h('input', { type: 'checkbox', checked: !lend?.gpu_off });
+  box.onchange = () => save(next(!box.checked));
+  return h('div', { class: 'machine-found' }, h('div', { class: 'muted small' }, 'GPU jobs'),
+    h('label', { class: 'row small' }, box, h('span', {}, h('code', {}, 'run-gpu'),
+      h('span', { class: 'muted' }, lend?.gpu_off ? ' · off: refused until ticked again' : ' · untick to refuse them and stop one running'))));
+}
+
+/**
  * What a machine lends (#439). One whose agent reports what it found gets a tick per MCP server (one at a time)
  * and per folder; a tick saves at once and reaches the agent, with no new token. One set up before that lends
  * what its own command line says, shown as it is.
@@ -317,6 +331,7 @@ function machineLends(m) {
       m.servers.includes('ws') ? h('label', { class: 'row small', title: 'Lets minions check out pushed branches and run the listed tasks in every folder below' }, all, h('span', {}, 'All its folders')) : '',
       ...workspaces.map((w) => h('div', { class: 'machine-found' }, h('strong', { class: 'small' }, w.name), workspaceDetail(w))),
       m.servers.length ? '' : h('p', { class: 'muted small' }, 'Nothing: it runs no MCP server and lists no folder.'),
+      gpuSwitch(m.lend, m.workspace_tools ? workspaces : [], (off) => ({ server: null, workspaces: [], before_ticks: true, ...(off ? { gpu_off: true } : {}) }), (next) => patchMachine(m, { lend: next }, `switch GPU jobs for ${m.name}`, renderMachineList)),
       h('p', { class: 'muted small' }, 'Set up before ticks: it lends what its own command line says. ',
         h('button', { type: 'button', class: 'link', onclick: () => newMachineToken(m) }, 'Reinstall to manage from here'), '.'),
       ...problems, checked);
@@ -334,6 +349,7 @@ function machineLends(m) {
   const servers = [...found, ...(lend.server && !found.some((f) => f.name === lend.server) ? [{ name: lend.server, gone: true }] : [])];
   const folders = [...workspaces, ...lend.workspaces.filter((n) => !workspaces.some((w) => w.name === n)).map((name) => ({ name, gone: true }))];
   const gone = online ? 'not found there now' : 'ticked';
+  const { gpu_off: _, ...gpuOn } = lend;
   return h('div', { class: 'machine-lends' },
     servers.length ? h('div', { class: 'machine-found' }, h('div', { class: 'muted small' }, 'MCP server (one at a time)'),
       ...servers.map((f) => tick(lend.server === f.name, (on) => save({ ...lend, server: on ? f.name : null }),
@@ -343,6 +359,7 @@ function machineLends(m) {
         tick(lend.workspaces.includes(w.name), (on) => save({ ...lend, workspaces: on ? [...lend.workspaces, w.name] : lend.workspaces.filter((n) => n !== w.name) }),
           h('strong', {}, w.name), w.gone ? h('span', { class: 'muted' }, ` · ${gone}`) : ''),
         w.gone ? '' : workspaceDetail(w)))) : '',
+    gpuSwitch(lend, workspaces.filter((w) => lend.workspaces.includes(w.name)), (off) => (off ? { ...gpuOn, gpu_off: true } : gpuOn), save),
     online
       ? (servers.length || folders.length ? '' : h('p', { class: 'muted small' }, 'It found no MCP server in Claude Code\'s config there and no machine-agent.json entries.'))
       : h('p', { class: 'muted small' }, m.last_seen_at ? 'Offline: what it finds there shows once it connects.' : 'Once it connects, what it finds on that computer shows here to tick.'),

@@ -11,9 +11,10 @@ import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
-import { pickFor, pickReason } from '../../public/model-table.js';
+import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
+import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
 import { inOrder } from '../../public/reorder.js';
 import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../../public/shipping.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
@@ -35,10 +36,12 @@ import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
+import { briefWarning, namedFiles } from '../brief-lint.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
+import { addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
@@ -590,6 +593,7 @@ export const projectRoutes: Route[] = [
         if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true, as);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
+      addMemoryCurator(app.store, app.dataDir, project.id);
       void app.releases.refresh(true); // its targets show up without anyone asking (#627)
       if (setup) {
         const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);
@@ -1092,7 +1096,17 @@ export const projectRoutes: Route[] = [
       const byHand = !caller && (model !== null || effort !== null);
       model ??= table.model;
       effort ??= table.effort;
-      const because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort);
+      const pickBy = byHand ? session.name : caller ? 'Taskmaster' : 'table';
+      let because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      // Third fix (#1157): a bug that looks like 2+ earlier fixes of the last 14 days starts with "diagnose first", one tier up from the table's pick.
+      const repeat = planned.type?.[0] === 'bug' ? await findRepeats(store, project, { title, brief: ownBrief(message), at: Date.now() }).catch(() => []) : [];
+      const stepped = repeat.length ? steppedTier({ model, effort }, table, project.fable_ok !== 'off') : null;
+      const tierWas = tierLabel(model, effort);
+      if (stepped) {
+        ({ model, effort } = stepped);
+        because = `third fix (${repeat.map((m) => `#${m.number}`).join(', ')}): one tier up → ${tierLabel(model, effort)}`;
+      }
+      const brief0 = repeat.length ? `${flagBlock(repeat)}${FLAG_RULE}${message}` : message;
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
       let leader: Ticket | undefined;
@@ -1115,6 +1129,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
+      store.addPick(id, model, effort, pickBy, because);
       store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
@@ -1134,13 +1149,24 @@ export const projectRoutes: Route[] = [
       }
       if (follow) {
         const { leader, when } = follow;
-        waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
+        waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
         store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` });
         runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unpark starts it now.` });
         runner.broadcastTicket(id);
         notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
       } else {
-        runner.send(id, session.name, message, [], { brief: true });
+        runner.send(id, session.name, brief0, [], { brief: true });
+      }
+      if (repeat.length) {
+        const tier = stepped ? { from: tierWas, to: tierLabel(model, effort) } : null;
+        notes.push(flagNote(repeat, tier));
+        runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
+      }
+      // A brief an agent wrote (the Taskmaster's, or a handoff a person starts) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
+      // A person's Start already carries its brief's text, and naming the file must not let another section of it count.
+      if (caller || brief) {
+        const warning = briefWarning(brief ? message : `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
+        if (warning) notes.push(warning);
       }
       // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
       void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
@@ -1310,9 +1336,9 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; then cards addressed to them from their other schemes (#687).
+  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; only this scheme's (a card another scheme addressed to them stays out: Josh, 2026-11-19, docs/adr/0015).
   { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, {
-      items: [...inboxItems(app.store, app.runner.approvals, project.id, session.name), ...directCards(app.store, project.id, session.name)],
+      items: inboxItems(app.store, app.runner.approvals, project.id, session.name),
     }) },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },

@@ -169,7 +169,7 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   const schemeArg = (tools: any[], name: string) => !!tools.find((t) => t.name === name).inputSchema.properties.scheme;
   assert.ok(schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'list_tickets') && schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'read_ticket'));
   assert.ok(!schemeArg(await tool(tmPeek, 'tools/list', {}, false), 'list_tickets'), "other Taskmasters aren't offered it");
-  assert.ok(!(await tool(tmCitadel, 'tools/list', {}, true)).some((t: any) => !['list_tickets', 'read_ticket', 'message_taskmaster'].includes(t.name) && t.inputSchema?.properties?.scheme), 'no other tool takes a scheme (message_taskmaster always named the one it writes to)');
+  assert.ok(!(await tool(tmCitadel, 'tools/list', {}, true)).some((t: any) => !['list_tickets', 'read_ticket', 'live_facts', 'message_taskmaster'].includes(t.name) && t.inputSchema?.properties?.scheme), 'no other tool takes a scheme (message_taskmaster always named the one it writes to)');
 
   askedBy(tmCitadel, josh.id);
   const list = await tool(tmCitadel, 'list_tickets', { scheme: peek.id }, true);
@@ -177,6 +177,8 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   const read = await tool(tmCitadel, 'read_ticket', { scheme: peek.id, ticket_id: peekMinion.number }, true);
   assert.ok(!read.isError && read.text.includes('Aura timers'), read.text);
   assert.ok(!(await tool(tmCitadel, 'read_ticket', { scheme: peek.id, ticket_id: peekMinion.number, live: true }, true)).isError);
+  const facts = await tool(tmCitadel, 'live_facts', { scheme: peek.id, ticket_id: peekMinion.number }, true);
+  assert.ok(!facts.isError && facts.text.includes('Aura timers (scheme Peek)'), facts.text);
   // Reads only: writes and routes not marked everyScheme still stop at its own scheme.
   for (const [method, path] of [['GET', `/api/projects/${peek.id}/tickets`], ['GET', `/api/tickets/${peekMinion.id}`], ['GET', `/api/tickets/${peekMinion.id}/events?after=0`], ['GET', `/api/projects/${peek.id}?number=1`]]) assert.equal(await api(tmCitadel, method, path), 200, path);
   for (const [method, path] of [['PATCH', `/api/tickets/${peekMinion.id}`], ['POST', `/api/tickets/${peekMinion.id}/messages`], ['POST', `/api/tickets/${peekMinion.id}/stop`], ['PATCH', `/api/projects/${peek.id}`], ['POST', `/api/projects/${peek.id}/tickets`], ['GET', `/api/projects/${peek.id}/artifacts`]]) {

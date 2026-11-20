@@ -10,6 +10,7 @@
     run    takes the box's screen lock: tests that open windows, or the app itself (then screenshot,
            then stop_job). Waits its turn with CI desktop jobs.
     build  doesn't: builds and tests that need no screen, which go on beside a CI desktop job.
+    run-gpu  once the box has its GPU (gpu-host.ps1): like run, with the GPU on while it runs.
   Behind `mise exec --` when the repo has a mise.toml, so its pinned tools are on PATH.
 
 .EXAMPLE
@@ -89,6 +90,8 @@ c.workspaces[name] = { ...old, path: folder, tasks: {
   run: { run, args: true, about: 'a PowerShell command line, given as one argument, with the screen: tests that open windows, or the app (then screenshot, then stop_job)' },
   build: { run, args: true, screen: false, about: 'a PowerShell command line, given as one argument, that needs no screen: builds and plain tests' },
 } };
+// The box has its GPU once gpu-host.ps1 has run (README.md); its -Install writes the same task.
+if (fs.existsSync('C:\\citadel-box\\gpu.ps1')) c.workspaces[name].tasks['run-gpu'] = { run: [...run.slice(0, -ps.length), 'powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\citadel-box\\gpu.ps1', '-Run'], args: true, about: 'like run, with the GPU on (real Direct3D hardware) while it runs; run draws in software' };
 fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, JSON.stringify(c, null, 2));
 '@
@@ -96,7 +99,7 @@ fs.writeFileSync(file, JSON.stringify(c, null, 2));
 $code = $LASTEXITCODE
 Remove-Item Env:CC_BOX_WORKSPACE
 if ($code) { throw "Could not write $config" }
-Write-Host "  $config has workspace $Workspace (tasks run and build). The agent reads it again by itself."
+Write-Host "  $config has workspace $Workspace (tasks run and build, and run-gpu once the box has its GPU). The agent reads it again by itself."
 
 Say 'Screen-lock hooks for the desktop runners here'
 & C:\citadel-box\screen-lock.ps1 -Install

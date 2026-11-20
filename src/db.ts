@@ -7,6 +7,7 @@ import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
+import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { Memory } from './memory.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
@@ -658,6 +659,8 @@ CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
 CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
 -- A scheme's cards without a seek into every minion's events (recentCards, #759): partial, so no other query's plan can change.
 CREATE INDEX IF NOT EXISTS events_cards ON events(ticket_id, kind) WHERE kind IN ('question', 'plan', 'approval');
+-- Error events by time, for the post-deploy watch's turnOutcomes (#1178): partial, so it holds only the few error rows and no other query's plan can change.
+CREATE INDEX IF NOT EXISTS events_errors ON events(created_at) WHERE kind = 'error';
 -- What recentCards found of each card, kept across restarts (#762): the first person's reply after it, an approval's result,
 -- and the newest event looked at. The card's minion and own id are kept to tell it from a later card that took a deleted id.
 CREATE TABLE IF NOT EXISTS card_fates (
@@ -860,6 +863,18 @@ CREATE TABLE IF NOT EXISTS turn_models (
   PRIMARY KEY (turn_id, model)
 );
 -- Each Grunt a turn started (#948), read from the session's subagents/ folder at the turn's end.
+-- Every model and effort a minion started on or was moved to (#1061, A4): who picked it and why, so a scorecard can count
+-- which reasons held up. No foreign key on ticket_id, like brief_starts, so an older release's deleteTicket still works.
+CREATE TABLE IF NOT EXISTS ticket_picks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  model TEXT,
+  effort TEXT,
+  by TEXT NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ticket_picks_ticket ON ticket_picks(ticket_id, id);
 CREATE TABLE IF NOT EXISTS turn_grunts (
   agent_id TEXT PRIMARY KEY,
   turn_id INTEGER NOT NULL REFERENCES turns(id),
@@ -1476,8 +1491,11 @@ export const SCHEMA_HISTORY = [
   [81, 'review_entries, review_versions, review_runs, review_verdicts; repo rubric files imported once (#1051, #1054)'],
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
-  [84, 'contraptions.subdir (#1136)'],
-  [85, 'contraption_push_devices (#1138)'],
+  [84, 'events_errors index (#1178)'],
+  [85, 'ticket_picks (#1061)'],
+  [86, 'memory_proposals (#1111)'],
+  [87, 'contraptions.subdir (#1136)'],
+  [88, 'contraption_push_devices (#1138)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1524,6 +1542,8 @@ export class Store {
   claims: Claims;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
+  /** The memory curator's proposals, waiting on a member (src/memory-curator.ts, #1111). */
+  memoryProposals: MemoryProposals;
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
@@ -1548,11 +1568,12 @@ export class Store {
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
       this.memory = new Memory(this);
+      this.memoryProposals = new MemoryProposals(this.db);
       return;
     }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
     this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
@@ -1574,6 +1595,7 @@ export class Store {
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
     this.memory = new Memory(this);
+    this.memoryProposals = new MemoryProposals(this.db);
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();
@@ -2492,6 +2514,14 @@ export class Store {
     return caller.kind === 'coordinator' && caller.project_id === GLOBAL_OWNER && this.isAdmin(this.getUser(this.turnAsker(caller.id) ?? -1));
   }
 
+  /** Record a model and effort pick with its reason (#1061): at a minion's start, and at every change after. */
+  addPick(ticketId: number, model: string | null, effort: string | null, by: string, reason: string, at = Date.now()) {
+    this.db.prepare('INSERT INTO ticket_picks (ticket_id, at, model, effort, by, reason) VALUES (?, ?, ?, ?, ?, ?)').run(ticketId, at, model, effort, by, reason);
+  }
+  /** A minion's picks, oldest first. */
+  picksOf(ticketId: number) {
+    return this.db.prepare('SELECT at, model, effort, by, reason FROM ticket_picks WHERE ticket_id = ? ORDER BY id').all(ticketId) as { at: number; model: string | null; effort: string | null; by: string; reason: string }[];
+  }
   deleteTicket(id: number) {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));
@@ -2506,6 +2536,7 @@ export class Store {
     this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turn_grunts WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM ticket_picks WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
@@ -3489,6 +3520,16 @@ export class Store {
       .all(since, until, payer) as unknown as SpendRowRaw[];
   }
 
+  /** Bug minions of every scheme created since `since`, with their brief's first 4,000 characters: the third-fix flag's pool (#1157). */
+  bugBriefs(since: number): { project_id: number; number: number; title: string; at: number; brief: string }[] {
+    return this.db
+      .prepare(`SELECT k.project_id, k.number, k.title, k.created_at AS at,
+          coalesce((SELECT substr(json_extract(e.data, '$.text'), 1, 4000) FROM events e WHERE e.ticket_id = k.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1), '') AS brief
+        FROM tickets k JOIN properties p ON p.target_type = 'minion' AND p.target_id = k.id JOIN property_keys pk ON pk.id = p.key_id AND pk.key = 'type'
+        WHERE k.created_at >= ? AND k.kind != 'coordinator' AND k.number IS NOT NULL AND p.value = 'bug'`)
+      .all(since) as unknown as { project_id: number; number: number; title: string; at: number; brief: string }[];
+  }
+
   /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
   addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
@@ -3561,8 +3602,9 @@ export class Store {
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null } {
     const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
         FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND e.data LIKE '%hit your %limit%', 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
-    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE id >= ? AND id < ? AND kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
-      .get(this.eventIdAt(from), this.eventIdAt(to), from, to) as { n: number; first: number | null };
+    // Through events_errors: without it this read every event of the window (43 ms a day's window, #1178), eventIdAt or not.
+    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'")
+      .get(from, to) as { n: number; first: number | null };
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);
     return { turns: Number(ok.n) + Number(errs.n), failed: Number(ok.bad ?? 0) + Number(errs.n), first: firsts.length ? Math.min(...firsts) : null };
   }

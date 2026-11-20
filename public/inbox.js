@@ -1,6 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
+import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 import { askWhy } from './threadstate.js';
@@ -47,7 +47,6 @@ export function refreshSchemeCounts() {
       // A favicon a merge added or changed since the page drew it.
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
-    // Refetch, not just redraw: another scheme's minion dismissed or reopened takes its cards addressed to you (#687) with it.
     updateBadge();
     refreshInbox();
   }, () => {});
@@ -64,8 +63,7 @@ export function inboxEvent(event) {
   if (view?.kind !== 'project') return;
   if (!ticketOf(event.ticket_id)) {
     others.event(event);
-    // A card another scheme addressed to you (#687), or news of one this list shows, redraws this list too.
-    if (cardEvent(event) && (inbox.items.some((i) => i.ticketId === event.ticket_id) || JSON.parse(event.data).to === me)) refreshSoon();
+    if (cardEvent(event) && inbox.items.some((i) => i.ticketId === event.ticket_id)) refreshSoon();
   } else if (cardEvent(event)) refreshSoon();
 }
 
@@ -151,12 +149,11 @@ export function renderInbox() {
     Object.assign(inbox, { projectId: view.projectId, items: seen });
   }
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
-  // Cards addressed to you from your other schemes (`from`, #687) show here too, though only their own scheme's pill counts them.
-  const items = inbox.items.filter((i) => i.from || (ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed'));
+  const items = inbox.items.filter((i) => ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed');
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
   const all = items.filter((i) => !faded(i));
-  const waiting = all.filter((i) => !i.from);
+  const waiting = all;
   const count = new Set(waiting.map((i) => i.ticketId)).size;
   const shown = new Set(all.map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
@@ -203,13 +200,11 @@ export function renderInbox() {
 }
 
 /**
- * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. One from
- * another scheme (a card addressed to you there, #687) names that scheme.
+ * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited.
  */
 let inboxTips = null;
 function inboxRow(items) {
-  const { from } = items[0];
-  const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
+  const t = ticketOf(items[0].ticketId);
   const asks = new Map();
   for (const i of items) {
     const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
@@ -222,8 +217,8 @@ function inboxRow(items) {
   const seen = items.every(faded);
   const target = rowTarget(items);
   return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
-    h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
-      isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' },
+      isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
     h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));

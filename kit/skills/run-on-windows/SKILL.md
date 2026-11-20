@@ -6,7 +6,7 @@ description: Run a test, a command or the app on the shared Windows test box and
 # Run on Windows
 
 The test box is a Windows 11 VM whose screen is always signed in and unlocked. It runs at 125%
-with rounded corners and renders on the CPU (WARP), with no GPU. Its machine is
+with rounded corners and draws on the CPU (WARP) unless a job asks for the GPU. Its machine is
 `citadel-test-box`, and its tools are `mcp__citadel-test-box-ws__…`. If your turn doesn't have
 them, the box is offline, isn't lent to your scheme or has Workspace tools off: say so (the
 Taskmaster's machines tool shows which) and use CI. Setup and costs:
@@ -19,11 +19,17 @@ Citadel's `tools/win-test-box/README.md`.
    the screen is busy.
 3. **`git_sync {workspace, ref: "<your branch>"}`.** This gives a detached checkout of
    origin/<branch>.
-4. **Run.** A box workspace has two tasks. Each takes one argument: a whole PowerShell command
+4. **Run.** A box workspace has two or three tasks. Each takes one argument: a whole PowerShell command
    line, run in the clone (behind `mise exec --` when the repo pins tools).
    - **`run`** has the screen: tests that open windows, overlays or capture, or the app itself.
    - **`build`** doesn't touch the screen: compiling and plain tests. It runs beside a CI desktop
      job, so build with it first and then `run` only what needs the screen.
+   - **`run-gpu`**, once the box has its GPU: like `run`, with Cara's GPU switched on in the box
+     for this job only, so Direct3D gets real hardware. Everything else draws in software, so
+     golden pictures stay `run`'s. It prints the adapter an app gets by default; exit 2 means the
+     box has no GPU yet (use CI or a person), 3 that it didn't come on (`gpu.ps1 -Check` in `build`).
+     A person can switch GPU jobs off on the Machines page: then `run-gpu` is refused, and one
+     running is stopped ("Stopped by the GPU jobs switch"). Don't retry: use `run`, or ask.
 
    For example, `run_task {workspace, task: "build", args: ["cargo build --tests"]}`. Pass the
    command as one string: quoting across several args is lost on the way to PowerShell.
@@ -98,8 +104,9 @@ The driver falls back to an Edge tab when the install dialog never comes (the ov
 - **Pixel tests:** the box is unactivated on purpose, so an "Activate Windows" watermark may
   appear in the bottom-right corner. The first screenshots (2026-11-10) had none, but Windows can
   add it later, so keep pixel checks out of that corner.
-- **What a pass proves:** a pass here proves Windows behaviour on a GPU-less 125% screen. It does
-  not prove her GPU, HDR or a game running beside it. Say which one you proved.
+- **What a pass proves:** a pass here proves Windows behaviour on a 125% screen, in software
+  drawing, or with `run-gpu` on real Direct3D hardware. It never proves HDR or hardware overlays
+  (the box's screen supports neither, GPU or not) or a game running beside it. Say which you proved.
 - **What the box can't do** (WARP, a Hyper-V screen): exclusive fullscreen fails, and capturing
   a maximised window can give a black frame (Peek Auras, 2026-11-10). Skip such a test on the box
   rather than chase it, and say so.

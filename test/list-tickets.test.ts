@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { pacificDay } from '../src/contraption-errors.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
 
 // A minion lists its own scheme's minions, read-only (#143): list_tickets through the real MCP server,
@@ -24,6 +24,12 @@ after(async () => {
 const store = new Store(join(data, 'coordinator.db'));
 const A = store.createProject('A', null);
 const B = store.createProject('B', null);
+// A scheme with a repo whose build/5 branch exists: its feeder's go card merges, its build minion's and a plain minion's ship.
+const gitRepo = join(root, 'repo');
+mkdirSync(gitRepo);
+for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'], ['branch', 'build/5']]) execFileSync('git', a, { cwd: gitRepo });
+const C = store.createProject('C', null);
+store.setProjectRepoDir(C.id, gitRepo);
 const minion = (p: number, title: string) => store.createTicket({ project_id: p, kind: 'ticket', title, permission_mode: 'default', created_by: 'Cara' });
 const M1 = minion(A.id, 'Asker');
 const M2 = minion(A.id, 'Sibling');
@@ -135,4 +141,21 @@ test('a question card asked with kind merge reads as a ship card on the list; an
   }
   const { data: after } = await srv.call(`/api/projects/${A.id}`);
   assert.deepEqual(after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what), ['ship', 'ship', 'ship']);
+});
+
+test("a feeder's go card says merge, a build owner's and a plain minion's say ship", async () => {
+  const feeder = store.createTicket({ project_id: C.id, kind: 'ticket', title: 'Feeder', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(feeder.id, { build: 5 });
+  const owner = store.createTicket({ project_id: C.id, kind: 'ticket', title: 'Owner', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(owner.id, { build: 5 });
+  store.setSetting(buildOwnerKey(C.id, 5), owner.id);
+  const plain = store.createTicket({ project_id: C.id, kind: 'ticket', title: 'Plain', permission_mode: 'default', created_by: 'Cara' });
+  const q = [{ question: 'Go?', header: 'Go', options: [{ label: 'Go', recommended: true }, { label: 'Hold' }] }];
+  for (const t of [feeder, owner, plain]) {
+    const r = await fetch(`${srv.base}/api/tickets/${t.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(t.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind: 'merge' }) });
+    assert.equal(r.status, 201, await r.text());
+  }
+  const { data: scheme } = await srv.call(`/api/projects/${C.id}`);
+  const what = (title: string) => scheme.tickets.find((t: any) => t.title === title).open_cards.map((c: any) => c.what);
+  assert.deepEqual([what('Feeder'), what('Owner'), what('Plain')], [['merge'], ['ship'], ['ship']]);
 });

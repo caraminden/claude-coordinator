@@ -195,6 +195,8 @@ test('a runner\'s use is its Runner.Listener and everything under it, as CPU sin
   assert.deepEqual(runnerUse(next, first.seen).runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: 46, mem: 1000 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 }]);
   // A pid used again that points a process at its own child doesn't loop.
   assert.equal(runnerUse([{ ...procs[0], ppid: 11 }, procs[1]], first.seen).runners.length, 1);
+  // A Linux runner that updated itself runs from bin.<version> (bin is a symlink to it, and /proc/<pid>/exe resolves it).
+  assert.deepEqual(runnerUse([{ pid: 40, ppid: 1, path: '/opt/actions-runner-twireader/bin.2.330.0/Runner.Listener', cpu: 1, mem: 7 }], null).runners, [{ dir: '/opt/actions-runner-twireader', cpu: null, mem: 7 }]);
 });
 
 test('a sample: nothing on the first look, then percentages of the whole PC, named from each runner\'s .runner file', async () => {

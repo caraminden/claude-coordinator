@@ -196,7 +196,8 @@ export function runnerUse(procs, prev) {
   const seen = new Map(procs.map((p) => [p.pid, p.cpu]));
   const runners = [];
   for (const root of procs) {
-    const m = /^(.*)[\\/]bin[\\/]Runner\.Listener(?:\.exe)?$/i.exec(root.path ?? '');
+    // A Linux runner that updated itself runs from bin.<version>: bin is a symlink there, and /proc resolves it.
+    const m = /^(.*)[\\/]bin(?:\.[\d.]+)?[\\/]Runner\.Listener(?:\.exe)?$/i.exec(root.path ?? '');
     if (!m) continue;
     let cpu = 0;
     let mem = 0;

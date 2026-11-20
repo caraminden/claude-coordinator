@@ -19,7 +19,9 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    test goes green, a file exists in a folder), not process steps. One to five lines.
 4. **Already shipped on this**: what git (`git log main --grep`, the paths in play) and the minions
    list show today, with the date checked and the commits or minions found, or "nothing found
-   (checked 2026-11-19)". A minion that starts on work already shipped repeats it.
+   (checked 2026-11-19)". A minion that starts on work already shipped repeats it. For anything
+   bigger than a one-file fix, first send a `citadel:scout` Grunt the area or your draft: its
+   "Touched" lines go here, its "Tried or ruled out" and "Reusable" lines in part 6.
 5. **Leave alone**: what the minion must not touch (files, lanes, another minion's branch, live
    data). "Nothing in particular" when true.
 6. **Ruled out or tried**: decisions already made (quoted, dated), what was tried and failed and

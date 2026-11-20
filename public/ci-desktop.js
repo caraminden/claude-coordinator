@@ -125,3 +125,17 @@ export function trouble(pc) {
   if (pc.verdict.kind === 'none' && pc.series.some((s) => s[1] !== null)) return 'CI desktop is offline';
   return '';
 }
+
+/** The one line the chip's tooltip and the page's reason row both say for a PC in trouble. */
+export const troubleLine = (pc) => `${pc.host}: ${trouble(pc)}`;
+
+/** A PC's toned word for the CI page's list: the trouble kinds first, then busy (CPU or memory at 70%), else fine. */
+export function pcWord(pc) {
+  const v = pc.verdict.kind;
+  if (v === 'over') return ['warn', 'Overloading'];
+  if (v === 'crash') return ['danger', 'Crashed'];
+  if (trouble(pc)) return ['danger', 'Offline'];
+  if (v === 'none') return ['neutral', 'No samples'];
+  const hot = pc.now && Math.max(pc.now.cpu, (1 - pc.now.mem_free / pc.now.mem_total) * 100) >= 70;
+  return hot ? ['warn', 'Busy'] : ['ok', 'Fine'];
+}

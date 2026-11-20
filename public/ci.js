@@ -7,7 +7,7 @@ import { ago, api, h, view } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
-import { pcCard, trouble } from './ci-desktop.js';
+import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
@@ -26,6 +26,7 @@ function stateOf(s, now) {
   if (s.problems.length) return 'fix';
   return now - s.view.at > 20 * 60_000 ? 'asleep' : 'ready';
 }
+const DOT_OF = { ok: 'ready', warn: 'fix', danger: 'down', neutral: 'asleep' };
 const STATE_WORDS = { down: 'needs a person', fix: 'being handled', ready: 'all clear', asleep: 'not read lately' };
 const RANK = { down: 3, fix: 2, asleep: 1, ready: 0 };
 
@@ -82,7 +83,6 @@ const GENERIC = /^(self-hosted|windows|linux|macos|x64|arm64)$/i;
 const labelName = (ls) => ls.filter((l) => !GENERIC.test(l)).join(', ') || ls.join(', ');
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-const LOAD_OPEN = 'ci-load-open';
 
 /** A block of the overview in Citadel's look (#1068): a heading in its hue over a box of rows that open, as Host load is. */
 const block = (title, hue, cls, ...rows) => h('section', { class: `ci-block ${cls}` }, h('h3', { class: 'settings-section', 'data-hue': hue }, title), h('div', { class: 'settings-rows' }, ...rows));
@@ -178,20 +178,11 @@ function runningBlock(s, now, ui) {
   return block('Running now', 'running', 'ci-running', row);
 }
 
-/**
- * CI desktop load (#1019, Cara 2026-11-18: "a collapsed version (something like just showing CPU and Memory) ... that can be expanded
- * for the full details"): one row, closed by default and remembered per device; opened, a line per PC and then its cards.
- */
-function desktopLoad(pcs, ui) {
-  if (!pcs.length) return '';
-  const bad = pcs.filter(trouble).length;
-  const hot = (pc) => pc.now && Math.max(pc.now.cpu, (1 - pc.now.mem_free / pc.now.mem_total) * 100) >= 70;
-  const [tone, word] = bad ? ['danger', `${bad} in trouble`] : pcs.some(hot) ? ['warn', 'Busy'] : ['ok', 'Fine'];
-  const [row] = settingsRow({ icon: 'monitor', hue: bad ? 'danger' : 'held', title: 'CI desktops', open: ui.loadOpen,
-    summary: [toneChip(tone, word), pcs.map((pc) => (pc.now ? `${pc.host} CPU ${Math.round(pc.now.cpu)}% · Mem ${Math.round((1 - pc.now.mem_free / pc.now.mem_total) * 100)}%` : `${pc.host} no sample`)).join(' · ')] },
-  ...pcs.map(pcCard));
-  row.addEventListener('toggle', () => ui.setLoad(row.open));
-  return block('CI desktop load', 'held', 'ci-desktops', row);
+/** A scheme's one line about the desktops its runners are on, linking to each one's row in the list (Josh, 2026-11-19: the load lives at the list's bottom, not in each scheme). */
+function runsOn(s, pcs, ui) {
+  const mine = pcs.filter((pc) => pc.projects.includes(s.id));
+  if (!mine.length) return '';
+  return h('p', { class: 'ci-runs-on muted' }, 'Runs on ', ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${pcWord(pc)[1]}`]));
 }
 
 const waitItem = (j, slug) => hueRow({ hue: 'waiting', lead: 'queued', meta: age(j.since) },
@@ -235,7 +226,7 @@ function waitingBlock(s, now, ui) {
 }
 
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), desktopLoad(pcs, ui), hostLoadBlock(ui.host)];
+  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui)];
 }
 
 /** The page: `projectId` is the scheme it opened from, selected first. */
@@ -245,7 +236,6 @@ export function ciPage(projectId, startTab = 'overview') {
   let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' ? 'health' : 'overview';
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
   const readTab = async (id) => { try { health.set(id, await readHealth(id)); draw(); } catch { health.set(id, { error: true }); draw(); } };
-  let loadOpen = localStorage.getItem(LOAD_OPEN) === '1';
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
   let host = null; // citadel-heavy's slots and waits (#1060)
@@ -262,7 +252,8 @@ export function ciPage(projectId, startTab = 'overview') {
       detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'), hostLoadBlock(host));
       return;
     }
-    const s = schemes.find((x) => x.id === picked) ?? schemes[0];
+    const pcPicked = typeof picked === 'string' ? data.pcs.find((pc) => `pc:${pc.host}` === picked) : null;
+    const s = pcPicked ? null : schemes.find((x) => x.id === picked) ?? schemes[0];
     const rows = schemes.map((x) => {
       const st = stateOf(x, now);
       const n = x.problems.length;
@@ -273,9 +264,26 @@ export function ciPage(projectId, startTab = 'overview') {
     // The toggle (phones only, by CSS) lists the hidden all-clear names, so every scheme stays in view.
     const hidden = schemes.filter((x) => x !== s && stateOf(x, now) === 'ready');
     list.classList.toggle('greens-open', greensOpen);
-    list.replaceChildren(...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
+    // What turns the chip yellow or red besides a scheme's own problems: a desktop in trouble. Its words are the chip tooltip's.
+    const why = data.pcs.filter(trouble).map((pc) => h('button', { type: 'button', class: 'ci-li ci-why', 'data-tone': pc.verdict.kind === 'over' ? 'warn' : 'danger', title: pc.verdict.text,
+      onclick: () => { picked = `pc:${pc.host}`; draw(); } },
+    h('span', { class: `dot ${pc.verdict.kind === 'over' ? 'fix' : 'down'}` }), h('span', { class: 'ci-li-name' }, troubleLine(pc)),
+    h('span', { class: 'ci-li-state ci-why-text' }, pc.verdict.text)));
+    // The desktops at the list's bottom: a toned word each, the load view in the right pane (Josh, 2026-11-19).
+    const pcRows = data.pcs.length ? [h('div', { class: 'ci-list-head' }, 'Desktops'), ...data.pcs.map((pc) => {
+      const [tone, word] = pcWord(pc);
+      return h('button', { type: 'button', class: `ci-li ci-pc${pc === pcPicked ? ' on' : ''}`, 'data-host': pc.host, 'aria-current': pc === pcPicked ? 'true' : null, onclick: () => { picked = `pc:${pc.host}`; draw(); } },
+        h('span', { class: `dot ${DOT_OF[tone]}` }), h('span', { class: 'ci-li-name' }, pc.host), h('span', { class: 'ci-li-state' }, toneChip(tone, word)));
+    })] : [];
+    list.replaceChildren(...why, ...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
-      h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '');
+      h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '', ...pcRows);
+    if (pcPicked) {
+      detail.replaceChildren(
+        h('div', { class: 'ci-head' }, h('h3', {}, pcPicked.host), h('span', { class: 'muted small' }, 'CI desktop load')),
+        h('div', { class: 'ci-block ci-desktops' }, pcCard(pcPicked)), hostLoadBlock(host));
+      return;
+    }
     const tabs = [['overview', 'Overview'], ['history', 'History'], ['health', 'Test health']];
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
@@ -286,7 +294,7 @@ export function ciPage(projectId, startTab = 'overview') {
         host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
         hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
-        loadOpen, setLoad: (on) => { loadOpen = on; localStorage.setItem(LOAD_OPEN, on ? '1' : '0'); },
+        openPc: (host) => { picked = `pc:${host}`; draw(); },
       })
         : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, () => readTab(s.id))
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
@@ -330,7 +338,7 @@ async function readChips() {
     const worst = schemes.reduce((w, s) => (RANK[stateOf(s, now)] > RANK[w] ? stateOf(s, now) : w), pcs.some(trouble) ? 'fix' : 'ready');
     const ringing = schemes.reduce((n, s) => n + s.problems.filter((x) => !x.quiet).length, 0);
     const quiet = schemes.reduce((n, s) => n + s.problems.filter((x) => x.quiet).length, 0);
-    const title = schemes.length ? `CI: ${ringing ? `${ringing} need${ringing === 1 ? 's' : ''} a person` : 'nothing needs a person'}${quiet ? `, ${quiet} being handled` : ''}${pcs.some(trouble) ? `; ${pcs.filter(trouble).map(trouble).join('; ')}` : ''}` : '';
+    const title = schemes.length ? `CI: ${ringing ? `${ringing} need${ringing === 1 ? 's' : ''} a person` : 'nothing needs a person'}${quiet ? `, ${quiet} being handled` : ''}${pcs.some(trouble) ? `; ${pcs.filter(trouble).map(troubleLine).join('; ')}` : ''}` : '';
     chipRead = { hidden: !schemes.length, title, worst };
     for (const c of chips) paintChip(c, chipRead);
   } catch {

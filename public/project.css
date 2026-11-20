@@ -474,6 +474,16 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
 .ci-more { display: none; }
+.ci-runs-on { margin: var(--space-3) 0 0; }
+.ci-runs-on button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.ci-list-head { margin: var(--space-3) 0 0.2rem; padding: 0 0.6rem; font-size: 0.75em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, inherit); }
+.ci-pc .ci-li-state { text-align: left; }
+/* The desktop that makes the chip yellow or red: a toned row above the schemes; its text is two lines tall always, so a live read moves nothing. */
+.ci-why { border-radius: var(--radius-sm); }
+.ci-why[data-tone="warn"] { background: color-mix(in srgb, var(--warn, #b7791f) 14%, transparent); }
+.ci-why[data-tone="danger"] { background: color-mix(in srgb, var(--danger, #c53030) 14%, transparent); }
+.ci-why .ci-li-state.ci-why-text { grid-column: 2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; min-height: 2.6em; text-align: left; }
+.ci-why .ci-li-name { white-space: normal; font-size: 0.92em; }
 .ci-li-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-li-state { grid-column: 2; font-size: 0.8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }

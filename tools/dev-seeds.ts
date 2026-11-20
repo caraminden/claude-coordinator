@@ -894,6 +894,27 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/ci`;
     },
   },
+  'ci-desktop-over': {
+    about: 'the CI page with every scheme clear and its desktop overloaded (#1085): the toned "why the chip is yellow" row above the scheme list; seed `ci` for the scheme-red case',
+    seed(c) {
+      c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
+      const now = Date.now();
+      c.store.setSetting(`ci-health:view:${c.project.id}`, {
+        at: now - 60_000, slug: 'caraminden/seeded', branch: 'main',
+        runners: [{ name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: false, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: null, offlineSince: null }],
+        running: [], queues: [], waiting: [], workflows: [], runs: [],
+      });
+      c.store.setSetting(`ci-health:${c.project.id}`, { offline: {}, sent: {}, problems: [] });
+      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
+      // Someone is at the PC (idle_sec 0) and the CPU sits at 90% or more: the rule's "Overloading".
+      c.store.addRunnerLoads(Array.from({ length: 40 }, (_, i) => ({ machine: pc.id, at: now - (39 - i) * 30_000, data: JSON.stringify({
+        at: now - (39 - i) * 30_000, host: 'DESKTOP-G248IJ8', os: 'windows', cores: 32, cpu: 92 + (i % 5), mem_total: 64 * 2 ** 30, mem_free: 22 * 2 ** 30,
+        disk_total: 2e12, disk_free: 6e11, queue: 12, pressure: null, idle_sec: 0, temp: null, hv: null, restarts: [],
+        runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
+      }) })));
+      return `#/p/${c.project.id}/ci`;
+    },
+  },
   'land-line': {
     about: "a scheme that lands with the kit's land template, on its Releases page (#1007): one landing, three waiting in an order set by hand, one from an old branch that can't move; on two targets",
     seed(c) {

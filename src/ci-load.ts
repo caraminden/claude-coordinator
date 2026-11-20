@@ -36,6 +36,8 @@ export const MORE_CPU = 60;
 export const CRASH_HOLD_MS = DAY_MS;
 /** How long a verdict holds before its Mandate item goes out (a crash goes at once). */
 export const TELL_AFTER_MS = 30 * MIN;
+/** The first look at each PC's verdict after a start. */
+const FIRST_TICK_MS = 60_000;
 
 export interface RunnerUse { name: string; repo: string; dir: string; cpu: number; mem: number }
 /** One look at a PC, as its agent sent it and cleanSample checked it. Percentages are of the whole PC. */
@@ -329,6 +331,8 @@ export class CiLoad {
   start() {
     this.timer ??= setInterval(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), 5 * MIN);
     this.timer.unref?.();
+    // A deploy restarts the server several times a day: waiting a full 5 minutes for the first look let the held verdict go stale (#1085).
+    setTimeout(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), FIRST_TICK_MS).unref?.();
     this.flusher ??= setInterval(() => this.flush(), FLUSH_MS);
     this.flusher.unref?.();
   }

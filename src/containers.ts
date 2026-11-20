@@ -23,12 +23,10 @@ export interface ContainerSpec {
   /**
    * Memory limits, set on the container's systemd unit (src/containers.ts start), e.g. { high: '6G', max: '8G', swap: '4G' }:
    * high throttles and reclaims, max OOM-kills inside the unit, swap bounds zram, whose pages cost RAM the cgroup isn't
-   * charged for. Not podman's --memory: systemd-run gives podman no delegated controllers, so --cgroups=split's payload
-   * cgroup has none and --memory never applied (#1214: a container started with --memory 6g peaked at 22.3G).
+   * charged for. Not podman's --memory or --cpus: systemd-run gives podman no delegated controllers, so --cgroups=split's payload
+   * cgroup has none and neither ever applied (#1214: a container started with --memory 6g peaked at 22.3G). No CPU cap, as before.
    */
   memory?: { high: string; max: string; swap: string };
-  /** podman's --cpus. Like --memory it never applies today (no delegated cpu controller, #1214); kept so the spec stays as it was. */
-  cpus?: number;
 }
 
 export interface CmdResult {
@@ -51,7 +49,7 @@ const SPEC_LABEL = 'citadel.spec';
 
 /** A short hash of what a container is made of: image, mounts, env and limits. */
 export function specHash(spec: ContainerSpec): string {
-  return createHash('sha256').update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null, spec.cpus ?? null])).digest('hex').slice(0, 12);
+  return createHash('sha256').update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null])).digest('hex').slice(0, 12);
 }
 
 /** systemd-run's -p properties for a spec's unit: its memory limits (ContainerSpec.memory). */
@@ -63,7 +61,6 @@ export function unitProps(spec: ContainerSpec): string[] {
 /** podman run's arguments for a spec, after `run`. */
 export function runArgs(spec: ContainerSpec): string[] {
   const args = ['--rm', '--replace', '--name', spec.name, '--init', '--userns=keep-id', '--network=host', '--cgroups=split', '--label', `${SPEC_LABEL}=${specHash(spec)}`];
-  if (spec.cpus) args.push('--cpus', String(spec.cpus));
   for (const [k, v] of Object.entries(spec.env ?? {})) args.push('-e', `${k}=${v}`);
   for (const m of spec.mounts) {
     // A named volume is chowned to the user (:U), so keep-id's user owns its own home.

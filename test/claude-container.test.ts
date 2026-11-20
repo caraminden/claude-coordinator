@@ -267,10 +267,10 @@ test('a container turn whose heartbeat stops counts as gone, whatever its pid sa
 });
 
 test('podman run arguments: keep-id, host network, a :U volume, binds at their own path, the spec label', () => {
-  const spec = { name: 'citadel-claude-1', image: 'localhost/citadel-claude:abc', mounts: [{ src: 'citadel-claude-1', dst: '/home/u', volume: true }, { src: '/data/projects', dst: '/data/projects' }, { src: '/opt/claude', dst: '/opt/claude', ro: true }], env: { HOME: '/home/u' }, memory: { high: '6G', max: '8G', swap: '4G' }, cpus: 4 };
+  const spec = { name: 'citadel-claude-1', image: 'localhost/citadel-claude:abc', mounts: [{ src: 'citadel-claude-1', dst: '/home/u', volume: true }, { src: '/data/projects', dst: '/data/projects' }, { src: '/opt/claude', dst: '/opt/claude', ro: true }], env: { HOME: '/home/u' }, memory: { high: '6G', max: '8G', swap: '4G' } };
   const args = runArgs(spec);
   // The memory caps sit on the systemd unit: podman's --memory never reached a cgroup with a memory controller (#1214).
-  assert.ok(!args.includes('--memory'));
+  assert.ok(!args.includes('--memory') && !args.includes('--cpus'));
   assert.deepEqual(unitProps(spec), ['-p', 'MemoryHigh=6G', '-p', 'MemoryMax=8G', '-p', 'MemorySwapMax=4G']);
   assert.notEqual(specHash(spec), specHash({ ...spec, memory: { ...spec.memory, max: '10G' } }), 'a new cap restarts the container once idle');
   for (const a of ['--userns=keep-id', '--network=host', '--init', '--rm']) assert.ok(args.includes(a), a);

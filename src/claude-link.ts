@@ -442,7 +442,7 @@ export class ClaudeLink {
       // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
-    return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY, cpus: 4 };
+    return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY };
   }
 
   /** Build the image if needed, make the volume and start the container (or keep it, if it runs from this spec or turns run in it). */

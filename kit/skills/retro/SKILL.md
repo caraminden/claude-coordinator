@@ -72,10 +72,14 @@ Create either file when it is first needed.
    in the retro folder) goes in the same commit. Update the ledger in the same PR: add this retro to each row it
    hit again, change a row's guard when a fix ships, and add a row for any finding that is
    now in two retros.
+   Every number in the retro (costs, counts, durations, ships) follows `citadel:research`,
+   "Numbers carry their query": a footnote with the query or command and the date it ran, or
+   "my guess". A Sonnet Grunt (medium) re-runs five footnotes picked at random before the retro
+   is linked; a miss is fixed first, and the reply names the five and their results.
 8. **Ship the fixes in the milestone's PR**, while it is still open, so the owner reviews
    once, with the retro file in it and each edit citing its finding. Only a milestone PR
    already shipped gets a small follow-up PR instead. A process or design rule the owner
    accepts from the retro also goes in the decisions log Project facts names, if any.
 
-Done when every finding has an edit in the PR or a line in the retro saying why not, the
-ledger is current, and the owner has the top three in one reply.
+Done when every finding has an edit in the PR or a line in the retro saying why not, every
+number has its footnote and the five re-runs passed, the ledger is current, and the owner has the top three in one reply.

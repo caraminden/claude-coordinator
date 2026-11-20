@@ -30,6 +30,7 @@ export const pushRoutes: Route[] = [
       const desk = desktopId(body.desktop);
       if (desk) {
         app.store.savePushSubscription(session.name, DESKTOP + desk, '', '');
+        await ownWrites(); // the view reads the row back (#1244)
         return json(res, 200, pushView(app, DESKTOP + desk));
       }
       if (!validSubscription(body.subscription)) throw new HttpError(400, 'Not a usable push subscription');
@@ -40,6 +41,7 @@ export const pushRoutes: Route[] = [
         app.pusher.subject = `https://${host}`;
         app.store.setSetting('push_subject', app.pusher.subject);
       }
+      await ownWrites(); // the view reads the row back (#1244)
       return json(res, 200, pushView(app, endpoint));
     },
   },

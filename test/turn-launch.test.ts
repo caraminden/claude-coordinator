@@ -76,7 +76,7 @@ function scrub(value: unknown): any {
   return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-'));
 }
 
-interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string) => void | Promise<void> }
+interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string, ticket: number) => void | Promise<void> }
 /** Start one turn and return everything it was launched with, then end it. */
 async function launch(c: Case) {
   const project = c.project ? store.getProject(c.project)! : store.createProject(`P${store.listProjects().length + 1}`, null);
@@ -99,9 +99,9 @@ async function launch(c: Case) {
   const files = readdirSync(dir).filter((f) => f !== 'pin').sort().map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
   const got = { launched: true, notes, spec: read('spec.json'), settings: read('settings.json'), mcp: read('mcp.json'), codexTripwire: read('codex-tripwire.json'), files, pinned: readdirSync(join(dir, 'pin')).length > 0,
     spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
-  await c.peek?.(dir);
-  // End it: the wrapper that would have run it never started.
-  writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
+  await c.peek?.(dir, t.id);
+  // End it: the wrapper that would have run it never started. A peek that ran the real wrapper may have ended it already, folder and all.
+  if (runner.isRunning(t.id)) writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
   const busy = () => runner.isRunning(t.id) || (runner as any).lanes.busy(t.id);
   for (let i = 0; i < 1000 && busy(); i++) await wait(10);
@@ -317,11 +317,11 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
     console.log(JSON.stringify({ type: 'result' }));`);
   let pool: { pid: number } | null = null;
   let seen: any = null;
-  let exit: { code: number | null } | null = null;
+  let ended: { status?: string; said: string[] } | null = null;
   runner.pool = true;
   try {
     await launch({
-      peek: async (dir) => {
+      peek: async (dir, ticket) => {
         // The turn as the runner launched it, with the stand-in in claude's place and the app swapped for the fake.
         const spec = JSON.parse(readFileSync(join(dir, 'spec.json'), 'utf8'));
         spec.command = process.execPath;
@@ -330,9 +330,11 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         writeFileSync(join(dir, 'spec.json'), JSON.stringify(spec), { mode: 0o600 });
         const [node, ...wrapper] = spawned[0].wrapper;
         const w = spawn(node, wrapper, { stdio: 'ignore' });
-        for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
+        // The runner ends the turn from the wrapper's exit.json and deletes its folder in the same poll: waiting on that file
+        // raced the runner for it, and lost now and then (#1297). Its verdict on the turn says how the stand-in exited.
+        for (let i = 0; i < 3000 && runner.isRunning(ticket); i++) await wait(10);
         w.kill();
-        exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
+        if (!runner.isRunning(ticket)) ended = { status: store.getTicket(ticket)?.status, said: store.listEvents(ticket).filter((e) => e.kind === 'error' || e.kind === 'note').map((e) => e.data) };
         if (spec.pool) pool = readPool(spec.pool.dir);
         seen = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
       },
@@ -342,7 +344,8 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
     if (pool) try { process.kill(pool!.pid, 'SIGKILL'); } catch {}
     app.close();
   }
-  assert.equal(exit?.code, 0, 'the wrapper saw the stand-in exit cleanly');
+  assert.ok(ended, 'the turn ended once the stand-in exited');
+  assert.notEqual(ended.status, 'error', `the runner saw the stand-in exit cleanly: ${ended.said.join('\n')}`);
   assert.ok(seen, 'the stand-in claude ran');
   assert.equal(seen.thread.status, 'connected', `the thread server: ${seen.thread.error}`);
   assert.ok(seen.thread.tools.includes('set_thread_status'), `its tools: ${seen.thread.tools}`);

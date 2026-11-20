@@ -6,6 +6,8 @@
 import { cardText, type CardLink } from './card-links.ts';
 import { ghGet, type GhGet } from './gh-api.ts';
 import { schemeGithub } from './github-link.ts';
+import type { Store, Ticket } from './db.ts';
+import type { Runner } from './runner.ts';
 import type { App } from './http.ts';
 import { pacific } from './pacific.ts';
 import { repoSlug } from './prlinks.ts';
@@ -75,13 +77,30 @@ export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branche
   };
 }
 
+/** What the database and the runner already know of one minion, no branch or GitHub read: liveFacts' first half and the handoff sheet's lines. */
+export function storedFacts(store: Store, runner: Pick<Runner, 'view'>, t: Ticket): Omit<Facts, 'head' | 'branchRead' | 'pr' | 'ci'> {
+  const v = runner.view(t);
+  return {
+    number: t.number ?? 0,
+    title: t.title,
+    scheme: store.getProject(t.project_id)?.name ?? '',
+    status: t.status,
+    state: t.state ?? null,
+    note: t.note ?? null,
+    parkedOn: v.wakes_on ?? v.parked_for ?? null,
+    cards: v.open_cards ?? [],
+    waiting: v.wait ? v.wait.text : null,
+    branch: t.branch ?? null,
+    ship: v.ship ? { stage: v.ship.stage, text: v.ship.text } : null,
+  };
+}
+
 /** One minion's live facts, read now: its branch is looked at afresh and GitHub asked for its newest run. */
 export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet): Promise<Facts> {
-  const { store, runner } = app;
+  const { store } = app;
   const status = await app.ticketBranch(ticketId).catch(() => null);
   const t = store.getTicket(ticketId);
   if (!t) throw new Error(`No minion ${ticketId}`);
-  const v = runner.view(t);
   const project = store.getProject(t.project_id);
   const slug = repoSlug(project?.repo_url ?? null);
   let ci: Facts['ci'] = null;
@@ -93,18 +112,8 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
     }
   } else if (t.branch) ci = { error: 'its scheme has no GitHub repo' };
   return {
-    number: t.number ?? 0,
-    title: t.title,
-    scheme: project?.name ?? '',
-    status: t.status,
-    state: t.state ?? null,
-    note: t.note ?? null,
-    parkedOn: v.wakes_on ?? v.parked_for ?? null,
-    cards: v.open_cards ?? [],
-    waiting: v.wait ? v.wait.text : null,
-    branch: t.branch ?? null,
+    ...storedFacts(store, app.runner, t),
     head: status?.tip.slice(0, 8) ?? null,
-    ship: v.ship ? { stage: v.ship.stage, text: v.ship.text } : null,
     branchRead: !!status,
     pr: status?.pr ? { number: status.pr.number, state: status.pr.state, url: status.pr.url } : null,
     ci,
@@ -131,4 +140,39 @@ export function factsText(f: Facts): string {
     f.pr ? `PR #${f.pr.number}: ${f.pr.state.toLowerCase()} ${f.pr.url}` : '',
     f.branch ? `newest CI run: ${ciText(f.ci)}` : '',
   ].filter(Boolean).join('\n');
+}
+
+/** How the sheet opens when the handoff came back: the prose is the Taskmaster's, the sheet the database's. */
+export const SHEET_CHECK = "Facts sheet built by the server at hand-off from the database: check the handoff above against it, and trust the sheet where they differ.";
+/** How the sheet opens when the handoff turn failed, so it is all the new session has. */
+export const SHEET_FAILED = "No handoff came back (the handoff turn failed), so this facts sheet was built by the server from the database: check before relying on anything else, and rely on memory and the minions' own records for the rest.";
+
+const SHEET_PEOPLE = 6;
+const SHEET_MINIONS = 40;
+const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * A Taskmaster's facts sheet for its fresh session, straight from the database (G6): its scheme's open cards and who
+ * they wait on, parks and what wakes each, minions in flight with state and note, ships in progress, and the last few
+ * messages from people. Same facts as live_facts (storedFacts), no GitHub read: it runs as a turn ends.
+ */
+export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmaster: Ticket): string {
+  const mine = store.listTickets(taskmaster.project_id).filter((t) => t.id !== taskmaster.id && t.kind !== 'coordinator' && t.status !== 'closed');
+  const rows = mine.map((t) => ({ t, f: storedFacts(store, runner, t) }));
+  const line = ({ f }: { f: ReturnType<typeof storedFacts> }) => `- #${f.number} ${cut(f.title, 80)}: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · ${cut(f.note, 100)}` : ''}`;
+  const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`));
+  const parks = rows.filter(({ f }) => f.state === 'parked').map((r) => `${line(r)} (${r.f.parkedOn ? `wakes on: ${r.f.parkedOn}` : 'nothing wakes it by itself'})`);
+  const flight = rows.filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked')).slice(0, SHEET_MINIONS).map(line);
+  const ships = rows.filter(({ f }) => f.ship).map(({ f }) => `- #${f.number}: ${f.ship!.text}`);
+  const people = store.eventsBefore(taskmaster.id, Number.MAX_SAFE_INTEGER, 80).filter((e) => e.kind === 'user_message').map((e) => { try { return JSON.parse(e.data); } catch { return null; } })
+    .filter((d) => d && typeof d.text === 'string' && d.author && !d.from && !d.mail && !d.brief && !/^(system|citadel|mandate|#)/i.test(d.author))
+    .slice(0, SHEET_PEOPLE).reverse().map((d) => `- ${d.author}: ${cut(d.text.replace(/\s+/g, ' '), 300)}`);
+  const part = (head: string, items: string[], none: string) => `${head}\n${items.length ? items.join('\n') : none}`;
+  return [
+    part('Open cards waiting on people:', cards, 'none'),
+    part('Parked minions:', parks, 'none'),
+    part('Minions in flight:', flight, 'none'),
+    part('Ships in progress:', ships, 'none'),
+    part('Last messages from people (newest last):', people, 'none'),
+  ].join('\n\n');
 }

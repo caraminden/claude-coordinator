@@ -32,6 +32,7 @@ import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
+import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -2221,12 +2222,17 @@ export class Runner {
     const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
       ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
-    if (f.summary) {
+    // A Taskmaster's failed handoff starts the fresh session from a facts sheet the server builds from the database (G6), not a compaction.
+    const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
+    if (f.summary || sheeted) {
+      const sheet = ticket?.kind === 'coordinator' ? handoffSheet(this.store, this, ticket) : '';
+      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : f.summary!;
       this.store.deleteSetting(freshKey(ticketId));
-      this.store.setSetting(handoffKey(ticketId), f.summary);
+      this.store.setSetting(handoffKey(ticketId), text);
       this.store.deleteSetting(contextKey(ticketId));
       this.store.updateTicket(ticketId, { session_id: null });
-      this.emit(ticketId, 'fresh', { summary: f.summary, why: f.why });
+      if (sheeted) this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
+      this.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.store.deleteSetting(freshKey(ticketId));
       this.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });

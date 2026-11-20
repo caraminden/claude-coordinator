@@ -5,9 +5,9 @@
 // stays under it (inert), scroll and all. The framed page's own rail.js draws no rail and lends Citadel's.
 
 import { frameKey } from './appswitch.js';
-import { h, icon, tintTitleBar } from './base.js';
+import { api, h, icon, tintTitleBar } from './base.js';
 import { canBack, canForward, goBack, goForward, replaceHash } from './navstack.js';
-import { appClipboard, FRAME } from './rail.js';
+import { FRAME } from './rail.js';
 
 const frames = new Map();
 let box = null;
@@ -149,23 +149,33 @@ export const ARTIFACT_ALLOW = ['fullscreen *', ...NO_CLIPBOARD].join('; ');
  */
 export const FRAME_ALLOW = [...['microphone', 'camera', 'fullscreen'].map((f) => `${f} *`), ...NO_CLIPBOARD].join('; ');
 
-/** A contraption frame's `allow`: clipboard writes only for an app whose citadel-app.json asks for them (rail.js appClipboard). */
+/** A contraption frame's `allow`: clipboard writes only for an app whose citadel-app.json asks for them (clipboardApps, below). */
 export const frameAllow = (clipboard) => (clipboard ? FRAME_ALLOW.replace("clipboard-write 'none'", 'clipboard-write *') : FRAME_ALLOW);
 
-// The rail's first list arrived after a frame was made (a link straight into an app): one that now gets other permissions
-// reloads with them, since a loaded page keeps the ones it started with. Only the first: a later change (an app's deploy
-// asking for the clipboard) reaches its frame at the next reload rather than reloading a page someone is using.
-globalThis.addEventListener?.('citadel-apps', () => {
-  for (const [name, frame] of frames) {
-    const allow = frameAllow(appClipboard(name));
-    if (frame.allow === allow) continue;
-    frame.allow = allow;
-    frame.src = frame.src;
-  }
-}, { once: true });
+// The apps whose citadel-app.json asks for clipboard writes, fetched once when the first frame opens. A frame made before the
+// answer starts with none, and one that now gets more reloads with them, since a loaded page keeps the ones it started with.
+// Only that once: a later deploy asking for the clipboard reaches its frame at the next reload, not under someone using it.
+// Fetched here, not taken from rail.js: rail.js is served to apps, so its exports and events are their contract.
+let clipboardApps = new Set();
+const appClipboard = (name) => clipboardApps.has(name);
+let asked = false;
+function askClipboard() {
+  if (asked) return;
+  asked = true;
+  api('api/contraptions/mine').then((mine) => {
+    clipboardApps = new Set((mine ?? []).flatMap((c) => (c?.clipboard ? [c.name] : [])));
+    for (const [name, frame] of frames) {
+      const allow = frameAllow(appClipboard(name));
+      if (frame.allow === allow) continue;
+      frame.allow = allow;
+      frame.src = frame.src;
+    }
+  }, () => { asked = false; }); // no answer: the next frame asks again
+}
 
 /** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
 export function showFrame(name, src) {
+  askClipboard();
   if (!box) {
     box = document.createElement('div');
     box.id = 'frames';

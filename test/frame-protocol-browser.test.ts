@@ -149,6 +149,18 @@ test("the frame carries the allow list, so the mic works on the contraption's ow
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentWindow.document`).catch(() => 'cross'), 'cross');
 });
 
+test("an app whose citadel-app.json asks for clipboard writes gets them in its frame, and only writes (#1086)", { skip }, async () => {
+  (apps[0] as Record<string, unknown>).clipboard = true;
+  try {
+    const page = await framer({ width: 1000, height: 600 });
+    await waitFor(page, "the frame's allow to take up the app's opt-in", `/(^|; )clipboard-write \\*(;|$)/.test(document.querySelector('#frames iframe').allow)`);
+    assert.match(await page.eval<string>(`document.querySelector('#frames iframe').allow`), /(^|; )clipboard-read 'none'(;|$)/);
+    await waitFor(page, "the contraption's page in the frame, reloaded with it", `'handle' in window.echo`);
+  } finally {
+    delete (apps[0] as Record<string, unknown>).clipboard;
+  }
+});
+
 test("a contraption's top bar runs up into Citadel's title bar strip, with a drag box over it and a hole over its button", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, 'the frame-topbar class', `document.documentElement.classList.contains('frame-topbar')`);

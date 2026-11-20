@@ -176,3 +176,21 @@ test('placeholder in a command inside an ask_question card counts, in the questi
   assert.equal(hit('Run?', '```wsl\nls <dir>\n```').length, 1);
   assert.deepEqual(hit('Run this?\n```wsl\nls /tmp\n```'), []);
 });
+
+test('a proposal without a card is sent back once per prompt; the other shapes only count', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-refuse-'));
+  const stateDir = mkdtempSync(join(tmpdir(), 'answer-state-'));
+  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared };
+  const stop = (text: string, over: object = {}) => {
+    const out: { block?: string } = {};
+    answerHook({ session_id: 'r1', prompt_id: 'p1', last_assistant_message: text, ...over }, env, { stateDir, out });
+    return out.block;
+  };
+  assert.match(stop(PROPOSAL) ?? '', /ask_question card/, 'first stop is sent back');
+  assert.equal(stop(PROPOSAL), undefined, 'never twice for one prompt');
+  assert.match(stop(PROPOSAL, { prompt_id: 'p2' }) ?? '', /ask_question/, 'a new prompt gets its own');
+  assert.equal(stop(`${PROPOSAL}\n\nSee [the card below](#/p/2/t/9?e=4).`, { prompt_id: 'p3' }), undefined, 'a linked card is no hit');
+  assert.equal(stop('Done: it is teal now.', { prompt_id: 'p4' }), undefined);
+  assert.equal(stop('Run:\n\n```fish\nssh <host>\n```\n', { prompt_id: 'p5' }), undefined, 'a placeholder only counts');
+  assert.equal(stop(PROPOSAL, { session_id: 'r2', prompt_id: undefined, stop_hook_active: true }), undefined, 'no prompt id: only a first stop');
+});

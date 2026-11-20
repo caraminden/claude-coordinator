@@ -8,13 +8,17 @@
  *    propose_plan, or message to the Taskmaster or a minion.
  *  - Placeholder in a command: a fenced block tagged powershell, powershell-admin, wsl, fish, bash or
  *    cmd holds a `<like this>` placeholder. Values you can look up go in filled (Cara, 2026-11-17, #900).
- * A trial: each hit writes one `would refuse` line to the retro log and refuses nothing. The weekly
- * process digest counts them and how many were false alarms; refusal turns on only for a check with
- * under one false alarm in five. A `Process:` line in the final text (self-review's, not `none`) is also
+ * Each hit writes one `would refuse` line to the retro log. The weekly process digest counts them and
+ * how many were false alarms; refusal turns on only for a check with under one false alarm in five.
+ * Refusing is on for one shape, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106): the
+ * stop is sent back once per prompt, never twice, and logs a `refused stop` line instead. The other
+ * shapes only count. (A choice asked in prose is refused by src/link-check.ts, a different hook.) A `Process:` line in the final text (self-review's, not `none`) is also
  * logged, as a `process` line. A turn a person's message reached mid-turn (a steer) is skipped:
  * its short end may be the steer cutting it off, not a broken rule (#280).
  */
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { note } from './retro-log.ts';
 
 export const MIN_TOOL_CALLS = 5;
@@ -139,11 +143,15 @@ export function processLine(text: string): string | null {
   return m && !/^none\b\.?$/i.test(m[1]) ? m[1] : null;
 }
 
+/** The shapes whose stop is sent back, once per prompt. */
+const REFUSED = /^proposal without a card/;
+
 /**
- * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits. Never refuses.
+ * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits.
  * job-check.ts calls it, only for a stop it lets through: a refused stop isn't the turn's end.
+ * `refusal` (job-check.ts passes it) lets a REFUSED shape send the stop back, once per prompt.
  */
-export function answerHook(input: any, env = process.env): string[] {
+export function answerHook(input: any, env = process.env, refusal?: { stateDir?: string; out: { block?: string } }): string[] {
   const role = env.COORDINATOR_ROLE;
   if (role !== 'thread' && role !== 'coordinator') return [];
   let turn: Turn = { toolCalls: [], finalText: '', steered: false };
@@ -151,9 +159,37 @@ export function answerHook(input: any, env = process.env): string[] {
   // Claude Code's own copy of the last message beats the transcript, which may not be flushed yet.
   if (typeof input?.last_assistant_message === 'string' && input.last_assistant_message.trim()) turn.finalText = input.last_assistant_message;
   const hits = answerCheck(turn);
-  for (const hit of hits) note(input, 'would refuse', hit, env);
+  const refuse = refusal ? refusalFor(input, hits, refusal.stateDir ?? join(tmpdir(), 'citadel-kit')) : null;
+  for (const hit of hits) {
+    if (refuse && REFUSED.test(hit)) {
+      note(input, 'refused stop', hit, env);
+      refusal!.out.block = refuse;
+    } else note(input, 'would refuse', hit, env);
+  }
   // self-review's Process: line goes to the log for the process digest, whatever the checks said.
   const process = turn.steered ? null : processLine(turn.finalText);
-  if (process) note(input, 'process', process, env);
+  if (process && !refusal?.out.block) note(input, 'process', process, env);
   return hits;
+}
+
+/** The reason to send this stop back for, the first time this prompt hits a REFUSED shape; else null. Without a prompt id, only a first stop. */
+function refusalFor(input: any, hits: string[], stateDir: string): string | null {
+  if (!hits.some((h) => REFUSED.test(h))) return null;
+  const prompt = input?.prompt_id ?? null;
+  const file = join(stateDir, `answer-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);
+  if (!prompt && input?.stop_hook_active) return null;
+  try {
+    if (prompt && JSON.parse(readFileSync(file, 'utf8')).prompt === prompt) return null;
+  } catch {
+    // Nothing refused yet this session.
+  }
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ prompt }));
+  } catch {
+    return null; // no marker to stop a second refusal: let the turn end
+  }
+  return '[citadel answer check] Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. '
+    + 'Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card\'s link. '
+    + 'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.';
 }

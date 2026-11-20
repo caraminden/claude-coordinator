@@ -57,7 +57,7 @@ export async function showTicket(ticketId) {
 }
 
 /** A tab in the Minions panel's header; it switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
-const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, 'data-part': name === 'orders' ? 'orders-tab' : name === 'minions' ? 'minions-tab' : null, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
 
 /** Per scheme, the last chat hash and the last Orders hash you were on, so a tab click goes back to where you were. */
 const lastHash = new Map();
@@ -240,7 +240,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     threadSearchBox(projectId),
     h('div', { id: 'saved-views', class: 'saved-views' }),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
-    h('div', { id: 'threads' }),
+    h('div', { id: 'threads', 'data-part': 'minion-list' }),
     // Orders → Schedules lists the schedules in the panel in place of the Orders menu (#1083); a row opens its page.
     main.kind === 'schedules' ? schedulesPane(projectId, main.schedule) : '',
     ordersMenu());

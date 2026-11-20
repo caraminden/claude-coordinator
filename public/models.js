@@ -78,7 +78,7 @@ export function fableMeterView(w) {
       status.textContent = `Couldn't save: ${err.message}`;
     }
   } }, 'Save');
-  const [row, sumEl] = settingsRow({ key: 'models-fable', icon: 'spark', hue: f.over ? 'danger' : 'accent', title: 'Weekly Fable cap' },
+  const [row, sumEl] = settingsRow({ key: 'models-fable', part: 'fable-cap', icon: 'spark', hue: f.over ? 'danger' : 'accent', title: 'Weekly Fable cap' },
     tilesSlot, pick, slot,
     account?.admin ? h('div', { class: 'fable-cap-row' }, h('label', {}, 'Weekly cap ', input, ' % of the plan'), save, status) : h('p', { class: 'look-prose' }, `Weekly cap: ${f.capPct}% of the plan (an admin sets it).`),
     h('p', { class: 'look-prose foot' }, f.over

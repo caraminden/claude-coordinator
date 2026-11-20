@@ -545,7 +545,7 @@ export function renderTicketHead() {
   const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
   // A search in progress keeps the menu open: its box is in there.
   const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
-  const more = h('button', { type: 'button', class: 'nav-btn head-more', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {
+  const more = h('button', { type: 'button', class: 'nav-btn head-more', 'data-part': 'minion-menu', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {
     menuFor = menuOpen ? null : t.id;
     renderTicketHead();
   } }, '⋯');
@@ -639,7 +639,7 @@ let noteEdit = null;
 /** "✎ Note" after the ship status, under the title, while a minion has no note and none is being written. */
 function personNoteButton(t) {
   if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
-  return h('button', { type: 'button', class: 'note-btn', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
+  return h('button', { type: 'button', class: 'note-btn', 'data-part': 'minion-note', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
     '✎', h('span', { class: 'wide-only' }, 'Note'));
 }
 
@@ -708,7 +708,7 @@ function pinButton(t) {
     undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
     label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
   });
-  return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
+  return h('button', { type: 'button', 'data-part': 'pin-minion', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
     icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
 }
 

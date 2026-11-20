@@ -18,7 +18,7 @@ import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onClaims, onReleases } from './releases.js';
 import { ciChip } from './ci.js';
-import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
+import { inAppHash, jumpParts, showParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
 import { filesUploading } from './files.js';
 import { onJobUpdate } from './jobs.js';
@@ -30,6 +30,7 @@ import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { appSrc } from './extlinks.js';
 import { toast } from './ui/status.js';
+import { showPart } from './show-part.js';
 import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
@@ -835,6 +836,7 @@ function onEvent(event) {
 
 // Bumped on every navigation, so a slow load that another click has overtaken is dropped.
 export let routeSeq = 0;
+let routedHash = null; // the address the newest finished route opened (a "show me where" link waits for it)
 
 async function route() {
   if (!me) return;
@@ -843,6 +845,14 @@ async function route() {
     // Open the chat at its plain address, so Back and a reload don't jump again; its mountChat takes the jump.
     pendingJump = jump;
     return replaceHash(jump.hash);
+  }
+  // A "show me where" link (#1122): open the page at its plain address, then outline the part once a later route is done.
+  const show = showParts(location.hash);
+  if (show) {
+    const from = routeSeq;
+    // Ready once a route has finished on the address now showing: #/t/<id> hands on to the minion's own address first.
+    showPart(show.name, () => routeSeq > from && routedHash === location.hash && !document.body.classList.contains('navigating'));
+    return replaceHash(show.hash);
   }
   // Under a contraption's frame the page keeps its scroll; it's saved when you left it for the frame.
   if (!framed()) saveScroll();
@@ -909,7 +919,10 @@ async function route() {
       setView(null);
     }
   } finally {
-    if (seq === routeSeq) document.body.classList.remove('navigating');
+    if (seq === routeSeq) {
+      document.body.classList.remove('navigating');
+      routedHash = hash;
+    }
     reportPresence();
   }
 }

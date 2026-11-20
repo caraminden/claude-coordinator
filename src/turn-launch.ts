@@ -108,6 +108,10 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   pinnedCopy('replay.ts');
   const REPLAY_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-replay');
   if (existsSync(REPLAY_BIN)) cpSync(REPLAY_BIN, join(MCP_DIR, 'bin', 'citadel-replay'));
+  // citadel-where (#1122): "show me where" links; its shim runs the pinned show-parts.ts beside it.
+  pinnedCopy('show-parts.ts');
+  const WHERE_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-where');
+  if (existsSync(WHERE_BIN)) cpSync(WHERE_BIN, join(MCP_DIR, 'bin', 'citadel-where'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');

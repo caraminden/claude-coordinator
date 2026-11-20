@@ -345,7 +345,7 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
     app.close();
   }
   assert.ok(ended, 'the turn ended once the stand-in exited');
-  assert.notEqual(ended.status, 'error', `the runner saw the stand-in exit cleanly: ${ended.said.join('\n')}`);
+  assert.equal(ended.status, 'idle', `the runner saw the stand-in exit cleanly: ${ended.said.join('\n')}`);
   assert.ok(seen, 'the stand-in claude ran');
   assert.equal(seen.thread.status, 'connected', `the thread server: ${seen.thread.error}`);
   assert.ok(seen.thread.tools.includes('set_thread_status'), `its tools: ${seen.thread.tools}`);

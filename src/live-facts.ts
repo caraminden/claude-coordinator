@@ -160,7 +160,7 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
   const mine = store.listTickets(taskmaster.project_id).filter((t) => t.id !== taskmaster.id && t.kind !== 'coordinator' && t.status !== 'closed');
   const rows = mine.map((t) => ({ t, f: storedFacts(store, runner, t) }));
   const line = ({ f }: { f: ReturnType<typeof storedFacts> }) => `- #${f.number} ${cut(f.title, 80)}: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · ${cut(f.note, 100)}` : ''}`;
-  const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`));
+  const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`)).slice(0, SHEET_MINIONS);
   const parks = rows.filter(({ f }) => f.state === 'parked').map((r) => `${line(r)} (${r.f.parkedOn ? `wakes on: ${r.f.parkedOn}` : 'nothing wakes it by itself'})`);
   const flight = rows.filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked')).slice(0, SHEET_MINIONS).map(line);
   const ships = rows.filter(({ f }) => f.ship).map(({ f }) => `- #${f.number}: ${f.ship!.text}`);

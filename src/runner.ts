@@ -2210,8 +2210,8 @@ export class Runner {
   }
 
   /**
-   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a handoff turn without one
-   * falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
+   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a Taskmaster's handoff turn without one
+   * resets it from a server-built facts sheet (G6), a minion's falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
    */
   private endFresh(ticketId: number, turn: TurnState | null, ok: boolean, stopped: boolean) {
     let f = this.store.getSetting<FreshState>(freshKey(ticketId));

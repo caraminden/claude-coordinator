@@ -76,7 +76,7 @@ export function lostSessionText(sessionId: string, note: string | null, chat: st
   return { text, entries: kept.length };
 }
 
-/** The fallback when a handoff turn fails (#406): Claude Code's own compaction, kept to what a handoff holds. */
+/** The fallback when a minion's handoff turn fails (#406; a Taskmaster's starts from a facts sheet): Claude Code's own compaction, kept to what a handoff holds. */
 export const COMPACT_COMMAND = '/compact Keep every open ask and who made it, relays still owed, cards waiting on people, who is parked on what, and promised next steps.';
 
 /** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */

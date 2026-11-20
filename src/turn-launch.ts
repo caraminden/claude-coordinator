@@ -107,6 +107,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   };
   const hash = createHash('sha256');
   for (const f of [...closure('mcp-pool.ts')].sort()) hash.update(`${f}\0`).update(readFileSync(join(MCP_DIR, f)));
+  hash.update(`slice\0${TASKMASTER_SLICE}`); // the slice it runs in too, so moving it starts a fresh pool there
   const POOL_VERSION = hash.digest('hex').slice(0, 16);
   const KIT = join(MCP_DIR, 'kit');
   const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
@@ -180,7 +181,7 @@ export const TURN_NODE = 'citadel-node';
 export const TURN_BUILD_JOBS = '4';
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
 export const TURN_SLICE = 'citadel-turns.slice';
-/** Host Taskmaster turns (#1280): apart from minion turns, so a storm there neither throttles nor oom-kills them. */
+/** Host Taskmaster turns and the shared Citadel tools pool they call (#1280): apart from minion turns, so a storm there doesn't stall them. */
 export const TASKMASTER_SLICE = 'citadel-taskmasters.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
@@ -729,13 +730,14 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`]), '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
     : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
-  // On the host it runs in a unit of its own, so it outlives the turn that started it.
+  // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
+  // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M).
   const poolDir = join(dirname(dir), '.pool', pins.POOL_VERSION);
   const poolEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]]));
   const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
   const pool: PoolSpec | undefined = pooled ? {
     dir: poolDir, script: pinned(pins.POOL), node, version: pins.POOL_VERSION, env: poolEnv,
-    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077'] } : {}),
+    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'UMask=0077'] } : {}),
   } : undefined;
   return { command, args, env, configDir, files, spawn, ...(pool ? { pool } : {}) };
 }

@@ -1,11 +1,14 @@
-# Host Taskmaster turns, every scheme's and the Overlord's (src/turn-launch.ts TASKMASTER_SLICE), under citadel.slice
+# Host Taskmaster turns, every scheme's and the Overlord's, and the shared Citadel tools pool every host turn calls
+# (src/turn-launch.ts TASKMASTER_SLICE, about 70M), under citadel.slice
 # and apart from citadel-turns.slice (#1280). Cara, 2026-11-20: "when we do have issues they become really hard to debug
 # and fix if the taskmaster also becomes unresponsive". On 2026-11-20 minion turns plus a land filled the turns'
-# 10G and stalled every turn in it, the Taskmasters too; here a minion storm doesn't throttle them.
+# 10G and stalled every turn in it, the Taskmasters too; here a minion storm in that slice doesn't throttle them. A
+# storm across all of citadel.slice (its 19G) still reaches them, and the kernel's own oom-killer can still pick them.
 # Sized from the journal's "memory peak" lines, 2026-11-18 to 20: 68 Taskmaster turns, p50 404M, p90 463M, max 572M.
 # MemoryHigh 4G holds about seven at their largest at once and keeps one runaway from crowding the server.
 # CPUWeight 400 against 100 for minion turns and containers (the server has 1000): at load 70 even hooks timed out.
-# ManagedOOMPreference=omit, as the server has (#1257): oomd takes a minion turn instead. Each unit sets it too.
+# ManagedOOMPreference=omit, as the server has (#1257): when oomd acts on user@.service's pressure it passes them over
+# for a minion turn. Each unit sets it too. Uninstalled, the slice still keeps them apart, with no limits of its own.
 # No MemoryLow or MemoryMin: user.slice and user@.service above citadel.slice have none, and the kernel caps a
 # child's protection at its parents', so a reserve here would protect nothing. A real one needs Cody (root).
 [Unit]

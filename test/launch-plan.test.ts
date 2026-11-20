@@ -1,13 +1,13 @@
 // launchPlan (src/turn-launch.ts) on its own: one fact changed at a time, and what that alone changes in
 // the plan. The whole launch of each kind of turn is pinned in test/turn-launch.test.ts.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { AUTH_VARS } from '../src/claude-link.ts';
-import { launchPlan, TASKMASTER_SLICE, TURN_SLICE, type LaunchPlan, type TurnFacts } from '../src/turn-launch.ts';
+import { launchPlan, type LaunchPlan, type TurnFacts } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'launch-plan-')));
@@ -97,11 +97,15 @@ test('a host turn is a unit when it has one and a child when not, with the same 
   assert.deepEqual(unit.systemdRun.slice(-3), unit.wrapper);
 });
 
-test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice (#1280)", () => {
-  const minionRun = (plan({ unit: 'citadel-turn-x' }).spawn as any).systemdRun as string[];
-  const tmRun = (plan({ unit: 'citadel-turn-y', ticket: taskmaster }).spawn as any).systemdRun as string[];
-  assert.ok(minionRun.includes(`--slice=${TURN_SLICE}`) && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
-  assert.ok(tmRun.includes(`--slice=${TASKMASTER_SLICE}`) && tmRun.includes('ManagedOOMPreference=omit') && !tmRun.includes(`--slice=${TURN_SLICE}`), tmRun.join(' '));
+test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice; the tools pool beside the Taskmasters (#1280)", () => {
+  const run = (p: ReturnType<typeof plan>) => { assert.equal(p.spawn.how, 'unit'); return p.spawn.how === 'unit' ? p.spawn.systemdRun : []; };
+  const minionRun = run(plan({ unit: 'citadel-turn-x' }));
+  const tmRun = run(plan({ unit: 'citadel-turn-y', ticket: taskmaster }));
+  assert.ok(minionRun.includes('--slice=citadel-turns.slice') && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
+  assert.ok(tmRun.includes('--slice=citadel-taskmasters.slice') && !tmRun.includes('--slice=citadel-turns.slice'), tmRun.join(' '));
+  assert.equal(tmRun[tmRun.indexOf('ManagedOOMPreference=omit') - 1], '-p');
+  assert.ok(plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!.includes('--slice=citadel-taskmasters.slice'), 'the tools pool Taskmasters call');
+  assert.ok(existsSync(new URL('../deploy/citadel-taskmasters.slice', import.meta.url)), 'the slice it names ships in deploy/');
 });
 
 test("a minion's approval rules become asks and it gets the approval tool; a Taskmaster gets neither", () => {

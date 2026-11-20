@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { AUTH_VARS } from '../src/claude-link.ts';
-import { launchPlan, type LaunchPlan, type TurnFacts } from '../src/turn-launch.ts';
+import { launchPlan, TASKMASTER_SLICE, TURN_SLICE, type LaunchPlan, type TurnFacts } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'launch-plan-')));
@@ -95,6 +95,13 @@ test('a host turn is a unit when it has one and a child when not, with the same 
   assert.deepEqual(unit.wrapper, [join(dir, 'pin', 'bin', 'citadel-node'), join(dir, 'pin', 'turn-wrapper.ts'), dir]);
   assert.ok(unit.systemdRun.includes('--unit=citadel-turn-x'));
   assert.deepEqual(unit.systemdRun.slice(-3), unit.wrapper);
+});
+
+test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice (#1280)", () => {
+  const minionRun = (plan({ unit: 'citadel-turn-x' }).spawn as any).systemdRun as string[];
+  const tmRun = (plan({ unit: 'citadel-turn-y', ticket: taskmaster }).spawn as any).systemdRun as string[];
+  assert.ok(minionRun.includes(`--slice=${TURN_SLICE}`) && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
+  assert.ok(tmRun.includes(`--slice=${TASKMASTER_SLICE}`) && tmRun.includes('ManagedOOMPreference=omit') && !tmRun.includes(`--slice=${TURN_SLICE}`), tmRun.join(' '));
 });
 
 test("a minion's approval rules become asks and it gets the approval tool; a Taskmaster gets neither", () => {

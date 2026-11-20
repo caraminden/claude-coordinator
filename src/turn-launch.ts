@@ -180,6 +180,8 @@ export const TURN_NODE = 'citadel-node';
 export const TURN_BUILD_JOBS = '4';
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
 export const TURN_SLICE = 'citadel-turns.slice';
+/** Host Taskmaster turns (#1280): apart from minion turns, so a storm there neither throttles nor oom-kills them. */
+export const TASKMASTER_SLICE = 'citadel-taskmasters.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
 export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean, readOnly: string[] = [], envFiles: string[] = []): TripwireConfig {
@@ -724,7 +726,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   }
   const wrapper = [node, pinned(pins.TURN_WRAPPER), dir];
   const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
-    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
+    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`]), '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
     : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it.

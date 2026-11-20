@@ -1,0 +1,17 @@
+# Host Taskmaster turns, every scheme's and the Overlord's (src/turn-launch.ts TASKMASTER_SLICE), under citadel.slice
+# and apart from citadel-turns.slice (#1280). Cara, 2026-11-20: "when we do have issues they become really hard to debug
+# and fix if the taskmaster also becomes unresponsive". On 2026-11-20 minion turns plus a land filled the turns'
+# 10G and stalled every turn in it, the Taskmasters too; here a minion storm doesn't throttle them.
+# Sized from the journal's "memory peak" lines, 2026-11-18 to 20: 68 Taskmaster turns, p50 404M, p90 463M, max 572M.
+# MemoryHigh 4G holds about seven at their largest at once and keeps one runaway from crowding the server.
+# CPUWeight 400 against 100 for minion turns and containers (the server has 1000): at load 70 even hooks timed out.
+# ManagedOOMPreference=omit, as the server has (#1257): oomd takes a minion turn instead. Each unit sets it too.
+# No MemoryLow or MemoryMin: user.slice and user@.service above citadel.slice have none, and the kernel caps a
+# child's protection at its parents', so a reserve here would protect nothing. A real one needs Cody (root).
+[Unit]
+Description=Taskmaster turns of Citadel
+
+[Slice]
+MemoryHigh=4G
+CPUWeight=400
+ManagedOOMPreference=omit

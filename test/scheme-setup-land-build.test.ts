@@ -180,3 +180,22 @@ test('--build after a landing killed mid-way: the worktree goes back on its bran
   assert.equal(git(b.main, 'rev-parse', 'main^1'), at, 'main is the build with main merged in');
   assert.equal(b.has('refs/heads/build/1'), false);
 });
+
+test("claims (#1159): a feeder that writes another feeder's claimed file is refused, at --check too; --build refuses while the claims are on the build", () => {
+  const b = buildSetup();
+  // The build minion (#3) puts its plan on the build: #1 writes f1.txt, #2 writes f2.txt.
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt\n');
+  git(b.main, 'branch', '-f', 'build/1', 'ticket/3-x');
+  assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 0);
+  b.commit(b.wts[0], 'f2.txt', 'one wrote it\n');
+  const build = b.at('build/1');
+  const why = /ticket\/1-x writes outside its claim in build\/1's build-claims\.md, so nothing merged: f2\.txt is #2's in the claims\. A late need goes through the build minion: ask #3/;
+  assert.match(b.run(1, '--check', '--into', 'build/1', 'f1.txt').stderr, why);
+  const res = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, why);
+  assert.equal(b.at('build/1'), build, 'the build did not move');
+  git(b.wts[2], 'merge', '-q', '--ff-only', 'build/1');
+  assert.match(b.run(3, '--build').stderr, /build-claims\.md, the build's claims, is still on ticket\/3-x and would ship to main: git rm it/);
+});

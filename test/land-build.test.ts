@@ -341,3 +341,81 @@ test('a --build that stopped after merging main says how to go on', () => {
   assert.equal(c.run({}, ['--build'], bwt).status, 0);
   assert.equal(tipOf(r, 'main'), git(bwt, 'rev-parse', 'HEAD'));
 });
+
+// Build claims (#1159): build-claims.md on the build, the build minion's (#9) plan. #1 claims b.txt, #2 claims c.txt,
+// hub.txt is shared. #2 merges first: c.txt, a line in hub.txt and u.txt, which nobody claimed.
+function claimed(r: R) {
+  build(r);
+  const boss = worktree(r, 'ticket/9-build');
+  r.commit(boss, 'hub.txt', 'top\n');
+  writeFileSync(join(boss, 'build-claims.md'), '# Build 3\nbuild: #9\n#1: b.txt\n#2: c.txt\nshared: hub.txt\n');
+  git(boss, 'add', '-A');
+  git(boss, 'commit', '-qm', 'claims');
+  git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
+  const two = worktree(r, 'ticket/2-y');
+  writeFileSync(join(two, 'hub.txt'), 'top\nfrom two\n');
+  writeFileSync(join(two, 'u.txt'), 'two took it\n');
+  r.commit(two, 'c.txt', 'theirs\n');
+  const res = into(r, [OK], {}, two);
+  assert.equal(res.status, 0, res.stderr);
+  git(r.wt, 'rebase', '-q', 'build/3');
+  return { boss, two, before: tipOf(r, 'build/3') };
+}
+
+test("claims: a feeder that writes a file another feeder claimed is refused with the reason, and the build doesn't move", () => {
+  const r = setup();
+  const { before } = claimed(r);
+  r.commit(r.wt, 'c.txt', 'mine now\n');
+  const res = into(r, [OK]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /ticket\/1-x writes outside its claim in build\/3's build-claims\.md, so nothing merged: c\.txt is #2's in the claims\. A late need goes through the build minion: ask #9/);
+  assert.equal(tipOf(r, 'build/3'), before);
+  // --check, as hand_off_land runs it, refuses the same way before the land starts.
+  assert.match(r.run({}, ['--check', '--into', 'build/3', OK]).stderr, /c\.txt is #2's in the claims/);
+});
+
+test('claims: its own and unclaimed new files merge in; one another feeder already merged in, or the claims file, do not', () => {
+  const r = setup();
+  claimed(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  r.commit(r.wt, 'new.txt', 'nobody had it\n');
+  let res = into(r, [OK]);
+  assert.equal(res.status, 0, res.stderr);
+  r.commit(r.wt, 'u.txt', 'mine too\n');
+  r.commit(r.wt, 'build-claims.md', '#1: b.txt c.txt\n');
+  const before = tipOf(r, 'build/3');
+  res = into(r, [OK]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /build-claims\.md is the build minion's plan, so only it changes a claim; u\.txt is unclaimed, but #2 merged it in first, so it is #2's\./);
+  assert.equal(tipOf(r, 'build/3'), before);
+});
+
+test("claims: a shared file takes added lines, not changes to lines another feeder merged in; the build minion isn't checked", () => {
+  const r = setup();
+  const { boss } = claimed(r);
+  writeFileSync(join(r.wt, 'hub.txt'), 'top\nfrom one\nfrom two\n');
+  git(r.wt, 'commit', '-qam', 'hub: add');
+  let res = into(r, [OK]);
+  assert.equal(res.status, 0, res.stderr);
+  writeFileSync(join(r.wt, 'hub.txt'), 'top\nfrom one\nfrom two, edited by one\n');
+  git(r.wt, 'commit', '-qam', 'hub: edit');
+  const before = tipOf(r, 'build/3');
+  res = into(r, [OK]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /hub\.txt \(shared\) changes or removes lines #2 merged in \(line 3\): only add to a shared file/);
+  assert.equal(tipOf(r, 'build/3'), before);
+  // The build minion edits anything, the claims included.
+  git(boss, 'merge', '-q', '--ff-only', 'build/3');
+  r.commit(boss, 'c.txt', 'the build minion fixed it\n');
+  res = into(r, [OK], {}, boss);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test('claims: --build refuses while build-claims.md is on the build, so it never ships to main', () => {
+  const r = setup();
+  const { boss } = claimed(r);
+  git(boss, 'merge', '-q', '--ff-only', 'build/3');
+  const res = r.run({}, ['--build'], boss);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /build-claims\.md, the build's claims, is still on ticket\/9-build and would ship to main: git rm it/);
+});

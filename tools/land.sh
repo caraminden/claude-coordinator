@@ -127,6 +127,67 @@ branch=$(git branch --show-current)
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 [ -n "$check" ] || mkdir -p -m 700 "$state"
+# Build claims (#1159): build-claims.md on build/<n>, the build minion's plan, names the files each feeder writes
+# ("#<n>: <paths>"; a path ending in / is a folder, the longest match wins), the hub files any feeder may add to
+# ("shared: <paths>") and the build minion ("build: #<n>"). A feeder's --into is refused when it writes a file another
+# feeder claimed, an unclaimed file another feeder already merged in, the claims file itself, or, in a shared file,
+# lines another feeder merged in. Who merged a commit comes from build/<n>'s reflog ("land.sh --into <branch>"),
+# else from a "#<n>" at the start of its subject. A plain check, no AI; with no claims file there is no check.
+claims_check() {
+  local trunk=$1 claims me boss mb merged f who m a b why
+  claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
+  me=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$branch")
+  boss=$(sed -nE 's/^build:[[:space:]]*#?([0-9]+).*/\1/p' <<<"$claims" | head -n 1)
+  { [ -n "$me" ] && [ "$me" != "$boss" ]; } || return 0 # the build minion's own branch, or one with no minion number
+  mb=$(git merge-base "refs/heads/$build" HEAD) || return 0
+  # "<commit> <minion>" for each commit a feeder's --into brought in, newest reflog entry first.
+  merged=$(git reflog show --format='%H %gs' "refs/heads/$build" 2>/dev/null | awk 'NR > 1 { print $1, prev } { prev = $0 }' |
+    while read -r old new tool flag who; do
+      [ "$tool $flag" = "land.sh --into" ] || continue
+      m=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$who")
+      [ -z "$m" ] || git rev-list --no-merges "$old..$new" 2>/dev/null | sed "s/\$/ $m/"
+    done)
+  # The minion that wrote a commit of the build, or nothing for main's commits and the build minion's.
+  writer() {
+    git merge-base --is-ancestor "$1" "refs/heads/$trunk" 2>/dev/null && return 0
+    local m
+    m=$(awk -v c="$1" '$1 == c { print $2; exit }' <<<"$merged")
+    [ -n "$m" ] || m=$(git log -1 --format=%s "$1" | sed -nE 's/^#([0-9]+)([^0-9].*)?$/\1/p')
+    [ "$m" = "$boss" ] || echo "$m"
+  }
+  why=$(while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$f" = build-claims.md ]; then
+      echo "$f is the build minion's plan, so only it changes a claim"
+      continue
+    fi
+    who=$(awk -v f="$f" 'match($0, /^(#[0-9]+|shared):/) {
+        w = substr($0, 1, RLENGTH - 1); sub(/^#/, "", w); n = split(substr($0, RLENGTH + 1), p, /[ \t]+/)
+        for (i = 1; i <= n; i++) if (p[i] != "" && (p[i] == f || (p[i] ~ /\/$/ && index(f, p[i]) == 1)) && length(p[i]) > best) { best = length(p[i]); out = w }
+      } END { print out }' <<<"$claims")
+    if [ "$who" = shared ]; then
+      # Each run of lines this branch changes or removes, blamed at the merge-base: any another feeder wrote refuses.
+      git diff -U0 --no-renames "$mb" HEAD -- "$f" | sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? .*/\1 \3/p' | while read -r a b; do
+        [ "${b:-1}" != 0 ] || continue
+        git blame --porcelain -L "$a,+${b:-1}" "$mb" -- "$f" 2>/dev/null | awk 'length($1) >= 40 && $1 ~ /^[0-9a-f]+$/ { print $1 }' | sort -u | while read -r c; do
+          m=$(writer "$c")
+          [ -z "$m" ] || [ "$m" = "$me" ] || echo "$f (shared) changes or removes lines #$m merged in (line $a): only add to a shared file"
+        done
+      done | sort -u
+    elif [ -n "$who" ]; then
+      [ "$who" = "$me" ] || echo "$f is #$who's in the claims"
+    else
+      for c in $(git rev-list --reverse --no-merges "refs/heads/$trunk..refs/heads/$build" -- "$f"); do
+        m=$(writer "$c")
+        [ -n "$m" ] || continue
+        [ "$m" = "$me" ] || echo "$f is unclaimed, but #$m merged it in first, so it is #$m's"
+        break
+      done
+    fi
+  done < <(git diff --name-only --no-renames "$mb" HEAD))
+  [ -z "$why" ] || refuse "$branch writes outside its claim in $build's build-claims.md, so nothing merged: $(sed ':a;N;$!ba;s/\n/; /g' <<<"$why"). A late need goes through the build minion: ask #${boss:-?} (message_minion) to move the claim, or leave those files to their owners, then run this again"
+}
+
 label=$branch # for the retro log's lines: which kind of run this is
 untouched="main is untouched"
 case $mode in
@@ -140,7 +201,8 @@ case $mode in
     if [ "$mode" = into ] && [ ${#files[@]} -eq 0 ]; then
       code=$(git diff --name-only "refs/heads/$build...HEAD" | grep -vE '\.md$|^docs/' || true)
       [ -z "$code" ] || refuse "name the test files this change touched (tools/land.sh --into $build <test files>): only a docs-only change (*.md, docs/) merges in untested, and it changes $(head -n 3 <<<"$code" | sed ':a;N;$!ba;s/\n/, /g')$([ "$(wc -l <<<"$code")" -le 3 ] || echo ' and more'). Nothing merged"
-    fi ;;
+    fi
+    [ "$mode" != into ] || claims_check main ;;
   land)
     # The guard: a branch on a build's commits (a feeder that ran the usual command) would put part of that build live.
     # Not commits that came off main (a rolled-back restart) after a merge of main took them into the build: the rebase
@@ -154,6 +216,7 @@ case $mode in
       done
     done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
 esac
+
 
 # A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
 # (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
@@ -209,6 +272,7 @@ if [ "$mode" = build ]; then
     refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
   fi
   label="$branch · lands $build"
+  ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
 fi
 unset LAND_REBASED LAND_REDO LAND_BUILD
 if [ -n "$check" ]; then
@@ -530,7 +594,7 @@ preflight() {
 
 # The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
 merge_into() {
-  git update-ref -m "land.sh --into" "refs/heads/$build" "$tip" "$base" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
+  git update-ref -m "land.sh --into $branch" "refs/heads/$build" "$tip" "$base" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
   land_mark merged
   queue_done ok
   say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); main and the live checkout are untouched"

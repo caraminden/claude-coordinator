@@ -1949,7 +1949,7 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (!args.slug) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
-        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
+        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.file ? `, agent_file ${e.file}` : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
       }
       const slug = encodeURIComponent(String(args.slug));
       if (args.run !== undefined) {
@@ -1966,6 +1966,7 @@ async function runTool(name: string, args: any): Promise<string> {
         const e = entries.find((x: any) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
         if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
+        if (e.file) return `${e.slug}, version ${e.version}, agent_file ${e.file} (${e.enabled ? 'on' : 'off'} here): ${e.agent ? `${e.what ?? ''} Its text is the file's:\n\n${e.agent.text}\n----` : 'Its file is gone from the repo.'} This scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
         return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
       }
       const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial, ...extra });

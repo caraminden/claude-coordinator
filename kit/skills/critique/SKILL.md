@@ -132,6 +132,8 @@ When the turn's "Kit reviewers:" line says the professor is off, skip the call t
    items a call; when the next round is the last, say so. When the `on_fail:` step that fired names
    a teacher entry, add "Teacher rubric: `<path>`", its file in the review set folder (the
    "Review set:" line names it; the file says `kind: teacher`). A teacher on trial still teaches.
+   When the step names one of the scheme's own agents instead (the "Kit reviewers:" line lists
+   them, with their additions file), call that agent in `professor`'s place with the same brief.
    The scheme's additions to the kit's Professor, when it has some, go in too: the "Kit reviewers:"
    line names their file (`professor.md`).
 3. **Apply fix 1,** remake the artifacts and run the next critic round as usual. Once that round is

@@ -494,7 +494,7 @@ export class ReviewSet {
     next.panel = next.panel?.trim() || null;
     if (next.on_fail && !next.on_fail.length) next.on_fail = null;
     // Back on trial, it only advises (Q12): a person putting a blocker back on trial means that, not "switch it to Advise first".
-    if (next.trial && !was.trial && !fromFile(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
+    if (next.trial && !was.trial && !isKit(was)) Object.assign(next, { gate: next.gate === 'block' ? 'advise' : next.gate, gives_label: false });
     if (JSON.stringify(next) === JSON.stringify(snapshotOf(was))) return was;
     if (isKit(was)) {
       const changed = KIT_FIXED.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(was[k]));
@@ -556,8 +556,18 @@ export class ReviewSet {
    */
   ensureAgents(projectId: number, files: AgentFile[], at = Date.now()): void {
     for (const f of files) {
-      if (this.get(projectId, f.slug)) continue;
-      this.create(projectId, { slug: f.slug, name: nameFor(f.slug), kind: f.kind, source: `agent:${f.path}` }, 'Citadel', `Read from ${f.path}`, at);
+      const was = this.get(projectId, f.slug);
+      // The file is the source of its kind (save refuses a kind change there): a `kind:` edit reaches its entry, with no version.
+      if (was) {
+        if (isAgentFile(was) && was.source === `agent:${f.path}` && was.kind !== f.kind) this.db.prepare('UPDATE review_entries SET kind = ? WHERE id = ?').run(f.kind, was.id);
+        continue;
+      }
+      // A file named like a reserved or over-long slug stays off the page rather than break it.
+      try {
+        this.create(projectId, { slug: f.slug, name: nameFor(f.slug), kind: f.kind, source: `agent:${f.path}` }, 'Citadel', `Read from ${f.path}`, at);
+      } catch (err) {
+        if (!(err instanceof ReviewError)) throw err;
+      }
     }
   }
 
@@ -744,7 +754,7 @@ export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<num
   if (!on.length) return 0;
   mkdirSync(dir, { recursive: true });
   // A hand-off to an entry since deleted or switched off would send the critic nowhere: those steps drop out.
-  const live = (s: OnFail) => s.to === 'professor' || s.to === 'person' || on.some((x) => x.slug === s.to);
+  const live = (s: OnFail) => s.to === 'professor' || s.to === 'person' || on.some((x) => x.slug === s.to) || entries.some((x) => x.slug === s.to && x.enabled && isAgentFile(x));
   for (const e of on) {
     const steps = e.on_fail?.filter(live) ?? null;
     writeFileSync(join(dir, `${e.slug}.md`), renderEntry({ ...e, on_fail: steps?.length ? steps : null }, { verdicts: verdicts.get(e.id), requester }));

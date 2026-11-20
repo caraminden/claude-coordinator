@@ -349,6 +349,23 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   assert.equal(kindTry.status, 400);
   assert.match(kindTry.data.error, /agent file \.claude\/agents\/art-critic\.md/);
   assert.equal((await call(`${url}/art-critic`, { method: 'PATCH', body: { on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], version: critic.version + 1 } })).status, 200);
+  // The review_set tool names it as the file's, and reads out the file's text with the scheme's additions.
+  const tm = (await call(`/api/projects/${p.id}`)).data.coordinator.id;
+  const tool = async (args: Record<string, unknown>) => {
+    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(tm), COORDINATOR_ROLE: 'thread' },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    try {
+      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
+      return (await reply).result.content[0].text as string;
+    } finally {
+      child.kill();
+    }
+  };
+  assert.match(await tool({}), /^art-critic \(critic, on, agent_file \.claude\/agents\/art-critic\.md/m);
+  assert.match(await tool({ slug: 'art-critic' }), /agent_file \.claude\/agents\/art-critic\.md \(on here\): Judges new art.*\n\nYou judge art\.[\s\S]*what a save replaces:\n\nPixel art at whole scales\./);
   // The file is read live: deleted, the entry stays with no text, so the page can say it's gone.
   rmSync(join(agents, 'art-critic.md'));
   const gone = (await call(url)).data.entries.find((e: any) => e.slug === 'art-critic');

@@ -486,4 +486,17 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   assert.match(line, /switched off its own agents .*tuner.*\.claude\/agents\/tuner\.md/);
   assert.match(line, /own reviewing agents, whose text is their file: .*shader-critic/);
   assert.match(readFileSync(join(kdir, 'shader-critic.md'), 'utf8'), /\.claude\/agents\/Shader_Critic\.md[\s\S]*Look at banding/);
+  // A file named like a reserved slug stays off rather than break the page; a kind: edit in a file reaches its entry.
+  writeFileSync(join(dir, 'audits.md'), '---\ndescription: Audits\n---\nx\n');
+  writeFileSync(join(dir, 'tuner.md'), '---\ndescription: Tunes\nkind: teacher\n---\nTeach.\n');
+  set.ensureAgents(3, readAgentFiles(repo));
+  assert.equal(set.get(3, 'audits'), null);
+  assert.equal(set.get(3, 'tuner')!.kind, 'teacher');
+  // A critic's hand-off to a repo teacher that's on stays in its rubric; back on trial, a repo blocker only advises.
+  set.save(3, 'tuner', { enabled: true }, 'Josh', 'On');
+  set.create(3, { slug: 'look', name: 'Look', on_fail: [{ after: 2, to: 'tuner' }, { after: 3, to: 'person' }] }, 'Josh');
+  renderSet(set.list(3), join(root, 'agents-set'));
+  assert.match(readFileSync(join(root, 'agents-set', 'look.md'), 'utf8'), /on_fail: tuner after 2 fails, person after 3 fails/);
+  set.save(3, 'shader-critic', { gate: 'block' }, 'Josh', 'Blocks');
+  assert.equal(set.save(3, 'shader-critic', { trial: true }, 'Josh', 'Trial').gate, 'advise');
 });

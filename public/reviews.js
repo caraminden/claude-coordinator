@@ -121,11 +121,11 @@ function columnUnits(here) {
     const key = isLens(e) ? 'lens' : e.panel && !e.kit && !e.file ? `panel:${e.panel}` : null;
     if (key && seen.has(key)) continue;
     // A panel sits where its first member that's on runs (orderLine), not at a switched-off one above it.
-    if (key !== 'lens' && key && !e.enabled && here.some((x) => x.panel === e.panel && !x.kit && x.enabled)) continue;
+    if (key !== 'lens' && key && !e.enabled && here.some((x) => x.panel === e.panel && !x.kit && !x.file && x.enabled)) continue;
     if (key) seen.add(key);
     if (key === 'lens') out.push({ node: lensesCard(here.filter(isLens)) });
     else if (key) {
-      const members = here.filter((x) => x.panel === e.panel && !x.kit);
+      const members = here.filter((x) => x.panel === e.panel && !x.kit && !x.file);
       out.push({ node: panelBox(e.panel, members), runs: members.some((x) => x.enabled) });
     } else out.push({ node: withTeachers(e), runs: !e.kit && !e.file && e.enabled });
   }
@@ -339,7 +339,7 @@ function detail() {
     e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path),
       e.kit ? " in the kit: every scheme's minions read the same." : e.file ? " in this scheme's repo: change it there, and the page reads it as it is." : ` in this scheme's repo: this entry runs as that agent, with its rubric below.`),
       h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), markdownElement(e.agent.text, { headingBase: 4 })))
-      : e.file ? section('Its text', h('p', { class: 'error' }, h('code', {}, e.file), ' is gone from the repo, so nothing runs it. Put the file back, or delete this entry.')) : null,
+      : e.file ? section('Its text', h('p', { class: 'error' }, h('code', {}, e.file), ' is gone from the repo, or its kind: line now says none, so nothing runs it. Put the file back, or switch this off.')) : null,
     e.kit || e.file ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, `None: it reads ${e.kit ? "the kit's text" : 'its file'} alone. Edit by hand or describe a change to add to it.`))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
     e.kit ? null : e.file ? (e.kind === 'teacher' ? null : section('With the others', onFailEditor(e))) : section('With the others', ...withOthers(e)),

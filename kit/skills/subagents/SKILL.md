@@ -97,7 +97,8 @@ Ask one question: will the session need what this step reads, or only what it co
   and ship logs and the retro log are one job for the `citadel:investigator` agent, not a
   hand-written general-purpose brief: ask it the question, with the minion's #N and the window, and
   take back its Pacific-time timeline (at most 15 lines). It works in a person's container too
-  (it uses `host_check` there).
+  (it uses `host_check` there). When the person asks what went wrong and how to stop it, the
+  `citadel:post-mortem` skill sends it and adds the cause and the fix.
 - **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
   long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
   the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on

@@ -19,7 +19,10 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     message (under 200 characters, or ending in a colon), or when its final text proposes work
     and it made no ask_question, propose_plan or message to the Taskmaster or a minion, or when
     it states live state (another minion's, CI's, a deploy's, or a card waiting on a person) without
-    a call that reads it, such as live_facts, gh or git, or a report of it in its prompt (#1113). A turn a
+    a call that reads it, such as live_facts, gh or git, or a report of it in its prompt (#1113). For
+    minions only it also counts (#1154): a final reply with no status line or one Citadel would ignore,
+    a first turn that ends with the title still its message's opening words (`CITADEL_MINION_TITLE`,
+    which the runner sets), and a hand-off to ship in a session with no self-review in it. A turn a
     steer reached is skipped. The weekly process digest counts the lines to decide on refusal.
   - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
     runs, counted from that runner's own summary), failed push, refused stop, would-refuse stop (answer-check.ts) or `process` line (a self-review's `Process:` line, also answer-check.ts) in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) and `smoke` lines (a land its quick checks refused before the line) to `<date>/land.md`.

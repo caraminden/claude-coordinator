@@ -876,14 +876,18 @@ mock.boards('#takes', { boards: [
         runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
       }) })));
       // #992: the red has a fix minion; the stuck one links to the Taskmaster's wake entry.
-      const fix = minion(c, 'Fix the red drift run 9090', {}, 'bug');
+      // #1078: three reds: a fix minion at work (with its re-run), one closed with the red still open, and none yet.
+      const fix = minion(c, 'Fix the red drift run 9090', { status: 'running', last_activity: 'Finding the cause… · 2 of 4 done', note: 'the drift check reads a stale fixture' }, 'bug');
+      const gone = minion(c, 'Main red: lint.yml run 9091', { status: 'closed', note: 'fixed the lint rule' }, 'bug');
       const heard = c.store.addEvent(taskmaster(c).id, 'user_message', { author: 'Citadel', text: 'Seeded: CI: 1 job on self-hosted, seeded-ci has waited for a runner. Start a fix minion now.' });
       c.store.setSetting('ci-health:wake-at', { [`${c.project.id}:stuck:self-hosted,seeded-ci`]: { project: c.project.id, entry: heard.id } });
       c.store.setSetting(`ci-health:${c.project.id}`, {
         offline: {}, sent: {},
         problems: [
           { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service' },
-          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false } },
+          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false }, rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' } },
+          { key: 'red:lint.yml', title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed', why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold', fix: `reopen #${gone.number} or start another fix minion naming run 9095`, fixMinion: { number: gone.number!, closed: true } },
+          { key: 'red:nightly.yml', title: 'CI, Seeded: nightly.yml is red on main (run 9096).', why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago', fix: 'the Taskmaster starts a fix minion naming run 9096', quiet: true, noFix: { ringsAt: now + 48 * 60_000, late: false } },
         ],
       });
       return `#/p/${c.project.id}/ci`;

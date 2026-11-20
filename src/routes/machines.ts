@@ -243,7 +243,16 @@ export const machineRoutes: Route[] = [
   // The CI page (#968): each scheme they can see with its runners, queue, verdicts, runs and open problems, plus the CI desktop's load.
   {
     method: 'GET', path: '/api/ci', ...people,
-    handler: ({ res, app, session }) => json(res, 200, { schemes: app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? [], pcs: app.ciLoad.views(), now: Date.now() }),
+    handler: ({ res, app, session }) => {
+      // Each red's fix minion as the minions list draws it (#1078): its state, step and note, read now.
+      const schemes = (app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? []).map((s) => ({ ...s, problems: s.problems.map((x) => {
+        const t = x.fixMinion && app.store.getTicketByNumber(s.id, x.fixMinion.number);
+        if (!t) return x;
+        const v = app.runner.view(t);
+        return { ...x, fixTicket: { id: v.id, number: v.number, project_id: v.project_id, title: v.title, status: v.status, state: v.state, note: v.note, last_activity: v.last_activity, created_at: v.created_at, updated_at: v.updated_at, closed_at: v.closed_at, steps: v.steps, step_track: v.step_track, wait: v.wait, open_cards: v.open_cards, approvals: v.approvals, server_work: v.server_work, closing: v.closing, queued: v.queued, ship: v.ship } };
+      }) }));
+      json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now() });
+    },
   },
   // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.
   // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).

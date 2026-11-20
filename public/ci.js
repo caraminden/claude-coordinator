@@ -11,6 +11,9 @@ import { pcCard, trouble } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
+import { usage } from './core.js';
+import { rowBar, rowState } from './threadstate.js';
+import { progressTrack, waitBar } from './wait.js';
 
 const REFRESH_MS = 30_000;
 const LA = { timeZone: 'America/Los_Angeles', timeZoneName: 'short' };
@@ -25,6 +28,38 @@ function stateOf(s, now) {
 }
 const STATE_WORDS = { down: 'needs a person', fix: 'being handled', ready: 'all clear', asleep: 'not read lately' };
 const RANK = { down: 3, fix: 2, asleep: 1, ready: 0 };
+
+/**
+ * The fix minion, the first thing a red's card shows (#1078; Josh, 2026-11-19: "CI errors should very obviously show the minion
+ * that is fixing the issue and maybe even a progress report"): the minions list's row (its number, title, state chip and plan track),
+ * its latest line and how long it has been on it, the re-run that tests its fix, all linking to its chat; or a toned notice that none
+ * has started and when that rings. Its lines are always there and its bar keeps its height, so a live read moves nothing.
+ */
+export function fixBox(x, now = Date.now()) {
+  const t = x.fixTicket;
+  if (!t) {
+    const n = x.noFix;
+    return h('div', { class: `ci-fix none${n.late ? ' late' : ''}` },
+      h('b', {}, n.late ? 'No fix minion started' : 'No fix minion yet'),
+      h('div', { class: 'muted' }, n.late ? 'This is ringing now: ask the Taskmaster to start one.' : `If none starts, this rings at ${when(n.ringsAt)}.`));
+  }
+  const st = rowState(t, usage, now);
+  const barOf = rowBar(t, st);
+  // The bar's and the re-run's room are kept whether or not they show, so a read that adds or drops one moves nothing.
+  const bar = (barOf && (progressTrack(barOf) || waitBar(barOf))) || h('div', { class: 'ci-fix-gap' });
+  const closed = t.status === 'closed';
+  const line = (closed ? t.note : t.status === 'running' ? t.last_activity : t.note || t.last_activity) || (st.rank === 1 ? 'Working…' : st.label);
+  const on = closed ? `closed ${ago(t.closed_at ?? t.updated_at)}` : `on it for ${shortSpan(now - t.created_at)}`;
+  const re = x.rerun;
+  return h('div', { class: `ci-fix f-${st.fam || 'none'}${closed ? ' closed' : ''}`, title: st.label },
+    h('div', { class: 'ci-fix-top' },
+      h('a', { class: 'ci-fix-link', href: `#/p/${t.project_id}/t/${t.number}` }, h('span', { class: 'num' }, `#${t.number}`), ' ', t.title),
+      h('span', { class: `state${st.quiet ? ' quiet' : ''}` }, st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell || st.label)),
+    h('div', { class: 'ci-fix-line muted' }, `${line} · ${on}`),
+    bar,
+    h('div', { class: 'ci-fix-rerun' }, !re ? '' : re.state === 'running' ? `Re-running on ${re.sha}` : re.state === 'failed' ? `The re-run on ${re.sha} failed` : `Waiting for a person to re-run on ${re.sha}`,
+      re?.url ? [' · ', ext(re.url, 'the run')] : ''));
+}
 
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');
 
@@ -64,10 +99,11 @@ function problemsBlock(s) {
   s.problems.length ? statTiles([String(ring), 'ring a person', ring ? 'danger' : 'done'], [String(quiet), 'being handled', quiet ? 'held' : 'done']) : null,
   s.problems.length ? h('div', { class: 'hue-rows' }, ...s.problems.map((x) => hueRow({ hue: x.quiet ? 'held' : 'danger', lead: x.quiet ? 'quiet' : 'rings' },
     h('strong', {}, x.title.replace(/^CI(, [^:]+)?: /, '')),
+    x.fixTicket || x.noFix ? fixBox(x) : '',
     x.why ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Why: '), x.why) : '',
     x.fix ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '',
     // The line is always there, so a link arriving moves nothing (#992).
-    h('span', { class: 'ci-detail-line ci-problem-link' }, x.link ? [h('span', { class: 'muted' }, x.link.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
+    x.fixTicket || x.noFix ? '' : h('span', { class: 'ci-detail-line ci-problem-link' }, x.link ? [h('span', { class: 'muted' }, x.link.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
       h('a', { href: x.link.href }, x.link.label), x.link.closed ? h('span', { class: 'muted' }, ' (closed)') : ''] : '')))) 
     : emptyCard('Nothing needs fixing', 'A red run or a stuck runner shows here with why and the fix.'));
   return block('Open problems', ring ? 'danger' : quiet ? 'held' : 'done', 'ci-problems', row);

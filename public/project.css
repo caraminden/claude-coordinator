@@ -485,6 +485,21 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-block { display: grid; gap: var(--space-2); }
 .ci-block h4 { margin: 0; font-size: 0.85em; color: var(--muted); font-weight: 650; }
 .ci-block > p { margin: 0; }
+.ci-fix { position: relative; display: grid; gap: 0.2rem; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-left: 3px solid var(--c, var(--closed)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--c, var(--closed)) 7%, var(--panel)); min-height: 3.6rem; }
+.ci-fix.none { border-left-color: var(--waiting-tint); background: color-mix(in srgb, var(--waiting-tint) 10%, var(--panel)); font-size: 0.9em; }
+.ci-fix.none.late { border-left-color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--panel)); }
+.ci-fix-top { display: flex; align-items: baseline; gap: 0.5rem; }
+.ci-fix-link { flex: 1; min-width: 0; font-weight: 650; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.ci-fix-link::after { content: ''; position: absolute; inset: 0; }
+.ci-fix-link:hover { text-decoration: underline; }
+.ci-fix .state { flex: none; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums; color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
+.ci-fix .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
+.ci-fix .state .still { display: inline-block; width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; margin-right: 4px; vertical-align: 1px; }
+.ci-fix-line { font-size: 0.85em; min-height: 1.3em; overflow-wrap: anywhere; }
+.ci-fix .wait-bar, .ci-fix .seg-track { margin: 0.1rem 0; min-height: 4px; }
+.ci-fix-gap { height: 4px; margin: 0.1rem 0; }
+.ci-fix-rerun { min-height: 1.3em; font-size: 0.85em; position: relative; z-index: 1; }
+.ci-fix-rerun a { position: relative; z-index: 1; }
 .ci-tag { flex: none; font-size: 0.75em; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .ci-runs { display: grid; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .ci-runs > * + * { border-top: 1px solid var(--line); }

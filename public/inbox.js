@@ -130,13 +130,13 @@ export function schemeCount(p) {
 
 let pillTips = null;
 
-/** The Home line's pill (#1140): every shelf scheme's counts summed, purple when any of them is. */
+/** The Home line's pill (#1140): every shelf scheme's counts summed. Never purple (Josh, 2026-11-20: "Lets make the Home not go purple on unreads? it feels like duplicating information"): each scheme's own pill already shows what's new. */
 export const homeCount = (schemes) => schemeCount({
   id: 'home',
   inbox: schemes.reduce((n, p) => n + (p.inbox || 0), 0),
   running: schemes.some((p) => p.running),
   working: schemes.reduce((n, p) => n + (p.running ? p.working || 1 : 0), 0),
-  fresh: schemes.some((p) => schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p).fresh),
+  fresh: false,
 });
 
 const badge = { on: null };

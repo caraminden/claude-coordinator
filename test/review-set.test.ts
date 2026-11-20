@@ -319,6 +319,18 @@ test('the run record: dots, first-round pass rate, a stuck entry, and the ship h
   assert.equal(set.record(3).get(set.get(3, 'ui')!.id)!.stuck, 'fail', 'five first rounds, all failed');
 });
 
+test("a teacher's record counts every round after its fix, not just first rounds, and is never stuck (#1089)", () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'prof', name: 'Prof', kind: 'teacher' }, 'Josh');
+  const verdicts = ['fail', 'fail', 'fail', 'fail', 'pass', 'fail'];
+  verdicts.forEach((v, i) => set.recordRun(3, 'prof', { ticketId: 80 + i, minion: `#${80 + i}`, round: 3, verdict: v }));
+  const rec = set.record(3).get(set.get(3, 'prof')!.id)!;
+  assert.deepEqual([rec.firsts, rec.passes, rec.rate, rec.stuck], [6, 1, 17, null], 'one of six fixes held, all after round 1, and five fails call no teacher stuck');
+  set.create(3, { slug: 'critic', name: 'Critic' }, 'Josh');
+  set.recordRun(3, 'critic', { ticketId: 90, minion: '#90', round: 3, verdict: 'pass' });
+  assert.equal(set.record(3).get(set.get(3, 'critic')!.id)!.firsts, 0, "a critic's later rounds still don't count");
+});
+
 test("a blocking entry's fail is lifted by a later pass from what judges in its place: its panel's referee or its hand-off", () => {
   const { set } = fresh();
   set.create(3, { slug: 'layout', name: 'Layout', gate: 'block', panel: 'Taste' }, 'Josh');

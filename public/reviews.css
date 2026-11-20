@@ -127,5 +127,5 @@
 .rv-teach-rec { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; font-variant-numeric: tabular-nums; }
 .rv-teach-loose { flex-direction: column; align-items: flex-start; margin-left: 0; border-style: dashed; border-left-width: 1px; background: none; }
 .rv-agent summary { cursor: pointer; color: var(--accent); width: fit-content; padding: 0.15rem 0; }
-.rv-agent pre { max-height: 22rem; overflow: auto; margin: 0.4rem 0 0; }
+.rv-agent > .cui-md { max-height: 22rem; overflow: auto; margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.9em; }
 .rv-link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }

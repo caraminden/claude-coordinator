@@ -8,6 +8,7 @@
 import { ago, api, h, icon, view } from './base.js';
 import { collapseRuns, diffLines } from './plan-diff.js';
 import { optimistic } from './ui/optimistic.js';
+import { markdownElement } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 
 const COLUMNS = [['work', 'While working'], ['ship', 'Before ship'], ['ask', 'On ask'], ['schedule', 'On a schedule']];
@@ -334,7 +335,7 @@ function detail() {
     e.kind === 'teacher' ? section('When it runs', h('p', {}, e.kit ? e.when : 'When a critic hands it a stubborn fail'), handOffs(e))
       : section('Reviews', h('p', {}, e.kit ? e.when : whenLine(e)), e.kit ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
     e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path), " in the kit: every scheme's minions read the same."),
-      h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), h('pre', { class: 'rv-added' }, e.agent.text))) : null,
+      h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), markdownElement(e.agent.text, { headingBase: 4 }))) : null,
     e.kit ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, "None: it reads the kit's text alone. Edit by hand or describe a change to add to it."))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
     e.kit ? null : section('With the others', ...withOthers(e)),

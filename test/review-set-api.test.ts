@@ -137,7 +137,12 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   const first = await call(url);
   assert.equal(first.status, 200);
   const kit = first.data.entries.filter((e: any) => e.kit).map((e: any) => e.slug);
-  assert.deepEqual([kit[0], kit.includes('lens-tests'), kit.includes('finding-checker'), kit.at(-1)], ['pre-ship-review', true, true, 'fresh-eyes']);
+  assert.deepEqual([kit[0], kit.includes('lens-tests'), kit.includes('finding-checker'), kit.at(-2), kit.at(-1)], ['pre-ship-review', true, true, 'fresh-eyes', 'professor']);
+  // #1089: the kit's teacher shows in this scheme too, with its agent file's text (frontmatter cut) and no stage of its own to judge.
+  const prof = first.data.entries.find((e: any) => e.slug === 'professor');
+  assert.deepEqual([prof.kind, prof.agent?.path, prof.passes], ['teacher', 'kit/agents/professor.md', 0]);
+  assert.match(prof.agent.text, /^You are the teacher/);
+  assert.equal(first.data.entries.find((e: any) => e.slug === 'lens-tests').agent, null, 'a lens has no agent file of its own');
   assert.equal(first.data.label, 'Pre-ship review');
   assert.ok(first.data.audits.length, 'the standard audits are listed');
   assert.ok(first.data.entries.every((e: any) => !e.kit || (!e.trial && e.what)), "kit entries are off trial and carry the kit's own words");

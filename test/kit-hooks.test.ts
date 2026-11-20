@@ -399,3 +399,13 @@ test('grunt-model table: every kit agent pins model and effort, and its frontmat
     if (/^(sonnet|opus|haiku|fable)$/.test(row.model)) assert.deepEqual([model, effort], [row.model, row.effort], name);
   }
 });
+
+test('writing-for-agents\' HOOKS.md names every hook: the kit\'s (kit/hooks/) and the ones each turn gets (src/turn-launch.ts) (#1154)', () => {
+  const catalogue = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'writing-for-agents', 'HOOKS.md'), 'utf8');
+  const kit = readdirSync(HOOKS).filter((f) => /\.(?:ts|sh)$/.test(f));
+  const launch = readFileSync(join(import.meta.dirname, '..', 'src', 'turn-launch.ts'), 'utf8');
+  const turn = [...launch.matchAll(/script = turnPins\(\)\.(\w+)/g)].map((m) => launch.match(new RegExp(`const ${m[1]} = pinnedCopy\\('([\\w-]+\\.ts)'\\)`))?.[1] ?? `${m[1]} (no pinned file found)`);
+  assert.ok(kit.length >= 8 && turn.length >= 5, `found ${kit.length} kit hooks and ${turn.length} turn hooks: the patterns above stopped matching`);
+  const missing = [...kit, ...turn].filter((f) => !catalogue.includes(`\`${f}\``));
+  assert.deepEqual(missing, [], 'add each to kit/skills/writing-for-agents/HOOKS.md with its event, what it does and its mode');
+});

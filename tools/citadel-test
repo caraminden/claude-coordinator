@@ -7,21 +7,26 @@
 # tests whose name matches (node's --test-name-pattern). Exits with the tests' status, 124 at the time limit.
 # It also runs the repo-wide tests in tools/always-tests.txt (a change anywhere can break them), counted as "+N
 # repo-wide"; --name does not filter those (they run in a second pass).
+# --affected [--base <ref>] adds the files your change can break (#1112): the test files you touched since the base
+# (default main, committed or not) and every test tools/affected-map.txt maps your changed paths to, each printed with
+# the rule that picked it (format: specs/affected-tests-map.md). You may name files too; with --affected none are needed.
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run without files or on a folder.
 set -uo pipefail
 say() { echo "citadel-test: $*" >&2; }
-usage() { say "usage: citadel-test test/<name>.test.ts ... [--name '<pattern>'] [--full] [--timeout <seconds>]"; exit 2; }
+usage() { say "usage: citadel-test [--affected [--base <ref>]] test/<name>.test.ts ... [--name '<pattern>'] [--full] [--timeout <seconds>]"; exit 2; }
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { say "run it inside a worktree of Citadel's repo"; exit 2; }
 reporter=$root/tools/citadel-test-reporter.ts
 [ -f "$reporter" ] || { say "$root has no tools/citadel-test-reporter.ts: it isn't Citadel's repo, or its branch is older than the command (rebase onto main)"; exit 2; }
 
-files=() opts=() full= limit=300
+files=() opts=() full= limit=300 affected= base=main
 while [ $# -gt 0 ]; do
   case $1 in
     --name) [ $# -ge 2 ] || usage; opts+=("--test-name-pattern=$2"); shift ;;
     --name=*) opts+=("--test-name-pattern=${1#--name=}") ;;
     --full) full=1 ;;
+    --affected) affected=1 ;;
+    --base) [ $# -ge 2 ] || usage; base=$2; shift ;;
     --timeout) [ $# -ge 2 ] && [[ $2 =~ ^[0-9]+$ ]] || usage; limit=$2; shift ;;
     --timeout=*) limit=${1#--timeout=}; [[ $limit =~ ^[0-9]+$ ]] || usage ;;
     -*) say "unknown option $1"; usage ;;
@@ -30,7 +35,19 @@ while [ $# -gt 0 ]; do
   shift
 done
 full_suite="the full suite is the land gate's job (tools/land.sh runs it on CI); if you must run it here: citadel-heavy npm test"
-[ ${#files[@]} -gt 0 ] || { say "name the test files your change touches; $full_suite"; exit 2; }
+if [ -n "$affected" ]; then
+  alist=$("$root/tools/citadel-node" "$root/tools/affected.ts" --root "$root" --base "$base") ; as=$?
+  [ $as -eq 3 ] && { say "the map has no rule for: $(echo "$alist" | sed -n 's/^unmapped\t//p' | tr '\n' ' ')and its @fallback is full: $full_suite"; exit 2; }
+  [ $as -eq 0 ] || exit 2
+  while IFS=$'\t' read -r kind a b; do
+    case $kind in
+      run) say "affected: $a  <- $b"; case " ${files[*]-} " in *" $a "*) ;; *) files+=("$a") ;; esac ;;
+      unmapped) say "affected: no rule covers $a (run the tests that guard it by name)" ;;
+      empty) say "affected: nothing has changed from $base" ;;
+    esac
+  done <<<"$alist"
+fi
+[ ${#files[@]} -gt 0 ] || [ -n "$affected" ] || { say "name the test files your change touches; $full_suite"; exit 2; }
 for f in "${files[@]}"; do
   [ -d "$f" ] && { say "$f is a folder; $full_suite"; exit 2; }
   [ -f "$f" ] || { say "no such file: $f"; exit 2; }
@@ -44,6 +61,7 @@ while IFS= read -r line; do
   dup=; for f in "${files[@]}"; do [ "$(realpath "$f")" = "$(realpath "$root/$line")" ] && dup=1; done
   [ -n "$dup" ] || extra+=("$root/$line")
 done <"${CITADEL_TEST_ALWAYS:-$root/tools/always-tests.txt}"
+[ ${#files[@]} -gt 0 ] || [ ${#extra[@]} -gt 0 ] || { say "affected: nothing to run"; exit 0; }
 # With --name the pattern would skip the repo-wide files' tests, so they run apart; otherwise they join the run.
 second=(); export CITADEL_TEST_EXTRA=0
 if [ ${#opts[@]} -gt 0 ]; then second=("${extra[@]}"); else files+=("${extra[@]}"); export CITADEL_TEST_EXTRA=${#extra[@]}; fi

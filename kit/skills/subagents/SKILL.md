@@ -36,6 +36,7 @@ design.
 | `citadel:finding-checker` | opus | medium |
 | `citadel:finding-checker` on a high-risk change | fable | medium |
 | `citadel:investigator` | sonnet | medium |
+| `citadel:scout` | sonnet | medium |
 | `citadel:fresh-eyes` | opus | high |
 | `citadel:professor` | opus | high |
 | `citadel:critic` | from the rubric | from the rubric |
@@ -99,6 +100,10 @@ Ask one question: will the session need what this step reads, or only what it co
   take back its Pacific-time timeline (at most 15 lines). It works in a person's container too
   (it uses `host_check` there). When the person asks what went wrong and how to stop it, the
   `citadel:post-mortem` skill sends it and adds the cause and the fix.
+- **"What has this scheme already done here?"** Past minions on an area (who touched it, what they
+  tried or ruled out, what they left to reuse) are one job for the `citadel:scout` agent: give it the
+  area, the paths or the draft brief, and take back its 15 lines. It keeps a dated note per area in
+  the shared folder, so a second ask on the same area costs a few calls.
 - **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
   long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
   the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on

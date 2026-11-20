@@ -4,10 +4,10 @@ import { test } from 'node:test';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
-// Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit; 39,700 the same day: #1056 added the design-brief ambition line; minion 37,000 and Taskmaster 40,100 the same day: #1043 added the Shipping line both read, path, go threshold and try-first, in place of each scheme's own shipping paragraph) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
+// Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit; 39,700 the same day: #1056 added the design-brief ambition line; minion 37,000 and Taskmaster 40,100 the same day: #1043 added the Shipping line both read, path, go threshold and try-first, in place of each scheme's own shipping paragraph; Taskmaster 40,800 on 2026-11-19: #1154 added the rule-to-hook trigger) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 37_500 /* +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5) */, taskmaster: 40_500 /* +100 for the ship-lessons line (#1119) */ };
+const BUDGET = { minion: 37_500 /* +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5) */, taskmaster: 40_800 /* +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154) */ };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);
@@ -78,7 +78,7 @@ test('saving instructions says what they cost, the same in the settings page and
 // next to the built-in prompt, so they get a budget too. Characters of name + description, today's size
 // plus about 5% on 2026-11-14. This never asks for shorter text: a skill with a longer description is a
 // deliberate decision, made by raising the number with the reason in the commit message.
-const KIT_BUDGET = 10_150; // +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110)
+const KIT_BUDGET = 10_350; // +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110); +200 on 2026-11-20 for the citadel:scout agent (#1156)
 
 /** A skill's or agent's `name` and `description` frontmatter, a folded or plain description joined on one line. */
 function listing(file: string): string {

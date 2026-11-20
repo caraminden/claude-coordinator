@@ -1,0 +1,45 @@
+# Citadel's affected-tests map (#1112), read by `tools/citadel-test --affected`. The format is the spec in the shared
+# folder's specs/affected-tests-map.md: a rule is `<source glob>: <test> ...`, every rule that matches a changed path
+# adds its tests, a touched test file runs itself, and a path no rule covers is printed as unmapped.
+# The tests in tools/always-tests.txt run on every citadel-test run, so they need no line here.
+# test/affected.test.ts fails when a repo-wide test (one that reads the repo, not one module) is on neither this map nor
+# that list, or when a line here names a file that is gone.
+@tests test/*.test.ts test/*.test.js
+@fallback always
+
+# The database: its schema, its secrets list, and the first-run commit budget.
+src/db.ts: test/db-setup.test.ts test/host-check.test.ts
+src/db-view.ts: test/host-check.test.ts
+src/host-check.ts: test/host-check.test.ts
+
+# Agent instructions and the tools every turn loads.
+src/prompts.ts: test/prompt-done-when.test.ts test/prompt-hashes.test.ts test/model-table.test.ts
+src/mcp.ts: test/mcp-always-load.test.ts
+src/turn-launch.ts: test/pinned-mcp.test.ts
+src/runner.ts: test/pinned-mcp.test.ts
+
+# Routes and who sees what.
+src/routes/**: test/access-matrix.test.ts
+
+# The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
+public/**: test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
+src/previews.ts: test/relative-urls.test.ts
+
+# PowerShell scripts are linted with pwsh.
+**/*.ps1: test/ps1-lint.test.ts
+tools/ci-runner/**: test/ps1-lint.test.ts
+tools/win-test-box/**: test/ps1-lint.test.ts
+kit/skills/**: test/ps1-lint.test.ts test/skill-evals.test.ts
+tools/skill-evals/**: test/skill-evals.test.ts
+
+# Test code: the guards over every test file.
+test/**: test/one-until.test.ts test/raw-log-read.test.ts
+
+# The test tooling's own tests.
+tools/citadel-test: test/citadel-test.test.ts test/affected.test.ts
+tools/affected.ts: test/affected.test.ts
+tools/affected-map.txt: test/affected.test.ts
+tools/always-tests.txt: test/citadel-test.test.ts
+src/backup.html: test/backup.test.ts
+src/backup.ts: test/backup.test.ts

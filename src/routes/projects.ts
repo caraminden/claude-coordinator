@@ -1380,6 +1380,18 @@ export const projectRoutes: Route[] = [
       return json(res, 200, { hits: scope === 'minions' ? minionHits(app, hits) : hits });
     },
   },
+  // Past minions and handoffs by words (#1156, search_minions): ?q= (empty lists the newest closed), ?since=YYYY-MM-DD, ?limit=.
+  {
+    method: 'GET', path: '/api/projects/:project/past-minions', who: ['person', 'taskmaster', 'minion'],
+    handler({ res, url, app, project }) {
+      const since = (url.searchParams.get('since') ?? '').trim();
+      if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new HttpError(400, 'since is a date, YYYY-MM-DD');
+      const q = (url.searchParams.get('q') ?? '').slice(0, 500);
+      // Pacific midnight, near enough either side of daylight saving for a day's cut.
+      const hits = app.store.minionIndex.search(project.id, q, { since: since ? Date.parse(`${since}T00:00:00-08:00`) : 0, limit: Number(url.searchParams.get('limit')) || 10 });
+      return json(res, 200, { hits });
+    },
+  },
 
   // The scheme's scheduled minions, for the Schedules page and the Taskmaster; each with the number
   // of the minion its last run started. People and the Taskmaster add them; minions can't.

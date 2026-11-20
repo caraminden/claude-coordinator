@@ -28,6 +28,8 @@ const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').spli
 // The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
 const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
 const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
+/** A minion in the seam trial's fresh group (#1129): offered its own fresh_session. */
+const SEAM_TRIAL = process.env.COORDINATOR_SEAM_TRIAL === '1';
 const MAX_TEXT = 4000;
 /** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
 const MSG = msgFromEnv(process.env.COORDINATOR_MSG);
@@ -1126,6 +1128,20 @@ const SEARCH_DECISIONS = {
   },
 };
 
+/** Past minions and handoffs by words (#1156): the index src/minion-index.ts fills as minions close. */
+const SEARCH_MINIONS = {
+  name: 'search_minions',
+  description: "Search this scheme's closed minions by words: each one's title, type, brief, last replies and the files it wrote (repo paths, and $TMPDIR/ scratch scripts such as seed or page-driving scripts), plus the shared folder's handoffs. Use it before building tooling, a script or a feature, to find who already built, tried or ruled it out, and before briefing new work. Every word must match first, then any of them fill up; a file path works as words (src/memory.ts). Returns #N, title, type, closed date, the matching text and the files. Leads to check with read_ticket, not facts. For a deeper look at an area, start a citadel:scout Grunt.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Words or a path, e.g. "seed script" or "tools/land.sh queue"; empty lists the newest closed' },
+      since: { type: 'string', description: 'Optional: only minions closed on or after this date, YYYY-MM-DD (Pacific)' },
+      limit: { type: 'integer', description: 'How many minions (default 10, max 30)' },
+    },
+  },
+};
+
 /** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
 const MEDIA = process.env.COORDINATOR_MEDIA === '1';
 const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
@@ -1280,6 +1296,17 @@ function memoryText(hits: any[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   return hits.map((h) => `${h.kind === 'coordinator' ? 'Taskmaster' : `#${h.number} ${h.title}`} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
+}
+
+/** search_minions' answer: a header line per minion or handoff, then its matching text and the files it wrote. */
+function pastMinionsText(hits: any[]): string {
+  if (!hits.length) return 'No closed minion or handoff matches. Fewer words, or another word for it, may find one.';
+  const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return hits.map((h) => {
+    if (h.kind === 'handoff') return `Handoff ${h.name} · changed ${day(h.mtime)}\n${h.snippet}`;
+    const files = h.files ? h.files.split('\n') : [];
+    return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
+  }).join('\n\n');
 }
 
 /** search_decisions' answer: one block per decision, newest or best first, then what each source holds. */
@@ -1585,6 +1612,20 @@ const SHIP_LESSONS = {
       take: { type: 'array', items: { type: 'integer' }, maxItems: 200, description: 'Lesson ids to mark taken' },
       note: { type: 'string', maxLength: 300, description: 'With take: what became of them, e.g. "proposed: handoffs/handoff-x.md" or "dropped: one-off"' },
     },
+  },
+};
+
+/** A minion's fresh_session (the seam trial's fresh group, #1129): the same route as a Taskmaster's, and it carries on by itself. */
+const SEAM_FRESH = {
+  name: 'fresh_session',
+  description: `Hand off to a fresh Claude session at a seam you pick (your turn's [System] note says when you are in the trial): when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt, memory and a facts sheet ${APP_NAME} adds: your cards, state and people's last messages) instead of this whole conversation, and it starts by itself. People's chat history stays as it is. Commit your work first. In \`summary\` put: each person's asks and decisions in their own words, with who and when; your task list with what is done; the branch, its head and what is committed or pushed; cards waiting on people with their links; what is parked or waited on; what you ruled out and why; and the next step. Facts, not history. Then reply in one line and end the turn.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' },
+      carry_on: { type: 'boolean', description: 'Default true: your fresh session starts at once. false when this turn ends waiting on a person or another minion: it then starts with the next message' },
+    },
+    required: ['summary'],
   },
 };
 
@@ -2101,6 +2142,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('GET', `/api/projects/${PROJECT}/decisions?${q}`);
       return decisionsText(r, Math.min(Math.max(Number(args.limit) || 10, 1), 50));
     }
+    case 'search_minions': {
+      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', ...(args.since ? { since: String(args.since) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
+      return pastMinionsText((await call('GET', `/api/projects/${PROJECT}/past-minions?${q}`)).hits);
+    }
     case 'contraption_turns': {
       const q = new URLSearchParams();
       if (args.app) q.set('app', String(args.app));
@@ -2440,8 +2485,10 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':
-      await call('POST', `/api/tickets/${TICKET}/fresh-session`, { summary: args.summary });
-      return 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
+      await call('POST', `/api/tickets/${TICKET}/fresh-session`, { summary: args.summary, ...(ROLE === 'thread' ? { carry_on: args.carry_on !== false } : {}) });
+      return ROLE === 'thread' && args.carry_on !== false
+        ? 'Handoff saved: your session resets when this turn ends, and your next turn starts from it by itself. Reply in one line and end the turn.'
+        : 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
     case 'stop_ticket': {
       const { stopped } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
       return stopped ? 'Stopped.' : 'That minion was not running.';
@@ -2502,10 +2549,10 @@ function toolList() {
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
-  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
+  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, ...(SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

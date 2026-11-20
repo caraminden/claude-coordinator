@@ -23,6 +23,7 @@ import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
+import { DownloadLinks, downloadLinks, linkSession } from './src/download-links.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
@@ -83,6 +84,7 @@ import { ensureCoordinatorFor, projectRoutes } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
+import { MinionIndexer } from './src/minion-index.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
 import { memoryCuratorRoutes } from './src/routes/memory-curator.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
@@ -682,6 +684,9 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
 if (!BOOT_CHECK) setInterval(() => void safely('memory', () => memoryIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+// Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
+const minionIndexer = new MinionIndexer(store, DATA_DIR);
+if (!BOOT_CHECK) setInterval(() => void safely('minion index', () => minionIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 
 // ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 
@@ -1482,6 +1487,13 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
     if (isBackupPath(url.pathname)) {
       await serveBackup(app, BACKUP_SCHEME, req, res, url);
+    } else if (DownloadLinks.token(url.pathname) !== null) {
+      // A short-lived download link Firefox opens with no login (#1184): that one file's GET, replayed as its person.
+      const link = req.method === 'GET' || req.method === 'HEAD' ? downloadLinks.redeem(DownloadLinks.token(url.pathname)!) : null;
+      const session = link && linkSession(store, link.uid);
+      if (!link || !session) throw new HttpError(410, 'This download link has expired: download the file from Citadel again');
+      req.url = link.path;
+      await routes(app, req, res, requestUrl(req), session);
     } else if (url.pathname.startsWith('/api/')) {
       const session = auth.session(req);
       // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
@@ -1495,9 +1507,10 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       apps.serve(req, res);
     } else if (preview) {
       const session = auth.session(req);
-      // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
+      // An HTML page's files under its file token come from a frame that sends no cookies, and a download link (#1184) from
+      // Firefox, which has none; the preview checks the token.
       const [, build, id, rest] = preview;
-      const tokened = /^\/(c\/)?api\/files\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
+      const tokened = /^\/(c\/)?api\/(files|dl)\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
       // People only, signed in to the live app; a page load without a login goes to the login.
       if (!tokened && (!session || session.agent !== undefined)) {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();

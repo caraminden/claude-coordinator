@@ -2882,6 +2882,11 @@ export class Store {
    * plan verdict, which are messages too, or an approval click), and how many turns each thread
    * has finished since. `since` is null if they never have.
    */
+  /** Whether `name` has ever written or acted anywhere (#1151's welcome): recap leaves 0 for "never", so that doesn't count. */
+  hasActed(name: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM last_actions WHERE name = ? AND at > 0 LIMIT 1').get(name);
+  }
+
   recap(name: string, projectId: number): { since: number | null; turns: Record<number, number> } {
     let row = this.db.prepare('SELECT at FROM last_actions WHERE name = ? AND project_id = ?').get(name, projectId) as { at: number } | undefined;
     if (!row) {

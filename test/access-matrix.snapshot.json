@@ -3822,6 +3822,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/welcome": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/welcome": {
+  "anon": "401 Not logged in",
+  "person": "400 Send dismiss: true or one of the practice card's answers",
+  "member": "400 Send dismiss: true or one of the practice card's answers",
+  "outsider": "400 Send dismiss: true or one of the practice card's answers",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /apps/cx/link": {
   "anon": "200",
   "person": "200",

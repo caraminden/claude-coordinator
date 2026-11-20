@@ -14,6 +14,7 @@ import { optOutKey } from '../replay-keep.ts';
 import { ordinal, writeOrder } from '../waits.ts';
 import { CITADEL_TARGET } from '../releases.ts';
 import { landQueue, schemeLine } from '../release-readers.ts';
+import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -41,7 +42,9 @@ export async function newPasswordHash(v: unknown): Promise<string> {
 /** Who you are, as the front end needs it. */
 function meView({ store, claude, runner }: Ctx['app'], session: Ctx['session']) {
   const user = session.uid ? store.getUser(session.uid) : undefined;
-  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked'), payer: runner.payerOf(user?.id), keepChats: !!user && !store.getSetting<boolean>(optOutKey(user.id)) };
+  const turns = !!user?.server_login || (!!user && claude.linked(user.id) === 'linked');
+  // welcome: the first-day checklist (#1151), null once it's gone; here so the chat draws with it, never under it later.
+  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns, payer: runner.payerOf(user?.id), keepChats: !!user && !store.getSetting<boolean>(optOutKey(user.id)), welcome: user ? welcomeView(store, user, turns) : null };
 }
 
 export const appRoutes: Route[] = [
@@ -103,6 +106,24 @@ export const appRoutes: Route[] = [
       const origin = typeof host === 'string' && !caller ? `${isSecure(req) ? 'https' : 'http'}://${host}` : null;
       if (origin && store.getSetting('public_origin') !== origin) store.setSetting('public_origin', origin);
       return json(res, 200, caller ? { name: session.name } : meView(app, session));
+    },
+  },
+  // The first-day welcome (#1151): its steps again after the person did something, and dismissing it or answering its practice card.
+  {
+    method: 'GET', path: '/api/welcome', who: ['person'],
+    handler({ res, app, session }) {
+      return json(res, 200, { welcome: meView(app, session).welcome });
+    },
+  },
+  {
+    method: 'POST', path: '/api/welcome', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = await readJson(req);
+      if (!session.uid) throw new HttpError(400, 'Only a person has a welcome');
+      if (body?.dismiss === true) welcomeAct(app.store, session.uid, { dismiss: true });
+      else if (CARD_OPTIONS.includes(body?.card)) welcomeAct(app.store, session.uid, { card: body.card });
+      else throw new HttpError(400, 'Send dismiss: true or one of the practice card\'s answers');
+      return json(res, 200, { welcome: meView(app, session).welcome });
     },
   },
   {

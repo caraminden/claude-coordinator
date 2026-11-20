@@ -318,7 +318,7 @@ function appTiles(a, days, ships, redraw) {
 }
 
 /** The Status page for scheme `projectId`: Citadel first, then the apps you can see, this scheme's first. */
-export function statusPage(projectId, all = false) {
+export function statusPage(projectId) {
   let picked = 'citadel';
   let data = null;
   const list = h('nav', { class: 'ci-list st-list-nav', 'aria-label': 'Citadel and your apps' });
@@ -329,14 +329,14 @@ export function statusPage(projectId, all = false) {
   h('span', { class: `dot ${DOT[v.tone]}` }), h('span', { class: 'ci-li-name' }, name), h('span', { class: 'ci-li-state muted' }, sub ?? (v.reasons[0] ?? WORD[v.tone])));
   const draw = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
-    const shown = all ? apps : apps.filter((a) => a.scheme === projectId);
-    const sorted = [...shown].sort((x, y) => (y.scheme === projectId) - (x.scheme === projectId) || x.title.localeCompare(y.title));
-    const app = sorted.find((a) => `app:${a.name}` === picked);
+    const mine = apps.filter((a) => a.scheme === projectId).sort((x, y) => x.title.localeCompare(y.title));
+    const others = apps.filter((a) => a.scheme !== projectId).sort((x, y) => x.title.localeCompare(y.title));
+    const app = [...mine, ...others].find((a) => `app:${a.name}` === picked);
     if (!app) picked = 'citadel';
     list.replaceChildren(row('citadel', 'Citadel', citadel.verdict),
-      h('div', { class: 'ci-list-head' }, 'Your apps'),
-      ...(sorted.length ? sorted.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, all ? 'No app in a scheme you\'re in.' : 'No app in this scheme.')]),
-      ...(all ? [] : [h('a', { class: 'ci-li ci-all-link', href: `#/p/${projectId}/status/all` }, h('span', { class: 'ci-li-name' }, 'All schemes\' apps'))]));
+      h('div', { class: 'ci-list-head' }, 'This scheme\'s apps'),
+      ...(mine.length ? mine.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, 'No app in this scheme.')]),
+      ...(others.length ? [h('div', { class: 'ci-list-head' }, 'Other schemes\' apps'), ...others.map((a) => row(`app:${a.name}`, a.title, a.verdict))] : []));
     const v = app ? app.verdict : citadel.verdict;
     ix = { target: app ? `app:${app.name}` : 'citadel', looks: (app ?? citadel).looks ?? {}, verdict: v, ask: !!app || citadel.canInvestigate !== false };
     // Each reason names the minion on its tile (#1273), the way the CI page names a red's fix minion.

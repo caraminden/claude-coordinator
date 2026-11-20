@@ -64,7 +64,7 @@ Write-Host "  $($card.Name) can be partitioned ($($part.PartitionCount) partitio
 if ($vm.DynamicMemoryEnabled) { Stop-With "the box has dynamic memory on; a GPU partition needs it off (new-test-box.ps1 turns it off)." }
 if ($vm.CheckpointType -ne 'Disabled') { Stop-With "the box has checkpoints on; a GPU partition needs them off: Set-VM -Name $Name -CheckpointType Disabled" }
 $have = Get-VMGpuPartitionAdapter -VMName $Name -ErrorAction SilentlyContinue
-Write-Host "  The box: $($vm.State), $(if ($have) { 'has its GPU partition already, so this run copies the driver again' } else { 'no GPU partition yet' })"
+Write-Host "  The box: $($vm.State), $(if ($have) { 'has its GPU partition already, so this run copies only driver files the box lacks' } else { 'no GPU partition yet' })"
 
 # The driver's files: whole driver-store folders go to the box's HostDriverStore, loose ones in
 # System32 and SysWOW64 to the same place there. Its INF and kernel driver stay out: the box loads
@@ -122,7 +122,7 @@ $names = @($folders | ForEach-Object { Split-Path $_ -Leaf })
 $repo = 'C:\Windows\System32\HostDriverStore\FileRepository'
 Invoke-Command -Session $s {
   New-Item -ItemType Directory -Force $using:repo | Out-Null
-  # Folders from an older driver go. The current ones are copied over again: an earlier copy may have stopped halfway.
+  # Folders from an older driver go; in the current ones, a file missing or of another size (a copy that stopped) is copied below.
   Get-ChildItem $using:repo -Directory | Where-Object Name -notin $using:names | Remove-Item -Recurse -Force
 }
 # File by file, skipping one the box has at the same size: a folder's name pins the driver version, so that file is
@@ -138,7 +138,7 @@ $dirs = @($todo | ForEach-Object { Split-Path $_.To } | Sort-Object -Unique)
 Invoke-Command -Session $s { $using:dirs | ForEach-Object { New-Item -ItemType Directory -Force $_ | Out-Null } }
 foreach ($t in $todo) {
   try { Copy-Item -ToSession $s -Path $t.From -Destination $t.To -Force }
-  catch { Stop-With "the box has $($t.To) open, so it can't be replaced. Restart the box (Restart-VM -Name $Name in this window), then run this again." }
+  catch { Stop-With "copying $($t.To) failed: $($_.Exception.Message) If it says the file is in use, restart the box (Restart-VM -Name $Name in this window) and run this again." }
 }
 Write-Host "  driver files copied"
 

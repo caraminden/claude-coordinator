@@ -131,6 +131,18 @@ export class Landings {
     // As the runner tags turn units: two servers on one box (a dev copy) never share a unit name.
     this.unitTag = createHash('sha256').update(this.root).digest('hex').slice(0, 8);
     this.prune();
+    this.waiting = this.scan();
+  }
+
+  /** Minions with a hand-off not yet reported: kept in memory, read from the folders once at start (#1210: a scan per call froze the server). */
+  private readonly waiting: Set<number>;
+
+  private scan(): Set<number> {
+    try {
+      return new Set(readdirSync(this.root).filter((n) => /^\d+$/.test(n) && existsSync(join(this.root, n, HANDOFF))).map(Number));
+    } catch {
+      return new Set();
+    }
   }
 
   private dir(ticketId: number): string {
@@ -156,16 +168,13 @@ export class Landings {
     if ((now && now.code === null) || existsSync(join(this.dir(ticketId), HANDOFF))) return false;
     this.start(ticketId, cwd, env, args);
     writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
+    this.waiting.add(ticketId);
     return true;
   }
 
   /** Minions whose handed-off landing isn't reported yet. */
   handoffs(): number[] {
-    try {
-      return readdirSync(this.root).filter((n) => /^\d+$/.test(n) && existsSync(join(this.root, n, HANDOFF))).map(Number);
-    } catch {
-      return [];
-    }
+    return [...this.waiting];
   }
 
   handoff(ticketId: number): (Handoff & { args: string[] }) | null {
@@ -178,6 +187,7 @@ export class Landings {
 
   /** Reported: it no longer counts as a hand-off. */
   settled(ticketId: number) {
+    this.waiting.delete(ticketId);
     try {
       renameSync(join(this.dir(ticketId), HANDOFF), join(this.dir(ticketId), 'handoff.done.json'));
     } catch {

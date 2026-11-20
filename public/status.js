@@ -172,6 +172,7 @@ function citadelTiles(c, days, now, ships, redraw) {
     tile('Stalls', plural(c.stalls.counts[today], 'stall') + ' today',
       lastStall ? `Longest today ${secs(c.stalls.longest[today])} · the last ${ago(lastStall.at)}${lastStall.seconds !== null ? `, ${lastStall.seconds} s` : ''}` : 'None this week',
       dayBars(days, c.stalls.counts, { tip: (i) => `${plural(c.stalls.counts[i], 'stall')}${c.stalls.counts[i] ? `, longest ${c.stalls.longest[i]} s` : ''}`, label: 'event-loop stalls a day' })),
+    stormTile(c.storms, days, now),
     tile('Memory', mem === null ? 'No reading yet' : `${mem}% used`, host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes',
       hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), { tone: mem !== null && mem >= 90 ? 'warn' : null }),
     tile('Disk', disk === null ? 'No reading yet' : `${disk}% used`, host ? `${bytes(host.disk_free)} free of ${bytes(host.disk_total)}` : 'Read every 5 minutes',
@@ -195,6 +196,22 @@ function citadelTiles(c, days, now, ships, redraw) {
     backupTile(c.backup, now),
     ...c.slots.map(slot),
   ];
+}
+
+/**
+ * Memory limits (#1280): times a slice or container sat at its memory limit while its work stalled, which burns cores
+ * reclaiming. The headline is today's stalled time; the line names the group and its largest unit, now or last.
+ */
+function stormTile(s, days, now) {
+  if (!s) return '';
+  const today = days.length - 1;
+  const one = (x) => `${x.group}${x.limit ? ` (limit ${bytes(x.limit)})` : ''}: ${secs(x.stalled)} stalled over ${secs(x.seconds)}${x.unit ? `, largest ${x.unit} ${bytes(x.unitBytes)}` : ''}`;
+  const live = s.now[0];
+  const stalledToday = s.stalled[today] + sum(s.now.map((x) => x.stalled));
+  return tile('Memory limits', live ? 'At its limit now' : stalledToday ? `${secs(stalledToday)} stalled today` : 'None today',
+    live ? one(live) : s.last ? `The last ${ago(s.last.at)}: ${one(s.last)}` : 'No slice or container at its limit this week',
+    dayBars(days, s.stalled, { tip: (i) => `${plural(s.counts[i], 'storm')}${s.counts[i] ? `, ${secs(s.stalled[i])} stalled` : ''}`, label: 'seconds stalled at a memory limit a day' }),
+    { tone: live || stalledToday >= 60 ? 'warn' : null });
 }
 
 /** Backup freshness (#1142): the last database backup, the last off-box pull, and each app yes or no. Red when a night is missing. */

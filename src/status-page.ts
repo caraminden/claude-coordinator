@@ -12,6 +12,7 @@ import { pacificDay } from './pacific.ts';
 import { join } from 'node:path';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
+import { parseStorm, type Storm } from './memory-storms.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -23,6 +24,8 @@ const BUILD_KEEP_MS = 20_000;
 export const CITADEL_UNITS = ['claude-coordinator.service', 'claude-coordinator-backup.timer', 'claude-coordinator-prune.timer', 'citadel-watchdog.timer', 'citadel-embed.service', 'citadel-android-adb.service'];
 /** A stall at least this long, in the last day, turns Citadel's verdict to warn. */
 const STALL_WARN_S = 5;
+/** Seconds stalled at a memory limit in the last day (#1280) that turn Citadel's verdict to warn. Starting number; tune here. */
+export const STORM_WARN_S = 60;
 /** Errors in an app's last day that turn its verdict to warn. */
 export const APP_ERRORS_WARN = 10;
 
@@ -108,6 +111,8 @@ export interface StatusDeps {
   /** Tell a scheme's Taskmaster (a wake): the slow-ship nudge. Left out in a preview or a test that doesn't send. */
   tell?: (projectId: number, text: string) => void;
   mem?: () => Promise<{ total: number; avail: number }>;
+  /** Memory-limit storms still going (#1280, src/memory-storms.ts); the ones that ended are 'memory-high' health events. */
+  storms?: () => Storm[];
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
 }
 
@@ -247,6 +252,20 @@ export class StatusPage {
       stallLongest[d] = Math.max(stallLongest[d], stallSeconds(s.detail) ?? 0);
     }
     const lastStall = stalls.at(-1);
+    // Memory limits (#1280): storms per day, the seconds stalled, the last one, and any going now.
+    const storms = store.healthEventsSince(['memory-high'], since).flatMap((e) => {
+      const s = parseStorm(e.detail);
+      return s ? [{ at: e.at, ...s }] : [];
+    });
+    const stormCount = blank();
+    const stormStalled = blank();
+    for (const s of storms) {
+      const d = dayOf(s.at);
+      if (!(d in stormCount)) continue;
+      stormCount[d]++;
+      stormStalled[d] += s.stalled;
+    }
+    const stormsNow = this.deps.storms?.() ?? [];
     // Memory and disk: the hourly worst (least free), and the newest reading.
     const samples = store.hostSamples(since);
     const hourly = new Map<number, HostSample>();
@@ -297,6 +316,8 @@ export class StatusPage {
     if (oddBoots.length) reasons.push(['warn', `${oddBoots.length} restart${oddBoots.length > 1 ? 's' : ''} without a ship in the last day`]);
     const longStall = Math.max(0, ...stalls.filter((s) => s.at >= dayAgo).map((s) => stallSeconds(s.detail) ?? 0));
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`]);
+    const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
+    if (stormS >= STORM_WARN_S) reasons.push(['warn', `${Math.round(stormS)} s stalled at a memory limit in the last day`]);
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free']);
     const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
@@ -308,6 +329,7 @@ export class StatusPage {
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), detail: lastStall.detail.slice(0, 300) } : null },
       host: { series, latest, sampledFrom: samples[0]?.at ?? null },
+      storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,
@@ -406,6 +428,8 @@ export interface CitadelStatus {
   stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; detail: string } | null };
   /** series: [hour, memory used %, disk used %], the hour's worst. */
   host: { series: [number, number, number][]; latest: HostSample | null; sampledFrom: number | null };
+  /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
+  storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
   /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
   ciVisible: boolean;

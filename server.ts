@@ -20,6 +20,7 @@ import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { StatusPage, recordBoot } from './src/status-page.ts';
+import { MemoryStorms } from './src/memory-storms.ts';
 import { restartDetail, startWatchdog, takeMark } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
@@ -1561,8 +1562,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   send(res, 200, headers, body);
 }
 
+// Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
+const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, JSON.stringify(storm)) });
 // The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
 const status = new StatusPage({
+  storms: () => memoryStorms.current(),
   store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
   ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
@@ -1571,6 +1575,7 @@ const status = new StatusPage({
 if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT);
   status.start();
+  memoryStorms.start();
 }
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
@@ -1773,6 +1778,7 @@ process.on('SIGTERM', () => {
   services.stopping = true;
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
+  memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
   process.once('exit', () => ciLoad.stop()); // at the exit itself, after the last request: writes the runner-load samples it still holds
   server.close(() => process.exit(0));
   for (const c of clients.keys()) c.end();

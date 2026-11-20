@@ -13,7 +13,7 @@ function scope(url: URL, app: any, session: any, project: { id: number }) {
   if (all && !citadel) throw new HttpError(403, 'Every scheme\'s counts are for the Citadel scheme\'s members');
   return { citadel, all, id: all ? null : project.id };
 }
-const usageBody = (u: { since: number; skills: object; agents: object } | null) => (u ? { since: u.since, usage: { skills: u.skills, agents: u.agents } } : { since: null, usage: null });
+const usageBody = (u: { since: number; skills: object; agents: object; active: object } | null) => (u ? { since: u.since, usage: { skills: u.skills, agents: u.agents, active: u.active } } : { since: null, usage: null });
 
 export const skillRoutes: Route[] = [
   {

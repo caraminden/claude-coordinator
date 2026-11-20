@@ -74,6 +74,8 @@ test('the walk: each run\'s step of the turn, the Grunts it started, its minion 
   assert.deepEqual(self.phases, { 'before a ship': 1, 'before any edit': 1, 'after edits': 1 });
   assert.equal(self.shipped, 1);
   assert.deepEqual(self.types, { bug: 2, none: 1 });
+  assert.deepEqual(self.typeMinions, { bug: 1, none: 1 }, 'minions, not runs');
+  assert.deepEqual(r.active, { bug: 1, none: 1 });
   assert.deepEqual(self.last.map((l) => l.number), [41, 40, 40]);
   assert.deepEqual(r.skills['citadel:bug-fixing'].phases, { 'before any edit': 1 });
   assert.deepEqual(r.skills['citadel:bug-fixing'].with, { 'citadel:reviewer': 1 });

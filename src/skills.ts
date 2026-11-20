@@ -116,12 +116,15 @@ export interface Usage {
   types: Record<string, number>;
   /** For a skill: the Grunt types started later in the same turn. For a Grunt type: the skill that ran last before it in the turn ("none"). */
   with: Record<string, number>;
+  /** Distinct minions per type, for the type's rate against UsageReport.active ("taskmaster" not counted). */
+  typeMinions: Record<string, number>;
   /** Runs in a minion that later shipped. */
   shipped: number;
   /** The newest few, newest first. */
   last: RecentRun[];
 }
-export interface UsageReport { since: number; skills: Record<string, Usage>; agents: Record<string, Usage> }
+/** `active`: the minions at work in the window per type (any event the walk keeps; Taskmasters left out), what a type's rate is out of. */
+export interface UsageReport { since: number; skills: Record<string, Usage>; agents: Record<string, Usage>; active: Record<string, number> }
 
 const LAST = 5;
 /** Called once per run as the walk settles it (a skill's phase is final only when its turn ends; a Grunt type has none). */
@@ -137,15 +140,17 @@ export function usageFrom(t: SkillTimeline, since: number, per?: PerRun): UsageR
   const skills: Record<string, Usage> = {};
   const agents: Record<string, Usage> = {};
   const seen = new Map<Usage, Set<number>>();
-  const blank = (): Usage => ({ runs: 0, minions: 0, phases: {}, types: {}, with: {}, shipped: 0, last: [] });
+  const blank = (): Usage => ({ runs: 0, minions: 0, phases: {}, types: {}, typeMinions: {}, with: {}, shipped: 0, last: [] });
   const bump = (r: Record<string, number>, k: string) => (r[k] = (r[k] ?? 0) + 1);
   const count = (u: Usage, ticket: number, at: number, eventId: number) => {
     const k = tickets.get(ticket);
     u.runs++;
     const ids = seen.get(u) ?? new Set<number>();
+    const type = k?.kind === 'coordinator' ? 'taskmaster' : k?.type ?? 'none';
+    if (!ids.has(ticket) && type !== 'taskmaster') bump(u.typeMinions, type);
     seen.set(u, ids.add(ticket));
     u.minions = ids.size;
-    bump(u.types, k?.kind === 'coordinator' ? 'taskmaster' : k?.type ?? 'none');
+    bump(u.types, type);
     if (k?.shipped != null && k.shipped > eventId) u.shipped++;
     if (k) u.last.push({ project_id: k.project_id, number: k.number, title: k.title, at });
   };
@@ -194,7 +199,12 @@ export function usageFrom(t: SkillTimeline, since: number, per?: PerRun): UsageR
   }
   endTurn();
   for (const u of [...Object.values(skills), ...Object.values(agents)]) u.last = u.last.sort((a, b) => b.at - a.at).slice(0, LAST);
-  return { since, skills, agents };
+  const active: Record<string, number> = {};
+  for (const id of new Set(t.events.map((e) => e.ticket_id))) {
+    const k = tickets.get(id);
+    if (k && k.kind !== 'coordinator') bump(active, k.type ?? 'none');
+  }
+  return { since, skills, agents, active };
 }
 
 /**

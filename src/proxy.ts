@@ -25,7 +25,7 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
   if (Number(req.headers['content-length'] ?? 0) > max) return void tooBig(req, res, max);
   let ended = false;
   // Only a GET or HEAD with no body is asked again: never a POST, so a snap can't post twice.
-  const again = (req.method === 'GET' || req.method === 'HEAD') && !req.headers['content-length'] && !req.headers['transfer-encoding'];
+  const again = (req.method === 'GET' || req.method === 'HEAD') && !Number(req.headers['content-length'] ?? 0) && !req.headers['transfer-encoding'];
   const until = Date.now() + (opts.retryMs ?? RETRY_MS);
   let gone = false;
   let upstream: ClientRequest;

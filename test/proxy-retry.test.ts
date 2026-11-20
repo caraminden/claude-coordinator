@@ -25,9 +25,9 @@ async function front(appPort: number, retryMs = 2000) {
   return { s, failed };
 }
 
-function ask(port: number, method = 'GET', body?: string) {
+function ask(port: number, method = 'GET', body?: string, extra: Record<string, string> = {}) {
   return new Promise<{ status: number; text: string }>((ok, fail) => {
-    const r = request({ port, host: '127.0.0.1', method, path: '/x', headers: body ? { 'content-length': Buffer.byteLength(body) } : {} }, (res) => {
+    const r = request({ port, host: '127.0.0.1', method, path: '/x', headers: body ? { 'content-length': Buffer.byteLength(body) } : extra }, (res) => {
       let text = '';
       res.on('data', (d) => (text += d)).on('end', () => ok({ status: res.statusCode ?? 0, text }));
     });
@@ -56,6 +56,20 @@ test('a GET the app drops mid-request (its stop) asks again', async () => {
   const { s, failed } = await front(portOf(app));
   try {
     assert.deepEqual(await ask(portOf(s)), { status: 200, text: 'answer 2' });
+    assert.deepEqual(failed, []);
+  } finally {
+    await close(s);
+    await close(app);
+  }
+});
+
+test('a HEAD saying Content-Length: 0 has no body, so it asks again too', async () => {
+  let n = 0;
+  const app = await listen(createServer((req, res) => (++n === 1 ? req.socket.destroy() : res.end())));
+  const { s, failed } = await front(portOf(app));
+  try {
+    assert.equal((await ask(portOf(s), 'HEAD', undefined, { 'content-length': '0' })).status, 200);
+    assert.equal(n, 2);
     assert.deepEqual(failed, []);
   } finally {
     await close(s);

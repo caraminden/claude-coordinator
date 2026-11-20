@@ -5,6 +5,7 @@
 #   powershell -File install.ps1 [-Url https://citadel.zip/api/desktop/2/citadel/install.zip] [-Keep]
 param([string]$Url = 'https://citadel.zip/api/desktop/2/citadel/install.zip', [switch]$Keep)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'  # Windows PowerShell's progress bar slows a 150 MB download to minutes
 $dir = Join-Path $env:TEMP ('citadel-install-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory $dir | Out-Null
 $zip = Join-Path $dir 'install.zip'

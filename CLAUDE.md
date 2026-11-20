@@ -46,7 +46,7 @@ skill step is skipped or uses its default.
   (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire
   (`src/tripwire.ts`, `src/tripwire-git.ts`, `src/tripwire-base.ts`, `tools/guard.sh`, `.githooks/`); who sees what and whose turns run
   (`src/access.ts`, and `turnPerson` in `src/runner.ts`: whose Claude login a turn runs on); the kit's scheme-setup templates, which other schemes copy
-  (`kit/skills/scheme-setup/templates/`). `src/db.ts` holds every query: judge an
+  (`kit/skills/scheme-setup/templates/`). `src/db.ts` (setup, migrations, settings) and its area files `src/db/<area>.ts` hold every query, a new one in its area's file (`test/db-areas.test.ts`): judge an
   edit there by what it does.
 - **How a change ships:** the scheme instructions, "Shipping fixes" (`tools/land.sh`).
 - **UI rules:** the scheme instructions, "UI checks"; tokens, parts and design rules in the living

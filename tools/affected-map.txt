@@ -8,7 +8,8 @@
 @fallback always
 
 # The database: its schema, its secrets list, and the first-run commit budget.
-src/db.ts: test/db-setup.test.ts test/host-check.test.ts
+src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
+src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
 

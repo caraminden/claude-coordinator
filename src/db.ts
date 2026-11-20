@@ -14,6 +14,8 @@ import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
+import { machineQueries } from './db/machines.ts';
+import { pushQueries } from './db/push.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
@@ -3996,209 +3998,17 @@ export class Store {
     const upto = last === undefined || last >= 0xd800 ? null : prefix.slice(0, -1) + String.fromCodePoint(last + 1);
     return [`key >= ? ${upto === null ? '' : 'AND key < ?'} AND substr(key, 1, ?) = ?`, [prefix, upto, prefix.length, prefix].filter((v) => v !== null)];
   }
+}
 
-  listMachines(): Machine[] {
-    return this.db.prepare('SELECT * FROM machines ORDER BY name').all() as unknown as Machine[];
-  }
-
-  getMachine(id: number): Machine | undefined {
-    return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
-  }
-
-  /** A CI runner agent's load sample (#534), as JSON. */
-  addRunnerLoad(machineId: number, at: number, data: string) {
-    this.db.prepare('INSERT INTO runner_load (machine_id, at, data) VALUES (?, ?, ?)').run(machineId, at, data);
-  }
-
-  /** Many samples in one commit (CiLoad's buffer, #791); one whose machine has since been deleted is dropped. */
-  addRunnerLoads(rows: { machine: number; at: number; data: string }[]) {
-    const ins = this.db.prepare('INSERT INTO runner_load (machine_id, at, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM machines WHERE id = ?)');
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      for (const r of rows) ins.run(r.machine, r.at, r.data, r.machine);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  /** Every agent's samples from `since` on, oldest first. */
-  runnerLoadSince(since: number): { machine_id: number; at: number; data: string }[] {
-    return this.db.prepare('SELECT machine_id, at, data FROM runner_load WHERE at >= ? ORDER BY at').all(since) as { machine_id: number; at: number; data: string }[];
-  }
-
-  pruneRunnerLoad(before: number) {
-    this.db.prepare('DELETE FROM runner_load WHERE at < ?').run(before);
-  }
-
-  /** A machine `ownerId` manages (#306), or a shared one with none. It is lent to no scheme until some are added (#438). */
-  createMachine(name: string, tokenHash: string, by: string, ownerId: number | null = null): Machine {
-    const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, 1)')
-      .run(name, tokenHash, by, Date.now(), ownerId);
-    return this.getMachine(Number(lastInsertRowid))!;
-  }
-
-  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
-    const keys = Object.keys(fields) as (keyof typeof fields)[];
-    if (!keys.length) return;
-    this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
-  }
-
-  /** A new job (#857); returns it. */
-  addMachineJob(j: Omit<MachineJob, 'id' | 'go' | 'go_by' | 'paused_by' | 'card' | 'input_token_hash' | 'started_at' | 'ended_at' | 'run_s' | 'server_run_s' | 'gpu_busy_s' | 'live' | 'live_at' | 'exit_code' | 'error' | 'outputs' | 'upload_bytes' | 'swept_at'> & Partial<Pick<MachineJob, 'go' | 'go_by'>>): MachineJob {
-    const keys = Object.keys(j) as (keyof typeof j)[];
-    const { lastInsertRowid } = this.db.prepare(`INSERT INTO machine_jobs (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => (j[k] ?? null) as any));
-    return this.getMachineJob(Number(lastInsertRowid))!;
-  }
-
-  getMachineJob(id: number): MachineJob | undefined {
-    return this.db.prepare('SELECT * FROM machine_jobs WHERE id = ?').get(id) as unknown as MachineJob | undefined;
-  }
-
-  updateMachineJob(id: number, fields: Partial<Omit<MachineJob, 'id' | 'machine_id' | 'project_id' | 'kind' | 'kind_hash' | 'created_at'>>) {
-    const keys = Object.keys(fields) as (keyof typeof fields)[];
-    if (!keys.length) return;
-    this.db.prepare(`UPDATE machine_jobs SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => (fields[k] ?? null) as any), id);
-  }
-
-  /** Jobs matching one of these: a machine's, a minion's, a contraption's, or in some states; newest first, at most `limit`. */
-  machineJobs(where: { machine?: number; ticket?: number; contraption?: number; states?: readonly string[]; endedBefore?: number }, limit = 100): MachineJob[] {
-    const conds: string[] = [];
-    const args: (number | string)[] = [];
-    if (where.machine !== undefined) { conds.push('machine_id = ?'); args.push(where.machine); }
-    if (where.ticket !== undefined) { conds.push('ticket_id = ?'); args.push(where.ticket); }
-    if (where.contraption !== undefined) { conds.push('contraption_id = ?'); args.push(where.contraption); }
-    if (where.states) { conds.push(`state IN (${where.states.map(() => '?').join(', ')})`); args.push(...where.states); }
-    if (where.endedBefore !== undefined) { conds.push('ended_at < ? AND swept_at IS NULL'); args.push(where.endedBefore); }
-    return this.db.prepare(`SELECT * FROM machine_jobs ${conds.length ? `WHERE ${conds.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).all(...args, limit) as unknown as MachineJob[];
-  }
-
-  /** The bytes of job results a scheme holds on this server now (#857): what the 20 GB cap counts. */
-  jobResultBytes(projectId: number): number {
-    return (this.db.prepare('SELECT COALESCE(SUM(upload_bytes), 0) AS n FROM machine_jobs WHERE project_id = ? AND swept_at IS NULL').get(projectId) as { n: number }).n;
-  }
-
-  /** The standing go for a kind on a machine (#857), or undefined. */
-  jobKind(machineId: number, hash: string): { machine_id: number; hash: string; name: string; recipe: string; allowed_by: string; at: number } | undefined {
-    return this.db.prepare('SELECT * FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').get(machineId, hash) as any;
-  }
-
-  allowJobKind(machineId: number, hash: string, name: string, recipe: string, by: string) {
-    this.db.prepare('INSERT OR REPLACE INTO machine_job_kinds (machine_id, hash, name, recipe, allowed_by, at) VALUES (?, ?, ?, ?, ?, ?)').run(machineId, hash, name, recipe, by, Date.now());
-  }
-
-  /** Take back a standing go; false if there was none. */
-  forgetJobKind(machineId: number, hash: string): boolean {
-    return this.db.prepare('DELETE FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').run(machineId, hash).changes > 0;
-  }
-
-  /** A machine's standing goes, newest first. */
-  jobKinds(machineId: number): { hash: string; name: string; recipe: string; allowed_by: string; at: number }[] {
-    return this.db.prepare('SELECT hash, name, recipe, allowed_by, at FROM machine_job_kinds WHERE machine_id = ? ORDER BY at DESC').all(machineId) as any;
-  }
-
-  /** The schemes a machine is lent to. */
-  machineProjects(machineId: number): number[] {
-    return (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(machineId) as { project_id: number }[]).map((r) => r.project_id);
-  }
-
-  machineGranted(machineId: number, projectId: number): boolean {
-    return !!this.db.prepare('SELECT 1 FROM machine_projects WHERE machine_id = ? AND project_id = ?').get(machineId, projectId);
-  }
-
-  /** Lend a machine to exactly these schemes. */
-  setMachineProjects(machineId: number, projectIds: number[]) {
-    this.db.exec('BEGIN');
-    try {
-      this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(machineId);
-      const add = this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
-      for (const id of projectIds) add.run(machineId, id);
-      // Only a CI runner host from before #438 is still unscoped; giving it a list ends "every scheme an admin owns" for it.
-      this.db.prepare('UPDATE machines SET scoped = 1 WHERE id = ?').run(machineId);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  deleteMachine(id: number) {
-    this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
-  }
-
-  listViews(projectId: number, owner: string): SavedView[] {
-    const rows = this.db.prepare('SELECT * FROM person_views WHERE project_id = ? AND owner = ? ORDER BY name COLLATE NOCASE').all(projectId, owner) as any[];
-    return rows.map((r) => ({ ...r, picks: JSON.parse(r.picks) }));
-  }
-
-  /** Save the picks under a name; saving under a name this person already has replaces that view. */
-  saveView(projectId: number, owner: string, name: string, picks: SavedView['picks']) {
-    this.db
-      .prepare('INSERT INTO person_views (project_id, owner, name, picks, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, owner, name) DO UPDATE SET picks = excluded.picks, created_at = excluded.created_at')
-      .run(projectId, owner, name, JSON.stringify(picks), Date.now());
-  }
-
-  deleteView(projectId: number, owner: string, id: number): boolean {
-    return this.db.prepare('DELETE FROM person_views WHERE project_id = ? AND owner = ? AND id = ?').run(projectId, owner, id).changes > 0;
-  }
-
-  /** A phone's FCM token for a person and contraption (#1138); a token seen before moves here and is fresh again. */
-  savePushDevice(contraptionId: number, userId: number, token: string, platform: string) {
-    const now = Date.now();
-    this.db.prepare(`INSERT INTO contraption_push_devices (token, contraption_id, user_id, platform, created_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(token) DO UPDATE SET contraption_id = excluded.contraption_id, user_id = excluded.user_id, platform = excluded.platform, seen_at = excluded.seen_at`)
-      .run(token, contraptionId, userId, platform, now, now);
-  }
-
-  /** Forget a phone: a dead token, or (with userId) a person's own phone signing out. */
-  deletePushDevice(token: string, userId: number | null = null) {
-    this.db.prepare('DELETE FROM contraption_push_devices WHERE token = ? AND (? IS NULL OR user_id = ?)').run(token, userId, userId);
-  }
-
-  /** The tokens of these people's phones for a contraption. */
-  pushDevices(contraptionId: number, userIds: number[]): string[] {
-    if (!userIds.length) return [];
-    return (this.db.prepare(`SELECT token FROM contraption_push_devices WHERE contraption_id = ? AND user_id IN (${userIds.map(() => '?').join(', ')}) ORDER BY id`)
-      .all(contraptionId, ...userIds) as { token: string }[]).map((r) => r.token);
-  }
-
-  listPushSubscriptions(): PushSubscriptionRow[] {
-    return this.db.prepare('SELECT * FROM push_subscriptions ORDER BY id').all() as unknown as PushSubscriptionRow[];
-  }
-
-  getPushSubscription(endpoint: string): PushSubscriptionRow | undefined {
-    return this.db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint) as unknown as PushSubscriptionRow | undefined;
-  }
-
-  /** Save a browser's subscription for `name`; a browser someone else signed in on before becomes theirs. */
-  savePushSubscription(name: string, endpoint: string, p256dh: string, auth: string): PushSubscriptionRow {
-    this.db
-      .prepare(
-        `INSERT INTO push_subscriptions (name, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
-           muted = CASE WHEN name = excluded.name THEN muted ELSE '[]' END,
-           only_pinned = CASE WHEN name = excluded.name THEN only_pinned ELSE 0 END,
-           everything = CASE WHEN name = excluded.name THEN everything ELSE '[]' END, name = excluded.name`,
-      )
-      .run(name, endpoint, p256dh, auth, Date.now());
-    return this.getPushSubscription(endpoint)!;
-  }
-
-  setPushMuted(endpoint: string, muted: number[]) {
-    this.db.prepare('UPDATE push_subscriptions SET muted = ? WHERE endpoint = ?').run(JSON.stringify(muted), endpoint);
-  }
-
-  setPushEverything(endpoint: string, projectIds: number[]) {
-    this.db.prepare('UPDATE push_subscriptions SET everything = ? WHERE endpoint = ?').run(JSON.stringify(projectIds), endpoint);
-  }
-
-  setPushOnlyPinned(endpoint: string, onlyPinned: boolean) {
-    this.db.prepare('UPDATE push_subscriptions SET only_pinned = ? WHERE endpoint = ?').run(onlyPinned ? 1 : 0, endpoint);
-  }
-
-  deletePushSubscription(endpoint: string) {
-    this.db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+/**
+ * Each area's queries live in src/db/<area>.ts and are attached to Store's prototype here (#1313), so callers keep calling
+ * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
+ */
+type AreaQueries = typeof machineQueries & typeof pushQueries;
+export interface Store extends AreaQueries {}
+for (const area of [machineQueries, pushQueries]) {
+  for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
+    if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
+    Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });
   }
 }

@@ -1,0 +1,85 @@
+// src/db.ts by area (#1313): each area's queries live in src/db/<area>.ts and are attached to Store, so the class in
+// src/db.ts keeps only setup, migrations and settings. These lists name what is still in the class.
+import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { Store } from '../src/db.ts';
+
+const src = join(import.meta.dirname, '..', 'src');
+
+/** Setup, migrations and settings: these stay in src/db.ts. */
+const STAYS = `attachState autoCheckpoint closedAtFromNotes deleteSetting dropEarlyPeekAurasBuilds getSetting groupByType keyRange
+  lendingLists moveSharedViews noteSchemaVersion numberTickets setSetting settingKeys settingsWithPrefix settleBuilds
+  shippingFromRules serverLoginOwnerOnly statePath`;
+
+/** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. */
+const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError addEvent addFlakeEvents addFlakeFix addGithubSeen
+  addHealthEvent addHostSample addMember addOpenrouterCall addPick addRelease addStepTimes adoptOwnerless appDeploysSince
+  appErrorsSince appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns briefStarts bugBriefs
+  canSee cardEventId chatTextEvents ciFiles claimBrief contraptionByKeyHash contraptionEnabled contraptionErrors
+  contraptionReleases contraptionSession contraptionSessions contraptionsFor contraptionTurnsSince contraptionUsers
+  coordinatorFor countReleases createContraption createProject createTicket createUser dailyCosts deleteCiFile
+  deleteClaudeState deleteContraptionSession deleteCredential deleteProject deleteRepoCollaborator deleteSecret
+  deleteTicket deleteTurnAudit deleteUser deployedSince digestFor dropAudit endContraptionTurn eventIdAt eventsBefore
+  eventsBetween eventsOfKinds eventsPage fableSpend failCredential findArtifact findEvents findUser finishOpenrouterCall
+  flakeCounts flakeDetails flakeFiles flakeFix flakeFixes flakeSightings forgetCards getCiFile getClaudeState
+  getContraption getContraptionTurn getCoordinator getCredential getEvent getOverlord getProject getRepoCollaborator
+  getSecret getTicket getTicketByNumber getUser githubSeen hasActed hasFlakeNear healthBetween healthCount
+  healthEventsSince heldBelow hiddenProjects hostSamples inScheme insertEvent instructionHistory isAdmin isSplit
+  isTicketPinned lastApkPublish lastEventOf lastHealthEvent lastTurnEnd latestArtifact latestPlan leaveTouched
+  limitedTickets listArtifacts listClaudeState listContraptionDeploys listContraptions listCoordinators listCredentials
+  listEvents listMembers listOrder listProjects listReleases listRepoCollaborators listSecrets listTickets listTurns
+  listUsers liveReleasesSince markSeen memberSchemes minimizedProjects minionCosts minionOwner minionTurnsSince
+  nextNumber noteDigest noteLooks onboardingOpenedAt openCardAt openCardEventId openCards openCardsOf openCardsWhere
+  openrouterSpent ownerCoordinator personalInstructionHistory personalInstructions personalLayer personId personNotes
+  pickedCards picksOf pinnedArtifactPaths pinnedTickets planEvents promptHashes pruneArtifacts publishCiFile putCiFile
+  putClaudeState putContraptionSession putCredential putFates putRepoCollaborator putSecret putTurnAudit
+  readCardRows readsEveryScheme recap recentCards recordApkPublish recordGrunts recordTurn releasesSince removeMember
+  renameProject replyTexts rewriteClaudeEvents saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner
+  setAppInstructions setArtifactPinned setContraptionUser setEventData setLastActivity setListOrder
+  setOpenrouterCallPath setPersonalInstructions setPersonNote setProjectHidden setProjectInstructions
+  setProjectMinimized setProjectRepoDir setProjectSettings setProjectUpstream setSeenItems setSharedPin setTicketDir
+  setTicketPinned settleBrief setTurnVerdict sharedPins shipNotesSince shippedNotes shippedSince spendByPayer spendRows
+  splitScheme startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts ticketByBranch
+  ticketCost touch touchedBy turnAsker turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix
+  updateTicket updateTicketQuietly updateUser visibleProjects warmCardRows writeArtifactData`;
+
+/** The methods declared in src/db.ts's Store class body, by name. */
+function classMethods(): string[] {
+  const text = readFileSync(join(src, 'db.ts'), 'utf8');
+  const start = text.indexOf('\nexport class Store {');
+  assert.ok(start > 0, 'src/db.ts declares `export class Store {`');
+  const body = text.slice(start, text.indexOf('\n}\n', start));
+  const names = [...body.matchAll(/^ {2}(?:(?:private|static|async|get|set|readonly) )*([A-Za-z_$][\w$]*)\s*[<(]/gm)].map((m) => m[1]);
+  return names.filter((n) => n !== 'constructor');
+}
+
+test('no new query method lands in src/db.ts itself: it goes in its area\'s file under src/db/', () => {
+  const allowed = new Set(`${STAYS} ${NOT_MOVED_YET}`.split(/\s+/).filter(Boolean));
+  const found = classMethods();
+  assert.ok(found.includes('getSetting') && found.includes('attachState'), 'the scan finds the class\'s methods');
+  const added = found.filter((n) => !allowed.has(n));
+  assert.deepEqual(added, [], `new methods in src/db.ts's Store class: ${added.join(', ')}. Put a query in its area's file under src/db/ ` +
+    '(an object of methods taking `this: Store`, attached at the bottom of src/db.ts); start a new area file if none fits.');
+  const gone = [...allowed].filter((n) => !found.includes(n));
+  assert.deepEqual(gone, [], 'moved out of src/db.ts or renamed: take them off the lists in this test');
+});
+
+test('every area file under src/db/ is attached to Store, and no method is defined twice', async () => {
+  const files = readdirSync(join(src, 'db')).filter((f) => f.endsWith('.ts'));
+  assert.ok(files.length >= 2, 'the area files are there');
+  const seen = new Map<string, string>();
+  for (const f of files) {
+    const mod = await import(join(src, 'db', f));
+    for (const [exp, area] of Object.entries(mod)) {
+      for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area as object))) {
+        assert.ok(!seen.has(name), `${name} is in both ${seen.get(name)} and src/db/${f}`);
+        seen.set(name, `src/db/${f}`);
+        assert.equal(Object.getOwnPropertyDescriptor(Store.prototype, name)?.value, d.value, `src/db/${f}'s ${exp}.${name} is not on Store: add ${exp} to the areas at the bottom of src/db.ts`);
+      }
+    }
+  }
+  const store = new Store(':memory:');
+  assert.equal(store.createMachine('m', 'h', 'cara').name, 'm', 'a moved method runs with `this` as the Store, and calls another');
+});

@@ -7,7 +7,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { presenceChip } from './presence.js';
+import { othersIn, presenceChip } from './presence.js';
 import { byUrgency, cardChip, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
@@ -175,24 +175,91 @@ export function renderSidebar() {
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
   const pinnedGroup = pinned.length ? h('section', { class: 'thread-group g-pinned' }, h('h3', {}, 'Pinned'), pinned.map((t) => threadRow(t))) : '';
-  let closedGroup = '';
-  if (closed.length) {
-    // Closed threads stay out of the way but can still be opened and reopened.
-    // Their rows are built only while the list is open (#1077): a big scheme has a thousand, and every minion update redraws.
-    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Dismissed'), view.showClosed ? closed.map((t) => threadRow(t)) : []);
-    closedGroup.addEventListener('toggle', () => {
-      view.showClosed = closedGroup.open;
-      if (closedGroup.open && !closedGroup.querySelector('.thread-row')) closedGroup.append(...closed.map((t) => threadRow(t)));
-    });
+  const head = [pinnedGroup, ...sections];
+  const tail = [!all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
+    : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : ''];
+  if (!closed.length) {
+    closedRows.clear();
+    return finish(el, head, tail);
   }
-  el.replaceChildren(
-    pinnedGroup, ...sections, closedGroup,
-    !all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
-      : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
+  // Closed threads stay out of the way but can still be opened and reopened.
+  // Their rows are built only while the list is open, and a row is reused until its minion or what it shows changes (#1077, #1080):
+  // a big scheme has a thousand, and every minion update redraws.
+  closedGroup ??= dismissedGroup();
+  closedGroup.open = view.showClosed;
+  fillClosed(closed);
+  // The list stays in the page while the rest is swapped, so a redraw doesn't restyle its rows.
+  if (closedGroup.parentNode !== el) el.replaceChildren(...head, closedGroup, ...tail);
+  else {
+    for (const c of [...el.children]) if (c !== closedGroup) c.remove();
+    closedGroup.before(...head);
+    closedGroup.after(...tail);
+  }
+  if (whyTips?.open) whyTips.refresh();
+}
+
+function finish(el, head, tail) {
+  el.replaceChildren(...head, ...tail);
   // An open chip popover follows its chip into the new rows (tip.js); its words follow the minion's news.
   if (whyTips?.open) whyTips.refresh();
 }
 
+let closedGroup = null, closedList = [];
+const closedRows = new Map();
+let closedUsage = null; // rows show the plan's usage, which is replaced when it changes
+
+function dismissedGroup() {
+  const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed'));
+  g.addEventListener('toggle', () => {
+    view.showClosed = g.open;
+    if (g.open) renderSidebar();
+  });
+  return g;
+}
+
+/** What a dismissed row shows besides its minion: when any of it changes the row is built again. */
+// The stamp's words change with the Pacific day; a half hour's rebuild of every row is cheaper than formatting each row's date to check.
+let halfHour = 0;
+function closedKey(t) {
+  const note = view.personNotes?.[t.id];
+  return `${view.id === t.id}|${isSeen(t)}|${ago(t.updated_at)}|${halfHour}|${note ? `${note.text}${note.by}` : ''}|${othersIn(t).join()}|${me}`;
+}
+
+/** Fills the Dismissed list with its rows (none while it is shut), building only the rows that are new or changed. */
+function fillClosed(closed) {
+  const rows = [];
+  if (view.showClosed) {
+    const stamp = Math.floor(Date.now() / 1_800_000);
+    if (closedUsage !== usage || halfHour !== stamp) closedRows.clear();
+    halfHour = stamp;
+    closedUsage = usage;
+    const live = new Set();
+    for (const t of closed) {
+      live.add(t.id);
+      const key = closedKey(t), hit = closedRows.get(t.id);
+      if (hit && hit.t === t && hit.key === key) rows.push(hit.row);
+      else {
+        const row = threadRow(t);
+        closedRows.set(t.id, { t, key, row });
+        rows.push(row);
+      }
+    }
+    for (const id of closedRows.keys()) if (!live.has(id)) closedRows.delete(id);
+  } else closedRows.clear();
+  // In place: a row already where it belongs isn't touched.
+  if (rows.length === closedList.length && rows.every((r, i) => r === closedList[i]) && closedGroup.childElementCount === rows.length + 1) return;
+  let at = closedGroup.firstElementChild.nextElementSibling;
+  for (const r of rows) {
+    if (r === at) at = at.nextElementSibling;
+    else closedGroup.insertBefore(r, at);
+  }
+  while (at) {
+    const next = at.nextElementSibling;
+    at.remove();
+    at = next;
+  }
+  closedList = rows;
+}
 /** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
 export function revealActiveRow() {
   const box = document.getElementById('threads')?.closest('.sidebar');

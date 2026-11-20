@@ -77,3 +77,20 @@ test('a link to a dismissed minion opens the Dismissed list at its row', { skip 
   await waitFor(page, 'the dismissed minion\'s row', `document.querySelector('#threads details.g-closed[open] .thread-row.active')`);
   assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row.active').textContent`), /Dismissed minion 498/);
 });
+
+test('a redraw reuses the Dismissed rows whose minion did not change, and rebuilds the one that did', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the Dismissed list', `document.querySelector('#threads details.g-closed')`);
+  await page.eval(`document.querySelector('#threads details.g-closed summary').click()`);
+  await waitFor(page, 'the dismissed rows', `${closedRows} === 1000`);
+  await page.eval(`(() => { window.before = [...document.querySelectorAll('#threads details.g-closed .thread-row')]; window.group = document.querySelector('#threads details.g-closed'); })()`);
+  // An update to the running minion redraws the list: every dismissed row and the list itself stay the same nodes.
+  await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'More' } }) })`);
+  assert.equal(await page.eval(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].every((r, i) => r === before[i]) && document.querySelector('#threads details.g-closed') === group`), true);
+  // A dismissed minion that changes gets a new row in its place; its neighbours keep theirs.
+  await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...closed[5], title: 'Renamed', updated_at: closed[5].updated_at + 1 } }) })`);
+  const same = await page.eval<boolean[]>(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].map((r, i) => r === before[i])`);
+  assert.equal(same.length, 1000);
+  assert.equal(same.filter((x) => !x).length, 1);
+  assert.match(await page.eval<string>(`document.querySelectorAll('#threads details.g-closed .thread-row')[0].textContent + document.querySelector('#threads details.g-closed').textContent`), /Renamed/);
+});

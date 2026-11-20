@@ -185,21 +185,25 @@ export function personIdle(lines) {
 
 /**
  * Each runner's CPU seconds since the last look and its memory now, from a process list: a runner is a
- * Runner.Listener and everything under it. `procs` are { pid, ppid, path, cpu, mem }; `prev` is the last look's
- * pid → CPU seconds (null on the first, when CPU can't be told yet).
- * shortcut: a process that ended between two looks takes its last seconds with it, so a build made of many short
- * compiler runs reads a little low; exact needs a Windows job object or a cgroup per runner.
+ * Runner.Listener and everything under it. `procs` are { pid, ppid, path, cpu, mem, reaped? }; `reaped` is the CPU
+ * seconds of children that already ended and were collected (Linux's cutime + cstime). `prev` is the last look's
+ * result's `seen` (null on the first, when CPU can't be told yet).
+ * A tree's running total is each live process's own seconds plus its reaped children's: when a child ends its seconds
+ * move from its own to its parent's reaped, so the total never drops, and a compile that began and ended between two
+ * looks still counts. Windows has no reaped time (its runners still read low on short-lived processes).
  */
 export function runnerUse(procs, prev) {
   const kids = new Map();
   for (const p of procs) (kids.get(p.ppid) ?? kids.set(p.ppid, []).get(p.ppid)).push(p);
   const seen = new Map(procs.map((p) => [p.pid, p.cpu]));
+  const totals = new Map();
+  seen.totals = totals;
   const runners = [];
   for (const root of procs) {
     // A Linux runner that updated itself runs from bin.<version>: bin is a symlink there, and /proc resolves it.
     const m = /^(.*)[\\/]bin(?:\.[\d.]+)?[\\/]Runner\.Listener(?:\.exe)?$/i.exec(root.path ?? '');
     if (!m) continue;
-    let cpu = 0;
+    let total = 0;
     let mem = 0;
     const done = new Set();
     const walk = [root];
@@ -208,12 +212,14 @@ export function runnerUse(procs, prev) {
       // A pid used again can point a parent at its own child.
       if (done.has(p.pid)) continue;
       done.add(p.pid);
-      const before = prev?.get(p.pid);
-      cpu += before === undefined || p.cpu < before ? p.cpu : p.cpu - before;
+      total += p.cpu + (p.reaped ?? 0);
       mem += p.mem;
       walk.push(...(kids.get(p.pid) ?? []));
     }
-    runners.push({ dir: m[1], cpu: prev ? cpu : null, mem });
+    totals.set(m[1], total);
+    const before = prev?.totals?.get(m[1]);
+    // No earlier total for this runner (it just started) counts all it has used.
+    runners.push({ dir: m[1], cpu: prev ? (before === undefined ? total : Math.max(0, total - before)) : null, mem });
   }
   return { runners, seen };
 }
@@ -230,7 +236,7 @@ export function linuxProcs(proc = '/proc') {
       let path = '';
       try { path = readlinkSync(join(proc, name, 'exe')); } catch {}
       // utime and stime in ticks of 1/100 s, rss in 4 KB pages: what every Linux the runners use has.
-      out.push({ pid: Number(name), ppid: Number(f[1]), path, cpu: (Number(f[11]) + Number(f[12])) / 100, mem: Number(f[21]) * 4096 });
+      out.push({ pid: Number(name), ppid: Number(f[1]), path, cpu: (Number(f[11]) + Number(f[12])) / 100, mem: Number(f[21]) * 4096, reaped: (Number(f[13]) + Number(f[14])) / 100 });
     } catch {}
   }
   return out;

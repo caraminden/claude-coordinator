@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkJob, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
+import { linuxProcs, checkJob, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
@@ -190,13 +190,35 @@ test('a runner\'s use is its Runner.Listener and everything under it, as CPU sin
   ];
   const first = runnerUse(procs, null);
   assert.deepEqual(first.runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: null, mem: 600 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: null, mem: 10 }]);
-  // 30 seconds on: cargo used 20 more, a new rustc (pid 13) used 25 since it began, and pid 11 is a new process under an old number.
-  const next = [...procs.map((p) => (p.pid === 12 ? { ...p, cpu: 70 } : p.pid === 11 ? { ...p, cpu: 1 } : p)), { pid: 13, ppid: 12, path: 'rustc.exe', cpu: 25, mem: 400 }];
-  assert.deepEqual(runnerUse(next, first.seen).runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: 46, mem: 1000 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 }]);
+  // 30 seconds on: cargo used 20 more and a new rustc (pid 13) used 25 since it began.
+  const next = [...procs.map((p) => (p.pid === 12 ? { ...p, cpu: 70 } : p)), { pid: 13, ppid: 12, path: 'rustc.exe', cpu: 25, mem: 400 }];
+  assert.deepEqual(runnerUse(next, first.seen).runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: 45, mem: 1000 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 }]);
   // A pid used again that points a process at its own child doesn't loop.
   assert.equal(runnerUse([{ ...procs[0], ppid: 11 }, procs[1]], first.seen).runners.length, 1);
   // A Linux runner that updated itself runs from bin.<version> (bin is a symlink to it, and /proc/<pid>/exe resolves it).
   assert.deepEqual(runnerUse([{ pid: 40, ppid: 1, path: '/opt/actions-runner-twireader/bin.2.330.0/Runner.Listener', cpu: 1, mem: 7 }], null).runners, [{ dir: '/opt/actions-runner-twireader', cpu: null, mem: 7 }]);
+});
+
+test('CPU of a child that started and ended between two looks still counts, through its parent\'s reaped-children time', () => {
+  const root = { pid: 10, ppid: 1, path: '/opt/actions-runner-peek/bin/Runner.Listener', cpu: 1, mem: 1 };
+  const worker = { pid: 11, ppid: 10, path: '/opt/actions-runner-peek/bin/Runner.Worker', cpu: 2, mem: 1, reaped: 0 };
+  const first = runnerUse([{ ...root, reaped: 0 }, worker], null);
+  // rustc (pid 12) lived and died inside the 30 s, 40 CPU seconds, taken into the worker's reaped time; the worker used 1 more itself.
+  const next = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 40 }], first.seen);
+  assert.equal(next.runners[0].cpu, 41);
+  // A child seen at one look and gone at the next is not counted twice.
+  const seenKid = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 0 }, { pid: 12, ppid: 11, path: 'rustc', cpu: 10, mem: 1 }], first.seen);
+  const gone = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 25 }], seenKid.seen);
+  assert.equal(seenKid.runners[0].cpu, 11);
+  assert.equal(gone.runners[0].cpu, 15);
+});
+
+test('linuxProcs reads the time of a process\'s reaped children', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'proc-'));
+  mkdirSync(join(dir, '77'));
+  // fields after the command: state ppid ... utime(14) stime(15) cutime(16) cstime(17)
+  writeFileSync(join(dir, '77', 'stat'), '77 (a b) S 5 0 0 0 0 0 0 0 0 0 100 50 300 100 ' + '0 '.repeat(10) + '\n');
+  assert.equal(linuxProcs(dir)[0].reaped, 4);
 });
 
 test('a sample: nothing on the first look, then percentages of the whole PC, named from each runner\'s .runner file', async () => {

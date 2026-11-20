@@ -490,7 +490,7 @@ const TOOLS = [
   {
     name: 'create_ticket',
     description:
-      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained: write it with citadel:briefing. The result warns when it has no quoted words from a person or no "Done when".',
+      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained: write it with citadel:briefing. The result warns when it has no quoted words from a person, no "Done when", no "Already shipped on this" or no "Leave alone".',
     inputSchema: {
       type: 'object',
       properties: {

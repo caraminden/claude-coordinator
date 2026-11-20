@@ -1,10 +1,12 @@
 // The check on a new minion's brief (#1108, citadel:briefing): it warns, never refuses, when the brief
-// an agent wrote has no quoted words from a person or no "Done when".
+// an agent wrote has no quoted words from a person, no "Done when", no "Already shipped on this" or no "Leave alone".
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 
 /** A person's words in quotes: three or more words between "…" or “…”, or a `>` quote line. */
 const QUOTE = /"[^"\n]*\S\s+\S+\s+\S[^"\n]*"|“[^”\n]*\S\s+\S+\s+\S[^”\n]*”|^\s*>\s*\S/m;
 const DONE_WHEN = /\bdone[\s-]*when\b/i;
+const SHIPPED = /\balready[\s-]*shipped\b/i;
+const LEAVE_ALONE = /\bleave[\s-]*alone\b/i;
 
 /** The handoffs and specs a brief names by full path inside `shared` (the scheme's shared folder), read so a pointer brief is judged by its file. */
 export function namedFiles(text: string, shared: string): string {
@@ -28,6 +30,8 @@ export function briefWarning(text: string): string | null {
   const missing = [
     !QUOTE.test(text) && 'no quoted words from a person (their ask in quotes, with who and the date)',
     !DONE_WHEN.test(text) && 'no "Done when" (the end state a person can see or check)',
+    !SHIPPED.test(text) && 'no "Already shipped on this" (what git and the minions list show today, with the date, or "nothing found")',
+    !LEAVE_ALONE.test(text) && 'no "Leave alone" (what the minion must not touch)',
   ].filter(Boolean);
   if (!missing.length) return null;
   return `Brief check (citadel:briefing): it has ${missing.join(' and ')}. The minion was still created: send the missing part with message_ticket now, or ignore this if there is none to give.`;

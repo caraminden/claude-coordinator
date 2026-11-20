@@ -175,6 +175,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`ui-screenshots critic: pass (round 1)`) and the base check's
   (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
+- **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.

@@ -32,6 +32,7 @@ import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
 import { repoSlug } from '../prlinks.ts';
 import { NOTIFY_STATES } from '../push.ts';
+import { addMention, clearMentions, mentionedIn } from '../mentions.ts';
 import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -439,6 +440,7 @@ export const ticketRoutes: Route[] = [
       // they had open at its latest update closes (#811).
       const body = await readJson(req).catch(() => ({}));
       if (body?.left === true) return json(res, 200, { seen_at: store.seenAt(session.name, id), closed: app.runner.closeIfSeen(id, session.name) });
+      clearMentions(store, session.name, id);
       return json(res, 200, { seen_at: store.markSeen(session.name, id) });
     },
   },
@@ -521,8 +523,16 @@ export const ticketRoutes: Route[] = [
         // Only here is a message a person's own typed words, the one kind that can be a go to merge (#201).
         // Its sendId goes on the message too, so the chat swaps in the server's copy for that exact message.
         // A parked minion keeps it for its next turn (#718).
-        const r = runner.send(id, session.name, text, await saveImages(app, ticket, body.images), { ...(caller ? {} : { typed: true }), ...(sendId ? { sendId } : {}), hold: true }, !caller && body.after !== true, files);
+        // A person's @mentions (#1149) of members who can open this chat: a minion's, or the scheme's shared Taskmaster.
+        const mentions = !caller && (ticket.kind !== 'coordinator' || ticket.coordinator_of == null) ? mentionedIn(text, app.store.listMembers(ticket.project_id), session.name) : [];
+        const r = runner.send(id, session.name, text, await saveImages(app, ticket, body.images), { ...(caller ? {} : { typed: true }), ...(sendId ? { sendId } : {}), ...(mentions.length ? { mentions } : {}), hold: true }, !caller && body.after !== true, files);
         if (r === 'parked') held = 'parked';
+        // send is synchronous, so the chat's newest message is the one just sent.
+        const sent = mentions.length ? app.store.lastEventOf(id, 'user_message') : undefined;
+        for (const name of sent ? mentions : []) {
+          addMention(app.store, name, { ticketId: id, projectId: ticket.project_id, eventId: sent!.id, at: sent!.created_at, by: session.name, text });
+          app.notify(id, { kind: 'mention', by: session.name, text, eventId: sent!.id, to: name }, session.name);
+        }
       });
       if (held !== undefined && held !== 'parked') return json(res, 202, { ...ticketView(app, id), held });
       personWrote(ctx);

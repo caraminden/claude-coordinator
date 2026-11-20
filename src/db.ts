@@ -2954,6 +2954,11 @@ export class Store {
       .all(ticketId, before, limit) as unknown as EventRow[];
   }
 
+  /** A chat's newest event of `kind` (#1149: the message a person just sent). */
+  lastEventOf(ticketId: number, kind: string): EventRow | undefined {
+    return this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND kind = ? ORDER BY id DESC LIMIT 1').get(ticketId, kind) as unknown as EventRow | undefined;
+  }
+
   listEvents(ticketId: number, afterId = 0): EventRow[] {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')

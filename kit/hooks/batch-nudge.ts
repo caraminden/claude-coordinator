@@ -3,7 +3,7 @@
  * 2026-11-20 "Go"): after a minion's third single read-only call in a row (Read, Grep, Glob, or a Bash that only
  * reads), adds one line to the tool result saying independent lookups go in one message. Once per run.
  * Only on minions' own sessions (COORDINATOR_ROLE=thread, no agent_id) and only on half of them: the minions
- * whose number is even. The other half is the control; `reports/batch-lookups-trial-2026-11.md` compares them.
+ * whose number is even. The other half is the control; `reports/batch-lookups-trial-2026-11.md` (written a week after it is live) compares them.
  * A call sent together with others in one assistant message is not single, and ends the run. Anything else (an
  * edit, a Bash that writes, an Agent call) ends it too. It runs inside flail-brake.ts's process, which already
  * runs after Bash and edits, so there is no process of its own.
@@ -52,13 +52,19 @@ export function callsInMessage(transcriptPath: unknown, toolUseId: unknown): num
       const len = Math.min(size, 256 * 1024);
       const buf = Buffer.alloc(len);
       readSync(fd, buf, 0, len, size - len);
-      for (const line of buf.toString('utf8').split('\n').reverse()) {
-        if (!line.includes(toolUseId) || !line.includes('"tool_use"')) continue;
-        const content = JSON.parse(line)?.message?.content;
-        if (Array.isArray(content) && content.some((b: any) => b?.type === 'tool_use' && b.id === toolUseId)) {
-          return content.filter((b: any) => b?.type === 'tool_use').length;
+      // The transcript stores one line per content block, parallel calls sharing message.id.
+      const rows = buf.toString('utf8').split('\n').flatMap((l) => {
+        if (!l.includes('"tool_use"')) return [];
+        try {
+          const m = JSON.parse(l)?.message;
+          return Array.isArray(m?.content) ? [m] : [];
+        } catch {
+          return [];
         }
-      }
+      });
+      const mine = rows.find((m) => m.content.some((b: any) => b?.type === 'tool_use' && b.id === toolUseId));
+      if (mine?.id) return new Set(rows.filter((m) => m.id === mine.id).flatMap((m) => m.content.filter((b: any) => b?.type === 'tool_use').map((b: any) => b.id))).size;
+      if (mine) return mine.content.filter((b: any) => b?.type === 'tool_use').length;
     } finally {
       closeSync(fd);
     }

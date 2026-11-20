@@ -430,7 +430,7 @@ test('batch nudge: third single lookup in a row, even-numbered minions only, nev
   for (const c of ['sed -i s/a/b/ f', 'echo hi > f', 'git commit -m x', 'rm f', 'find . -delete', 'ls $(pwd)']) assert.equal(readOnlyBash(c), false, c);
   // A call sent together with another in one message is not single.
   const tp = join(dir, 't.jsonl');
-  writeFileSync(tp, JSON.stringify({ message: { content: [{ type: 'tool_use', id: 'x1' }, { type: 'tool_use', id: 'x2' }] } }) + '\n' + JSON.stringify({ message: { content: [{ type: 'tool_use', id: 'y1' }] } }) + '\n');
+  writeFileSync(tp, JSON.stringify({ message: { id: 'm1', content: [{ type: 'tool_use', id: 'x1' }] } }) + '\n' + JSON.stringify({ message: { id: 'm1', content: [{ type: 'tool_use', id: 'x2' }] } }) + '\n' + JSON.stringify({ message: { id: 'm2', content: [{ type: 'tool_use', id: 'y1' }] } }) + '\n');
   assert.equal(callsInMessage(tp, 'x2'), 2);
   assert.equal(callsInMessage(tp, 'y1'), 1);
   assert.equal(callsInMessage(tp, 'none'), 1);

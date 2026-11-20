@@ -11,8 +11,9 @@ function marked(role: string) {
   return tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']).map((t: any) => t.name).sort();
 }
 
-test("a minion's always-loaded tools are these five", () => {
-  assert.deepEqual(marked('thread'), ['ask_question', 'close_self', 'message_coordinator', 'set_properties', 'set_thread_status']);
+// plan and hand_off_land since #1275: nearly every minion plans and ships, and fetching them was 1,124 and 711 ToolSearch calls a week.
+test("a minion's always-loaded tools are these seven", () => {
+  assert.deepEqual(marked('thread'), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status']);
 });
 
 test("a Taskmaster's always-loaded tools are these four", () => {

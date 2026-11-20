@@ -3,7 +3,9 @@
 // TodoWrite) and to sort every other tool call under the step that was in progress when it ran.
 
 /** Tools that manage the task list itself; they are progress, not work, so they are never shown as actions. */
-export const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'TodoWrite']);
+export const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'TodoWrite', 'mcp__thread__plan']);
+/** A minion's always-loaded plan tool (#1275, src/mcp.ts PLAN), read like TaskCreate and TaskUpdate. */
+const PLAN_TOOLS = new Set(['mcp__thread__plan']);
 /** Housekeeping tools (loading other tools' schemas) that are not shown as actions either. */
 const HIDDEN_TOOLS = new Set(['ToolSearch']);
 
@@ -352,32 +354,13 @@ export function applyEvent(p, kind, data, at = null) {
       }
       if (block.type !== 'tool_use') continue;
       const input = block.input || {};
-      if (block.name === 'TaskCreate' || block.name === 'TaskUpdate' || block.name === 'TodoWrite') p.planMoved = true;
+      if (block.name === 'TaskCreate' || block.name === 'TaskUpdate' || block.name === 'TodoWrite' || PLAN_TOOLS.has(block.name)) p.planMoved = true;
       if (block.name === 'TaskCreate') {
         p.pendingCreates.set(block.id, input);
       } else if (block.name === 'TaskUpdate') {
-        const idx = p.tasks.findIndex((t) => t.id === String(input.taskId));
-        if (idx < 0) continue;
-        const task = p.tasks[idx];
-        if (input.status === 'deleted') p.tasks.splice(idx, 1);
-        const est = estimateOf(input);
-        if (est) task.estimate = est;
-        if (input.status && input.status !== 'deleted') {
-          // A TaskUpdate comes from a running turn, so a step's working time starts with it.
-          if (input.status === 'in_progress' && task.status !== 'in_progress') Object.assign(task, { startedAt: at, work: 0, workFrom: at });
-          if (input.status !== 'in_progress') settle(task, at);
-          if (input.status === 'completed' && task.status === 'in_progress' && task.startedAt != null && at != null) {
-            p.finished?.push({ id: task.id, subject: input.subject || task.subject, estimate: task.estimate ?? null, startedAt: task.startedAt, finishedAt: at, work: task.work ?? 0, model: p.model });
-          }
-          // The order steps finished in, so the plan's track fills left to right (#630).
-          if (input.status === 'completed' && task.status !== 'completed') task.doneN = (p.doneCount = (p.doneCount ?? 0) + 1);
-          task.status = input.status;
-        }
-        if (input.subject) task.subject = input.subject;
-        if (input.activeForm) task.activeForm = input.activeForm;
-        if (input.description) task.description = input.description;
-        // Claude records what a finished step found or decided as metadata.outcome.
-        if (typeof input.metadata?.outcome === 'string') task.outcome = input.metadata.outcome;
+        updateTask(p, p.tasks.findIndex((t) => t.id === String(input.taskId)), input, at);
+      } else if (PLAN_TOOLS.has(block.name)) {
+        applyPlan(p, block.id, input, at);
       } else if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
         // A step the plan still has keeps its id, matched by its words; a new step gets a new one (from this
         // call's id), so an earlier plan's actions and open steps don't land under it.
@@ -410,6 +393,50 @@ export function applyEvent(p, kind, data, at = null) {
     }
   }
   return actions;
+}
+
+/** One TaskUpdate (or a plan step put in its shape) on the step at `idx` (none when -1). */
+function updateTask(p, idx, input, at) {
+  if (idx < 0) return;
+  const task = p.tasks[idx];
+  if (input.status === 'deleted') p.tasks.splice(idx, 1);
+  const est = estimateOf(input);
+  if (est) task.estimate = est;
+  if (input.status && input.status !== 'deleted') {
+    // An update comes from a running turn, so a step's working time starts with it.
+    if (input.status === 'in_progress' && task.status !== 'in_progress') Object.assign(task, { startedAt: at, work: 0, workFrom: at });
+    if (input.status !== 'in_progress') settle(task, at);
+    if (input.status === 'completed' && task.status === 'in_progress' && task.startedAt != null && at != null) {
+      p.finished?.push({ id: task.id, subject: input.subject || task.subject, estimate: task.estimate ?? null, startedAt: task.startedAt, finishedAt: at, work: task.work ?? 0, model: p.model });
+    }
+    // The order steps finished in, so the plan's track fills left to right (#630).
+    if (input.status === 'completed' && task.status !== 'completed') task.doneN = (p.doneCount = (p.doneCount ?? 0) + 1);
+    task.status = input.status;
+  }
+  if (input.subject) task.subject = input.subject;
+  if (input.activeForm) task.activeForm = input.activeForm;
+  if (input.description) task.description = input.description;
+  // Claude records what a finished step found or decided as metadata.outcome.
+  if (typeof input.metadata?.outcome === 'string') task.outcome = input.metadata.outcome;
+}
+
+const PLAN_STATUS = { todo: 'pending', doing: 'in_progress', done: 'completed', dropped: 'deleted' };
+
+/** A plan call (#1275): each step by its number n, added when new, else changed as a TaskUpdate would. */
+function applyPlan(p, callId, input, at) {
+  const steps = (Array.isArray(input.steps) ? input.steps : []).filter((s) => Number.isInteger(s?.n) && s.n > 0);
+  // A new plan starts once the previous one is finished; its numbers start again under new ids.
+  if (steps.some((s) => s.step) && p.tasks.length && allDone(p)) p.tasks = [];
+  for (const s of steps) {
+    const update = { status: PLAN_STATUS[s.status], subject: s.step, activeForm: s.doing, description: s.why, metadata: { estimate: s.minutes, outcome: s.outcome } };
+    // A step TaskCreate made (id "3") is step 3 too, so a minion that started its plan before #1275 carries it on.
+    let idx = p.tasks.findIndex((t) => (t.n ?? Number(t.id)) === s.n);
+    if (idx < 0) {
+      if (update.status === 'deleted') continue;
+      idx = p.tasks.push({ id: `${callId}-${s.n}`, n: s.n, subject: s.step || `Step ${s.n}`, status: 'pending', actions: 0 }) - 1;
+    }
+    updateTask(p, idx, update, at);
+  }
 }
 
 /** Close a step's running share of working time at `at` (#571). */

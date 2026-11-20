@@ -651,8 +651,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (advised.model) args.push('--model', advised.model);
   if (advised.advisor && ticket.kind !== 'coordinator' && !codex) args.push('--advisor', advised.advisor);
   if (effort) args.push('--effort', effort);
-  // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
-  let env: Record<string, string> = { ...turnEnv(facts.env.server), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+  // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode. A Taskmaster's drive its progress readout; a
+  // minion plans with the always-loaded `plan` tool instead (#1275), so it never spends a ToolSearch on them nor is nudged to.
+  let env: Record<string, string> = { ...turnEnv(facts.env.server), ...(ticket.kind === 'coordinator' ? { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' } : {}) };
   // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
   // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };

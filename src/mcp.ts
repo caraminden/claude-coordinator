@@ -1416,11 +1416,11 @@ function labelFields(args: any) {
 
 /** land.sh's forms, for the land and hand_off_land tools (landArgs in src/land.ts checks them). */
 const LAND_PROPS = {
-  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's merge into its build, or the build minion's merge of main: the build branch, build/<n> (land.sh --into build/<n>). With files, or with full: true" },
-  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched, as paths in your worktree (e.g. test/land-tool.test.ts); only these run. None only for a docs-only change' },
-  full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs (land.sh --into build/<n> --full)' },
-  build: { type: 'boolean', description: "The build minion shipping its build to main, with its branch at the build's tip (land.sh --build). Nothing else with it" },
-  fix: { type: 'boolean', description: 'Only when land.sh refused because main holds a commit whose deploy was rolled back, and this branch is its fix or revert: ships it anyway (LAND_FIX=1 for land.sh)' },
+  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "build/<n>: a feeder's merge into its build, or the build minion's merge of main. With files or full" },
+  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched; only these run. None only for docs' },
+  full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs' },
+  build: { type: 'boolean', description: "The build minion shipping its build to main (land.sh --build), alone" },
+  fix: { type: 'boolean', description: 'Only when land.sh refused for a rolled-back deploy on main and this branch is its fix or revert' },
 };
 
 const MARK_IMAGE = {
@@ -1482,8 +1482,50 @@ const SEAM_FRESH = {
   },
 };
 
+/**
+ * A minion's task list (#1275): the progress readout (public/progress.js) reads these calls, as it reads TaskCreate and
+ * TaskUpdate. Claude Code can't preload a built-in tool, so the plan lives in an always-loaded MCP tool (ALWAYS_LOAD);
+ * the readout keeps the state, so the call itself only checks its shape.
+ */
+export const PLAN = {
+  name: 'plan',
+  description: 'Your task list, which people watch as the progress readout ("Running tests… 3/7"). Number the steps 1, 2, 3… yourself. Each call changes only the steps it names: a new number adds that step, a known one updates it. Once every step is done, a call with step titles starts a new plan. Finish one step and start the next in one call.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      steps: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          properties: {
+            n: { type: 'integer', minimum: 1 },
+            step: { type: 'string', description: 'Short title' },
+            doing: { type: 'string', description: 'Shown while underway, e.g. "Running tests"' },
+            why: { type: 'string', description: 'One sentence: what it involves and why' },
+            minutes: { type: 'number', description: 'Your estimate' },
+            status: { type: 'string', enum: ['todo', 'doing', 'done', 'dropped'] },
+            outcome: { type: 'string', description: 'When done: one sentence on what it found, decided or changed' },
+          },
+          required: ['n'],
+        },
+      },
+    },
+    required: ['steps'],
+  },
+};
+
+/** What a plan call answers: it checks the shape and returns no state (the readout replays the calls). */
+export function planResult(args: any): string {
+  const steps = args?.steps;
+  if (!Array.isArray(steps) || !steps.length) throw new Error('steps is required: a list of { n, … }, one per step to add or change.');
+  if (steps.some((s) => !Number.isInteger(s?.n) || s.n < 1)) throw new Error('Each step needs n, its number: 1, 2, 3…');
+  return 'ok';
+}
+
 const THREAD_TOOLS = () => ([
   LIVE_FACTS,
+  PLAN,
   SHIP_RISK,
   {
     name: 'set_thread_status',
@@ -1609,20 +1651,21 @@ const THREAD_TOOLS = () => ([
   },
   {
     name: 'hand_off_land',
+    // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
-      `Hand shipping to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the ship\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${C().DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${C().HOME_CONTRAPTIONS.length ? ` A ship to main first deploys each of ${C().HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as shipping (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
+      `Ship: the server runs tools/land.sh in your worktree and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once tested and self-reviewed. Commit everything first: uncommitted changes, or a branch that would conflict, are refused at once. On a clean land the server posts the shipped line${C().DEPLOYS ? ' and dismisses you, or sets pending-deploy for a restart' : ' and dismisses you'}.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')} and the shipped line says whether it went live, so never redeploy what it reports.` : ''} If it fails (a conflict, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: you show as shipping until it ends.`,
     inputSchema: {
       type: 'object',
       properties: {
-        summary: { type: 'string', maxLength: 300, description: 'What ships, in one line, for the shipped line (at most 300 characters)' },
-        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: in at most three lines, what you had to find out that your brief or the docs did not tell you (a path, a command, a gotcha, where something really lives), and which tool, rule or skill got in your way (a refusal, a wrong instruction, a slow or broken step), one per line. "nothing" is a fine answer. It goes in the scheme\'s ship lessons queue with your #N and the files you touched once the land is clean; a weekly pass turns anything said twice into a proposed doc, skill or brief edit. It never holds the ship' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's risk label. Leave it out when the scheme's pre-ship review is off and nothing gives the label instead (your turn's Kit reviewers line says which): a ship with no label is high and needs go" },
-        risk_reason: { type: 'string', maxLength: 300, description: 'The one-line reason for the label, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'Required at or above the scheme\'s go threshold (the Shipping lines in your prompt; high when they name none), and with no risk label: who gave the go to ship and when, e.g. "Cara, 3:05 PM PST"' },
-        stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
-        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
+        summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
+        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or the docs did not tell you, and which tool, rule or skill got in your way; "nothing" is fine. It goes to the ship lessons queue and never holds the ship' },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out only when no review gives one (your Kit reviewers line); it then ships as high and needs go" },
+        risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus anything you chose not to fix' },
+        go: { type: 'string', maxLength: 200, description: 'At or above the go threshold (your Shipping lines; high when they name none), or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
+        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for this minion: a clean land still ships, but you stay open in state ready' },
+        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, a wait or after-land steps, e.g. "Cara testing on her phone": you are woken once with the shipped line when it is live' },
         ...LAND_PROPS,
-        ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${C().HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
+        ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
       },
       required: ['summary'],
     },
@@ -2315,6 +2358,8 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       return `tools/land.sh exited ${r.code}${r.code === 0 ? '' : ' (read its output: main only moved if it says so)'}.\n\n${String(r.output).slice(-12_000)}`;
     }
+    case 'plan':
+      return planResult(args);
     case 'close_self': {
       let closed: any;
       try {
@@ -2447,7 +2492,7 @@ const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ti
  * about $27 a week (#699, measured by #1263), so test/mcp-always-load.test.ts pins this list.
  */
 export const ALWAYS_LOAD = {
-  thread: ['set_thread_status', 'set_properties', 'message_coordinator', 'ask_question', 'close_self'],
+  thread: ['set_thread_status', 'set_properties', 'message_coordinator', 'ask_question', 'close_self', 'plan', 'hand_off_land'],
   taskmaster: ['create_ticket', 'read_ticket', 'message_ticket', 'list_tickets'],
 };
 const withAlwaysLoad = (tools: any[]) => {

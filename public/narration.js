@@ -23,7 +23,7 @@ export function isNarration(text) {
 // words followed by nothing else weren't narrating any work.
 const BOOKKEEPING = new Set([
   'mcp__thread__set_thread_status', 'mcp__thread__set_properties', 'mcp__thread__settle_question',
-  'mcp__thread__strike_text', 'mcp__thread__close_self',
+  'mcp__thread__strike_text', 'mcp__thread__close_self', 'mcp__thread__plan',
   'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ToolSearch',
 ]);
 

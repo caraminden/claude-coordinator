@@ -262,3 +262,39 @@ test("the plan's track fills left to right: done steps in the order they finishe
   call('u5', 'TaskUpdate', { taskId: '3', status: 'in_progress' });
   assert.deepEqual(planTrack(p), [[1, 'c'], [4, 'c'], [2, 'c'], [3, 'i']], 'done steps keep the order they finished in');
 });
+
+test("the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: steps, estimates, outcomes, a new plan", () => {
+  const p = { ...createProgress(), finished: [] };
+  const at = (min) => 1_000_000 + min * 60_000;
+  const plan = (id, steps, t, extra = {}) => applyEvent(p, 'claude', { type: 'assistant', ...extra, message: { content: [{ type: 'tool_use', id, name: 'mcp__thread__plan', input: { steps } }] } }, t);
+  applyEvent(p, 'claude', { type: 'system', subtype: 'init', model: 'claude-opus-5-5' }, at(0));
+  plan('a', [
+    { n: 1, step: 'Find the parser', doing: 'Finding the parser', why: 'x', minutes: 3 },
+    { n: 2, step: 'Fix it', doing: 'Fixing it', minutes: 5 },
+    { n: 3, step: 'Ship it', minutes: 'soon' },
+  ], at(0));
+  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status, t.estimate]), [['Find the parser', 'pending', 3], ['Fix it', 'pending', 5], ['Ship it', 'pending', undefined]]);
+  assert.equal(progressLine(p, true), 'Planning… 0 of 3 done');
+  plan('b', [{ n: 1, status: 'doing' }], at(1));
+  assert.equal(progressLine(p, true), 'Finding the parser… · 0 of 3 done');
+  assert.equal(planEstimate(p, true, at(2)).usual, 180);
+  // One call finishes a step and starts the next.
+  plan('c', [{ n: 1, status: 'done', outcome: 'It lives in progress.js.' }, { n: 2, status: 'doing' }], at(4));
+  assert.equal(p.tasks[0].outcome, 'It lives in progress.js.');
+  assert.equal(progressLine(p, true), 'Fixing it… · 1 of 3 done');
+  assert.deepEqual(p.finished.map((f) => [f.subject, f.estimate, f.work]), [['Find the parser', 3, 3 * 60_000]]);
+  // Reword, drop, and a Grunt's call that isn't the minion's plan.
+  plan('d', [{ n: 2, step: 'Fix the parser', doing: 'Fixing the parser' }, { n: 3, status: 'dropped' }], at(5));
+  plan('g', [{ n: 2, status: 'done' }], at(5), { parent_tool_use_id: 'agent1' });
+  assert.equal(progressLine(p, true), 'Fixing the parser… · 1 of 2 done');
+  plan('e', [{ n: 2, status: 'done', outcome: 'Fixed.' }], at(6));
+  assert.equal(progressLine(p, false), 'Done · 2/2 steps');
+  // Once every step is done, titles start a new plan, numbered from 1 again under new ids.
+  plan('f', [{ n: 1, step: 'Next thing', minutes: 2 }], at(7));
+  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status]), [['Next thing', 'pending']]);
+  assert.notEqual(p.tasks[0].id, p.finished[0].id);
+  // A call with no steps, or a step with no number, changes nothing.
+  plan('h', null, at(8));
+  plan('i', [{ step: 'No number' }], at(8));
+  assert.equal(p.tasks.length, 1);
+});

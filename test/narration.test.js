@@ -19,7 +19,7 @@ test('long text, paragraphs and Markdown structure are not', () => {
 });
 
 test('bookkeeping tools are told from work', () => {
-  for (const name of ['mcp__thread__set_thread_status', 'TaskUpdate', 'TaskCreate', 'ToolSearch', 'mcp__thread__close_self']) assert.ok(isBookkeeping(name), name);
+  for (const name of ['mcp__thread__set_thread_status', 'TaskUpdate', 'TaskCreate', 'ToolSearch', 'mcp__thread__close_self', 'mcp__thread__plan']) assert.ok(isBookkeeping(name), name);
   for (const name of ['Bash', 'Read', 'Agent', 'mcp__thread__message_coordinator', 'mcp__thread__start_preview']) assert.ok(!isBookkeeping(name), name);
 });
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
@@ -102,6 +103,26 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
     'Longest now:',
     ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
   ].join('\n'));
+});
+
+// The tool definitions loaded up front (src/mcp.ts ALWAYS_LOAD) sit in the same prefix. Characters of name, description and
+// input schema, the biggest of a plain scheme, Citadel's (deploys) and one with apps. 13,100 before #1275, which added the
+// plan and ship tools for 3,700 (under 1k tokens, the handoff's bar: hand_off_land was trimmed from 4,600 to fit).
+const TOOLS_BUDGET = 16_900;
+
+test("a minion's always-loaded tool definitions stay within their budget", () => {
+  for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {
+    const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
+    const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '', COORDINATOR_HOME_CONTRAPTIONS: '', ...env } });
+    const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']);
+    const sizes = tools.map((t: any) => ({ name: t.name, n: JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length }));
+    const total = sizes.reduce((s: number, x: any) => s + x.n, 0);
+    assert.ok(total <= TOOLS_BUDGET, [
+      `A minion's always-loaded tools (${JSON.stringify(env)}) are ${total} characters, over their budget of ${TOOLS_BUDGET}.`,
+      'Every minion API call re-reads them; each 1k tokens costs about $22 a week. Trim, or raise TOOLS_BUDGET with the reason in the commit message.',
+      ...sizes.sort((a: any, b: any) => b.n - a.n).map((x: any) => `  ${x.n} ${x.name}`),
+    ].join('\n'));
+  }
 });
 
 // #760: a minion hears about ci-failures and dispatched-workflow watching only while its branch has an open PR.

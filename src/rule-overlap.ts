@@ -20,6 +20,8 @@ export function paragraphs(text: string, code = false): Para[] {
   let start = 0;
   const flush = () => { if (cur.length) out.push({ text: cur.join(' '), line: start }); cur = []; };
   text.split('\n').forEach((l, i) => {
+    // A comment in code speaks to maintainers, not agents.
+    if (code && /^\s*(?:\/\/|\/?\*)/.test(l)) return;
     if (code || !l.trim() || LIST.test(l) || /^#{1,6}\s/.test(l)) flush();
     if (!l.trim()) return;
     if (!cur.length) start = i + 1;

@@ -139,6 +139,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/ci-store": {
+  "anon": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "person": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "member": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "outsider": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "tmA": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "tmB": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m1": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m2": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store"
+ },
+ "GET /api/ci-store/1/nope": {
+  "anon": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "person": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "member": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "outsider": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "tmA": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "tmB": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m1": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m2": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store"
+ },
  "PUT /api/ci-store/nope": {
   "anon": "400 kind must be one of build, report, release",
   "person": "400 kind must be one of build, report, release",

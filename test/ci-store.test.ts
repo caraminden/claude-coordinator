@@ -235,6 +235,21 @@ test('uploads streaming in together are bounded, and ones that arrive while GitH
   assert.equal((await ci.upload(request('x', runToken({ run_id: '3' })), { name: 'a.zip', kind: 'build', target: '' })).size, 1);
 });
 
+test('a job reading the store is told who it is by its run token alone: 401 without a good one, 503 when GitHub\'s keys can\'t be read', async () => {
+  // #1266: the runner read path checks the token exactly as an upload does.
+  const store = new Store(join(root, 'reader.db'));
+  const mandate = store.createProject('Mandate', 'https://github.com/caraminden/mandate', null);
+  const ci = new CiStore(store, join(root, 'reader'), new RunTokens(async () => jwks));
+  const job = (token: string | null) => ({ headers: token ? { authorization: `Bearer ${token}` } : {} }) as any;
+  const { project, claims } = await ci.caller(job(runToken()));
+  assert.deepEqual([project.id, claims.sha, claims.workflow], [mandate.id, SHA, 'android.yml']);
+  await assert.rejects(ci.caller(job(null)), (err: any) => err.status === 401);
+  await assert.rejects(ci.caller(job(runToken({}, { key: other.privateKey }))), (err: any) => err.status === 401);
+  await assert.rejects(ci.caller(job(runToken({ repository: 'someone/else' }))), (err: any) => err.status === 403 && /No scheme has the repo/.test(err.message));
+  const unread = new CiStore(store, join(root, 'reader'), new RunTokens(async () => { throw new Error('The operation was aborted due to timeout'); }));
+  await assert.rejects(unread.caller(job(runToken())), (err: any) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message));
+});
+
 test('publish takes the APK from the store when the run put one there, and never asks GitHub', async () => {
   const dir = join(root, 'android');
   mkdirSync(dir, { recursive: true });
@@ -372,6 +387,103 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     assert.equal((await fetch(`${srv.base}/api/projects/${id}/ci-files`, { headers: { ...mandateApp, 'X-Forwarded-For': '100.64.0.9' } })).status, 403);
     // The key is only for reading: an upload with it is still a run token's job.
     assert.equal((await fetch(`${srv.base}/api/ci-store/x.zip?kind=build`, { method: 'PUT', headers: mandateApp, body: 'x' })).status, 401);
+    // A job reads its own scheme's files for its own commit, from any workflow (#1266: Peek's desktop e2e job takes
+    // the build windows.yml made of the same commit), at the address it uploads to, with its run token.
+    const peekMade = (await srv.call('/api/projects', { name: 'Peek', source: 'none' })).data;
+    const repoDb = new DatabaseSync(join(srv.data, 'coordinator.db'));
+    repoDb.prepare('UPDATE projects SET repo_url = ? WHERE id = ?').run('https://github.com/caraminden/peek-auras', peekMade.id ?? peekMade.project?.id);
+    repoDb.close();
+    const LATER = 'b'.repeat(40);
+    const laterUp = await put('later.zip', 'kind=build&target=windows', 'a later commit', runToken({ run_id: '4600', sha: LATER, workflow_ref: 'caraminden/mandate/.github/workflows/windows.yml@refs/heads/main' }));
+    const later = (await laterUp.json()).file;
+    const peekFile = (await (await put('peek.zip', 'kind=build', 'peek build', runToken({ repository: 'caraminden/peek-auras', run_id: '9000' }))).json()).file;
+    const desktopJob = runToken({ run_id: '4700', workflow_ref: 'caraminden/mandate/.github/workflows/desktop.yml@refs/heads/main' });
+    const asJob = (path: string, token: string | null = desktopJob) => fetch(`${srv.base}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    const releases = await asJob(`/api/ci-store?commit=${SHA}&workflow=android.yml&kind=release`);
+    assert.equal(releases.status, 200, await releases.clone().text());
+    const ownFiles = (await releases.json()).files;
+    assert.deepEqual(ownFiles.map((f: any) => f.name), ['mandate-9.apk', 'mandate-8.apk', 'mandate-7.apk'], 'newest first, another workflow\'s files');
+    const seven = ownFiles.find((f: any) => f.name === 'mandate-7.apk');
+    assert.equal(seven.url, `/api/ci-store/${seven.id}/mandate-7.apk`, 'a URL the job can fetch with its token');
+    const got = await asJob(seven.url);
+    assert.equal(got.status, 200);
+    assert.equal(await got.text(), 'apk seven');
+    // No commit asked: the token's own. Never another commit's file, nor another scheme's.
+    assert.deepEqual((await (await asJob('/api/ci-store')).json()).files.map((f: any) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk', 'reports.tar.gz', 'reports.tar.gz']);
+    assert.deepEqual((await (await asJob(`/api/ci-store?commit=${SHA.slice(0, 7)}&name=mandate-8.apk`)).json()).files.map((f: any) => f.name), ['mandate-8.apk'], 'a short SHA of its own commit');
+    const otherCommit = await asJob(`/api/ci-store?commit=${LATER}`);
+    assert.equal(otherCommit.status, 403, 'another commit, by query');
+    assert.match((await otherCommit.json()).error, /its own commit/);
+    assert.equal((await asJob(`/api/ci-store/${later.id}/later.zip`)).status, 403, 'another commit, by file');
+    assert.equal(await (await asJob(`/api/ci-store/${later.id}/later.zip`, runToken({ sha: LATER }))).text(), 'a later commit', 'that commit\'s own job reads it');
+    assert.equal((await asJob(`/api/ci-store/${peekFile.id}/peek.zip`)).status, 403, 'another scheme\'s file');
+    assert.equal((await asJob(seven.url, runToken({ repository: 'caraminden/peek-auras' }))).status, 403, 'another scheme\'s job');
+    assert.deepEqual((await (await asJob('/api/ci-store', runToken({ repository: 'caraminden/peek-auras' }))).json()).files.map((f: any) => f.name), ['peek.zip']);
+    assert.equal((await asJob(`/api/ci-store/${seven.id}/other.apk`)).status, 404, 'a name that isn\'t the file\'s');
+    assert.equal((await asJob(`/api/ci-store/999999/x.zip`)).status, 404);
+    assert.equal((await asJob('/api/ci-store?kind=nope')).status, 400);
+    for (const path of ['/api/ci-store', seven.url]) {
+      assert.equal((await asJob(path, null)).status, 401, `no token: ${path}`);
+      assert.equal((await asJob(path, 'not.a.token')).status, 401, `not a token: ${path}`);
+      assert.equal((await asJob(path, runToken({}, { key: other.privateKey }))).status, 401, `signed by someone else: ${path}`);
+      assert.equal((await asJob(path, runToken({ aud: 'https://github.com/caraminden' }))).status, 401, `another audience: ${path}`);
+      assert.equal((await fetch(`${srv.base}${path}`, { headers: mandateApp })).status, 401, `a contraption key: ${path}`);
+    }
+
+    // The kit's download script, as a job runs it: by name, the newest match, a list, and the store's refusals passed on.
+    const DOWNLOAD = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store', 'ci-download.sh');
+    const tokenAsked: string[] = [];
+    const tokens = createServer((req, res) => (tokenAsked.push(req.url!), res.end(JSON.stringify({ count: 1, value: desktopJob })))).listen(0, '127.0.0.1');
+    await new Promise((r) => tokens.once('listening', r));
+    const pullDir = join(root, 'pull');
+    mkdirSync(pullDir, { recursive: true });
+    const pull = (args: string[], env: Record<string, string> = {}) => new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
+      const p = spawn('bash', [DOWNLOAD, ...args], {
+        cwd: pullDir,
+        env: { PATH: process.env.PATH!, RUNNER_TEMP: pullDir, CITADEL_STORE_URL: srv.base, CI_DOWNLOAD_WAIT: '0', ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(tokens.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
+      });
+      let stdout = '', stderr = '';
+      p.stdout.on('data', (d) => (stdout += d));
+      p.stderr.on('data', (d) => (stderr += d));
+      p.on('close', (status) => done({ status, stdout, stderr }));
+    });
+    try {
+      const byName = await pull(['--workflow', 'android.yml', '--name', 'mandate-7.apk', '--out', 'got/seven.apk']);
+      assert.equal(byName.status, 0, byName.stdout + byName.stderr);
+      assert.equal(readFileSync(join(pullDir, 'got', 'seven.apk'), 'utf8'), 'apk seven');
+      assert.deepEqual(tokenAsked, ['/token?api-version=2&audience=citadel-ci-store']);
+      assert.match(byName.stdout, /^::add-mask::/m, 'the run token is masked in the job\'s log');
+      const newest = await pull(['--commit', SHA, '--workflow', 'android.yml', '--kind', 'release']);
+      assert.equal(newest.status, 0, newest.stdout + newest.stderr);
+      assert.equal(readFileSync(join(pullDir, 'mandate-9.apk'), 'utf8'), 'apk from the script', 'no --name: the newest match, under its own name');
+      const listed = await pull(['--list', '--kind', 'release']);
+      assert.equal(listed.status, 0, listed.stdout + listed.stderr);
+      assert.deepEqual(listed.stdout.trim().split('\n').filter((l) => !l.startsWith('::')), ['mandate-9.apk android.yml run 4500 release', 'mandate-8.apk android.yml run 4400 release', 'mandate-7.apk android.yml run 4349 release']);
+      assert.equal((await pull(['--name', 'later.zip'])).status, 1, 'another commit\'s file is not there for it');
+      assert.match((await pull(['--name', 'nothing.zip'])).stdout, /^::error::ci-download: nothing in the store matches/m);
+      const refused = await pull(['--commit', LATER]);
+      assert.equal(refused.status, 1);
+      assert.match(refused.stdout, /^::error::ci-download: the store refused .*HTTP 403.*its own commit/m);
+      assert.match((await pull(['--kind', 'nope'])).stderr, /--kind build, report or release/);
+      assert.match((await pull(['--name', 'x.zip'], { ACTIONS_ID_TOKEN_REQUEST_URL: '' })).stdout, /^::error::ci-download: no run token: the job needs 'permissions: id-token: write'/m);
+      assert.match((await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: 'http://127.0.0.1:1' })).stdout, /^::error::ci-download: the store at .* didn't answer/m);
+      // A 503 (the store couldn't read GitHub's keys yet) is tried again, for the list and for the bytes.
+      let busy = 0;
+      const flaky = createServer((req, res) => {
+        if (busy++ % 2 === 0) return (res.statusCode = 503, res.end('{"error":"try again in a minute"}'));
+        if (req.url!.startsWith('/api/ci-store?')) return res.end(JSON.stringify({ files: [{ name: 'x.zip', workflow: 'windows.yml', run_id: 1, kind: 'build', target: '', url: '/api/ci-store/5/x.zip' }] }));
+        res.end('x bytes');
+      }).listen(0, '127.0.0.1');
+      await new Promise((r) => flaky.once('listening', r));
+      const retried = await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: `http://127.0.0.1:${(flaky.address() as any).port}` });
+      flaky.close();
+      assert.equal(retried.status, 0, retried.stdout + retried.stderr);
+      assert.equal(busy, 4);
+      assert.equal(readFileSync(join(pullDir, 'x.zip'), 'utf8'), 'x bytes');
+      assert.deepEqual(readdirSync(pullDir).sort(), ['got', 'mandate-9.apk', 'x.zip'], 'nothing left in the runner\'s temp folder, and no file from a refusal');
+    } finally {
+      tokens.close();
+    }
   } finally {
     await srv.stop();
     keys.close();
@@ -386,6 +498,11 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     assert.equal((await at(split.base)).status, 403);
     assert.equal((await at(agentBase)).status, 401, 'served there, and still wants a real run token');
     assert.equal((await fetch(`${agentBase}/api/projects/1/ci-files`, { headers: { Cookie: split.cookie } })).status, 404, 'reading is not served on the machines address');
+    // A job reads where it uploads (#1266): there, not here.
+    for (const path of ['/api/ci-store', '/api/ci-store/1/a.zip']) {
+      assert.equal((await fetch(`${split.base}${path}`, { headers: { Authorization: 'Bearer x.y.z' } })).status, 403, `a job's read on the app's own address: ${path}`);
+      assert.equal((await fetch(`${agentBase}${path}`, { headers: { Authorization: 'Bearer x.y.z' } })).status, 401, `served on the machines address: ${path}`);
+    }
   } finally {
     await split.stop();
   }

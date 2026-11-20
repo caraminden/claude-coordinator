@@ -1,5 +1,6 @@
-// The CI store's routes (#658, src/ci-store.ts): a runner's job uploads on the machines listener; a scheme's
-// members, minions, Taskmaster and contraptions list and read its files on the app's own address.
+// The CI store's routes (#658, src/ci-store.ts): a runner's job uploads, and reads its own commit's files (#1266), on
+// the machines listener; a scheme's members, minions, Taskmaster and contraptions list and read its files on the app's
+// own address.
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
@@ -47,7 +48,7 @@ export function ciFileView(app: App, f: CiFile) {
 }
 
 /** A scheme's files matching the query's workflow, kind, target, name, run and commit (a prefix), newest first. */
-function matching({ app, project, url }: Ctx): CiFile[] {
+function matching({ app, project, url }: Pick<Ctx, 'app' | 'project' | 'url'>): CiFile[] {
   const q = (k: string) => url.searchParams.get(k) ?? '';
   if (q('kind') && !(KINDS as readonly string[]).includes(q('kind'))) throw new HttpError(400, `kind must be one of ${KINDS.join(', ')}`);
   if (q('run') && !/^\d+$/.test(q('run'))) throw new HttpError(400, 'run must be a run id');
@@ -96,19 +97,58 @@ export const ciStoreRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/ci-files/:file/:name', ...readers,
     async handler({ app, req, res, project, params }) {
-      const f = /^\d+$/.test(params.file) ? app.store.getCiFile(Number(params.file)) : undefined;
-      // The name is part of the URL only so a download is called what it is.
-      if (!f || f.project_id !== project.id || f.name !== decoded(params.name)) throw new HttpError(404, 'No such file in the CI store');
-      // Turns can write the scheme's folder: serve only a plain file that is still the store's own.
-      const file = await app.ciStore.plain(f).catch(() => null);
-      const size = file && (await stat(file).then((s) => s.size, () => null));
-      if (!file || size === null) throw new HttpError(404, 'That file is no longer there');
-      res.writeHead(200, {
-        'Content-Type': 'application/octet-stream', 'Content-Length': size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`,
-      });
-      if (req.method === 'HEAD') return res.end();
-      await pipeline(createReadStream(file), res).catch(() => {});
+      const f = named(app, params);
+      if (!f || f.project_id !== project.id) throw new HttpError(404, 'No such file in the CI store');
+      await send(app, req, res, f);
+    },
+  },
+];
+
+/** The row a download URL's id names, if its name is the file's: the name is in the URL only so a download is called what it is. */
+function named(app: App, params: Record<string, string>): CiFile | undefined {
+  const f = /^\d+$/.test(params.file) ? app.store.getCiFile(Number(params.file)) : undefined;
+  return f && f.name === decoded(params.name) ? f : undefined;
+}
+
+async function send(app: App, req: Ctx['req'], res: Ctx['res'], f: CiFile) {
+  // Turns can write the scheme's folder: serve only a plain file that is still the store's own.
+  const file = await app.ciStore.plain(f).catch(() => null);
+  const size = file && (await stat(file).then((s) => s.size, () => null));
+  if (!file || size === null) throw new HttpError(404, 'That file is no longer there');
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream', 'Content-Length': size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`,
+  });
+  if (req.method === 'HEAD') return res.end();
+  await pipeline(createReadStream(file), res).catch(() => {});
+}
+
+/**
+ * A CI job's reads, beside its upload on the machines listener (#1266; Josh's pick on Peek Auras #704, 2026-11-20: a
+ * desktop e2e job takes the build windows.yml made of the same commit). Its run token names its scheme and commit, and
+ * it reads only those: its scheme's files of its own commit, from any workflow.
+ */
+export const ciJobReadRoutes: Route[] = [
+  {
+    // GET /api/ci-store?commit=<its own SHA, or a prefix>&workflow=&kind=&target=&name=&run=: the matches, newest first.
+    method: 'GET', path: '/api/ci-store', who: 'machine',
+    async handler({ app, req, res, url }) {
+      const { project, claims } = await app.ciStore.caller(req);
+      const commit = (url.searchParams.get('commit') ?? '').toLowerCase();
+      if (commit && !claims.sha.startsWith(commit)) throw new HttpError(403, `A job reads only its own commit's files (${claims.sha}), not ${commit}`);
+      const files = matching({ app, project, url }).filter((f) => f.sha === claims.sha);
+      return json(res, 200, { files: files.map((f) => ({ ...ciFileView(app, f), url: `/api/ci-store/${f.id}/${encodeURIComponent(f.name)}` })) });
+    },
+  },
+  {
+    method: 'GET', path: '/api/ci-store/:file/:name', who: 'machine',
+    async handler({ app, req, res, params }) {
+      const { project, claims } = await app.ciStore.caller(req);
+      const f = named(app, params);
+      if (!f) throw new HttpError(404, 'No such file in the CI store');
+      if (f.project_id !== project.id) throw new HttpError(403, `A job reads only its own scheme's files (${project.name})`);
+      if (f.sha !== claims.sha) throw new HttpError(403, `A job reads only its own commit's files (${claims.sha}); that one is ${f.sha}'s`);
+      await send(app, req, res, f);
     },
   },
 ];

@@ -55,6 +55,35 @@ folder:
 - A report that can't be uploaded warns and passes. A build or release that can't fails the step.
   A job on a GitHub-hosted runner (`CI_RUNNER=github`) can't reach the store: the script skips.
 
+## Downloading in a later job
+
+A job can download what another job of the same commit stored, from any workflow, in place of
+`actions/download-artifact` or building it again. For example, a desktop e2e job can take the build
+`windows.yml` made. Copy `ci-download.sh` from this skill's folder to the repo's
+`tools/ci-download.sh` (keep it executable and unchanged). The job needs the same `id-token: write`
+permission as an upload:
+
+```yaml
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Take windows.yml's build of this commit
+        run: tools/ci-download.sh --workflow windows.yml --kind build --target windows --out build/app.zip
+```
+
+- Filters: `--workflow`, `--kind`, `--target`, `--name`, `--run`. With no `--name` the script takes
+  the newest match. `--out` sets where the file goes (default: its stored name, in the current folder).
+  `--list` prints the matches instead, newest first.
+- The run token names the scheme and commit. A job reads only its own scheme's files of its own
+  commit; `--commit` with another SHA is refused (403). The file has to be stored already, so the
+  download runs after the job that uploads it (`needs:`, or a workflow that starts once it ends).
+- A file that can't be downloaded, or no match, fails the step. A 503 (the store couldn't yet read
+  GitHub's signing keys) is retried, as uploads are.
+- The routes it calls, on the store's address: `GET /api/ci-store?commit=&workflow=&kind=&target=&name=&run=`
+  lists the matches as JSON, and each file's `url` (`/api/ci-store/<id>/<name>`) is the bytes, both with
+  `Authorization: Bearer <run token>`.
+
 ## Reading a run's files
 
 - In a turn: the `ci_files` tool lists the scheme's files, newest first, or with `latest: true`

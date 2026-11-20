@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
-import { ciUploadRoute } from './ci-store.ts';
+import { ciJobReadRoutes, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
@@ -165,8 +165,9 @@ export const agentRoutes: Route[] = [
     app.ciLoad.add(machine.id, await readJson(req, 500_000));
     return json(res, 202, {});
   }),
-  // Not an agent's: a CI job's upload, which checks the job's own GitHub run token (#658).
+  // Not an agent's: a CI job's upload and reads, which check the job's own GitHub run token (#658, #1266).
   ciUploadRoute,
+  ...ciJobReadRoutes,
 ];
 
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).

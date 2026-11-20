@@ -292,16 +292,21 @@ export class CiStore {
     return project;
   }
 
+  /** The job a request comes from, by its run token alone: 401 without a good one, 403 when no scheme has its repo. */
+  async caller(req: Pick<IncomingMessage, 'headers'>): Promise<{ project: Project; claims: RunClaims }> {
+    const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+    if (!token) throw new HttpError(401, 'Send the job\'s GitHub run token as Authorization: Bearer');
+    const claims = await this.tokens.check(token);
+    return { project: this.schemeOf(claims), claims };
+  }
+
   /**
    * Take one upload: check the job's run token, stream the body to a part file (never into memory) with its sha256,
    * then, with the store locked, plan the rules with the new file in: if it fits, it replaces the same run's file of
    * that name and what the rules give up for it is deleted; if it doesn't, 507 and nothing else is touched.
    */
   async upload(req: IncomingMessage, u: Upload): Promise<CiFile> {
-    const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-    if (!token) throw new HttpError(401, 'Send the job\'s GitHub run token as Authorization: Bearer');
-    const claims = await this.tokens.check(token);
-    const project = this.schemeOf(claims);
+    const { project, claims } = await this.caller(req);
     const declared = Number(req.headers['content-length']);
     if (!Number.isSafeInteger(declared) || declared <= 0) throw new HttpError(411, 'Send the file with its Content-Length; an empty upload is refused');
     const tooBig = () => new HttpError(413, `A file in the CI store is limited to ${gib(this.rules.fileBytes)}`);

@@ -850,6 +850,12 @@ export const projectRoutes: Route[] = [
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
         }
       }
+      // Worked out before anything is written, since it can still refuse (too many approval rules). The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
+      const gate = shippingGate({ ...project, ...settings });
+      if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
+      if (gate.approval_rules !== (settings.approval_rules ?? project.approval_rules)) {
+        try { settings.approval_rules = cleanRules(gate.approval_rules); } catch (e) { throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`); }
+      }
       // Renamed first: it is the only change that can still be refused (a taken name).
       if (name !== project.name) {
         try {
@@ -866,12 +872,6 @@ export const projectRoutes: Route[] = [
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
         }
-      }
-      // The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
-      const gate = shippingGate({ ...project, ...settings });
-      if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
-      if (gate.approval_rules !== (settings.approval_rules ?? project.approval_rules)) {
-        try { settings.approval_rules = cleanRules(gate.approval_rules); } catch (e) { throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`); }
       }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
       if (Object.keys(settings).length) {

@@ -137,7 +137,7 @@ test('PATCH Shipping keeps the merge approval and the go threshold agreeing, and
   assert.deepEqual([person.data.ship_path, person.data.go_from, person.data.try_first], ['pr-person', 'all', 'ui'], 'a person merging means every change needs a go');
   assert.match(person.data.approval_rules, /gh pr merge/);
   // The gate's two rules are checked like typed ones: a list already at the cap can't take them.
-  const { data: full } = await call('/api/projects', { method: 'POST', body: { name: 'Full rules' } });
+  const { data: full } = await call('/api/projects', { method: 'POST', body: { name: `Rules at the limit ${Date.now()}` } });
   const fifty = Array.from({ length: 50 }, (_, i) => `Bash(tool${i}:*)`).join('\n');
   assert.equal((await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { approval_rules: fifty } })).status, 200);
   const over = await call(`/api/projects/${full.id}`, { method: 'PATCH', body: { ship_path: 'pr-person' } });
@@ -188,4 +188,17 @@ test('PATCH saves a scheme\'s never-hold kinds on their own and refuses unknown 
   assert.equal(ok.data.msg_never_hold, 'decision,note');
   assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { msg_never_hold: [] } })).data.msg_never_hold, '');
   for (const body of [{ msg_never_hold: 'note' }, { msg_never_hold: ['shout'] }]) assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body })).status, 400, JSON.stringify(body));
+});
+
+test('a save refused for too many approval rules changes nothing, its rename included (#1287 F2)', async () => {
+  const { data: p, status: s0 } = await call('/api/projects', { method: 'POST', body: { name: `Rules at the limit ${Date.now()}` } });
+  assert.ok(p.id, JSON.stringify([s0, p]));
+  await call(`/api/projects/${p.id}`);
+  const rules = Array.from({ length: 50 }, (_, i) => `mcp__tool__r${i}`);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules } })).status, 200);
+  const refused = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { name: 'Renamed anyway', ship_path: 'pr-person' } });
+  assert.equal(refused.status, 400);
+  assert.match(refused.data.error, /At most 50/);
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  assert.match(page.project.name, /^Rules at the limit \d+$/);
 });

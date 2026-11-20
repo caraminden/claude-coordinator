@@ -112,27 +112,25 @@ function row(item) {
   const chip = item.source !== 'kit' ? h('span', { class: 'cui-chip', 'data-tone': 'info' }, 'This scheme\'s')
     : item.kind === 'agent' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'Kit Grunt')
       : off ? h('span', { class: 'cui-chip', 'data-tone': 'warn' }, 'Off here') : h('span', { class: 'cui-chip', 'data-tone': 'ok' }, 'Default, recommended');
-  // Until the counts arrive the stats line holds a bar and the "When, where and how" line its place (css: the slot is a fixed height, used or not).
-  const stats = !data.usage ? (data.usageError ? 'Counts unavailable: ' + data.usageError : h('span', { class: 'sk-ghost', 'aria-label': 'Loading counts' }))
-    : u
-    ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} in ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${u.shipped} of ${u.runs} followed by a ship`
-    : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
+  // Until the counts arrive the stats line holds a bar of the same height; the line is the toggle for the detail when the skill ran, so unused rows reserve nothing.
+  const text = u ? `${u.runs} ${u.runs === 1 ? 'run' : 'runs'} · ${u.minions} ${u.minions === 1 ? 'minion' : 'minions'} · ${u.shipped} then shipped` : `Not used ${scope === 'all' ? 'in any scheme' : 'here'} in the last ${data.days} days`;
+  const stats = !data.usage ? h('p', { class: 'sk-stats' }, data.usageError ? `Counts unavailable: ${data.usageError}` : h('span', { class: 'sk-ghost', 'aria-label': 'Loading counts' }))
+    : u ? detail(item, u, text) : h('p', { class: 'sk-stats' }, text);
   return h('article', { class: `sk-row${off ? ' off' : ''}` },
     h('div', { class: 'sk-top' }, h('span', { class: 'sk-name' }, item.name), chip, h('span', { class: 'spacer' }), sw),
     item.trigger ? h('p', { class: 'sk-when' }, h('b', {}, 'When: '), item.trigger) : null,
     item.what ? h('p', { class: 'sk-what muted' }, item.what) : null,
-    h('p', { class: 'sk-stats' }, stats),
-    h('div', { class: 'sk-slot' }, u ? detail(item, u) : null));
+    stats);
 }
 
 /** When, where and how (Josh's words): the step of the turn, the kinds of minion, the Grunts, and the last few runs. */
-function detail(item, u) {
+function detail(item, u, stats) {
   const phases = item.kind === 'skill' ? PHASES.filter((p) => u.phases[p]).map((p) => `${p} ${pct(u.phases[p], u.runs)}`).join(' · ') : '';
   const types = top(u.types).map(([k, n]) => `${k} ${n}`).join(' · ');
   const withs = top(u.with).map(([k, n]) => `${k === 'none' ? 'no skill first' : k} ${n}`).join(' · ');
   const line = (label, text) => (text ? h('p', {}, h('b', {}, label), text) : null);
   return h('details', { class: 'sk-detail' },
-    h('summary', {}, 'When, where and how'),
+    h('summary', { title: 'When, where and how it ran' }, stats),
     line('Step of the turn: ', phases),
     line('Minion types: ', types),
     line(item.kind === 'skill' ? 'Grunts it started: ' : 'Started after: ', withs),

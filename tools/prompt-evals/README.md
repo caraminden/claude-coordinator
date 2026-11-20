@@ -27,10 +27,28 @@ citadel-heavy tools/prompt-eval run --base main           # your branch against 
 citadel-heavy tools/prompt-eval run --ref <old sha>       # an old prompt version
 citadel-heavy tools/prompt-eval run --model sonnet --effort medium --base-model opus --base-effort high   # a tier question
 citadel-heavy tools/prompt-eval briefs --model sonnet     # whole reruns of closed bug fixes on a tier
+tools/prompt-eval check                                   # every case and brief file parses (no model calls)
+tools/prompt-eval check-briefs                            # each brief fails at `before` and passes at `fix`
+tools/prompt-eval snapshot <system-prompt.md>             # refresh fixture/ from a turn's system prompt
 tools/prompt-eval --help
 ```
 
 A run of 30 cases × 3 takes a while: start it in the background and wait with `citadel-wait pid <pid>`.
+
+**Cost.** An opening move on Opus high costs about $0.50, mostly writing the ~50k-token prompt to the
+cache, so a 30 × 3 run is about $45 a side and a `--base` comparison about $90 (measured 2026-11-19).
+A brief rerun is capped at `--budget` ($10). Run it when it answers a real question, not by habit.
+
+**Instructions.** The Citadel-wide and scheme instructions live in the database, not the repo, so a run
+uses `fixture/` (a snapshot; refresh it with `snapshot` when they change) and `--app`/`--scheme` point the
+tested side at other files. `fixture/2026-11-11/` holds both as they were live at 2026-11-11 00:00 PST
+(`app_instruction_history` id 11, `instruction_history` id 49), with code at `268638ee`: the known-bad
+version the first baseline was checked against:
+
+```sh
+citadel-heavy tools/prompt-eval run --ref 268638ee --app tools/prompt-evals/fixture/2026-11-11/citadel-wide.md \
+  --scheme tools/prompt-evals/fixture/2026-11-11/scheme.md --base HEAD
+```
 
 ## A case (`cases/<id>.json`)
 
@@ -86,7 +104,13 @@ entry whose `tool` matches the tool name (as in checks) and whose `match` matche
 wins. Without a match a tool answers with a stock reply (a card "is in the chat… End your turn now", a
 ship is "handed off", a lookup is "no rows"). Bash, Read, Grep and Glob are real, but read-only, in a copy
 of the repo at `commit`: writes, edits, Grunts and anything outside a read-only allowlist are refused (the
-call still shows in the transcript, so a check can see the attempt).
+call still shows in the transcript, so a check can see the attempt). So is any call that names today's live
+state (the real shared folder, `coordinator.db`, the live checkout, the auto-memory): it would leak the
+present into a past moment.
+
+What a rerun doesn't get back: the minion's auto-memory and the live state of the moment beyond the
+case's `facts`, and the repo copy still has later commits in its object store (`git log --all` can see
+them). `history` stands in for the earlier chat.
 
 ## A brief (`briefs/<id>.json`): whole reruns for tier questions
 

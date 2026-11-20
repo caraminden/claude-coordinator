@@ -25,6 +25,7 @@ paths:
   - "test/land.test.ts"
   - "test/land-build.test.ts"
   - "test/land-queue.test.ts"
+  - "test/land-train.test.ts"
   - "test/land-deploy.test.ts"
   - "test/land-recover.test.ts"
   - "test/land-boot-check.test.ts"

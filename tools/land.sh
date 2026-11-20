@@ -583,12 +583,12 @@ fi
 # <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two
 # deliberate removals of another minion's work (what the trailer is for), and nothing else; the line counts of
 # 2026-11-15 refused the same over ~1,090 landings in seven.
-undo_guard() { # <onto> [<head> <its branch>]: HEAD and $branch unless named (the ship train's riders, #1166)
-  local base head=${2:-HEAD} of=${3:-$branch}
-  base=$(git merge-base "$head" "$1") || return 2
+undo_guard() {
+  local base
+  base=$(git merge-base HEAD "$1") || return 2
   perl -e '
     use strict; use warnings; use List::Util qw(min max);
-    my ($base, $ticket, $head) = @ARGV;
+    my ($base, $ticket) = @ARGV;
     sub run { my $out = `$_[0]`; $? == 0 or die "undo guard: $_[0] failed\n"; $out }
     sub lines { # how many times a diff adds (+) or removes (-) each trimmed line of 12+ characters, keyed by file
       my ($sign, $cmd) = @_; my (%set, $f);
@@ -603,8 +603,8 @@ undo_guard() { # <onto> [<head> <its branch>]: HEAD and $branch unless named (th
     }
     sub text { (split /\0/, $_[0], 2)[1] }
     sub ticket { my $s = shift; return $1 if $s =~ /^(?:WIP:? )?#(\d+)\b/; my @t = $s =~ /#(\d+)\)/g; @t ? $t[-1] : "" }
-    my @named = run("git log --format=%B $base..$head") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
-    my $diff = "diff -U0 --no-renames --no-color $base $head";
+    my @named = run("git log --format=%B $base..HEAD") =~ /^(?:Undoes: *|This reverts commit )([0-9a-f]{7,40})\b/mg;
+    my $diff = "diff -U0 --no-renames --no-color $base HEAD";
     my ($removed, $added) = (lines("-", $diff), lines("+", $diff));
     my %net; # per text, how many more lines the branch removes than adds back anywhere
     $net{text($_)} += $removed->{$_} for keys %$removed;
@@ -629,7 +629,7 @@ undo_guard() { # <onto> [<head> <its branch>]: HEAD and $branch unless named (th
     exit 0 unless @bad;
     print join("\n", @bad), "\n";
     exit 1;
-  ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$of")" "$head"
+  ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$branch")"
 }
 
 if [ "$mode" = land ] || [ "$mode" = into ]; then
@@ -840,12 +840,12 @@ ci_gate() {
   esac
 }
 
-# A red run's failed log into $failed (its last lines go on stderr with the refusal, or in a ship train to the ship
-# that turned it red), and run-tests.sh's flake labels into the retro log (they can't reach it from the desktop, so
-# they are written from its output here).
+# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log
+# (they can't reach it from the desktop, so they are written from its output here).
 ci_failed() {
   local f load
   failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
+  tail -n 40 <<<"$failed" >&2
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI"
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
@@ -950,7 +950,7 @@ train_build() {
         c=$(git -C "$wt" rev-parse HEAD)
         if [ "$c" = "$cur" ]; then skip="main already has all of it"
         elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"
-        elif ! undo_guard "$cur" "$c" "$b" >/dev/null 2>&1; then skip="the undo guard stops it on the train"
+        elif ! (cd "$wt" && branch=$b && undo_guard "$cur") >/dev/null 2>&1; then skip="the undo guard stops it on the train"
         fi
       else
         git -C "$wt" rebase --abort >/dev/null 2>&1 || true
@@ -1058,7 +1058,6 @@ elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
-  tail -n 40 <<<"$failed" >&2
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else

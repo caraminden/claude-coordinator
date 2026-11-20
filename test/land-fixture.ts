@@ -9,7 +9,8 @@ import { git } from './git.ts';
 export { git };
 
 // tools/land.sh on throwaway repos: a scheme repo on main, a minion worktree, and a live clone. The
-// worktree's tools/deploy.sh is a stand-in that notes whether it got the lock, and fails on request.
+// worktree's tools/deploy.sh is a stand-in that notes whether it got the lock, and fails on request. FAKE_DEPLOY_LOG gets
+// main's commit for each deploy.
 export const land = join(import.meta.dirname, '..', 'tools', 'land.sh');
 export const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -33,6 +34,7 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
 flock -n "$lock" true && held=no || held=yes
 echo "locked=$DEPLOY_LOCKED held=$held" >"$DEPLOY_NOTE"
 until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0.05; done
+[ -z "\${FAKE_DEPLOY_LOG:-}" ] || git -C "$DEPLOY_SOURCE" rev-parse main >>"\$FAKE_DEPLOY_LOG"
 [ "\${FAKE_DEPLOY_EXIT:-0}" != 0 ] || [ -z "\${DEPLOY_TIMES:-}" ] || echo "queued \$(date +%s)" >>"\$DEPLOY_TIMES"
 [ "\${FAKE_DEPLOY_EXIT:-0}" != 0 ] || [ -n "\${FAKE_NOT_LIVE:-}" ] || [ -z "\${DEPLOY_TIMES:-}" ] || echo "live \$(date +%s)" >>"\$DEPLOY_TIMES"
 exit "\${FAKE_DEPLOY_EXIT:-0}"
@@ -79,6 +81,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
 // after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
+// FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166);
+// FAKE_CI_GATE: every run stays in progress until that file exists.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
   git(r.dir, 'init', '-q', '--bare', hub);
@@ -98,6 +102,9 @@ case "$*" in
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
     n=$(grep -c '/actions/runners ' "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
     [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
+    # (a commit GitHub hasn't got yet has no run)
+    if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
+    [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
       case $st in
         green) printf '%s\\tcompleted\\tsuccess\\thttps://ci/%s\\n' $id $id ;;

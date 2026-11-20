@@ -114,6 +114,12 @@
         const label = d.v ? o?.done ?? o?.label ?? d.v : 'note only';
         return `- ${it.title}: ${label}${d.note ? `. "${d.note}"` : ''}`;
       }),
+      // Every item with its title (picked or not), for the scheme's ideas ledger (#1150): it keeps sets with a Later option.
+      items: () => [...items].map(([id, it]) => {
+        const d = docs.get(id) ?? {};
+        const o = opts.find((x) => x.v === d.v);
+        return { collection, id, title: it.title, ...(d.v ? { label: o?.done ?? o?.label ?? d.v } : {}) };
+      }),
     };
     sets.push(set);
 
@@ -178,7 +184,7 @@
       toastNode?.remove();
       dock.paint();
       try {
-        const r = await window.citadel.send(body, marked.size ? { images: images() } : undefined);
+        const r = await window.citadel.send(body, { items: sets.flatMap((s) => s.items()), ...(marked.size ? { images: images() } : {}) });
         remember(body);
         if (pending === body) sent.textContent = `Sent to ${r?.to ?? 'the minion'} ✓`;
       } catch (e) {

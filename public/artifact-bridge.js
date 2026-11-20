@@ -290,12 +290,14 @@
      * In Citadel's viewer a sent page closes, showing the chat; `keepOpen: true` leaves it open (a page that sends
      * several times on purpose).
      */
-    send: async (text, { images, keepOpen } = {}) => {
+    send: async (text, { images, keepOpen, items } = {}) => {
       // A click in a tab never reaches the viewer, so the page checks it here too: a page never sends by itself.
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
       // `images`: marked pictures from draw ({ mediaType, data }), at most 6; they take longer to post.
-      const r = images?.length ? await request('send', { text: String(text), images, ...(keepOpen ? { keepOpen: true } : {}) }, 60000) : await request('send', { text: String(text), ...(keepOpen ? { keepOpen: true } : {}) });
+      // `items`: the page's pick items ({ collection, id, title, label }), for the scheme's ideas ledger (#1150).
+      const extra = { ...(keepOpen ? { keepOpen: true } : {}), ...(Array.isArray(items) && items.length ? { items } : {}) };
+      const r = images?.length ? await request('send', { text: String(text), images, ...extra }, 60000) : await request('send', { text: String(text), ...extra });
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
       setTimeout(() => {
         const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);

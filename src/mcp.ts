@@ -1142,6 +1142,22 @@ const SEARCH_MINIONS = {
   },
 };
 
+const IDEAS = {
+  name: 'ideas',
+  description: "The scheme's ideas ledger (Orders → Ideas): every idea it was shown on a choices page with a Later option, or written as a handoff, with its status (proposed, picked, later, skipped, started, built, declined), who decided in their words and when, its handoff and the minion that built it. It fills itself from page Sends, handoff files, starts and ships. Use it before proposing an idea (was it already picked, skipped or built?) and to find Later ideas to offer again. With `id`, fix one row by hand: `status` (null hands it back to automatic) and/or `minion` (#N, null to unlink, \"auto\" to let the scan link it).",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Words to find in titles, notes, handoff paths, #N; empty lists all' },
+      status: { type: 'string', enum: ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'], description: 'Only rows with this status' },
+      limit: { type: 'integer', description: 'How many rows (default 30, max 200)' },
+      id: { type: 'integer', description: 'A row to fix by hand (from a listing)' },
+      set_status: { type: ['string', 'null'], enum: ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined', null], description: 'With id: the status to set, or null for automatic' },
+      minion: { type: ['integer', 'string', 'null'], description: 'With id: the #N that builds it, null to unlink, or "auto"' },
+    },
+  },
+};
+
 /** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
 const MEDIA = process.env.COORDINATOR_MEDIA === '1';
 const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
@@ -1307,6 +1323,21 @@ function pastMinionsText(hits: any[]): string {
     const files = h.files ? h.files.split('\n') : [];
     return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
   }).join('\n\n');
+}
+
+/** The ideas tool's answer: a count line, then one line per row. */
+function ideasText(r: { ideas: any[]; counts: Record<string, number>; total: number; waiting: number[] }, limit: number): string {
+  const day = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) : '');
+  const head = `${r.total} ideas: ${Object.entries(r.counts).filter(([, n]) => n).map(([s, n]) => `${n} ${s}`).join(', ') || 'none yet'}. Showing ${Math.min(limit, r.ideas.length)} of ${r.ideas.length}.${r.waiting.length ? ` ${r.waiting.length} at Later over two weeks.` : ''}`;
+  const rows = r.ideas.slice(0, limit).map((i) => [
+    `- [${i.id}] ${i.title || i.card} · ${i.status}${i.status_manual ? ' (by hand)' : ''}`,
+    i.decided_by ? ` · ${i.pick_label ?? i.pick ?? 'noted'} (${i.decided_by}, ${day(i.decided_at)}${i.words ? `: "${i.words}"` : ''})` : '',
+    i.page_label ? ` · page ${i.page_label}${i.page ? ` card ${i.card}` : ''}` : '',
+    i.source_number ? ` · from #${i.source_number}` : '',
+    i.handoff ? ` · handoff ${i.handoff}` : '',
+    i.minion ? ` · #${i.minion.number}` : '',
+  ].join(''));
+  return [head, ...rows].join('\n');
 }
 
 /** search_decisions' answer: one block per decision, newest or best first, then what each source holds. */
@@ -2146,6 +2177,20 @@ async function runTool(name: string, args: any): Promise<string> {
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', ...(args.since ? { since: String(args.since) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
       return pastMinionsText((await call('GET', `/api/projects/${PROJECT}/past-minions?${q}`)).hits);
     }
+    case 'ideas': {
+      if (args.id != null) {
+        const body: Record<string, unknown> = {};
+        if (args.set_status !== undefined) body.status = args.set_status;
+        if (args.minion !== undefined) body.ticket = args.minion === null || args.minion === 'auto' ? args.minion : Number(String(args.minion).replace(/^#/, ''));
+        if (!Object.keys(body).length) return 'Give set_status and/or minion with id.';
+        const r = await call('POST', `/api/projects/${PROJECT}/ideas/${Number(args.id)}`, body);
+        return `Row ${r.idea.id} is now ${r.idea.status}${r.idea.status_manual ? ' (set by hand)' : ''}${r.idea.number ? `, built by #${r.idea.number}` : ''}.`;
+      }
+      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '' });
+      if (typeof args.status === 'string') q.set('status', args.status);
+      const r = await call('GET', `/api/projects/${PROJECT}/ideas?${q}`);
+      return ideasText(r, Math.min(Math.max(Number(args.limit) || 30, 1), 200));
+    }
     case 'contraption_turns': {
       const q = new URLSearchParams();
       if (args.app) q.set('app', String(args.app));
@@ -2549,7 +2594,7 @@ function toolList() {
 function toolListAll() {
   const host = IN_CONTAINER ? [HOST_CHECK] : [];
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
-  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS];
+  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS, ...(SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];

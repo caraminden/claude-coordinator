@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
-import { projectDir } from '../src/workspace.ts';
+import { projectDir, projectSharedDir } from '../src/workspace.ts';
 import { readAgentFiles } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
@@ -1018,6 +1018,40 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/decisions (Orders → Decisions in "${c.project.name}")`;
     },
   },
+  ideas: {
+    about: 'Orders → Ideas (#1150): a choices page in the Seeded scheme with Build it / Later / Cut bars and a Send, a handoff for one pick that a minion started from and shipped, a pick another minion is still building, a Later pick waiting over two weeks, and a loose handoff',
+    seed(c) {
+      if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
+      const shared = projectSharedDir(c.dataDir, c.project.id);
+      mkdirSync(join(shared, 'mockups', 'ideas'), { recursive: true });
+      mkdirSync(join(shared, 'handoffs'), { recursive: true });
+      const page = join(shared, 'mockups', 'ideas', 'ideas.html');
+      writeFileSync(page, "<!doctype html><title>Ideas</title><h1>Ideas</h1><script>const opts = [{ v: 'go', label: 'Build it' }, { v: 'later', label: 'Later' }, { v: 'skip', label: 'Cut' }];\nmock.picks({ collection: 'ideas', options: opts });</script>");
+      const day = 86_400_000;
+      const at = (ago: number) => new Date(Date.now() - ago * day).toISOString();
+      c.store.writeArtifactData(c.project.id, page, [
+        { key: 'db/ideas/A1', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'One page for every sound, please' }) },
+        { key: 'db/ideas/A2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3) }) },
+        { key: 'db/ideas/B1', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(20), note: 'After the audio work' }) },
+        { key: 'db/ideas/B2', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(3) }) },
+        { key: 'db/ideas/C1', value: JSON.stringify({ v: 'skip', by: 'Josh', at: at(3) }) },
+        { key: 'db/ideas/C2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'Small one, do it first' }) },
+      ], 'Josh');
+      const idea = minion(c, 'Ideas for the audio pass');
+      c.store.addEvent(idea.id, 'user_message', { author: 'Josh', text: 'Picks on "Ideas":\n- A1 A sound board: Build it. "One page for every sound, please"\n- A2 Quieter footsteps: Build it\n- B1 A music mixer: Later. "After the audio work"\n- B2 Voice lines per room: Later\n- C1 Random ambience: Cut\n- C2 A mute key: Build it. "Small one, do it first"', comment: { path: page, about: 'Ideas' } });
+      const handoff = (name: string, title: string, card: string) => {
+        writeFileSync(join(shared, 'handoffs', name), `# Handoff: ${title} (${card})\n\nFrom #${idea.number}'s ideas page, card ${card}: \`${page}\`.\n**Pick (Josh):** Build it.\n`);
+        return join(shared, 'handoffs', name);
+      };
+      const board = minion(c, 'Sound board');
+      c.store.addEvent(board.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${handoff('handoff-sound-board.md', 'a sound board', 'A1')}\`.` });
+      const mute = minion(c, 'Mute key');
+      c.store.addEvent(mute.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${handoff('handoff-mute-key.md', 'a mute key', 'C2')}\`.` });
+      c.store.addEvent(mute.id, 'note', { text: 'Shipped 1a2b3c4 "Mute key": M toggles every sound. Risk low: front end only. Live now.' });
+      writeFileSync(join(shared, 'handoffs', 'handoff-save-slots.md'), '# Handoff: three save slots\n\nFrom the Taskmaster, after a chat with Josh.\n');
+      return `#/p/${c.project.id}/ideas (Orders → Ideas in "${c.project.name}"): A1 started by #${board.number}, C2 built by #${mute.number}, B1 pinned as Later over two weeks`;
+    },
+  },
   ci: {
     about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
     seed(c) {
@@ -1034,6 +1068,9 @@ mock.boards('#takes', { boards: [
       const seen = minion(c, 'Port the overlay', { status: 'closed' });
       for (const [file, n, src] of [['test/apps.test.ts', 17, 'in CI'], ['test/previews.test.ts', 12, 'smoke'], ['test/machines.test.ts', 9, 'run-tests'], ['test/checkpoint.test.ts', 4, 'in CI']] as const)
         for (let i = 0; i < n; i++) c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - (i * 20 + 3) * 3_600_000 / 2, [{ file, source: src, detail: `✖ ${file} › case ${i} (timed out after 5000ms)` }]);
+      // #1120: a fix with 30 of its 50 proving runs clean, and a held one that flaked again (reopened).
+      c.store.addFlakeFix(c.project.id, 'test/apps.test.ts', onIt.id, now - 26 * 3_600_000, { clean_runs: 30 });
+      c.store.addFlakeFix(c.project.id, 'test/machines.test.ts', seen.id, now - 80 * 3_600_000, { reopened: 1 });
       const [review, landing, landed] = [minion(c, 'Sound tab in settings'), minion(c, 'Drag panels between monitors', { status: 'closed' }), minion(c, 'Aura vanishes when its outline is removed', { status: 'closed' }, 'bug')];
       const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push', who: Ticket | null = null) => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id), minion: who?.number ?? null });
       c.store.setSetting(`ci-health:view:${c.project.id}`, {

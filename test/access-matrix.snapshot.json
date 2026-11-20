@@ -1563,6 +1563,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/ideas": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
+ "POST /api/projects/:p/ideas/1": {
+  "anon": "401 Not logged in",
+  "person": "404 No such idea in this scheme",
+  "member": "404 No such idea in this scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No such idea in this scheme",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No such idea in this scheme",
+  "m2": "404 No such idea in this scheme"
+ },
  "GET /api/projects/:p/inbox": {
   "anon": "401 Not logged in",
   "person": "200",

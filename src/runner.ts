@@ -46,7 +46,7 @@ import { takeStatus, type StatusFields } from './status-trailer.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
-import { CACHE_TTL_MS, KEEPALIVE_AFTER_MS, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, SERIES_CAP_MS, WEEK_MS, changedParts, claudeStamp, contextText, fingerprint, inWindow, keepaliveKey, missed, prefixParts, reportText, tooManyMisses, treeHash, turnDate, weekReport, type KeepaliveSeries } from './keepalive.ts';
+import { CACHE_TTL_MS, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, SERIES_CAP_MS, WEEK_MS, changedParts, claudeStamp, contextText, countGate, fingerprint, inWindow, keepaliveKey, missed, prefixParts, reportText, tooManyMisses, treeHash, turnDate, weekReport, type KeepaliveSeries } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
@@ -2351,11 +2351,14 @@ export class Runner {
       this.tellCitadel(reportText(r, off));
       if (off) return;
     }
-    if (!inWindow(now)) return;
+    // Runs outside working hours too, only to count the minions the hours turned away (#1274).
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         // A busy lane (its last save, say) runs it once free, if it still qualifies then.
-        if (t.kind === 'coordinator' || t.status !== 'idle' || this.keepalivePending.has(t.id) || !this.wantsKeepalive(t, p, now)) continue;
+        if (t.kind === 'coordinator' || t.status !== 'idle' || this.keepalivePending.has(t.id)) continue;
+        const gate = this.keepaliveGate(t, p, now);
+        this.countGate(t.id, gate, now);
+        if (gate) continue;
         this.keepalivePending.set(t.id, now - this.now());
         this.next(t.id);
       }
@@ -2364,17 +2367,46 @@ export class Runner {
 
   /** Whether a minion is waiting on a person with a warm cache that a keepalive would keep (keepaliveSweep). */
   private wantsKeepalive(t: Ticket, p: Project, now: number): boolean {
-    if (t.kind === 'coordinator' || !t.session_id || !t.cwd || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id)) return false;
-    if (this.limitWait(t.id) || this.netWait(t.id) || this.parked(t) || this.store.getSetting(freshKey(t.id))) return false;
-    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || this.store.openCardsOf(t.id).length)) return false;
-    if (!inWindow(now)) return false;
+    return !this.keepaliveGate(t, p, now);
+  }
+
+  /** Which of wantsKeepalive's gates turns a minion away, or null when a keepalive is due. */
+  private keepaliveGate(t: Ticket, p: Project, now: number): string | null {
+    if (t.kind === 'coordinator') return 'taskmaster';
+    if (!t.session_id || !t.cwd) return 'no session';
+    if (t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id)) return 'busy';
+    if (this.limitWait(t.id)) return 'limit wait';
+    if (this.netWait(t.id)) return 'net wait';
+    if (this.parked(t)) return 'parked';
+    if (this.store.getSetting(freshKey(t.id))) return 'fresh';
+    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || this.store.openCardsOf(t.id).length)) return `state ${t.state}`;
+    if (!inWindow(now)) return 'hours';
     // Codex keeps no Claude cache.
     const person = this.turnPerson(t, p, []);
-    if (isCodexModel(turnSettings(t, p).model) || (person !== null && this.store.getSetting<boolean>(codexSwitchKey(person))) || this.store.getSetting(codexThreadKey(t.id))) return false;
+    if (isCodexModel(turnSettings(t, p).model) || (person !== null && this.store.getSetting<boolean>(codexSwitchKey(person))) || this.store.getSetting(codexThreadKey(t.id))) return 'codex';
     const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(t.id));
-    if (!s || s.stopped || now - s.since >= SERIES_CAP_MS) return false;
+    if (!s) return 'no series';
+    if (s.stopped) return `stopped ${s.stopped}`;
+    if (now - s.since >= SERIES_CAP_MS) return 'series cap';
     const ended = this.store.lastTurnEnd(t.id);
-    return !!ended && now - ended >= KEEPALIVE_AFTER_MS && now - ended < CACHE_TTL_MS;
+    if (!ended) return 'no turn end';
+    return now - ended >= KEEPALIVE_AFTER_MS && now - ended < CACHE_TTL_MS ? null : 'not due';
+  }
+
+  /** Last turn end each minion's gate was counted for: one count per due window, not one per minute. */
+  private gateCounted = new Map<number, number>();
+
+  /**
+   * Count which gate turned a due minion away, or "sent" (#1274): once per idle minion with a series whose last turn
+   * ended 55 to 60 minutes ago, per Pacific day in KEEPALIVE_GATES_KEY. Minions not yet due aren't counted, or "not
+   * due" would drown the rest.
+   */
+  private countGate(ticketId: number, gate: string | null, now: number) {
+    if (!this.store.getSetting(keepaliveKey(ticketId))) return;
+    const ended = this.store.lastTurnEnd(ticketId);
+    if (!ended || now - ended < KEEPALIVE_AFTER_MS || now - ended >= CACHE_TTL_MS || this.gateCounted.get(ticketId) === ended) return;
+    this.gateCounted.set(ticketId, ended);
+    this.store.setSetting(KEEPALIVE_GATES_KEY, countGate(this.store.getSetting(KEEPALIVE_GATES_KEY), pacificDay(now), gate ?? 'sent'));
   }
 
   /** Mark a minion's keepalive series stopped, with why. */

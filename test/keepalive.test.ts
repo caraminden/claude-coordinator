@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import {
-  changedParts, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
+  changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
   tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow,
 } from '../src/keepalive.ts';
 import { Runner } from '../src/runner.ts';
@@ -318,4 +318,43 @@ test('the weekly readout switches keepalives off when they cost more than they s
   } finally {
     store.deleteSetting(KEEPALIVE_OFF_KEY);
   }
+});
+
+test('countGate adds one to a gate on a day and keeps the last 14 days', () => {
+  let c = countGate(null, '2026-11-01', 'sent');
+  c = countGate(c, '2026-11-01', 'sent');
+  c = countGate(c, '2026-11-01', 'state complete');
+  assert.deepEqual(c, { '2026-11-01': { sent: 2, 'state complete': 1 } });
+  for (let d = 2; d <= 20; d++) c = countGate(c, `2026-11-${String(d).padStart(2, '0')}`, 'hours');
+  assert.equal(Object.keys(c).length, 14);
+  assert.ok(!c['2026-11-06'] && c['2026-11-07'] && c['2026-11-20'], 'the oldest days go');
+});
+
+test('each due minion counts once a day under the gate that turned it away, or as sent (#1274)', async () => {
+  store.deleteSetting(KEEPALIVE_GATES_KEY);
+  const ready = minion();
+  const done = minion();
+  const night = minion();
+  const end = pst(17);
+  await realTurn(ready, end);
+  await realTurn(done, end);
+  await realTurn(night, pst(23, 30));
+  store.updateTicket(ready, { state: 'ready' });
+  store.updateTicket(done, { state: 'complete' });
+  store.updateTicket(night, { state: 'ready' });
+  const before = callCount();
+  runner.keepaliveSweep(end + 54 * 60_000);
+  assert.equal(store.getSetting(KEEPALIVE_GATES_KEY), null, 'not due yet: nothing counted');
+  runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+  await until('the keepalive to run', () => callCount() > before);
+  await idle(ready);
+  // A later minute of the same due window doesn't count the complete one again.
+  runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS + 60_000);
+  runner.keepaliveSweep(pst(23, 30) + KEEPALIVE_AFTER_MS); // 00:25 Pacific, the next day
+  await idle(night);
+  assert.deepEqual(store.getSetting(KEEPALIVE_GATES_KEY), {
+    '2026-11-17': { hours: 1 },
+    '2026-11-16': { sent: 1, 'state complete': 1 },
+  });
+  assert.equal(callCount(), before + 1, 'only the ready minion in hours was pinged');
 });

@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
 
 // Plan cards through the real server: a minion proposes, only a person approves or sends it back,
 // and a newer plan supersedes the open one. A stand-in `claude -p` records each turn's prompt and
@@ -32,16 +32,9 @@ chmodSync(fakeClaude, 0o755);
 let base = '';
 let cookie = '';
 
-async function call(path: string, opts: { method?: string; body?: unknown; token?: string } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : { Cookie: cookie }), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+let srv: Booted;
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
+  ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 // The token the minion's latest turn holds: each turn's token dies when the next turn starts.
@@ -52,7 +45,7 @@ let ticket: any;
 let turn: any;
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

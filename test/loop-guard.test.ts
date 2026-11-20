@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner } from '../src/runner.ts';
 import { TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/prompts.ts';
-import { agentToken, bootServer, until, stopProcs, stopTurns, testPins } from './helpers.ts';
+import { agentToken, bootServer, until, stopProcs, stopTurns, testPins, ok, type Booted } from './helpers.ts';
 testPins();
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT per LOOP_WINDOW_MS (ten minutes) wait for a person. A stand-in
@@ -200,23 +200,17 @@ test('two Taskmasters share one burst count, both ways, and either one continuin
 let base = '';
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
+let srv: Booted;
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> => {
   const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
-  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  const r = await srv.as(token ? { token } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET');
   // This stands in for whichever turn is current: if a new turn began mid-call, ask again as that one.
-  if (res.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+  if (r.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
+  return ok(r);
+};
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

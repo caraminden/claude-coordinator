@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, REPO, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, bootServer, REPO, stopProcs, stopTurns, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-api-'));
@@ -21,15 +21,9 @@ let base = '';
 let cookie = '';
 
 /** A request as Cara, or as the minion or Taskmaster `as` (a ticket id) with its token. */
-async function call(path: string, opts: { method?: string; body?: unknown; as?: number } = {}) {
-  const auth: Record<string, string> = opts.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), opts.as)}` };
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) =>
+  (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
   // A stand-in Claude for the describe box: a turn (stream-json) fails as /bin/false would; a describe call proposes
@@ -44,7 +38,7 @@ else
 fi
 `);
   chmodSync(claude, 0o755);
-  const srv = await bootServer({ root, stdout: true, env: { CLAUDE_BIN: claude } });
+  srv = await bootServer({ root, stdout: true, env: { CLAUDE_BIN: claude } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
 
 // A turn's question cards merge (Cara, 2026-11-18: "Merge a turn's cards", cap "Raise cap to 8", Taskmasters too):
 // a plain card asked while the turn's earlier plain card is unanswered joins it. The stand-in `claude -p` holds its
@@ -36,16 +36,11 @@ chmodSync(fakeClaude, 0o755);
 
 let base = '';
 let cookie = '';
-async function call(path: string, opts: { method?: string; body?: unknown; token?: string; fail?: boolean } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : { Cookie: cookie }), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok && !opts.fail) throw new Error(`${res.status} ${data.error}`);
-  return opts.fail ? { status: res.status, ...data } : data;
-}
+let srv: Booted;
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string; fail?: boolean } = {}) => {
+  const r = await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET');
+  return opts.fail ? { status: r.status, ...r.data } : ok(r);
+};
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 let ticket: any;
@@ -60,7 +55,7 @@ const q = (text: string, n = 1) => Array.from({ length: n }, (_, i) => ({ questi
 const ask = (questions: unknown[], extra: object = {}) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body: { questions, ...extra } });
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

@@ -9,7 +9,7 @@ import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until } from './helpers.ts';
+import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
 
 // Jobs on a person's machine (#857, shared/project/specs/desktop-gpu-jobs.md): the real server, a stand-in `claude -p`
 // that records each turn, and a fake machine agent on the real SSE stream that records the job messages it is sent.
@@ -62,18 +62,10 @@ async function raw(path: string, opts: { method?: string; body?: unknown; who?: 
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
 }
-async function call(who: string, path: string, body?: unknown, method?: string) {
-  const res = await raw(path, { who, body, method });
-  const out = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${out.error}`);
-  return out;
-}
-async function app(name: string, path: string, body?: unknown) {
-  const res = await raw(path, { bearer: KEY(name), body });
-  const out = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${out.error}`);
-  return out;
-}
+let srv: Booted;
+const call = async (who: string, path: string, body?: unknown, method?: string) =>
+  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, body || undefined, method));
+const app = async (name: string, path: string, body?: unknown) => ok(await srv.as({ token: KEY(name) })(path, body || undefined));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
@@ -138,7 +130,7 @@ const finish = (id: number) => wakes(async () => {
 });
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: join(root, 'home') } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: join(root, 'home') } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

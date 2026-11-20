@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, until, stopTurns, stopProcs } from './helpers.ts';
+import { bootServer, until, stopTurns, stopProcs, type Booted } from './helpers.ts';
 
 // State complete (#547; Josh, 2026-11-11: "always say something about there being no remaining work"):
 // it can't be set, or kept, without a note saying what is left.
@@ -18,17 +18,11 @@ after(async () => {
 
 let base = '';
 let cookie = '';
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookie, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown } = {}) => srv.call(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
-  const srv = await bootServer({ root });
+  srv = await bootServer({ root });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

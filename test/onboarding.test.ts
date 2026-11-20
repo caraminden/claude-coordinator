@@ -9,7 +9,7 @@ import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/prompts.ts';
 import { projectSharedDir, surveyReports } from '../src/workspace.ts';
-import { bootServer, jsonLines, REPO, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, jsonLines, REPO, until, stopProcs, stopTurns, type Booted } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
 // setup runs, its plan card and catalogue, and the catalogue never handing out a file's body.
@@ -36,17 +36,12 @@ const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 let base = '';
 let cookie = '';
-async function call(path: string, opts: { method?: string; body?: unknown; token?: string } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : { Cookie: cookie }), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
+  (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

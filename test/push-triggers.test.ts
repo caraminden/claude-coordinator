@@ -6,7 +6,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, until, stopTurns, stopProcs } from './helpers.ts';
+import { agentToken, bootServer, until, stopTurns, stopProcs, ok, type Booted } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
 // arrives, and stand-in browsers decrypt it. A stand-in `claude -p` fails any turn whose message
@@ -37,20 +37,14 @@ let pushService: ReturnType<typeof createHttpsServer> | undefined;
 const received: { path: string; body: Buffer }[] = [];
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
+let srv: Booted;
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> => {
   const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
-  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  const r = await srv.as(token ? { token } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET');
   // This stands in for whichever turn is current: if a new turn began mid-call, ask again as that one.
-  if (res.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+  if (r.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
+  return ok(r);
+};
 
 const browsers: Record<string, { ecdh: ReturnType<typeof createECDH>; auth: string; endpoint: string }> = {};
 
@@ -100,7 +94,7 @@ before(async () => {
   await new Promise<void>((r) => pushService!.listen(0, '127.0.0.1', r));
   pushBase = `https://127.0.0.1:${(pushService.address() as any).port}`;
 
-  const srv = await bootServer({
+  srv = await bootServer({
     root,
     // NODE_TLS_REJECT_UNAUTHORIZED: trust the stand-in push service's self-signed certificate.
     env: { CLAUDE_BIN: fakeClaude, NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1' },

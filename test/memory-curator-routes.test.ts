@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until } from './helpers.ts';
+import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
 
 // The memory curator (#1111) through the real server: a run proposes with propose_memory's route, the card waits in its
 // chat, a member applies the ticked changes on the Memory page's routes, the run is told, and Put back undoes it.
@@ -35,17 +35,9 @@ let ticket: any;
 let project: any;
 let dir = '';
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const token = who === 'minion' ? turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token : null;
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] }), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+let srv: Booted;
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
+  ok(await srv.as(who === 'minion' ? { token: turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
@@ -55,7 +47,7 @@ const read = (f: string) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f
 const B = '---\nname: B\ndescription: second\n---\nbeta\n';
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

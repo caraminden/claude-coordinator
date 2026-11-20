@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createInterface } from 'node:readline';
-import { agentToken, bootServer, until, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, bootServer, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { hashToken, newToken } from '../src/machines.ts';
@@ -27,16 +27,8 @@ const { mcpServer, fakeClaude, turns, startMachineAgent } = machineFakes(root, p
 let base = '';
 let cookie = '';
 
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookie, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+let srv: Booted;
+const call = async (path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.call(path, opts.body || undefined, opts.method ?? 'GET'));
 
 /** Put these schemes on a machine's list (#438): a new machine is lent to none. */
 const lend = (machineId: number, ...projects: { id: number }[]) => call(`/api/machines/${machineId}`, { method: 'PATCH', body: { projects: projects.map((p) => p.id) } });
@@ -45,7 +37,7 @@ const startAgent = (token: string, run?: string[], env?: NodeJS.ProcessEnv) => s
 
 before(async () => {
   // bootServer clears MACHINES_URL: a thread's turn inherits the live service's, and this server must take agents itself.
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude }, stdout: true });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude }, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, freePort, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, freePort, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
@@ -24,20 +24,12 @@ let base = '';
 let agentBase = '';
 let cookie = '';
 
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookie, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+let srv: Booted;
+const call = async (path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.call(path, opts.body || undefined, opts.method ?? 'GET'));
 
 before(async () => {
   agentBase = `http://127.0.0.1:${await freePort()}`;
-  const srv = await bootServer({ root, env: { MACHINES_URL: agentBase, CLAUDE_BIN: fakeClaude }, stdout: true });
+  srv = await bootServer({ root, env: { MACHINES_URL: agentBase, CLAUDE_BIN: fakeClaude }, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

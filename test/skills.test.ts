@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, skillDetail, sentenceAround, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
-import { bootServer, stopProcs, until } from './helpers.ts';
+import { bootServer, stopProcs, until, type Booted } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
 const root = mkdtempSync(join(tmpdir(), 'skills-'));
@@ -235,13 +235,11 @@ test('cachedUsage answers from the last report at once and never waits on a scan
 
 let base = '';
 let cookie = '';
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(base + path, { method: opts.method ?? 'GET', headers: { Cookie: cookie, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown } = {}) => srv.call(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
-  const srv = await bootServer({ root: join(root, 'srv'), stdout: true });
+  srv = await bootServer({ root: join(root, 'srv'), stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

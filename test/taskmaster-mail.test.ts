@@ -10,7 +10,7 @@ import { TASKMASTER_LOOP_LIMIT } from '../src/prompts.ts';
 import { RELAY_FILE_MAX, relayFile } from '../src/taskmaster-files.ts';
 import { HttpError } from '../src/http.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { agentToken, bootServer, jsonLines, withoutTurnNote, stopProcs, stopTurns, until, testPins } from './helpers.ts';
+import { agentToken, bootServer, jsonLines, withoutTurnNote, stopProcs, stopTurns, until, testPins, ok, type Booted } from './helpers.ts';
 testPins();
 
 // Taskmaster mail and relay files (#405): message_taskmaster's wake: false leaves held mail for the other
@@ -96,16 +96,12 @@ let base = '';
 let cookie = '';
 const data = join(root, 'data');
 
-async function call(who: string, path: string, body?: unknown): Promise<any> {
-  const auth = who === 'Cara' ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(data, Number(who.slice(6)))}` };
-  const res = await fetch(base + path, { method: body ? 'POST' : 'GET', headers: { ...auth, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  const out = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${out.error}`);
-  return out;
-}
+let srv: Booted;
+const call = async (who: string, path: string, body?: unknown): Promise<any> =>
+  ok(await srv.as(who === 'Cara' ? { cookie } : { token: agentToken(data, Number(who.slice(6))) })(path, body || undefined, body ? 'POST' : 'GET'));
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

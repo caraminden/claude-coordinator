@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until } from './helpers.ts';
+import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
 
 // Host tools (#1147, Josh: "Minion proposes, owner approves"): a minion in any scheme proposes a tool, a member of the
 // Citadel scheme approves it on a card, the server installs it with mise and a chore minion in the Citadel scheme ships
@@ -53,17 +53,9 @@ const cookies: Record<string, string> = {};
 const ids: Record<string, number> = {};
 let ticket: any;
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const token = who === 'minion' ? live() : null;
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] }), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} ${data.error}`);
-  return data;
-}
+let srv: Booted;
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
+  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
@@ -76,7 +68,7 @@ const miseCalls = () => (existsSync(miseLog) ? readFileSync(miseLog, 'utf8').tri
 const pyright = { source: 'npm', package: 'pyright', version: '1.1.414', why: 'type-check the Python tools' };
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, CITADEL_MISE: fakeMise } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, CITADEL_MISE: fakeMise } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

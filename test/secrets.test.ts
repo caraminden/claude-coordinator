@@ -13,7 +13,7 @@ import { Contraptions } from '../src/contraptions.ts';
 import { hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { looksSecret } from '../public/secret-check.js';
-import { agentToken, bootServer, jsonLines, PASSWORD, SECRET, stopProcs, stopTurns, until } from './helpers.ts';
+import { agentToken, bootServer, jsonLines, PASSWORD, SECRET, stopProcs, stopTurns, until, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'secrets-'));
 const data = join(root, 'data');
@@ -71,16 +71,12 @@ let base = '';
 const cookies: Record<string, string> = {};
 let out = '';
 
-async function call(path: string, opts: { method?: string; body?: unknown; token?: string; as?: string; bearer?: string } = {}) {
-  const auth = opts.bearer ? { Authorization: `Bearer ${opts.bearer}` } : opts.token ? { Authorization: `Bearer ${opts.token}` } : { Cookie: cookies[opts.as ?? 'Cara'] };
-  const res = await fetch(base + path, {
-    method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
-    headers: { ...auth, ...(opts.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-  });
-  const body = await res.json();
-  return { status: res.status, body };
-}
+let srv: Booted;
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string; as?: string; bearer?: string } = {}) => {
+  const token = opts.bearer ?? opts.token;
+  const r = await srv.as(token ? { token } : { cookie: cookies[opts.as ?? 'Cara'] })(path, opts.body, opts.method);
+  return { status: r.status, body: r.data };
+};
 const ok = async (path: string, opts: Parameters<typeof call>[1] = {}) => {
   const r = await call(path, opts);
   if (r.status >= 300) throw new Error(`${r.status} ${r.body.error}`);
@@ -109,7 +105,7 @@ function filesHolding(dir: string, needle: string): string[] {
 }
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

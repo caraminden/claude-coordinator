@@ -104,6 +104,14 @@ export function agentToken(data: string, id: number): string {
 
 export { until };
 
+/** A call's answer's body, or a throw naming its status and error: for a test that treats any non-2xx as a failure. */
+export function ok(r: { status: number; data: any }): any {
+  if (r.status < 200 || r.status >= 300) throw new Error(`${r.status} ${r.data?.error ?? JSON.stringify(r.data)}`);
+  return r.data;
+}
+
+export type Caller = (path: string, body?: unknown, method?: string) => Promise<{ status: number; data: any }>;
+
 export type Booted = {
   base: string;
   port: number;
@@ -114,7 +122,9 @@ export type Booted = {
   /** The session cookie of a person signed in as `name`. */
   cookie: string;
   /** A JSON call as that person: GET without a body, else `method` (POST by default). */
-  call: (path: string, body?: unknown, method?: string) => Promise<{ status: number; data: any }>;
+  call: Caller;
+  /** The same call as someone else: a session `cookie` or a Bearer `token` (a minion's, from `agentToken`). */
+  as: (who: { cookie?: string; token?: string }) => Caller;
   /** Kill the server and its turns (all but `keepTurns`, for a restart), then delete the scratch folder. */
   stop: (opts?: { keepTurns?: boolean }) => Promise<void>;
 };
@@ -156,10 +166,13 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     await stop();
     throw new Error(`Signing in answered ${login.status} without a cookie`);
   }
-  const call = async (path: string, body?: unknown, method?: string) => {
+  const as = (who: { cookie?: string; token?: string }): Caller => async (path, body, method) => {
     const res = await fetch(base + path, {
       method: method ?? (body === undefined ? 'GET' : 'POST'),
-      headers: { Cookie: cookie, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      headers: {
+        ...(who.cookie ? { Cookie: who.cookie } : {}), ...(who.token ? { Authorization: `Bearer ${who.token}` } : {}),
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
@@ -169,7 +182,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     } catch {}
     return { status: res.status, data };
   };
-  return { base, port, root, data, proc, cookie, call, stop };
+  const call = as({ cookie });
+  return { base, port, root, data, proc, cookie, call, as, stop };
 }
 
 /** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there (<unit>.failed: its last run failed). */

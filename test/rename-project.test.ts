@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, stopProcs } from './helpers.ts';
+import { bootServer, stopProcs, type Booted } from './helpers.ts';
 
 // A project's name is display-only: renaming it changes nothing that goes by id (repo, folders, links).
 const root = mkdtempSync(join(tmpdir(), 'rename-project-'));
@@ -33,17 +33,11 @@ test('renameProject trims, refuses empty and taken names, and leaves the repo al
 let base = '';
 let cookie = '';
 
-async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookie, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown } = {}) => srv.call(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
-  const srv = await bootServer({ root, stdout: true });
+  srv = await bootServer({ root, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

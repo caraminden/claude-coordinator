@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Claims, claimName } from '../src/claims.ts';
-import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, bootServer, stopProcs, stopTurns, type Booted } from './helpers.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
 function bare() {
@@ -58,17 +58,11 @@ after(async () => {
 });
 let base = '';
 let cookie = '';
-async function call(path: string, opts: { method?: string; body?: unknown; as?: number } = {}) {
-  const auth: Record<string, string> = opts.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), opts.as)}` };
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await res.json() };
-}
+let srv: Booted;
+const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) =>
+  (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
 before(async () => {
-  const srv = await bootServer({ root, stdout: true });
+  srv = await bootServer({ root, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

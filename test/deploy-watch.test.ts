@@ -54,6 +54,14 @@ function setup() {
 
 const sha = (c: string) => c.repeat(40);
 
+test('the beacon drops the harmless ResizeObserver warning and keeps any other error', () => {
+  const c = new ClientErrors();
+  assert.equal(c.take('a', { message: 'ResizeObserver loop limit exceeded' }), null);
+  assert.equal(c.take('a', { message: 'ResizeObserver loop completed with undelivered notifications.', kind: 'error' }), null);
+  assert.match(c.take('a', { message: 'x is not a function' }) ?? '', /x is not a function/);
+  assert.match(c.take('a', { message: 'ResizeObserver is not defined' }) ?? '', /not defined/);
+});
+
 test('a regression wakes each minion that shipped in the deploy once, by Shipped note or #N, and mails the Taskmaster', async () => {
   const { store, tm, a, b, clock, woken, mailed, w, deploy, errors } = setup();
   deploy(sha('0'));

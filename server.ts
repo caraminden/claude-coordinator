@@ -20,6 +20,7 @@ import { restartDetail, startWatchdog, takeMark } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
+import { installing as hostToolInstalls } from './src/host-tools.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
@@ -452,7 +453,7 @@ const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
-runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running();
+runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running() + hostToolInstalls();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);

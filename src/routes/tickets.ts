@@ -804,7 +804,7 @@ export const ticketRoutes: Route[] = [
       const byHand = tool.source === 'pacman';
       const event = postPlan(app, ticket.id, {
         summary: `Install ${toolLabel(tool)} on the server`,
-        plan: `${tool.why}\n\n${byHand ? 'A person runs, by hand (the server has no root)' : 'Approve runs, on the server'}:\n\n\`\`\`\n${command}\n\`\`\`\n\nFrom ${sourceName(tool.source)}. It is listed in the host tools list, which a rebuild of the server installs from.`,
+        plan: `${tool.why}\n\n${byHand ? 'A person runs, by hand (the server has no root)' : 'Approve runs, on the server'}:\n\n\`\`\`\n${command}\n\`\`\`\n\n${byHand ? `pacman takes no version: it installs the repo's current one, and the list's check flags it unless that is ${tool.version}. ` : ''}From ${sourceName(tool.source)}. It is listed in the host tools list, which a rebuild of the server installs from.`,
         hostTool: { ...tool, command },
       });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });

@@ -42,7 +42,7 @@ const repo = join(root, 'citadel-repo');
 mkdirSync(join(repo, 'tools'), { recursive: true });
 mkdirSync(join(repo, 'deploy'));
 writeFileSync(join(repo, 'deploy', 'host-tools.json'), '[]\n');
-writeFileSync(join(repo, 'tools', 'land.sh'), `{ git log -1 --format=%s; cat deploy/host-tools.json; } >> ${landLog}\n`);
+writeFileSync(join(repo, 'tools', 'land.sh'), `{ git log -1 --format=%s; cat deploy/host-tools.json; } > ${landLog}.part && mv ${landLog}.part ${landLog}\n`);
 const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@x', ...args], { cwd: repo });
 git('init', '-q', '-b', 'main');
 git('add', '-A');
@@ -131,12 +131,12 @@ test('an approval installs it with mise, and a chore minion in the Citadel schem
   await until('the list ships', () => existsSync(landLog));
   assert.deepEqual(miseCalls(), ['use -g --pin --yes npm:pyright@1.1.414']);
   const [subject, ...list] = readFileSync(landLog, 'utf8').trim().split('\n');
-  assert.match(subject, /^#\d+: list host tool npm:pyright@1\.1\.414, approved by Josh for Delve #1$/);
+  const [, chore] = subject.match(/^#(\d+): list host tool npm:pyright@1\.1\.414, approved by Josh for Delve #1$/) ?? [];
+  assert.ok(chore, subject);
   assert.deepEqual(JSON.parse(list.join('\n')), [{ ...pyright, approved_by: 'Josh', approved_on: list.join('').match(/\d{4}-\d\d-\d\d/)![0], asked_by: 'Delve #1' }]);
-  const chores = (await call('Cara', `/api/projects/${GLOBAL_OWNER}/tickets`)).tickets.filter((t: any) => t.title === 'List host tool npm:pyright@1.1.414');
-  assert.equal(chores.length, 1);
   await until('the minion hears', async () => /^Installed npm:pyright@1\.1\.414 on the server/.test(await lastMessage()));
-  assert.match(await lastMessage(), new RegExp(`ships with Citadel #${chores[0].number}`));
+  // The chore minion may be dismissed already (its ship was clean), so it is named by its commit.
+  assert.match(await lastMessage(), new RegExp(`ships with Citadel #${chore}\\.`));
   await idle();
 });
 

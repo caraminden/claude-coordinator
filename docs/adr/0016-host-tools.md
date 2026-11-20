@@ -16,14 +16,15 @@ Josh's picks on #1147's cards, 2026-11-19:
 - **Sources:** "mise's own tools; npm packages; Python packages (pipx); Rust crates (cargo); GitHub release binaries; Arch
   packages (pacman)". mise has no pipx backend, so Python packages go through its `pypi:` backend. All but Arch packages
   install with `mise use -g --pin <spec>` as the server's user; the server has no root, so an approved Arch package is listed
-  and a person runs the `sudo pacman -S --needed` line the minion hands them.
+  and a person runs the `sudo pacman -S --needed` line the minion hands them. pacman takes no version, so `check`
+  flags an Arch package whose installed version isn't the listed one.
 - **Where the list lives:** "In Citadel's repo", `deploy/host-tools.json`, one line per tool with who approved it, when and for
   which minion. Josh: "we definitely want all our dependencies in git so Citadel can be brought back up if we move off perigee".
 - **How a line gets into git:** "The server ships it". An approval starts a chore minion in the Citadel scheme whose branch
   holds that one commit and hands its ship off like any minion's: a clean ship dismisses it, a failed one wakes it to fix.
 
 A minion calls `propose_host_tool` (source, package, one exact version, why). The card shows the exact command; approving runs
-it behind the click and tells the minion how it went. A newer proposal for the same package supersedes the open card, and one
+it behind the click (a restart waits for a running install) and tells the minion how it went. A newer proposal for the same package supersedes the open card, and one
 already listed at that version is refused. `node tools/host-tools.ts install` puts the whole list on a fresh box;
 `node tools/host-tools.ts check` names what the box lacks.
 

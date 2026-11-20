@@ -115,8 +115,10 @@ export function manifestProblems(list: ListedTool[], mise: MiseList, pacmanVersi
   const out: string[] = [];
   for (const t of list) {
     if (t.source === 'pacman') {
+      // pacman -Q says pkgver-pkgrel ("14.1.1-1"); the list holds the pkgver a person approved.
       const v = pacmanVersion(t.package);
       if (v === null) out.push(`${toolLabel(t)}: not installed; a person runs \`${installCommand(t)}\``);
+      else if (v.replace(/-[^-]*$/, '') !== t.version.replace(/^v/, '')) out.push(`${toolLabel(t)}: pacman has ${v} installed; list the version the box has, or install ${t.version}`);
       continue;
     }
     const key = t.source === 'mise' ? t.package : `${t.source}:${t.package}`;
@@ -142,10 +144,17 @@ export function installEnv(home = homedir()): NodeJS.ProcessEnv {
 /** Longest an install may take: a cargo crate builds from source. */
 export const INSTALL_MS = 30 * 60_000;
 
+let running = 0;
+/** Installs running now, as the server's children: a restart waits for them (server.ts runner.hostJobs). */
+export const installing = () => running;
+
 /** Install a tool with mise, as approve does and a rebuild does; an Arch package isn't, and says so. */
 export function installTool(t: Pick<HostTool, 'source' | 'package' | 'version'>, home = homedir()): Promise<{ ok: boolean; output: string }> {
   const spec = miseSpec(t);
   if (!spec) return Promise.resolve({ ok: false, output: `${t.package} is an Arch package: a person runs \`${installCommand(t)}\`` });
-  return new Promise((done) => execFile(miseBin(home), ['use', '-g', '--pin', '--yes', spec], { cwd: home, env: installEnv(home), timeout: INSTALL_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) =>
-    done({ ok: !err, output: `${stdout}${stderr}${err && !stderr ? err.message : ''}`.trim().slice(-4000) })));
+  running++;
+  return new Promise((done) => execFile(miseBin(home), ['use', '-g', '--pin', '--yes', spec], { cwd: home, env: installEnv(home), timeout: INSTALL_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+    running--;
+    done({ ok: !err, output: `${stdout}${stderr}${err && !stderr ? err.message : ''}`.trim().slice(-4000) });
+  }));
 }

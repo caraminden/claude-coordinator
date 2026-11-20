@@ -191,6 +191,11 @@ test('only people subscribe, and only https push services', async () => {
   assert.equal(pinned.onlyPinned, true);
   assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.cara.endpoint, onlyPinned: false } }), { subscribed: false, muted: [], everything: [], onlyPinned: false });
   assert.equal((await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } })).onlyPinned, true);
+  // The desktop app's device names itself (#1186): a uuid, no keys; anything else is refused.
+  const desk = await call('Cara', '/api/push/subscription', { method: 'PUT', body: { desktop: '5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10' } });
+  assert.equal(desk.subscribed, true);
+  await assert.rejects(call('Cara', '/api/push/subscription', { method: 'PUT', body: { desktop: 'not-a-uuid' } }), /400/);
+  await call('Cara', '/api/push/subscription', { method: 'DELETE', body: { endpoint: 'desktop:5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10' } });
   // Turning it off forgets the browser.
   await call('Cara', '/api/push/subscription', { method: 'DELETE', body: { endpoint: browsers.cara.endpoint } });
   assert.deepEqual(await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } }), { subscribed: false, muted: [], everything: [], onlyPinned: false });

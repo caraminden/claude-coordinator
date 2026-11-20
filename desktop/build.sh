@@ -3,7 +3,7 @@
 # its app (resources/app) and electron.exe renamed Citadel.exe. The zip is what #1148's feed takes (publish_desktop,
 # exe "Citadel.exe", started "file"). Runs on Linux with curl, unzip and zip; nothing is compiled.
 #   desktop/build.sh [out.zip]     (default: $TMPDIR/citadel-desktop.zip)
-# shortcut: Citadel.exe keeps Electron's icon in Explorer (the window and taskbar use icon.png); changing the exe's own
+# shortcut: Citadel.exe keeps Electron's icon in Explorer (the window, tray and shortcuts use icon.ico); changing the exe's own
 # icon needs rcedit, a Windows tool, so do it if people mind the icon on the shortcut.
 set -euo pipefail
 VERSION=45.4.1
@@ -24,7 +24,7 @@ unzip -q "$dist" -d "$work/Citadel"
 mv "$work/Citadel/electron.exe" "$work/Citadel/Citadel.exe"
 rm -f "$work/Citadel/resources/default_app.asar"
 mkdir "$work/Citadel/resources/app"
-cp "$here"/{main.cjs,route.cjs,preload.cjs,package.json,icon.png} "$work/Citadel/resources/app/"
+cp "$here"/{main.cjs,route.cjs,preload.cjs,package.json,icon.ico} "$work/Citadel/resources/app/"
 rm -f "$out"
 (cd "$work" && zip -qr -X "$out" Citadel)
 echo "$out ($(du -h "$out" | cut -f1))"

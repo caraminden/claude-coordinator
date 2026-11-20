@@ -1,6 +1,6 @@
 // Push notifications: each signed-in person turns them on per browser, and can mute schemes there
 // or keep it to the minions they pinned.
-import { validSubscription } from '../push.ts';
+import { DESKTOP, desktopId, validSubscription } from '../push.ts';
 import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
 
 /** This browser's subscription as the account panel needs it. */
@@ -26,6 +26,12 @@ export const pushRoutes: Route[] = [
     method: 'PUT', path: '/api/push/subscription', ...people,
     async handler({ req, res, app, session }) {
       const body = await readJson(req, 10_000);
+      // The desktop app's device (#1186) names itself; its pings go down its live stream, so it has no keys.
+      const desk = desktopId(body.desktop);
+      if (desk) {
+        app.store.savePushSubscription(session.name, DESKTOP + desk, '', '');
+        return json(res, 200, pushView(app, DESKTOP + desk));
+      }
       if (!validSubscription(body.subscription)) throw new HttpError(400, 'Not a usable push subscription');
       const { endpoint, keys } = body.subscription;
       app.store.savePushSubscription(session.name, endpoint, keys.p256dh, keys.auth);

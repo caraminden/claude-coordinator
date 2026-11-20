@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store, type Ticket } from '../src/db.ts';
-import { Pusher, type PushTrigger, encryptPayload, loadVapidKeys, notificationFor, validSubscription, vapidJwt } from '../src/push.ts';
+import { Pusher, type PushTrigger, desktopId, encryptPayload, loadVapidKeys, notificationFor, validSubscription, vapidJwt } from '../src/push.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'push-'));
@@ -373,4 +373,25 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   store.savePushSubscription('Cara', b.endpoint, b.p256dh, b.auth);
   assert.equal(store.getPushSubscription(b.endpoint)!.everything, '[]');
   store.db.close();
+});
+
+test('a desktop app\'s device hears through its page, never a push service, and is kept when nobody is listening (#1186)', async () => {
+  const store = new Store(join(root, 'desktop.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const project = store.createProject('P', null, cara.id);
+  const t = store.createTicket({ project_id: project.id, title: 'Fix it', permission_mode: 'default', created_by: 'Cara' });
+  const web = browser('https://push.example/cara');
+  store.savePushSubscription('Cara', web.endpoint, web.p256dh, web.auth);
+  store.savePushSubscription('Cara', 'desktop:5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10', '', '');
+  const fetched: string[] = [];
+  const pusher = new Pusher(store, loadVapidKeys(root), (async (url: string) => (fetched.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch);
+  await pusher.notify(t, { kind: 'state', state: 'ready', note: 'Done' });
+  assert.deepEqual(fetched, [web.endpoint]);
+  const local: [string, string, string][] = [];
+  pusher.local = (sub, msg) => local.push([sub.name, sub.endpoint, msg.body]);
+  await pusher.notify(t, { kind: 'state', state: 'ready', note: 'Again' });
+  assert.deepEqual(local, [['Cara', 'desktop:5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10', 'Again']]);
+  assert.equal(store.listPushSubscriptions().length, 2);
+  assert.equal(desktopId('5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10'), '5f0c2a7e-1b9d-4c1e-9a3f-2d6b8e7c4a10');
+  for (const bad of ['', 'https://push.example/x', '../5f0c2a7e', 5]) assert.equal(desktopId(bad), null);
 });

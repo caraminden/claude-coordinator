@@ -160,6 +160,13 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
   };
 }
 
+/**
+ * A desktop app's device (#1186): Electron has no Web Push, so its pings go down the page's own live stream
+ * (Pusher.local) while the app runs. Stored like a subscription, `desktop:<uuid>`, so it keeps the same per-device settings.
+ */
+export const DESKTOP = 'desktop:';
+export const desktopId = (raw: unknown) => typeof raw === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw) ? raw : null;
+
 /** Is this a subscription worth storing: an https push service and well-formed keys? */
 export function validSubscription(raw: any): raw is PushSubscriptionJson {
   if (!raw || typeof raw.endpoint !== 'string' || raw.endpoint.length > 2000) return false;
@@ -179,6 +186,8 @@ export class Pusher {
   private fetch: typeof fetch;
   /** Who the push services can contact about this sender: the app's own address. */
   subject = 'https://localhost';
+  /** Hands a desktop app's ping to its open page (server.ts); none open, and it is dropped. */
+  local: (sub: PushSubscriptionRow, msg: PushMessage) => void = () => {};
 
   constructor(store: Store, keys: VapidKeys, fetchFn: typeof fetch = fetch) {
     this.store = store;
@@ -239,8 +248,12 @@ export class Pusher {
       && !this.store.hiddenProjects(user.id).has(projectId);
   }
 
-  /** Send one message; a subscription the push service says is gone (404, 410) is deleted. */
+  /** Send one message (a desktop app's through its page); a subscription the push service says is gone (404, 410) is deleted. */
   async send(sub: PushSubscriptionRow, msg: PushMessage): Promise<number> {
+    if (sub.endpoint.startsWith(DESKTOP)) {
+      this.local(sub, msg);
+      return 202;
+    }
     const res = await postPush(sub, msg, this.keys, this.subject, this.fetch);
     if (res.status === 404 || res.status === 410) this.store.deletePushSubscription(sub.endpoint);
     else if (!res.ok) console.error(`Push service answered ${res.status} for ${sub.name}: ${(await res.text().catch(() => '')).slice(0, 200)}`);

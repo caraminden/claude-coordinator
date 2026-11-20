@@ -2,7 +2,7 @@
 // setup), and passes the title bar colour the page picks (index.html's theme-color metas) to the window controls.
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('citadelDesktop', { app: 'electron' });
+contextBridge.exposeInMainWorld('citadelDesktop', { app: 'electron', show: () => ipcRenderer.send('citadel:show') });
 
 function watchTitleBar() {
   let last = null;

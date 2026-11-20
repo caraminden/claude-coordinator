@@ -3,9 +3,10 @@
 // sites open in the default browser; files download here, with the usual Save dialog. #1148's launcher installs and
 // updates it: it starts this build, and this build says it started by writing the file CITADEL_STARTED_FILE names.
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
-const { app, BrowserWindow, Menu, nativeTheme, shell, ipcMain } = require('electron');
-const { writeFileSync } = require('node:fs');
-const { join } = require('node:path');
+// Closing the window keeps it in the tray, so notifications (core.js desktopNotify) still come; Quit is the tray's menu.
+const { app, BrowserWindow, Menu, Tray, nativeTheme, shell, ipcMain } = require('electron');
+const { existsSync, writeFileSync } = require('node:fs');
+const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
 
 const START = new URL(process.env.CITADEL_URL || 'https://cara.apps.webplatformisbestplatform.net/c/');
@@ -17,10 +18,14 @@ const STRIP = 33;
 const PLAIN = { light: '#f6f5f2', dark: '#161514' };
 
 if (!app.requestSingleInstanceLock()) app.quit();
-app.setAppUserModelId('Citadel.Desktop');
+app.setAppUserModelId(AUMID);
 Menu.setApplicationMenu(null);
 
+const ICON = join(__dirname, 'icon.ico');
+const AUMID = 'Citadel.Desktop';
 let win = null;
+let tray = null;
+let quitting = false;
 
 function overlay(color) {
   const dark = nativeTheme.shouldUseDarkColors;
@@ -30,7 +35,7 @@ function overlay(color) {
 function open(url = START.href) {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 360, minHeight: 400,
-    title: 'Citadel', icon: join(__dirname, 'icon.png'), show: false,
+    title: 'Citadel', icon: ICON, show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? PLAIN.dark : PLAIN.light,
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: true },
@@ -56,6 +61,7 @@ function open(url = START.href) {
     else if (r.kind === 'browser') shell.openExternal(r.url);
   });
   wc.on('context-menu', (_e, p) => contextMenu(wc, p));
+  win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.on('closed', () => { win = null; });
   win.loadURL(url);
 }
@@ -91,10 +97,40 @@ ipcMain.on('citadel:title-bar', (e, color) => {
   if (w && typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) w.setTitleBarOverlay(overlay(color));
 });
 
-app.on('second-instance', () => {
+function show() {
   if (!win) return open();
   if (win.isMinimized()) win.restore();
+  win.show();
   win.focus();
-});
-app.whenReady().then(() => open());
-app.on('window-all-closed', () => app.quit());
+}
+
+/** The tray icon: click to show the window, right-click for Quit. */
+function makeTray() {
+  tray = new Tray(ICON);
+  tray.setToolTip('Citadel');
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Open Citadel', click: show }, { type: 'separator' }, { label: 'Quit Citadel', click: () => app.quit() }]));
+  tray.on('click', show);
+}
+
+/**
+ * Start menu and desktop shortcuts to #1148's launcher (two folders up from this build, versions\<n>\), so updates
+ * run; with the app's id, which Windows needs to show its notifications. The Start menu one is rewritten on each
+ * start (the launcher may have moved); the desktop one is made once, so deleting it sticks.
+ */
+function shortcuts() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const launcher = join(dirname(process.execPath), '..', '..', 'citadel.exe');
+  const target = existsSync(launcher) ? launcher : process.execPath;
+  const link = { target, cwd: dirname(target), icon: ICON, iconIndex: 0, appUserModelId: AUMID, description: 'Citadel' };
+  shell.writeShortcutLink(join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Citadel.lnk'), 'replace', link);
+  const made = join(app.getPath('userData'), 'desktop-shortcut-made');
+  if (!existsSync(made)) {
+    shell.writeShortcutLink(join(app.getPath('desktop'), 'Citadel.lnk'), 'create', link);
+    try { writeFileSync(made, ''); } catch {}
+  }
+}
+
+ipcMain.on('citadel:show', show);
+app.on('second-instance', show);
+app.on('before-quit', () => { quitting = true; });
+app.whenReady().then(() => { open(); makeTray(); shortcuts(); });

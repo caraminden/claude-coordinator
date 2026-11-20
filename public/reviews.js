@@ -5,7 +5,10 @@
 // while an entry is on trial; and a describe box asks an agent for edits, shown as before and after with Apply.
 // Phase 3 (#1054): run order ("↓ then"), panels as one dashed box with their referee, hand-offs on a fail, each entry's
 // last runs as dots with its first-round pass rate, and the verdicts minions recorded (read-only; Edit by hand removes).
+// At a glance (#1094, Josh's picks 2026-11-19): a headline you read, ghost cards for folders nobody watches, the lenses
+// as one row, the scheme's own repo files in a group, and an Every scheme tab with a row per scheme.
 import { ago, api, h, icon, view } from './base.js';
+import { meter, schemeTag, toneChip } from './look.js';
 import { collapseRuns, diffLines } from './plan-diff.js';
 import { optimistic } from './ui/optimistic.js';
 import { markdownElement } from './ui/markdown.js';
@@ -16,7 +19,9 @@ const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
 const pacific = (ms) => new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 
 let pageEl = null;
-let state = null; // { projectId, entries, starters, audits, selected, mode: 'view'|'edit'|'history'|'new', versions, ask }
+let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen }
+// The tab ('scheme' or 'all') and the Every scheme rows outlive a scheme switch: the table is the same on every scheme.
+const every = { tab: 'scheme', rows: null, error: null };
 
 const url = (slug = '') => `api/projects/${state.projectId}/reviews${slug ? `/${encodeURIComponent(slug)}` : ''}`;
 const entry = (slug) => state.entries.find((e) => e.slug === slug);
@@ -32,10 +37,11 @@ function labelGiver() {
 
 export function reviewsPage() {
   const projectId = view.projectId;
-  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], selected: null, mode: 'view', versions: null, ask: null };
+  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: false, newWhen: '' };
   pageEl = h('section', { class: 'reviews-main', onkeydown: (e) => { if (e.key === 'Escape' && state.mode === 'view') closePage(); } });
   draw();
   load();
+  if (every.tab === 'all') loadEvery();
   return pageEl;
 }
 
@@ -46,9 +52,9 @@ function closePage() {
 async function load() {
   const at = state;
   try {
-    const { entries, starters, audits } = await api(url());
+    const { entries, starters, audits, glance } = await api(url());
     if (state !== at) return;
-    Object.assign(state, { entries, starters, audits: audits ?? [] });
+    Object.assign(state, { entries, starters, audits: audits ?? [], glance: glance ?? null });
     if (state.selected && !entry(state.selected) && !audit(state.selected)) state.selected = null;
     if (!state.selected && entries.length && matchMedia('(min-width: 801px)').matches) state.selected = entries[0].slug;
   } catch (err) {
@@ -62,6 +68,7 @@ export function onReviewsChanged(projectId) {
   if (!pageEl?.isConnected || state?.projectId !== projectId) return;
   if (state.mode === 'edit' || state.mode === 'new') return;
   load();
+  if (every.tab === 'all') loadEvery();
   if (state.mode === 'history') loadVersions();
 }
 
@@ -70,15 +77,133 @@ function draw() {
   const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
   const head = h('div', { class: 'ticket-head rv-head' },
     h('div', { class: 'row' }, close('narrow-only', 'back'),
-      h('h2', {}, 'Reviewers and critics', h('span', { class: 'muted rv-scheme' }, ` · ${view.project?.name ?? ''}`)),
+      h('h2', {}, h('span', { class: 'rv-title-long' }, 'Reviewers and critics'), h('span', { class: 'rv-title-short' }, 'Reviewers'), h('span', { class: 'muted rv-scheme' }, ` · ${view.project?.name ?? ''}`)),
       h('span', { class: 'spacer' }),
-      h('a', { class: 'muted small', href: `#/p/${view.projectId}/skills` }, 'Skills'),
-      h('button', { type: 'button', class: 'cui-btn rv-new', onclick: () => select(null, 'new') }, '+ New'),
-      close('wide-only', 'close')));
+      h('a', { class: 'muted small rv-skills-link', href: `#/p/${view.projectId}/skills` }, 'Skills'),
+      every.tab === 'scheme' ? h('button', { type: 'button', class: 'cui-btn rv-new', onclick: () => select(null, 'new') }, '+ New') : null,
+      close('wide-only', 'close')),
+    h('div', { class: 'rv-seg rv-tabs', role: 'group', 'aria-label': 'Which schemes' },
+      ...[['scheme', 'This scheme'], ['all', 'Every scheme']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(every.tab === k), onclick: () => setTab(k) }, label))));
+  if (every.tab === 'all') return pageEl.replaceChildren(head, everyTable());
   const body = state.error ? [h('p', { class: 'error' }, state.error)]
     : !state.entries ? [h('p', { class: 'muted' }, 'Loading…')]
-      : [board(), detail()];
-  pageEl.replaceChildren(head, state.entries ? describeBox() : '', h('div', { class: 'rv-body' }, ...body));
+      : [h('div', { class: 'rv-boardbox' }, board(), repoGroup()), detail()];
+  pageEl.replaceChildren(head, state.entries ? headline() : '', state.entries ? describeBox() : '', h('div', { class: 'rv-body' }, ...body));
+}
+
+function setTab(k) {
+  every.tab = k;
+  draw();
+  if (k === 'all') loadEvery();
+}
+
+async function loadEvery() {
+  try {
+    every.rows = (await api('api/reviews/schemes')).schemes;
+    every.error = null;
+  } catch (err) {
+    every.error = err.message;
+  }
+  if (every.tab === 'all' && pageEl?.isConnected) draw();
+}
+
+// What the headline's phrases light up on hover (#1094): the cards each phrase counts.
+const isOwn = (e) => e.enabled && !e.kit && !e.file && e.kind !== 'teacher' && e.kind !== 'audit';
+const isNever = (e) => e.enabled && !e.kit && !e.runs?.length;
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The summary first (#1094, take A): two sentences a newcomer reads, built from the set. Each key phrase lights up the
+ * cards it counts while it's hovered or focused; the unwatched share points at the ghost cards.
+ */
+function headline() {
+  const name = view.project?.name ?? 'This scheme';
+  const own = state.entries.filter(isOwn);
+  const files = state.entries.filter((e) => e.enabled && e.file && e.kind !== 'teacher');
+  const pre = entry('pre-ship-review');
+  const trial = state.entries.filter((e) => e.enabled && e.trial && !e.kit);
+  const never = state.entries.filter(isNever);
+  const g = state.glance;
+  const cov = g?.coverage;
+  const hl = (key, tone, text) => h('button', { type: 'button', class: 'rv-hl', 'data-tone': tone, 'data-hi': key,
+    onmouseenter: () => { pageEl.dataset.hi = key; }, onmouseleave: () => { delete pageEl.dataset.hi; },
+    onfocus: () => { pageEl.dataset.hi = key; }, onblur: () => { delete pageEl.dataset.hi; },
+    onclick: () => pageEl.querySelector(`.is-${key}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, text);
+  const preOn = !pre?.kit || pre.enabled;
+  const preText = preOn ? ["the kit's ", hl('preship', 'info', 'pre-ship review'), ' before it ships'] : [hl('preship', 'danger', 'nothing before it ships'), ": the kit's pre-ship review is off"];
+  const first = own.length
+    ? [`${name}'s work is judged by `, hl('own', 'ok', `${plural(own.length, 'critic')} of its own`), ' while it\'s built, ',
+      ...(files.length ? ['its ', hl('repo', 'ok', plural(files.length, 'repo agent')), ' when a minion calls them, '] : []), 'and ', ...preText, '.']
+    : [`${name} has `, hl('own', 'warn', 'no critics of its own'), ' yet', ...(files.length ? [', ', hl('repo', 'ok', plural(files.length, 'repo agent')), ' a minion can call'] : []), preOn ? [': ', ...preText.slice(0, 2), ' judges its work before it ships.'] : ['; ', ...preText, '.']];
+  const unwatched = cov?.changes ? Math.round((100 * (cov.changes - cov.watched)) / cov.changes) : null;
+  const second = [
+    trial.length ? hl('trial', 'warn', `${trial.length} on trial`) : 'Nothing is on trial',
+    trial.length ? ' (advising, blocking nothing)' : '', ', ',
+    never.length ? hl('never', 'warn', `${plural(never.length, 'judge')} never run`) : own.length || files.length ? 'every judge of its own has a run on record' : 'none of its own to run',
+    unwatched === null ? '.' : [', and ', hl('gap', unwatched > 50 ? 'danger' : unwatched > 20 ? 'warn' : 'ok', `${unwatched}% of this month's changes`), ' fall where no critic of its own looks.'],
+  ];
+  const foot = g ? [
+    g.closed ? toneChip(g.judged === g.closed ? 'ok' : g.judged ? 'warn' : 'danger', `Judged ${g.judged} of ${plural(g.closed, 'minion')} closed this week`) : toneChip('neutral', 'No minions closed this week'),
+    toneChip(g.last ? 'neutral' : 'warn', g.last ? `Last run ${ago(g.last)}` : 'No run recorded yet'),
+    cov ? toneChip('neutral', `${cov.changes.toLocaleString()} changes in ${g.days} days, tests and docs left out`) : null,
+  ] : [];
+  return h('div', { class: 'rv-glance' }, h('p', { class: 'rv-headline' }, ...first.flat(), ' ', ...second.flat()), h('div', { class: 'rv-chips rv-glance-foot' }, ...foot));
+}
+
+/** The folders this month's changes hit that no critic of the scheme's own watches, as dashed cards at the foot of While working (take B). */
+function ghostCards() {
+  const gaps = (state.glance?.coverage?.gaps ?? []).filter((x) => x.folder !== '(top)').slice(0, 3);
+  return gaps.map((x) => h('div', { class: 'rv-ghost is-gap' },
+    h('div', {}, 'Nothing watches ', h('code', {}, `${x.folder}/**`)),
+    h('div', { class: 'muted' }, `${plural(x.changes, 'change')} in ${state.glance.days} days`),
+    h('button', { type: 'button', class: 'rv-link', onclick: () => { state.newWhen = `diff: ${x.folder}/**`; select(null, 'new'); } }, '+ Add a critic')));
+}
+
+/** The scheme's own repo files (#1094): its reviewing agent files as cards, and its review skills read-only, with the Skills page a click away. */
+function repoGroup() {
+  const files = state.entries.filter((e) => e.file && e.kind !== 'teacher');
+  const skills = state.glance?.skills ?? [];
+  if (!files.length && !skills.length) return '';
+  return h('section', { class: 'rv-repo is-repo', 'aria-label': "From this scheme's repo" },
+    h('div', { class: 'rv-repo-head' }, h('h3', {}, "From this scheme's repo"), h('a', { class: 'small', href: `#/p/${view.projectId}/skills` }, 'See them on Skills')),
+    h('div', { class: 'rv-repo-items' }, ...files.map(card),
+      ...skills.map((k) => h('div', { class: 'rv-card rv-skill', title: 'A review skill in the repo: read-only here, a minion loads it when its work needs it' },
+        h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, k.name)),
+        k.what ? h('div', { class: 'rv-card-when' }, k.what) : null,
+        h('div', { class: 'rv-chips' }, toneChip('ok', 'skill'), toneChip('neutral', 'read-only'))))));
+}
+
+/** "4 hours ago", or a dash for never: a cell that's empty reads as missing data, so it says so. */
+const none = (text = '—') => h('span', { class: 'muted' }, text);
+
+/** The Every scheme tab (#1094, take A "But with more color"): a row a scheme, each opening its own page. */
+function everyTable() {
+  if (every.error) return h('p', { class: 'error' }, every.error);
+  if (!every.rows) return h('p', { class: 'muted' }, 'Loading…');
+  if (!every.rows.length) return h('p', { class: 'muted' }, "You aren't a member of any scheme yet.");
+  const rows = [...every.rows].sort((a, b) => (b.last ?? 0) - (a.last ?? 0) || a.name.localeCompare(b.name));
+  const open = (r) => { every.tab = 'scheme'; if (r.id === state.projectId) draw(); else location.hash = `#/p/${r.id}/reviews`; };
+  const n = (v, tone) => (v ? toneChip(tone, String(v)) : none());
+  const watched = (r) => {
+    if (!r.coverage?.changes) return none(r.coverage ? 'no changes' : 'no repo');
+    const f = r.coverage.watched / r.coverage.changes;
+    return h('span', { 'data-hue': f >= 0.7 ? 'done' : f >= 0.4 ? 'waiting' : 'danger' }, meter(f, `${Math.round(100 * f)}%`));
+  };
+  const cells = (r) => [
+    ['Scheme', h('span', { class: 'rv-mx-name' }, schemeTag(r.name), r.opened ? null : toneChip('neutral', 'never opened'), r.preship ? null : toneChip('danger', 'pre-ship off'))],
+    ['Critics', n(r.critics, 'ok')], ['On trial', n(r.trial, 'warn')], ['Teachers', n(r.teachers, 'violet')], ['Repo agents', n(r.repo, 'info')],
+    ['Last run', r.last ? h('span', {}, ago(r.last)) : toneChip('warn', 'never')],
+    ['Passed', r.rate === null ? none() : toneChip(r.rate >= 70 ? 'ok' : r.rate >= 40 ? 'warn' : 'danger', `${r.rate}%`)],
+    ['Judged this week', r.closed ? toneChip(r.judged === r.closed ? 'ok' : r.judged ? 'warn' : 'danger', `${r.judged} of ${r.closed}`) : none()],
+    ['Watched', watched(r)],
+    ['Biggest gap', r.coverage?.gap ? h('span', {}, h('code', {}, `${r.coverage.gap.folder}/`), h('span', { class: 'muted' }, ` ${r.coverage.gap.changes}`)) : none()],
+  ];
+  return h('div', { class: 'rv-every' },
+    h('p', { class: 'muted rv-every-note' }, `Every scheme you're a member of. The kit's pre-ship review runs in each unless it says off; Watched is the share of the last 30 days of changes a critic of the scheme's own looks at, tests and docs left out.`),
+    h('table', { class: 'rv-mx' },
+      h('thead', {}, h('tr', {}, ...cells(rows[0]).map(([k]) => h('th', { scope: 'col' }, k)))),
+      h('tbody', {}, ...rows.map((r) => h('tr', { tabindex: 0, onclick: () => open(r), onkeydown: (ev) => { if (ev.key === 'Enter') open(r); } },
+        ...cells(r).map(([k, v]) => h('td', { 'data-label': k }, v)))))));
 }
 
 function select(slug, mode = 'view') {
@@ -92,19 +217,20 @@ function select(slug, mode = 'view') {
 }
 
 function board() {
-  const cols = COLUMNS.filter(([stage]) => stage !== 'ask' || state.entries.some((e) => e.stage === 'ask'));
+  const cols = COLUMNS.filter(([stage]) => stage !== 'ask' || state.entries.some((e) => e.stage === 'ask' && !e.file && e.kind !== 'teacher'));
   if (!state.entries.length && !state.audits.length) {
     return h('div', { class: 'rv-board rv-empty' },
       h('p', {}, 'Nothing reviews work in this scheme yet.'),
       h('p', { class: 'muted' }, 'Add a critic from a kit starter (like the UI screenshots critic) or write one from scratch. A new one starts on trial: it advises, and blocks nothing, until you take it off trial.'),
       h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => select(null, 'new') }, '+ New'));
   }
-  return h('div', { class: 'rv-board' }, ...cols.map(([stage, label]) => {
-    // A teacher runs only when a critic hands it work (#1089): it hangs under those critics, not in a column.
-    const list = columnUnits(state.entries.filter((e) => e.stage === stage && e.kind !== 'teacher'));
-    if (stage === 'work') list.push(...state.entries.filter((t) => t.kind === 'teacher' && !handsTo(t).length).map(looseTeacher));
+  return h('div', { class: 'rv-board', 'data-cols': cols.length }, ...cols.map(([stage, label]) => {
+    // A teacher runs only when a critic hands it work (#1089): it hangs under those critics, not in a column. The repo's own
+    // agent files sit in their own group under the columns (#1094).
+    const list = columnUnits(state.entries.filter((e) => e.stage === stage && e.kind !== 'teacher' && !e.file));
+    if (stage === 'work') list.push(...state.entries.filter((t) => t.kind === 'teacher' && !handsTo(t).length).map(looseTeacher), ...ghostCards());
     if (stage === 'schedule') list.push(...state.audits.map(auditCard));
-    return h('section', { class: 'rv-col', 'aria-label': label },
+    return h('section', { class: `rv-col is-${stage}`, 'aria-label': label },
       h('h3', {}, label),
       list.length ? list : h('p', { class: 'muted rv-none' }, 'None'));
   }));
@@ -153,11 +279,12 @@ function dots(runs) {
 
 function card(e) {
   const sw = onSwitch(e);
-  return h('div', { class: `rv-card${e.slug === state.selected ? ' on' : ''}${e.enabled ? '' : ' off'}`, role: 'button', tabindex: 0, 'aria-pressed': String(e.slug === state.selected),
+  const marks = [isOwn(e) && 'is-own', e.enabled && e.trial && !e.kit && 'is-trial', isNever(e) && 'is-never', e.file && 'is-repo', e.slug === 'pre-ship-review' && 'is-preship'].filter(Boolean).map((c) => ` ${c}`).join('');
+  return h('div', { class: `rv-card${marks}${e.slug === state.selected ? ' on' : ''}${e.enabled ? '' : ' off'}`, role: 'button', tabindex: 0, 'aria-pressed': String(e.slug === state.selected),
     onclick: () => select(e.slug), onkeydown: (ev) => { if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); select(e.slug); } } },
   h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, e.name), sw),
   h('div', { class: 'rv-card-when' }, e.kit || e.file ? e.when : whenLine(e)),
-  chips(e),
+  chips(e, true),
   e.runs?.length ? h('div', { class: 'rv-card-rec' }, dots(e.runs), e.rate === null ? null : h('span', { class: 'muted' }, `${e.rate}%`)) : null);
 }
 
@@ -192,26 +319,32 @@ function looseTeacher(t) {
     h('span', { class: 'muted' }, `${t.kit ? "The kit's teacher" : 'A teacher'}: no critic here hands off to it${t.enabled ? '' : ', and it is off'}. ${heldText(t)}.`));
 }
 
-/** The pre-ship review's lenses as one card, a switch a row, so nine of them don't bury the column. */
+/** The pre-ship review's lenses as one row that opens to a switch a lens (#1094), so nine of them don't bury the column. */
 function lensesCard(lenses) {
-  return h('div', { class: 'rv-card rv-lenses' },
-    h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, "The pre-ship review's lenses")),
-    h('div', { class: 'rv-card-when' }, 'Each read when the diff has its kind of change'),
-    h('ul', { class: 'rv-lens-list' }, lenses.map((e) => h('li', { class: `${e.slug === state.selected ? 'on' : ''}${e.enabled ? '' : ' off'}` },
+  const on = lenses.filter((e) => e.enabled).length;
+  const open = state.lenses || lenses.some((e) => e.slug === state.selected);
+  return h('div', { class: `rv-card rv-lenses${open ? ' open' : ''}` },
+    h('button', { type: 'button', class: 'rv-lens-row', 'aria-expanded': String(open), onclick: () => { state.lenses = !open; if (!state.lenses && lenses.some((e) => e.slug === state.selected)) state.selected = null; draw(); } },
+      h('span', { class: 'rv-card-name' }, "The pre-ship review's lenses"),
+      h('span', { class: 'rv-lens-count' }, toneChip(on ? 'info' : 'neutral', `${on} on`), on < lenses.length ? toneChip('neutral', `${lenses.length - on} off`) : null),
+      h('span', { class: 'rv-caret', 'aria-hidden': 'true' }, '▸')),
+    open ? h('div', { class: 'rv-card-when' }, 'Each read when the diff has its kind of change') : null,
+    open ? h('ul', { class: 'rv-lens-list' }, lenses.map((e) => h('li', { class: `${e.slug === state.selected ? 'on' : ''}${e.enabled ? '' : ' off'}` },
       h('button', { type: 'button', class: 'rv-lens-name', 'aria-pressed': String(e.slug === state.selected), onclick: () => select(e.slug) }, e.name.replace(/^Lens: /, '')),
-      onSwitch(e)))));
+      onSwitch(e)))) : null);
 }
 
-function chips(e) {
+function chips(e, onCard = false) {
   return h('div', { class: 'rv-chips' },
     e.kind !== 'critic' ? h('span', { class: 'cui-chip', 'data-tone': e.kind === 'teacher' ? 'violet' : 'neutral' }, e.kind) : null,
     e.trial ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: "On trial: it advises and blocks nothing until it's calibrated" }, 'trial') : null,
+    onCard && isNever(e) ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: 'On, with no run on record yet' }, 'never run') : null,
     e.gate === 'block' ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: 'Its fail blocks the ship' }, 'blocks') : null,
     e.stuck ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: `Its last ${e.firsts} first rounds all ${e.stuck === 'pass' ? 'passed: it may be too easy' : 'failed: it may be too strict, or the work keeps missing it'}` }, e.stuck === 'pass' ? 'always passes' : 'always fails') : null,
     labelGiver()?.slug === e.slug ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "Gives the risk label that decides whether a ship waits for a person's go" }, 'risk label') : null,
     e.kit ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "The kit's own: its text stays in the kit, and this scheme switches it and adds to it" }, 'kit')
       : e.file ? h('span', { class: 'cui-chip', 'data-tone': 'ok', title: `This scheme's own agent file, ${e.file}: its text stays in the repo, and this page switches it and adds to it` }, 'repo')
-      : e.extends ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `On top of the kit's ${e.extends} starter, so kit fixes reach it` }, 'kit') : null,
+      : e.extends ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `On top of the kit's ${e.extends} starter, so kit fixes reach it` }, `on the kit's ${e.extends}`) : null,
     e.file && !e.agent ? h('span', { class: 'cui-chip', 'data-tone': 'danger', title: `${e.file} is gone from the repo` }, 'file gone') : null,
     e.enabled ? null : h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'off'));
 }
@@ -669,6 +802,7 @@ function newForm() {
   const slug = h('input', { class: 'cui-input', placeholder: 'ui-screenshots', pattern: '[a-z0-9]+(-[a-z0-9]+)*', title: 'kebab-case, like ui-screenshots' });
   const from = h('select', { class: 'cui-input', onchange: () => { if (from.value && !slug.value) slug.placeholder = from.value; } },
     h('option', { value: '' }, 'Blank'), state.starters.map((s) => h('option', { value: s.slug }, `${s.slug}${s.judges ? `: ${s.judges}` : ''}`)));
+  const when = h('input', { class: 'cui-input', value: state.newWhen, placeholder: 'diff: src/**' });
   const err = h('p', { class: 'error', hidden: true });
   const add = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Add on trial');
   const submit = async (ev) => {
@@ -676,9 +810,10 @@ function newForm() {
     add.disabled = true;
     err.hidden = true;
     try {
-      const body = { ...(from.value ? { extends: from.value } : {}), ...(slug.value.trim() ? { slug: slug.value.trim() } : {}) };
+      const body = { ...(from.value ? { extends: from.value } : {}), ...(slug.value.trim() ? { slug: slug.value.trim() } : {}), ...(when.value.trim() ? { when: when.value.trim() } : {}) };
       const made = await api(url(), { method: 'POST', body });
       state.entries.push(made);
+      state.newWhen = '';
       select(made.slug, 'edit');
     } catch (x) {
       err.textContent = x.message;
@@ -690,7 +825,8 @@ function newForm() {
     h('h3', {}, 'New reviewer or critic'),
     field('Start from', from, 'A kit starter keeps getting the kit\'s fixes; this scheme\'s lines go on top.'),
     field('Name it', slug, 'Its file name, kebab-case. Leave it empty to use the starter\'s.'),
+    field('Runs when', when, 'Like diff: app/server/** for changes there. Leave it empty to use the starter\'s.'),
     h('p', { class: 'muted' }, 'It starts on trial: it advises and blocks nothing until you take it off trial.'),
     err,
-    h('div', { class: 'rv-actions' }, add, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(null) }, 'Cancel')));
+    h('div', { class: 'rv-actions' }, add, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => { state.newWhen = ''; select(null); } }, 'Cancel')));
 }

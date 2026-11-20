@@ -9,6 +9,8 @@ import { turnEnv } from '../turn-launch.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project, Ticket } from '../db.ts';
+import { glance } from '../review-glance.ts';
+import { KIT_DIR, listSkills } from '../skills.ts';
 
 /** The kit's agent each built-in runs as (#1089): its own text, shown on the page behind a toggle. */
 const KIT_AGENTS: Record<string, string> = { 'pre-ship-review': 'reviewer', 'finding-checker': 'finding-checker', 'fresh-eyes': 'fresh-eyes', professor: 'professor' };
@@ -103,6 +105,31 @@ function fieldsFrom(body: Record<string, any>): Partial<EntryFields> {
   return f;
 }
 
+/** The scheme's own review skills (#1094), read-only on the page: a skill in its repo whose name or description is about reviewing. */
+const reviewSkills = (repoDir: string | null) => listSkills(KIT_DIR, repoDir)
+  .filter((i) => i.source === 'scheme' && i.kind === 'skill' && /review|critic|critique|audit|rubric/i.test(`${i.name} ${i.what}`))
+  .map((i) => ({ name: i.name, what: i.what }));
+
+/** One scheme's row on the Every scheme tab (#1094), from what it has without opening its page (a never-opened scheme has no rows). */
+async function schemeRow(app: App, p: Project) {
+  const entries = app.store.reviews.list(p.id);
+  const own = entries.filter((e) => e.enabled && !isKit(e) && !isAgentFile(e));
+  const record = app.store.reviews.record(p.id);
+  const judges = own.filter((e) => e.kind !== 'teacher').map((e) => record.get(e.id)).filter((r) => r?.firsts);
+  const firsts = judges.reduce((n, r) => n + r!.firsts, 0);
+  const g = await glance(app.store.db, p.id, p.repo_dir, entries);
+  return {
+    id: p.id, name: p.name, opened: entries.length > 0,
+    critics: own.filter((e) => e.kind !== 'teacher' && e.kind !== 'audit').length,
+    trial: own.filter((e) => e.trial).length,
+    teachers: own.filter((e) => e.kind === 'teacher').length,
+    repo: entries.filter((e) => e.enabled && isAgentFile(e)).length,
+    preship: entries.find((e) => e.slug === 'pre-ship-review')?.enabled ?? true,
+    rate: firsts ? Math.round((100 * judges.reduce((n, r) => n + r!.passes, 0)) / firsts) : null,
+    last: g.last, closed: g.closed, judged: g.judged, coverage: g.coverage && { changes: g.coverage.changes, watched: g.coverage.watched, gap: g.coverage.gaps[0] ?? null },
+  };
+}
+
 const broadcast = (app: App, project: Project) => app.broadcast({ type: 'reviews', projectId: project.id });
 
 /** What a save changed, for History: "Turned off", "Edited by hand". */
@@ -120,12 +147,24 @@ function noteFor(f: Partial<EntryFields>): string {
 export const reviewRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/reviews', who: ['person', 'taskmaster', 'minion'],
-    handler({ res, app, project }) {
+    async handler({ res, app, project }) {
       ensure(app, project);
       const record = app.store.reviews.record(project.id);
       const verdicts = app.store.reviews.verdicts(project.id);
       const agents = readAgentFiles(project.repo_dir);
-      return json(res, 200, { entries: app.store.reviews.list(project.id).map((e) => view(e, { record: record.get(e.id), verdicts: verdicts.get(e.id), agents })), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id) });
+      const entries = app.store.reviews.list(project.id);
+      // The headline's numbers (#1094): judged this week, the last run, where this month's changes fall unwatched.
+      const summary = { ...(await glance(app.store.db, project.id, project.repo_dir, entries)), skills: reviewSkills(project.repo_dir) };
+      return json(res, 200, { entries: entries.map((e) => view(e, { record: record.get(e.id), verdicts: verdicts.get(e.id), agents })), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id), glance: summary });
+    },
+  },
+  {
+    // The Every scheme tab (#1094): a row for each scheme the person is a member of, admin reach left out.
+    method: 'GET', path: '/api/reviews/schemes', who: ['person'],
+    async handler({ res, app, session }) {
+      const member = app.store.memberSchemes(session.uid);
+      const schemes = app.store.listProjects().filter((p) => member.has(p.id));
+      return json(res, 200, { schemes: await Promise.all(schemes.map((p) => schemeRow(app, p))) });
     },
   },
   {

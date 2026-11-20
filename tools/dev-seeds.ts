@@ -1052,6 +1052,32 @@ mock.boards('#takes', { boards: [
       for (let i = 0; i < 6; i++) r.recordRun(id, 'copy-critic', { ticketId: t.id, minion: `#${t.number}`, round: 1, verdict: 'fail' }, now - (6 - i) * 1_800_000);
       r.recordVerdict(id, 'colour-critic', { person: 'Josh', words: 'The muted grey on the empty state is fine: it is meant to be quiet.', ticketId: t.id, minion: `#${t.number}` }, now - 3_000_000);
       r.recordVerdict(id, 'copy-critic', { person: c.who, words: 'It should have caught "Click here" on the welcome button.', ticketId: t.id, minion: `#${t.number}` }, now - 600_000);
+      // At a glance (#1094): a month of commits, most outside public/ where the critics look, so the hint has gaps; a
+      // review skill in the repo; two minions closed this week, one judged; and two more schemes for the Every scheme tab.
+      mkdirSync(join(repo, '.claude', 'skills', 'level-review'), { recursive: true });
+      writeFileSync(join(repo, '.claude', 'skills', 'level-review', 'SKILL.md'), '---\nname: level-review\ndescription: Review a new or changed level for pacing and fairness. Use when a level file changes.\n---\n\nPlay it through twice.\n');
+      const g = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' } });
+      g('init', '-q');
+      const files = ['app/server/rooms.ts', 'app/server/save.ts', 'app/server/net.ts', 'app/shared/types.ts', 'app/shared/maths.ts', 'public/menu.js', 'public/hud.css', 'levels/forest.json', 'test/rooms.test.ts', 'docs/notes.md'];
+      for (let i = 0; i < 24; i++) {
+        const f = files[(i * 7) % files.length];
+        mkdirSync(join(repo, f, '..'), { recursive: true });
+        writeFileSync(join(repo, f), `// change ${i}\n`);
+        g('add', '-A');
+        const at = new Date(now - (25 - i) * 86_400_000).toISOString();
+        execFileSync('git', ['-C', repo, 'commit', '-q', '-m', `change ${i}`], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid', GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } });
+      }
+      const judged = minion(c, 'Menu polish', { status: 'closed' });
+      r.recordRun(id, 'layout-critic', { ticketId: judged.id, minion: `#${judged.number}`, round: 1, verdict: 'pass' }, now - 900_000);
+      minion(c, 'Save file fix', { status: 'closed' });
+      const user = c.store.findUser('name', c.who);
+      for (const [name, critic] of [['Seeded two', true], ['Seeded quiet', false]] as const) {
+        const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
+        if (user) c.store.addMember(p.id, user.id);
+        if (!critic || r.get(p.id, 'map-critic')) continue;
+        r.ensureBuiltIns(p.id);
+        r.create(p.id, { slug: 'map-critic', name: 'Map critic', kind: 'critic', stage: 'work', trial: true, triggers: { diff: ['maps/**'] }, body: '## What it checks\n\nMaps.\n' } as never, c.who);
+      }
       return `#/p/${id}/reviews`;
     },
   },

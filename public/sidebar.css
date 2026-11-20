@@ -287,7 +287,8 @@
 .schedule-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .schedule-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; flex: none; }
 .schedule-actions button { padding: 0.25rem 0.7rem; font-size: 0.85em; }
-.schedule-summary { margin: 0 0 0.9rem; max-width: 46rem; font-size: 1rem; line-height: 1.5; color: var(--ink); }
+.schedules-main > .stat-tiles { margin-bottom: 0.75rem; }
+.schedule-summary { margin: 0.5rem 0 0.9rem; max-width: 46rem; font-size: 1rem; line-height: 1.5; color: var(--ink); }
 .schedule-runs-box { display: grid; gap: 0.5rem; }
 .schedule-strip { display: flex; gap: 3px; align-items: flex-end; height: 1.5rem; }
 .schedule-strip i { flex: 0 1 1.4rem; height: 100%; border-radius: 3px; background: var(--h); }
@@ -305,4 +306,5 @@
   .schedules-pick { display: none; }
   .schedule-head { flex-wrap: wrap; }
   .schedule-actions { width: 100%; }
+  .schedules-main > .stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

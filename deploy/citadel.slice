@@ -15,12 +15,14 @@
 # Budget: 29.1G - about 2G for the system and other logins - about 5G for app.slice (the Godot editor and its
 # agent 3G, apps and their builds; contraptions.slice once app units move there) leaves about 22G. Swap is
 # zram, so each swapped GiB still costs about a third of a GiB of RAM the cgroup isn't charged for: 6G of swap
-# is about 2G of RAM. So MemoryMax=20G, with MemoryHigh 3G below it to reclaim and throttle first.
+# is about 2G of RAM. That made 20G; Josh, 2026-11-20: "lets give citadel.slice the room if it needs it, we can
+# always cap harder if cody complains". So MemoryMax=22G, with MemoryHigh 3G below it to reclaim and throttle first,
+# which leaves the rest of the box about 5G when Citadel is full: cap harder if Godot or the apps start losing out.
 # No CPUQuota: the old 800% was never installed, and installing it would newly halve Citadel's cores.
 [Unit]
 Description=Citadel and its turns
 
 [Slice]
-MemoryHigh=17G
-MemoryMax=20G
+MemoryHigh=19G
+MemoryMax=22G
 MemorySwapMax=6G

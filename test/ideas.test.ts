@@ -141,3 +141,39 @@ test("a minion merged into a build is built once the build's own minion ships", 
   store.ideas.restatus(p.id);
   assert.equal(store.ideas.byHandoff(p.id, 'handoffs/feeder.md')!.status, 'built');
 });
+
+test('a handoff deleted after its minion started still joins its card, from the copy the minion read', () => {
+  const store = newStore();
+  const p = store.createProject('Peek Auras', null);
+  const shared = join(root, 'gone-shared');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  const page = join(shared, 'mockups', 'ideas.html');
+  store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- B4 Third-fix flag: Go\n- B5 Other: Later');
+  store.ideas.upsert(p.id, page, 'B4', { pick: 'go', decided_by: 'Josh', decided_at: 1 });
+  const abs = join(shared, 'handoffs', 'handoff-third-fix-flag.md');
+  const t = store.createTicket({ project_id: p.id, title: 'Third-fix flag on repeat bug briefs', permission_mode: 'default', created_by: 'Josh' });
+  store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${abs}\`.` });
+  store.addEvent(t.id, 'claude', { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: abs } }] } });
+  store.addEvent(t.id, 'claude', { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `     1\t# Handoff: third-fix flag (B4)\n     2\t\n     3\tFrom #12's ideas page, card B4: \`${page}\`.` }] } });
+  const lone = store.createTicket({ project_id: p.id, title: 'A lost handoff', permission_mode: 'default', created_by: 'Josh' });
+  store.addEvent(lone.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${join(shared, 'handoffs', 'lost.md')}\`.` });
+  store.ideas.sync(p.id, shared);
+  const b4 = store.ideas.find(p.id, page, 'B4')!;
+  assert.equal(b4.handoff, 'handoffs/handoff-third-fix-flag.md');
+  assert.equal(b4.ticket_id, t.id);
+  assert.equal(b4.status, 'started');
+  const lost = store.ideas.byHandoff(p.id, 'handoffs/lost.md')!;
+  assert.equal(lost.title, 'A lost handoff');
+  assert.equal(lost.ticket_id, lone.id);
+});
+
+test('sendsOf finds a Send in any chat of the scheme by the page path, and the minion it went to', () => {
+  const store = newStore();
+  const p = store.createProject('Mandate', null);
+  const page = join(root, 'm-shared', 'mockups', 'ideas.html');
+  const t = store.createTicket({ project_id: p.id, title: 'ideas', permission_mode: 'default', created_by: 'Josh' });
+  store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "Ideas":\n- A1 One: Go', comment: { path: page, about: 'Ideas' } });
+  const s = store.ideas.sendsOf(p.id, page);
+  assert.match(s.text, /A1 One: Go/);
+  assert.equal(s.source, t.number);
+});

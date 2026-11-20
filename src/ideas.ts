@@ -224,7 +224,7 @@ export class Ideas {
 
   /** Link a minion to the row its handoff made (made now if the scan hasn't seen the file yet). The newest start wins, never over a hand link or a built row. */
   linkHandoff(projectId: number, sharedDir: string, rel: string, ticket: { id: number; number: number | null }): Idea | null {
-    let row = this.byHandoff(projectId, rel) ?? this.fromHandoff(projectId, sharedDir, rel);
+    let row = this.byHandoff(projectId, rel) ?? this.fromHandoff(projectId, sharedDir, rel) ?? this.fromChat(projectId, sharedDir, rel, ticket.id);
     if (!row) return null;
     if (row.link_manual || row.ticket_id === ticket.id || (row.ticket_id && row.ticket_id > ticket.id) || row.status === 'built') return row;
     row = this.upsert(projectId, row.page, row.card, { ticket_id: ticket.id, number: ticket.number });
@@ -246,12 +246,45 @@ export class Ideas {
     }
     const had = this.byHandoff(projectId, rel);
     if (had) return had.title ? had : this.upsert(projectId, had.page, had.card, { title: h.head.title });
-    const { page, card, title, source } = h.head;
+    return this.join(projectId, rel, h.head);
+  }
+
+  /** A handoff's row: its page's card when it names one that has no other handoff yet, else a row of its own. */
+  private join(projectId: number, rel: string, head: HandoffHead): Idea {
+    const { page, card, title, source } = head;
     const onPage = page && card ? this.find(projectId, page, card) : undefined;
     if (page && card && (!onPage || !onPage.handoff)) {
       return this.upsert(projectId, page, card, { handoff: rel, title: onPage?.title || title, source_number: onPage?.source_number ?? source });
     }
     return this.upsert(projectId, '', rel, { handoff: rel, title, source_number: source });
+  }
+
+  /** A handoff deleted once its minion shipped: read the copy the minion read in its own chat, else name the row after the minion. */
+  fromChat(projectId: number, sharedDir: string, rel: string, ticketId: number): Idea {
+    const abs = join(sharedDir, rel);
+    const like = (s: string) => `%${s.replace(/[%_]/g, '_')}%`;
+    const uses = this.db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND data LIKE '{"type":"assistant"%' AND data LIKE ? ORDER BY id LIMIT 5`).all(ticketId, like(abs)) as { data: string }[];
+    const result = this.db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND data LIKE '{"type":"user"%' AND data LIKE ? ORDER BY id LIMIT 1`);
+    for (const u of uses) {
+      let ids: string[] = [];
+      try {
+        ids = (JSON.parse(u.data).message?.content ?? []).filter((c: { type?: string; input?: unknown }) => c.type === 'tool_use' && JSON.stringify(c.input ?? '').includes(abs)).map((c: { id: string }) => c.id);
+      } catch { continue; }
+      for (const id of ids) {
+        const r = result.get(ticketId, like(id)) as { data: string } | undefined;
+        if (!r) continue;
+        let text = '';
+        try {
+          const c = (JSON.parse(r.data).message?.content ?? []).find((x: { tool_use_id?: string }) => x.tool_use_id === id)?.content;
+          text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? '').join('\n') : '';
+        } catch { continue; }
+        // Read's output numbers each line ("    12\t…" or "12→…"); cat's doesn't.
+        text = text.replace(/^ *\d+(?:\t|→)/gm, '');
+        if (/^#\s/m.test(text)) return this.join(projectId, rel, parseHandoff(text.slice(0, 20_000), sharedDir));
+      }
+    }
+    const t = this.db.prepare('SELECT title FROM tickets WHERE id = ?').get(ticketId) as { title: string } | undefined;
+    return this.join(projectId, rel, { title: t?.title ?? rel, page: null, card: null, source: null });
   }
 
   /** A page's picks: one row per item of a later-style collection (picked, noted or, from mockkit's list, unpicked). */
@@ -365,25 +398,27 @@ export class Ideas {
       // Titles the page's Sends named: read from the chats it was sent to, once per page while a row lacks one.
       const untitled = this.db.prepare("SELECT 1 FROM ideas WHERE project_id = ? AND page = ? AND title = '' LIMIT 1").get(projectId, file);
       const fresh = !this.db.prepare('SELECT 1 FROM ideas WHERE project_id = ? AND page = ? LIMIT 1').get(projectId, file);
-      this.readPage(projectId, file, src?.number ?? null, [], untitled || fresh ? this.sendsOf(projectId, file) : '');
+      if (!untitled && !fresh) { this.readPage(projectId, file, src?.number ?? null); continue; }
+      const sends = this.sendsOf(projectId, file);
+      this.readPage(projectId, file, src?.number ?? sends.source, [], sends.text);
+      // A row no Send named keeps its card id as its title, so this chat search runs once per page, not every pass.
+      this.db.prepare("UPDATE ideas SET title = card WHERE project_id = ? AND page = ? AND title = ''").run(projectId, file);
     }
     for (const rel of handoffFiles(sharedDir)) this.fromHandoff(projectId, sharedDir, rel);
     this.linkStarts(projectId, sharedDir);
     this.restatus(projectId);
   }
 
-  /** The Send texts posted from a page, newest last, from every chat that linked it and the scheme's Taskmasters. */
-  sendsOf(projectId: number, file: string): string {
-    const ids = this.db.prepare(`SELECT DISTINCT ticket_id FROM artifacts WHERE project_id = ? AND path = ?
-      UNION SELECT id FROM tickets WHERE project_id = ? AND kind = 'coordinator'`).all(projectId, file, projectId) as { ticket_id: number }[];
-    const q = this.db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'user_message' AND data LIKE '%Picks on %' AND data LIKE ? ORDER BY id`);
+  /** The Send texts posted from a page, newest first, from any chat in the scheme, and the minion they first went to. */
+  sendsOf(projectId: number, file: string): { text: string; source: number | null } {
+    // The Send's comment carries the page's path; the (ticket_id, kind) index keeps this to the scheme's user messages.
+    const rows = this.db.prepare(`SELECT e.data, t.number, t.kind FROM tickets t JOIN events e ON e.ticket_id = t.id AND e.kind = 'user_message'
+      WHERE t.project_id = ? AND e.data LIKE '%Picks on %' AND e.data LIKE ? ORDER BY e.id`).all(projectId, `%${file.replace(/[%_]/g, '_')}%`) as { data: string; number: number | null; kind: string }[];
     const texts: string[] = [];
-    for (const { ticket_id } of ids) {
-      for (const r of q.all(ticket_id, `%${file.replace(/%/g, '_')}%`) as { data: string }[]) {
-        try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }
-      }
+    for (const r of rows) {
+      try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }
     }
-    return texts.reverse().join('\n');
+    return { text: texts.reverse().join('\n'), source: rows.find((r) => r.kind === 'ticket')?.number ?? null };
   }
 
   /** Run sync soon (debounced per scheme), off the request that asked for it; errors are logged, never thrown. */

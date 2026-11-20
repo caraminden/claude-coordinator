@@ -634,18 +634,22 @@ mock.boards('#takes', { boards: [
     },
   },
   'held-mail-working': {
-    about: 'a working minion with a message from another minion queued for its next turn (#1067): no inbox card, the light dashed "Not sent yet" bubble in the log',
+    about: 'working minions with mail from another minion queued for their next turn (#1067): no inbox card, the light dashed "not sent yet" row in the log and "N queued" on the working line; the route is the one with a single message, the next minion has two in a run',
     seed(c) {
       const from = minion(c, 'Aura success loop');
-      const t = minion(c, 'Aura replay harness', { status: 'running', last_activity: 'Running tests… 2/4', session_id: 'seed-held-working' });
-      const m = chat(c, t, 12);
-      m.asked('Build the replay harness for the aura tests.');
-      m.init();
-      m.said('Writing the harness; the first two tests pass.');
-      const text = `From #${from.number} (aura success loop): your brief's optional part 4 can reuse my fixture in test/aura.test.ts.`;
-      const id = m.put('user_message', { author: `#${from.number} Aura success loop`, text, mail: true, need: 'fyi', from: from.id });
-      c.store.setSetting(mailKey(t.id), [{ author: `#${from.number} Aura success loop`, text, images: [], id, from: from.id }]);
-      return route(c, t);
+      const by = `#${from.number} Aura success loop`;
+      const working = (title: string, texts: string[]) => {
+        const t = minion(c, title, { status: 'running', last_activity: 'Running tests… 2/4', session_id: `seed-held-working-${texts.length}` });
+        const m = chat(c, t, 12);
+        m.asked(`Build the ${title.toLowerCase()}.`);
+        m.init();
+        m.said('Writing it; the first two tests pass.');
+        c.store.setSetting(mailKey(t.id), texts.map((text) => ({ author: by, text, images: [], id: m.put('user_message', { author: by, text, mail: true, need: 'fyi', from: from.id }), from: from.id })));
+        return t;
+      };
+      const one = working('Aura replay harness', [`From #${from.number} (aura success loop): your brief's optional part 4 can reuse my fixture in test/aura.test.ts.`]);
+      working('Aura sound cues', ['The success chime now fires once per aura.', 'And the fixture covers the gold aura too.']);
+      return route(c, one);
     },
   },
   'side-thread': {

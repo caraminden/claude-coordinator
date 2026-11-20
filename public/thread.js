@@ -1204,14 +1204,17 @@ function addHeld(group, bubble) {
   return sumRun(group);
 }
 
-/** A run's summary counts what the log shows (the card shows the rest): the count, the senders, the newest as the preview; hidden while none is read. */
+/** A run's summary counts what the log shows (the card shows the rest): the count, the senders, how many a working minion
+ * hasn't read yet, the newest as the preview; hidden while the card shows them all. */
 function sumRun(group) {
   const read = [...group.querySelectorAll(':scope > .mc-list > .held-msg:not(.held-waiting)')];
   group.hidden = !read.length;
   if (!read.length) return group;
   const by = new Map();
   for (const b of read) by.set(b.heldData.author, (by.get(b.heldData.author) ?? 0) + 1);
-  group.querySelector('.who').textContent = `✉ ${read.length} held message${read.length === 1 ? '' : 's'} · ${[...by].map(([a, n]) => (n > 1 ? `${a} ×${n}` : a)).join(', ')}`;
+  const queued = read.filter((b) => b.classList.contains('held-queued')).length;
+  group.classList.toggle('held-queued', !!queued);
+  group.querySelector('.who').textContent = `✉ ${read.length} held message${read.length === 1 ? '' : 's'} · ${[...by].map(([a, n]) => (n > 1 ? `${a} ×${n}` : a)).join(', ')}${queued ? ` · ${queued} not sent yet` : ''}`;
   group.querySelector('.preview').textContent = read.at(-1).querySelector('.preview')?.textContent.replace(TRACKING, '').trim() ?? '';
   return group;
 }
@@ -1330,13 +1333,15 @@ export function renderTyping() {
   el.hidden = !show;
   if (!show) return;
   const lead = t.approvals ? 'Waiting for someone to approve or deny' : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : rowState(t, usage).label;
-  const key = `${lead}|${t.queued ?? 0}`;
+  // Held mail counts as queued while it works (#1067): it has no card then, and its bubble may be above the loaded history.
+  const queued = (t.queued ?? 0) + (running ? t.held_mail?.items?.length ?? 0 : 0);
+  const key = `${lead}|${queued}`;
   if (el.dataset.key !== key) {
     el.dataset.key = key;
     el.replaceChildren(
       h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
       h('span', { class: 'lead' }, lead),
-      ...(t.queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : []));
+      ...(queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${queued} message${queued === 1 ? '' : 's'} queued for the next turn` }, `${queued} queued`)] : []));
   }
   if (wasHidden && followChat) scrollToBottom();
 }

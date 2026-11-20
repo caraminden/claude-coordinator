@@ -15,7 +15,6 @@ test('heldLine: waiting while the chat lists it as held, then a read tag; never 
 test('heldLine: held for a working minion is queued, shown in the log, not waiting on the card', () => {
   const q = heldLine({ mail: true }, 7, { status: 'running', held_ids: [7] });
   assert.deepEqual([q.waiting, q.queued], [false, true]);
-  assert.match(q.text, /Not sent yet/);
   const read = heldLine({ mail: true }, 7, { status: 'running', held_ids: [] });
   assert.deepEqual([read.waiting, read.queued], [false, false]);
 });

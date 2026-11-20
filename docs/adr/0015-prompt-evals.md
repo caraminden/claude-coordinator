@@ -6,8 +6,8 @@ Prompt changes to minions and the Taskmaster shipped on a reviewer's read alone:
 still stopped the slip it was written for, or whether a cheaper model or effort would still make the right move. #1110's
 skill trigger evals measured one narrow thing (does a skill fire). `tools/prompt-eval` measures the move itself.
 
-**What it is.** 30 frozen moments from Citadel's own chats where a person corrected a minion or the Taskmaster (12 strikes,
-10 "why didn't you…" corrections, 8 rule slips). Each case holds what the minion knew, the message it answered, the
+**What it is.** 28 frozen moments from Citadel's own chats where a person corrected a minion or the Taskmaster (12 strikes,
+10 "why didn't you…" corrections, 6 rule slips). Each case holds what the minion knew, the message it answered, the
 answers its tools gave (a stub MCP server answers every Citadel tool from the case's `facts`; nothing reaches the live
 app), and code checks on the rerun's tool calls and text. The rerun gets the real prompt of the version under test
 (`promptParts` or, before #878, `systemPrompt`, plus the version's kit, CLAUDE.md and `.claude/`), in a read-only copy
@@ -33,4 +33,9 @@ $45 a side. That is why it runs on ask and before big changes only.
 doesn't get the minion's auto-memory or any live state beyond its `facts`, and the replay guard refuses calls that name
 today's shared folder, database, live checkout or memory.
 
-**The first run** (2026-11-19): RESULTS
+**The first run** (2026-11-19, $82.55 over two runs): today's prompt passes 22 of 28 cases (79%); the known-bad
+version (code `268638ee` with the instructions live on 2026-11-11) passes 17 (61%), with 7 cases fallen. An audit of
+the first run found 10 case bugs (loose or vacuous checks, a fact that never fired, inputs in the refused shared
+folder), fixed before the second. Two rule cases were dropped: they hinged on work already on the minion's branch,
+which a replay checkout starting from main doesn't have. The full write-up is the shared folder's
+`reports/prompt-evals-baseline-2026-11-19.md`.

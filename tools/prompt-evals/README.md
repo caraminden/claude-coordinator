@@ -147,3 +147,9 @@ reopen for a rule slip), add a case: freeze the moment from the database, write 
 least one check that the original turn fails, and run `tools/prompt-eval run --case <id> --runs 1` once
 to see it parse. Prune a case whose rule is gone or that today's prompt passes 3/3 for a month: keep about
 30. Cases quote Citadel's own chats only; never another scheme's, never a secret.
+
+A case holds everything the minion acts on in its `message`, `history` and `facts`. The replay checkout
+starts at main with an empty ticket branch, and today's shared folder is refused, so a moment that hinges on
+work already on the minion's branch, or on a file only the shared folder held, can't be replayed: inline the
+file's text, or leave the moment out. Read one run's transcript before trusting a new case: half the first
+run's failures were case bugs (`reports/prompt-evals-baseline-2026-11-19.md` in the shared folder).

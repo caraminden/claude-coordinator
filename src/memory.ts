@@ -152,10 +152,13 @@ export class Memory {
    */
   private pendingTurns(projectId: number, max: number, now: number): { chunks: Pending[]; mark: number | null } {
     const after = this.store.getSetting<number>(this.markKey(projectId)) ?? 0;
-    const msgs = this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
-      FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? ORDER BY e.id LIMIT 200`)
-      .all(projectId, after) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[];
+    // The ids first, from the covering index, then the 200 rows' text: the one query sorted every message past the mark with its
+    // text in the sorter, 0.7 s of the loop a pass when the mark sat behind a running turn (#1125).
+    const ids = (this.db.prepare(`SELECT e.id FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? ORDER BY e.id LIMIT 200`).all(projectId, after) as { id: number }[]).map((r) => r.id);
+    const msgs = (ids.length ? this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
+      FROM events e WHERE e.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[] : [])
+      .sort((x, y) => x.id - y.id);
     const chunks: Pending[] = [];
     let mark: number | null = null;
     let held = false; // a message before this one is still running or left over: the mark stays behind it

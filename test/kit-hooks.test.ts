@@ -409,3 +409,30 @@ test('writing-for-agents\' HOOKS.md names every hook: the kit\'s (kit/hooks/) an
   const missing = [...kit, ...turn].filter((f) => !catalogue.includes(`\`${f}\``));
   assert.deepEqual(missing, [], 'add each to kit/skills/writing-for-agents/HOOKS.md with its event, what it does and its mode');
 });
+
+test('batch nudge: third single lookup in a row, even-numbered minions only, never Grunts, batched calls end the run', async () => {
+  const { batchNudgeLine, BATCH_LINE, readOnlyBash, callsInMessage } = await import('../kit/hooks/batch-nudge.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'batch-'));
+  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '1278' };
+  const call = (tool_name: string, extra: object = {}, e: any = env, sid = 's1') => batchNudgeLine({ session_id: sid, tool_name, tool_input: {}, ...extra }, e, dir);
+  assert.equal(call('Read'), null);
+  assert.equal(call('Grep'), null);
+  assert.equal(call('Bash', { tool_input: { command: 'git log -1 | head -3' } }), BATCH_LINE, 'third');
+  assert.equal(call('Glob'), null, 'once per run');
+  assert.equal(call('Edit'), null);
+  assert.equal(call('Read'), null, 'an edit reset the count');
+  assert.equal(call('Bash', { tool_input: { command: 'npm test' } }), null, 'a Bash that is not a lookup ends the run');
+  for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, {}, { ...env, COORDINATOR_TICKET: '1279' }, 's2'), null, 'odd minion: control');
+  for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, { agent_id: 'a1' }, env, 's3'), null, 'Grunt');
+  for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, {}, { ...env, COORDINATOR_ROLE: 'coordinator' }, 's4'), null, 'Taskmaster');
+  assert.equal(readOnlyBash('ls -la && cat a | grep b 2>&1'), true);
+  assert.equal(readOnlyBash('sed -n 1,5p f'), true);
+  for (const c of ['sed -i s/a/b/ f', 'echo hi > f', 'git commit -m x', 'rm f', 'find . -delete', 'ls $(pwd)']) assert.equal(readOnlyBash(c), false, c);
+  // A call sent together with another in one message is not single.
+  const tp = join(dir, 't.jsonl');
+  writeFileSync(tp, JSON.stringify({ message: { content: [{ type: 'tool_use', id: 'x1' }, { type: 'tool_use', id: 'x2' }] } }) + '\n' + JSON.stringify({ message: { content: [{ type: 'tool_use', id: 'y1' }] } }) + '\n');
+  assert.equal(callsInMessage(tp, 'x2'), 2);
+  assert.equal(callsInMessage(tp, 'y1'), 1);
+  assert.equal(callsInMessage(tp, 'none'), 1);
+  for (const id of ['x1', 'x2', 'x1', 'x2']) assert.equal(call('Read', { transcript_path: tp, tool_use_id: id }, env, 's5'), null, 'batched calls never count');
+});

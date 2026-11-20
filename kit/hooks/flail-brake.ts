@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mask, testRuns } from './retro-log.ts';
 import { redRun } from './test-first.ts';
+import { batchNudgeLine } from './batch-nudge.ts';
 
 /** Reds in a row that earn the line: a starting value. */
 export const FLAIL_AT = 3;
@@ -59,8 +60,22 @@ export function flailBrakeHook(input: any, stateDir = join(tmpdir(), 'citadel-ki
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Fails open: a nudge that can't run says nothing.
   try {
-    const out = flailBrakeHook(JSON.parse(readFileSync(0, 'utf8')));
-    if (out) process.stdout.write(out);
+    const input = JSON.parse(readFileSync(0, 'utf8'));
+    const out = flailBrakeHook(input);
+    // The batch-lookups trial (batch-nudge.ts) rides this process: it already runs after Bash and edits.
+    let line: string | null = null;
+    try {
+      line = batchNudgeLine(input);
+    } catch {
+      // A broken trial never costs the brake its line.
+    }
+    if (line && out) {
+      const o = JSON.parse(out);
+      o.hookSpecificOutput.additionalContext += `\n${line}`;
+      process.stdout.write(JSON.stringify(o));
+    } else if (line) {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: line } }));
+    } else if (out) process.stdout.write(out);
   } catch {
     // See above.
   }

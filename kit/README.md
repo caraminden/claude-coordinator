@@ -33,6 +33,11 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     red three times in a row with no Edit, Write, MultiEdit or NotebookEdit between, it adds one
     line pointing at `citadel:diagnosing-bugs`. Once per streak; a green test run, another test command or an
     edit resets it; other Bash calls don't. A file changed from Bash (`sed -i`) is invisible to it.
+  - `batch-nudge.ts` (a one-week trial from 2026-11-20, #1278; runs inside `flail-brake.ts`'s process, which is also
+    registered for Read, Grep and Glob; never blocks): after a minion's third single read-only call in a row (Read,
+    Grep, Glob, or a Bash that only reads) it adds one line saying to send independent lookups in one message. Only
+    minions with an even number (the other half is the control); Grunts and Taskmasters never. A call sent with
+    others in one message, an edit or a writing Bash ends the run. The trial's readout decides whether it stays.
   - `big-read.ts` (PreToolUse on Read and Bash, every session, Grunts included): sends back a
     whole read of a big file (over 600 lines or 25k chars): a Read with no `limit`, or a plain
     `cat path` / `sed -n 'N,Mp' path` whose output isn't piped or redirected. The reason names the

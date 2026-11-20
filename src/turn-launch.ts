@@ -2,7 +2,7 @@
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
 import { msgEnv, msgSettings } from './msg-settings.ts';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
@@ -113,6 +113,24 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
   if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+}
+
+/**
+ * A turn's copy of the pinned files (#1125): hard links, so no file's bytes are copied. cpSync of the tree held the server
+ * 3.8 to 8.7 s on a busy disk, the second stall stack. A link outlives the server's own copy being swept, which is what the
+ * copy is for; the pinned files are never written to (pruneKit only unlinks), so the shared inode is safe. Across filesystems
+ * (a container's turns folder) a file is copied instead.
+ */
+export function copyPins(src: string, dst: string): void {
+  mkdirSync(dst, { recursive: true });
+  for (const e of readdirSync(src, { withFileTypes: true })) {
+    const from = join(src, e.name), to = join(dst, e.name);
+    if (e.isDirectory()) copyPins(from, to);
+    else if (e.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
+    else {
+      try { linkSync(from, to); } catch (err: any) { if (err.code !== 'EXDEV') throw err; cpSync(from, to); }
+    }
+  }
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */

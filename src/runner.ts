@@ -4,7 +4,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
@@ -35,7 +35,7 @@ import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { offSkills, pruneKit } from './skills.ts';
-import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
+import { alive, copyPins, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
@@ -2740,7 +2740,7 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     try {
       const pins = turnPins();
-      cpSync(pins.MCP_DIR, pin, { recursive: true });
+      copyPins(pins.MCP_DIR, pin);
       // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
       if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));

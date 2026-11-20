@@ -209,7 +209,7 @@ function stormTile(s, days, now) {
   const live = s.now[0];
   const stalledToday = s.stalled[today] + sum(s.now.map((x) => x.stalled));
   return tile('Memory limits', live ? 'At its limit now' : stalledToday ? `${secs(stalledToday)} stalled today` : 'None today',
-    live ? one(live) : s.last ? `The last ${ago(s.last.at)}: ${one(s.last)}` : 'No slice or container at its limit this week',
+    live ? s.now.map(one).join('; ') : s.last ? `The last ${ago(s.last.at)}: ${one(s.last)}` : 'No slice or container at its limit this week',
     dayBars(days, s.stalled, { tip: (i) => `${plural(s.counts[i], 'storm')}${s.counts[i] ? `, ${secs(s.stalled[i])} stalled` : ''}`, label: 'seconds stalled at a memory limit a day' }),
     { tone: live || stalledToday >= 60 ? 'warn' : null });
 }

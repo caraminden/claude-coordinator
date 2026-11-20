@@ -98,26 +98,25 @@ export async function readGroups(dir: string): Promise<Map<string, GroupReading>
 }
 
 /**
- * The largest unit inside `dir` by memory.current: down through the biggest child while it is a slice, stopping at the
- * first service or scope (a turn, a ship, a container). A group that is a unit itself names itself.
+ * The largest unit inside `dir` by memory.current: every service or scope (a turn, a ship, a container) in it and its
+ * slices, not the unit inside the biggest slice, which can be smaller than one elsewhere. A unit names itself.
  */
 export async function largestUnit(dir: string): Promise<{ unit: string; bytes: number } | null> {
-  let at = dir;
-  for (let depth = 0; depth < 4 && at.endsWith('.slice'); depth++) {
-    let kids: string[];
-    try {
-      kids = (await readdir(at, { withFileTypes: true })).filter((e) => e.isDirectory() && /\.(slice|service|scope)$/.test(e.name)).map((e) => join(at, e.name));
-    } catch {
-      return null;
-    }
-    const sized = await Promise.all(kids.map(async (k) => ({ k, b: Number((await readFile(join(k, 'memory.current'), 'utf8').catch(() => '0')).trim()) || 0 })));
-    const top = sized.sort((a, b) => b.b - a.b)[0];
-    if (!top) return null;
-    at = top.k;
-  }
-  if (at === dir && dir.endsWith('.slice')) return null;
-  const bytes = Number((await readFile(join(at, 'memory.current'), 'utf8').catch(() => '0')).trim()) || 0;
-  return { unit: basename(at), bytes };
+  const size = async (d: string) => Number((await readFile(join(d, 'memory.current'), 'utf8').catch(() => '0')).trim()) || 0;
+  if (!dir.endsWith('.slice')) return { unit: basename(dir), bytes: await size(dir) };
+  let best: { unit: string; bytes: number } | null = null;
+  const walk = async (at: string, depth: number): Promise<void> => {
+    const kids = await readdir(at, { withFileTypes: true }).catch(() => []);
+    await Promise.all(kids.filter((e) => e.isDirectory()).map(async (e) => {
+      const k = join(at, e.name);
+      if (e.name.endsWith('.slice')) return depth < 4 ? walk(k, depth + 1) : undefined;
+      if (!/\.(service|scope)$/.test(e.name)) return;
+      const bytes = await size(k);
+      if (!best || bytes > best.bytes) best = { unit: e.name, bytes };
+    }));
+  };
+  await walk(dir, 0);
+  return best;
 }
 
 interface Open { start: number; end: number; stalledUs: number; highs: number; peak: number; limit: number | null; unit: string | null; unitBytes: number | null }
@@ -138,6 +137,7 @@ export class MemoryStorms {
   private timer: NodeJS.Timeout | null = null;
   private dir: string | null | undefined;
   private busy = false;
+  private stopped = false;
   private readonly d: StormDeps;
   constructor(d: StormDeps) {
     this.d = d;
@@ -150,7 +150,7 @@ export class MemoryStorms {
 
   /** One reading: compares each group with the last, opens, grows and closes storms. Never throws. */
   async tick(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.stopped) return;
     this.busy = true;
     try {
       if (this.dir === undefined) this.dir = await citadelSliceDir();
@@ -183,6 +183,8 @@ export class MemoryStorms {
       }
       // A group that went away (a container stopped) ends its storm.
       for (const [path, o] of this.open) if (!groups.has(path)) this.close(path, o);
+      // stop() came while this reading awaited: record what it opened too.
+      if (this.stopped) for (const [path, o] of [...this.open]) this.close(path, o);
       this.last = groups;
       this.lastAt = now;
     } catch (err: any) {
@@ -217,6 +219,7 @@ export class MemoryStorms {
 
   /** Stops reading and records the storms still open, so a restart mid-storm doesn't lose them. */
   stop() {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const [path, o] of [...this.open]) this.close(path, o);

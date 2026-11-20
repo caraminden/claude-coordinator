@@ -38,6 +38,11 @@ test('readGroups reads citadel.slice, its slices and containers, not the server;
   assert.deepEqual(await largestUnit(join(c, 'citadel-turns.slice')), { unit: 'citadel-land-a-2.service', bytes: 5 });
   assert.deepEqual(await largestUnit(c), { unit: 'citadel-land-a-2.service', bytes: 5 }, 'down through the biggest slice to its biggest unit');
   assert.deepEqual(await largestUnit(join(c, 'citadel-claude-2.service')), { unit: 'citadel-claude-2.service', bytes: 1 }, 'a container names itself');
+  const w = join(root, 'wide', 'citadel.slice');
+  group(join(w, 'citadel-turns.slice'), { current: 9 });
+  for (const n of [1, 2, 3]) group(join(w, 'citadel-turns.slice', `citadel-turn-${n}.service`), { current: 3 });
+  group(join(w, 'citadel-claude-2.service'), { current: 6 });
+  assert.deepEqual(await largestUnit(w), { unit: 'citadel-claude-2.service', bytes: 6 }, 'a big unit beside a bigger slice of small ones');
 });
 
 /** A run of readings, one per 15 s: each [high, stalled seconds in that step] for one group. */
@@ -79,4 +84,17 @@ test('stop records a storm still going; current() shows it meanwhile', async () 
   assert.equal(recorded[0].storm.stalled, 18);
   assert.deepEqual(parseStorm(JSON.stringify(recorded[0].storm)), recorded[0].storm);
   assert.equal(parseStorm('not json'), null);
+});
+
+test('a stop that comes while a reading waits still records the storm that reading opens', async () => {
+  let t = 0, high = 0, someUs = 0;
+  const recorded: Storm[] = [];
+  let s!: MemoryStorms;
+  s = new MemoryStorms({ dir: '/c', now: () => t, read: async () => new Map([['/c/citadel-turns.slice', { name: 'citadel-turns.slice', high, someUs, current: 1, limit: 2 }]]),
+    largest: async () => { s.stop(); return { unit: 'u.service', bytes: 1 }; }, record: (_at, storm) => recorded.push(storm) });
+  await s.tick();
+  [t, high, someUs] = [15_000, 900, 9e6];
+  await s.tick();
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].unit, 'u.service');
 });

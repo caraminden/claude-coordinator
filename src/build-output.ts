@@ -1,18 +1,22 @@
 /**
  * A dismissed minion's build output (#336): the git-ignored `target/` and `node_modules/` folders in
- * its worktree, which a build makes again and which run to hundreds of GiB across a Rust scheme's
+ * its worktree, and a Gradle project's `build/` and `.gradle/` (#1153), which a build makes again and which run to hundreds of GiB across a Rust scheme's
  * minions. The worktree and branch stay, so a reopen still works; only those folders go.
  * Safe by construction: only a folder git calls wholly ignored (so it holds no tracked file), inside a
  * worktree at exactly projects/<scheme>/tickets/<id>, reached through no symlink. `rm` never follows
  * symlinks inside what it removes.
  */
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const NAMES = new Set(['target', 'node_modules']);
+// Gradle's output (#1153), only beside a Gradle build file: a bare `build/` elsewhere may be anything.
+const GRADLE_NAMES = new Set(['build', '.gradle']);
+const GRADLE_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
 // Lowest best-effort IO class and lowest CPU priority, so a sweep never hogs the box. Not the idle
 // class: under steady IO it can starve, holding the minion's lane (and a reopen) behind it.
 const LOW = ['ionice', '-c2', '-n7', 'nice', '-n19'];
@@ -35,8 +39,9 @@ export async function findBuildOutput(worktree: string): Promise<string[]> {
   const found: string[] = [];
   // A trailing slash means git found the whole folder ignored; a name without one is a file or a symlink.
   for (const rel of stdout.split('\0').filter((p) => p.endsWith('/')).map((p) => p.slice(0, -1)).sort()) {
-    if (!NAMES.has(basename(rel)) || found.some((f) => rel.startsWith(f + '/'))) continue;
+    if (found.some((f) => rel.startsWith(f + '/'))) continue;
     const dir = join(real, rel);
+    if (!NAMES.has(basename(rel)) && !(GRADLE_NAMES.has(basename(rel)) && GRADLE_FILES.some((f) => existsSync(join(dirname(dir), f))))) continue;
     // Reached through no symlink, and a real folder itself.
     if (!dir.startsWith(real + sep) || (await realpath(dirname(dir))) !== dirname(dir) || !(await lstat(dir)).isDirectory()) continue;
     found.push(rel);

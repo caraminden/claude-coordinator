@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# The build caches minions share (#1153, src/build-cache.ts), on every turn's PATH.
+#   citadel-build-cache                 sizes of the caches this turn uses
+#   citadel-build-cache clear gradle    empty the Gradle build cache every scheme's turns share
+#   citadel-build-cache clear sccache   empty this scheme's sccache (Peek Auras: <repo git dir>/sccache/cache)
+# Clear one when a bad entry breaks builds; the next build fills it again. Builds running meanwhile only
+# miss. The Gradle cache is trimmed to its cap daily by the server.
+set -euo pipefail
+# Outside a turn (a person on perigee) it falls back to the live data dir's cache.
+gradle=${CITADEL_GRADLE_CACHE:-${DATA_DIR:-$HOME/.local/share/claude-coordinator}/projects/.build-cache/gradle}
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+sccache=${SCCACHE_DIR:-${common:+$common/sccache/cache}}
+
+show() { local s; [ -n "$2" ] && [ -d "$2" ] && s=$(du -sh "$2") && echo "$1: ${s%%[[:space:]]*} in $2" || echo "$1: none"; }
+
+case "${1:-}" in
+  '' | status)
+    show gradle "$gradle"
+    show sccache "$sccache"
+    ;;
+  clear)
+    case "${2:-}" in
+      gradle)
+        [ -d "$gradle" ] || { echo "gradle: already empty"; exit 0; }
+        # Its entries only; Gradle's lock file stays for builds holding it.
+        find "$gradle" -mindepth 1 -maxdepth 1 -type f ! -name '*.lock' -delete
+        echo "gradle: cleared $gradle"
+        ;;
+      sccache)
+        [ -n "$sccache" ] && [ -d "$sccache" ] || { echo "sccache: this scheme has none" >&2; exit 2; }
+        # Only a folder that is plainly an sccache cache: a stray SCCACHE_DIR=$HOME must not wipe a home.
+        case "$sccache" in */sccache | */sccache/cache | */sccache/*) ;; *) echo "sccache: $sccache doesn't look like an sccache folder; clear it by hand" >&2; exit 2 ;; esac
+        find "$sccache" -mindepth 1 -delete
+        echo "sccache: cleared $sccache (a running sccache server forgets its size count: Peek's tools/rustc-wrapper --stop-server resets it)"
+        ;;
+      *) echo "usage: citadel-build-cache clear gradle|sccache" >&2; exit 2 ;;
+    esac
+    ;;
+  *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

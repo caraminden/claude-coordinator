@@ -29,6 +29,7 @@ import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
+import { gradleCacheDir } from './build-cache.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
@@ -636,7 +637,8 @@ export class Runner {
   private heavyEnv(ticket: Ticket, person: number | null): Record<string, string> {
     const payer = person ? this.store.getUser(person)?.login : undefined;
     const who = `${this.store.getProject(ticket.project_id)?.name ?? '?'} #${ticket.number}${payer ? ` (${payer})` : ''}`;
-    return { CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: who };
+    // One Gradle build cache for every worktree (#1153, src/build-cache.ts).
+    return { CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: who, CITADEL_GRADLE_CACHE: gradleCacheDir(this.dataDir) };
   }
 
   /** How many turns run in this container now (it isn't restarted under them). */

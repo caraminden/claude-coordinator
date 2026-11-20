@@ -19,7 +19,7 @@ const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketI
   || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
 
 /** The newest mention of you in each minion's chat, as its row shows it (#1149). */
-function mentionMap(items) {
+export function mentionMap(items) {
   const out = new Map();
   for (const i of items) if (i.kind === 'mention' && !(out.get(i.ticketId)?.at > i.at)) out.set(i.ticketId, { by: i.card.by, at: i.at });
   return out;

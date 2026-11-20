@@ -473,7 +473,12 @@ export const projectRoutes: Route[] = [
     method: 'GET', path: '/api/home', who: ['person'],
     handler: ({ res, app: { store, runner }, session }) => {
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
-      json(res, 200, homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now())));
+      const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()));
+      // The waiting minions as a scheme's list draws them (#1217: Josh, 2026-11-20, "the normal minion list render"), and when this person last opened each.
+      const ids = [...new Set(home.items.map((i) => i.ticketId))];
+      const seen: Record<number, number> = {};
+      for (const s of home.schemes) for (const [id, at] of Object.entries(store.seenTimes(session.name, s.id))) if (ids.includes(Number(id))) seen[Number(id)] = at;
+      json(res, 200, { ...home, tickets: runner.views(ids.map((id) => store.getTicket(id)).filter((t): t is Ticket => !!t)), seen });
     },
   },
   {

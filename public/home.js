@@ -1,23 +1,28 @@
-// Home (#1140): what waits on you across every scheme you're in, on one list, with the chat you open from it beside
-// it. Josh, 2026-11-19, picked "B · One list, a status line on top" with "a split view where you could see the minion
-// chat on the right", then "C · An overview until you pick" (Working now and Shipped since your last visit until a
-// row is clicked), "After you answer a card: Move to the next card" and "What else opens beside the list: No, they
-// go to the scheme". The page with his picks: shared/project/mockups/home-all-schemes/home-split-view.html.
-// The list is one element kept across pages (like the Needs-you strip), so moving between its chats keeps its scroll.
+// Home (#1140, #1217): every minion waiting on you across the schemes you're in, as a scheme's own minions list
+// draws them, with the chat you open from it beside it. Josh, 2026-11-20: "home should just use the normal minion
+// list render, but have all of the minions waiting on you in all schemes ... drop the working and shipped columns.
+// Untill you open one of the minions, that space could show a high level summary of what is going on and what
+// shipped, but not the individual minons". His picks that day: "Same as Needs you", "Counts per scheme" ("Maybe some
+// nice activity graphs or something?") and "Grouped by scheme". Kept from #1140: "After you answer a card: Move to
+// the next card", and the list as one element kept across pages, so moving between its chats keeps its scroll.
 // It's drawn at once from the last answer this browser had, then refreshed behind. Rows keep their place for the
-// whole visit: an answered one is ticked off where it was, and one that arrives joins the bottom with a "new" tag
-// (no reflow without input).
-import { HOME_LINE, ago, api, h, me, view } from './base.js';
-import { inboxRow } from './inbox.js';
-import { emptyCard, schemeHue, schemeTag, toneChip } from './look.js';
+// whole visit: an answered one is ticked off where it was, and one that arrives joins the bottom of its scheme with
+// a "new" tag (no reflow without input).
+import { HOME_LINE, api, h, isCoordinator, jumpHref, me, threadHref, view } from './base.js';
+import { usage } from './core.js';
+import { mentionMap } from './inbox.js';
+import { emptyCard, schemeHue, schemeTag, statTiles, toneChip } from './look.js';
+import { rowTarget } from './schemecounts.js';
+import { threadRow } from './sidebar.js';
+import { byUrgency, mentions } from './threadstate.js';
 
 const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
-let data = null; // the last answer: { items, schemes, shipped, me }, only ever drawn for the person it was fetched for
+let data = null; // the last answer: { items, tickets, seen, schemes, since, days, me }, only ever drawn for the person it was fetched for
 try { data = JSON.parse(localStorage.getItem(CACHE)); } catch {}
 let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
 // This visit: each list's ids in the order shown, the ones there when it opened (the rest are "new"), and the rows as last seen.
-const visit = { rows: [], working: [], shipped: [], first: null, last: new Map(), fresh: false };
+const visit = { rows: [], first: null, last: new Map(), fresh: false };
 let next = null; // the chat whose card you just answered, to move on from once the list agrees
 let timer = 0;
 let panel = null;
@@ -33,7 +38,7 @@ export function rememberHomeLine(shown) {
 
 /** A new visit to Home (from anywhere but Home): rows start in the server's order again, with nothing ticked or new. */
 export function startVisit() {
-  Object.assign(visit, { rows: [], working: [], shipped: [], first: null, last: new Map(), fresh: false });
+  Object.assign(visit, { rows: [], first: null, last: new Map(), fresh: false });
   next = null;
 }
 
@@ -44,12 +49,15 @@ export function homePanel() {
   return panel;
 }
 
-/** What fills the middle until a row is picked: Working now and Shipped since your last visit, each line off to its scheme. */
+/**
+ * What fills the chat's space until a row is picked: counts across your schemes and a row per scheme with its
+ * activity bars, no minion's own row. The side panel's title already says Home, so this has no heading of its own
+ * (Josh, 2026-11-20: "It shouldnt say home twice in the header"); on a phone it holds the list first.
+ */
 export function homeOverview(list = null) {
   overview = h('div', { class: 'home-overview-body' });
   drawOverview();
-  return h('section', { class: 'home-overview', 'data-part': 'home-overview' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, 'Home'), h('span', { class: 'spacer' }))), list, overview);
+  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list, overview);
 }
 
 /** Fetch Home again (a burst of news fetches once). */
@@ -67,7 +75,7 @@ export async function refreshHome() {
   data = { ...got, me };
   try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}
   // The first answer of a visit sorts it as the server does; the cached paint before it was only a stand-in.
-  if (!visit.fresh) Object.assign(visit, { rows: [], working: [], shipped: [], first: null, fresh: true });
+  if (!visit.fresh) Object.assign(visit, { rows: [], first: null, fresh: true });
   drawPanel();
   drawOverview();
   moveOn();
@@ -94,6 +102,7 @@ const stable = (shown, ids) => [...shown, ...ids.filter((id) => !shown.includes(
 /** Forget an answer fetched for someone else (a sign-out and in on this browser doesn't reload the page). */
 const own = () => { if (data && data.me !== me) data = null; };
 
+/** Each waiting minion's items, by ticket id. */
 function groups() {
   const rows = new Map();
   for (const i of data?.items ?? []) {
@@ -103,84 +112,99 @@ function groups() {
   return rows;
 }
 
-const rowHref = (items) => inboxRow(items, { href: homeHash }).getAttribute('href');
+/** A row's address: Home's own for its chat, at the oldest thing it waits on you for (a card opens at the card). */
+const rowHref = (t, items) => {
+  const target = items?.length ? rowTarget(items) : null;
+  return homeHash(target ? jumpHref(t, target) : threadHref(t));
+};
+
+/** The schemes' order: the server's (your shelf's), then any a row kept from earlier in the visit came from. */
+const schemeOrder = () => (data?.schemes ?? []).map((s) => ({ id: s.id, name: s.name }));
 
 function drawPanel() {
   if (!panel) return;
   own();
   const rows = groups();
-  visit.rows = stable(visit.rows, [...rows.keys()]);
-  visit.first ??= new Set(rows.keys());
-  for (const [id, items] of rows) visit.last.set(id, items);
-  const open = rows.size;
-  const working = (data?.schemes ?? []).reduce((n, s) => n + s.working.length, 0);
-  const shipped = data?.shipped?.total ?? 0;
-  // One line, always there: the numbers change, the line doesn't move.
-  const status = h('div', { class: 'home-status' },
-    open ? toneChip('warn', `${open} need${open === 1 ? 's' : ''} you`) : data ? toneChip('ok', 'Nothing needs you')
-      : toneChip(failed ? 'danger' : 'neutral', failed ? 'Not loaded' : 'Loading'),
-    working ? toneChip('info', `${working} working`) : null,
-    shipped ? toneChip('violet', `${shipped} shipped`) : null);
-  const list = visit.rows.map((id) => {
-    const items = rows.get(id) ?? visit.last.get(id);
-    const row = inboxRow(items, { href: homeHash, scheme: schemeTag });
-    row.classList.toggle('active', view?.home && view.id === id);
-    if (!rows.has(id)) {
-      // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
-      row.classList.add('done');
-      row.querySelector('.asks')?.replaceChildren(h('span', { class: 'chip done-chip' }, '✓ Done'));
-    } else if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
-    return row;
-  });
+  const tickets = new Map((data?.tickets ?? []).map((t) => [t.id, t]));
+  // A scheme's rows read seen times and mentions from the open scheme; Home's come from every scheme (ticket ids are global).
+  // Seen times only grow, so the newer of the two wins.
+  if (view) for (const [id, at] of Object.entries(data?.seen ?? {})) if (!(view.seen?.[id] >= at)) (view.seen ??= {})[id] = at;
+  for (const [id, m] of mentionMap(data?.items ?? [])) if (!mentions.has(id)) mentions.set(id, m);
+  // The first answer of a visit sorts each scheme as its own list does: Taskmaster first, then by urgency.
+  const order = [...rows.keys()].filter((id) => tickets.has(id))
+    .sort((a, b) => Number(isCoordinator(tickets.get(b))) - Number(isCoordinator(tickets.get(a))) || byUrgency(tickets.get(a), tickets.get(b), usage));
+  visit.rows = stable(visit.rows, order);
+  visit.first ??= new Set(order);
+  for (const id of order) visit.last.set(id, { t: tickets.get(id), items: rows.get(id) });
+  const names = schemeOrder();
+  for (const id of visit.rows) {
+    const t = visit.last.get(id)?.t;
+    if (t && !names.some((s) => s.id === t.project_id)) names.push({ id: t.project_id, name: view?.projects?.find((p) => p.id === t.project_id)?.name ?? '' });
+  }
+  const sections = names.map((s) => {
+    const ids = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
+    if (!ids.length) return null;
+    return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name), ...ids.map((id) => {
+      const { t, items } = rows.has(id) ? { t: tickets.get(id), items: rows.get(id) } : visit.last.get(id);
+      const row = threadRow(t, rowHref(t, items));
+      if (!rows.has(id)) {
+        // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
+        row.classList.add('done');
+        row.classList.remove('yours', 'unread');
+        const chip = h('span', { class: 'state done-chip' }, '✓ Done');
+        const state = row.querySelector('.state');
+        if (state) state.replaceWith(chip); else row.querySelector('.name')?.after(chip);
+      } else if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
+      return row;
+    }));
+  }).filter(Boolean);
   const retry = h('button', { type: 'button', class: 'link', onclick: () => { failed = false; drawPanel(); refreshHome(); } }, 'Try again');
-  panel.replaceChildren(status, list.length ? h('div', { class: 'inbox-rows home-rows' }, ...list)
-    : failed && !data ? emptyCard('Couldn\'t load Home', h('span', {}, 'What waits on you didn\'t load. ', retry), { mark: '!', hue: 'danger' })
-      : emptyCard('Nothing needs you', data ? 'Cards and questions from any of your schemes show here.' : 'Loading what waits on you…'));
+  panel.replaceChildren(...(sections.length ? sections
+    : [failed && !data ? emptyCard('Couldn\'t load Home', h('span', {}, 'What waits on you didn\'t load. ', retry), { mark: '!', hue: 'danger' })
+      : emptyCard('Nothing needs you', data ? 'Minions in any of your schemes that wait on you show here.' : 'Loading what waits on you…')]));
 }
 
 function drawOverview() {
   if (!overview) return;
   own();
   const schemes = data?.schemes ?? [];
-  const working = schemes.flatMap((s) => s.working.map((t) => ({ ...t, projectId: s.id, scheme: s.name })));
-  visit.working = stable(visit.working, working.map((t) => t.id));
-  for (const t of working) visit.last.set(`w${t.id}`, t);
-  const busy = new Set(working.map((t) => t.id));
-  const shipped = data?.shipped?.items ?? [];
-  const shipKey = (s) => `${s.ticketId}:${s.at}`;
-  visit.shipped = stable(visit.shipped, shipped.map(shipKey));
-  const ships = new Map(shipped.map((s) => [shipKey(s), s]));
-  for (const s of shipped) visit.last.set(`s${shipKey(s)}`, s);
-  const since = data?.shipped?.since;
+  const sum = (k) => schemes.reduce((n, s) => n + s[k], 0);
+  const days = data?.days ?? [];
+  // One scale for every scheme's bars, so a tall bar means the same in each.
+  const top = Math.max(1, ...schemes.flatMap((s) => s.daily));
+  const since = data?.since;
   overview.replaceChildren(
-    h('div', { class: 'home-column' },
-      h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Working now'),
-      visit.working.length ? h('div', { class: 'hue-rows' }, ...visit.working.map((id) => {
-        const t = visit.last.get(`w${id}`);
-        return line(t.projectId, t, busy.has(id) ? toneChip('info', 'Working') : toneChip('neutral', 'Stopped'), !busy.has(id));
-      })) : emptyCard('Nothing working', 'Minions with a turn running, in any of your schemes, show here.', { mark: '·', hue: 'held' })),
-    h('div', { class: 'home-column' },
-      h('h3', { class: 'settings-section', 'data-hue': 'done' }, since ? `Shipped since ${when(since)}` : 'Shipped since your last visit'),
-      visit.shipped.length ? h('div', { class: 'hue-rows' }, ...visit.shipped.map((key) => {
-        const s = ships.get(key) ?? visit.last.get(`s${key}`);
-        return line(s.projectId, s, h('span', { class: 'muted' }, ago(s.at)), false, shipText(s.text));
-      }), (data?.shipped?.total ?? 0) > shipped.length ? h('div', { class: 'muted home-more' }, `and ${data.shipped.total - shipped.length} more`) : null)
-        : emptyCard('Nothing shipped yet', 'What goes live in your schemes while you\'re away shows here.', { mark: '·', hue: 'held' })));
+    statTiles([sum('waiting'), 'waiting on you', 'waiting'], [sum('working'), 'working now', 'running'],
+      [sum('shipped'), since ? `shipped since ${when(since)}` : 'shipped since your last visit', 'done']),
+    h('h3', { class: 'settings-section', 'data-hue': 'accent' }, 'Your schemes', h('span', { class: 'home-days muted' }, `minions shipped each day, last ${days.length || 14} days`)),
+    schemes.length ? h('div', { class: 'hue-rows' }, ...schemes.map((s) => schemeRow(s, days, top)))
+      : emptyCard(data ? 'No schemes yet' : 'Loading', data ? 'The schemes you\'re in show here, with what\'s going on in each.' : 'Counting what\'s going on…', { mark: '·', hue: 'held' }));
 }
 
-/** A line off to the scheme: its tag, the minion (or Taskmaster) and a chip or time on the right. */
-function line(projectId, t, meta, quiet, sub = null) {
-  const scheme = data?.schemes?.find((s) => s.id === projectId)?.name ?? '';
-  const href = t.kind === 'coordinator' ? `#/p/${projectId}` : `#/p/${projectId}/t/${t.number}`;
-  return h('a', { class: `hue-row home-line${quiet ? ' quiet' : ''}`, href, 'data-cat': schemeHue(scheme) },
-    h('span', { class: 'hue-row-text' }, schemeTag(scheme), ' ',
-      t.kind === 'coordinator' ? 'Taskmaster' : [h('span', { class: 'num' }, `#${t.number}`), ' ', t.title],
-      sub ? h('span', { class: 'home-sub muted' }, sub) : null),
-    h('span', { class: 'hue-row-meta' }, meta));
+/** A scheme's line: its tag, what's going on in it as chips, and its last days' ships as bars; it opens the scheme. */
+function schemeRow(s, days, top) {
+  const chips = [
+    s.waiting ? toneChip('warn', `${s.waiting} need${s.waiting === 1 ? 's' : ''} you`) : null,
+    s.working ? toneChip('info', `${s.working} working`) : null,
+    s.shipped ? toneChip('ok', `${s.shipped} shipped`) : null,
+  ].filter(Boolean);
+  const total = s.daily.reduce((a, b) => a + b, 0);
+  const bars = h('span', { class: 'home-bars', role: 'img', 'aria-label': `${total} shipped in the last ${s.daily.length} days` }, ...s.daily.map((n, i) => {
+    const bar = h('i', { title: `${dayLabel(days[i])}: ${n} shipped`, class: n ? null : 'none' });
+    bar.style.setProperty('--v', String(n / top));
+    return bar;
+  }));
+  return h('a', { class: 'hue-row home-scheme', href: `#/p/${s.id}`, 'data-cat': schemeHue(s.name) },
+    h('span', { class: 'hue-row-text' }, schemeTag(s.name), ...(chips.length ? chips : [toneChip('neutral', 'Quiet')])),
+    h('span', { class: 'hue-row-meta' }, bars));
 }
 
-/** "Shipped abc1234: the fix. Risk low: …" as just what shipped. */
-const shipText = (text) => String(text ?? '').replace(/^Shipped (?:[0-9a-f]{7,40} ".*?"|the branch(?:'s new tip)?): /, '').replace(/\. Risk (low|medium|high)\b[\s\S]*$/, '');
+/** A Pacific day key ("2026-11-18") as "Tue Nov 18". */
+function dayLabel(day) {
+  if (!day) return '';
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+}
 
 /** A time as people read it (Pacific, as the rest of Citadel shows it), e.g. "Tue 2:10 PM". */
 function when(at) {
@@ -197,6 +221,8 @@ function moveOn() {
   const from = next;
   next = null;
   if (after == null) return;
+  const t = (data?.tickets ?? []).find((x) => x.id === after);
+  if (!t) return;
   // Long enough to see the card settle (Josh's "Move to the next card"); a row you click meanwhile wins.
-  setTimeout(() => { if (view?.home && view.id === from) location.hash = rowHref(rows.get(after)); }, 800);
+  setTimeout(() => { if (view?.home && view.id === from) location.hash = rowHref(t, rows.get(after)); }, 800);
 }

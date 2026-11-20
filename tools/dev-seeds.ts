@@ -609,7 +609,7 @@ mock.boards('#takes', { boards: [
     },
   },
   home: {
-    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each and three ships since yesterday; open #/home',
+    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each, three ships since yesterday and two weeks of past ones; open #/home',
     seed(c) {
       SCENARIOS['waiting-on-you'].seed(c);
       const delve = c.store.listProjects().find((x) => x.name === 'Delve')!;
@@ -621,6 +621,14 @@ mock.boards('#takes', { boards: [
       shipped(c, 'Usage bar in the top bar', 'Shipped 1a2b3c4 "#1201: usage bar": the usage bar shows your week. Risk low: front end only. Live now.');
       shipped(d, 'Chapter 2 balance', 'Shipped 5d6e7f8 "#240: chapter 2": foes hit 10% softer in chapter 2. Risk medium: numbers. Live now.');
       shipped(d, 'Build 8 merge', 'Merged 9a8b7c6 into build/8: a feeder. Risk low: x.');
+      // Two weeks of ships for Home's activity bars (#1217); a follow-up ship of the same minion counts once a day.
+      const past = (s: SeedCtx, title: string, daysAgo: number[]) => {
+        const t = minion(s, title, { status: 'closed' });
+        for (const n of daysAgo) c.store.db.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)')
+          .run(t.id, 'note', JSON.stringify({ text: `Shipped ${hex().slice(0, 7)}: ${title}. Risk low: x.` }), Date.now() - n * 86_400_000);
+      };
+      [[1, 1], [2], [3, 5], [5], [6, 9], [9], [12], [4]].forEach((days, i) => past(c, `Past fix ${i + 1}`, days));
+      [[2], [3], [3], [7, 8], [10], [11, 13]].forEach((days, i) => past(d, `Past level ${i + 1}`, days));
       return `#/p/${c.project.id}`;
     },
   },

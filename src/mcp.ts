@@ -944,7 +944,7 @@ const DEPLOY_CONTRAPTION = {
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 const REVIEW_SET = {
   name: 'review_set',
-  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial.",
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial. After each round you run of an entry (a critic, a reviewer, a referee), pass slug and run with the round and its verdict: the page's dots and pass rate come from these, and a blocking entry's last fail or ask on you holds your ship until a later round passes.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -962,7 +962,26 @@ const REVIEW_SET = {
       add: { type: 'boolean', description: 'Taskmaster only: add a new entry (with extends, or a new slug)' },
       extends: { type: 'string', description: 'With add: the kit starter it builds on, e.g. ui-screenshots' },
       when: { type: 'string', description: 'With add: when it runs, as the rubric format writes it, e.g. "diff: app/web/**"' },
+      run: {
+        type: 'object', description: 'Record one round you ran of this entry, sent on its own: the round (1 for the first) and its verdict (pass, fail, or ask when the item went to a person)',
+        properties: { round: { type: 'integer' }, verdict: { type: 'string', enum: ['pass', 'fail', 'ask'] } },
+        required: ['round', 'verdict'],
+      },
     },
+  },
+};
+
+const RECORD_VERDICT = {
+  name: 'record_verdict',
+  description: "Record that a person disagreed with a reviewer's or critic's verdict (citadel:critique, \"When a person disagrees\"): the entry's slug, who, and their own words quoted. Call it in the turn you hear it, whether they said it in this chat or on a card. It shows on the entry's page with who and when, marks your last run of it amber, and every later run of the entry reads it (and calibration tests against it). Only minions record verdicts; people never add them on the page.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slug: { type: 'string', description: "The entry's slug, e.g. ui-screenshots" },
+      person: { type: 'string', description: 'Who disagreed, by the name they write under, e.g. Josh' },
+      words: { type: 'string', description: 'Their own words, quoted as they wrote them' },
+    },
+    required: ['slug', 'person', 'words'],
   },
 };
 
@@ -1913,9 +1932,13 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (!args.slug) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
-        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.trial ? ', trial' : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
+        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
       }
       const slug = encodeURIComponent(String(args.slug));
+      if (args.run !== undefined) {
+        const r = await call('POST', `/api/projects/${PROJECT}/reviews/${slug}/runs`, { round: args.run?.round, verdict: args.run?.verdict });
+        return `Recorded round ${r.round} of ${args.slug}: ${r.verdict}.`;
+      }
       if (args.calibration !== undefined) {
         const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
         return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
@@ -1929,6 +1952,10 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial });
       return `Saved ${e.slug} as version ${e.version}.`;
+    }
+    case 'record_verdict': {
+      const v = await call('POST', `/api/projects/${PROJECT}/reviews/${encodeURIComponent(String(args.slug))}/verdicts`, { person: args.person, words: args.words });
+      return `Recorded on ${args.slug}: ${v.person}, "${v.words}". Its later runs read it.`;
     }
     case 'mandate_item': {
       if (typeof args.key !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(args.key)) throw new Error('key is required: letters, digits and . _ : - only, like pr-13');
@@ -2359,8 +2386,8 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

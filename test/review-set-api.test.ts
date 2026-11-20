@@ -99,14 +99,14 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   assert.deepEqual(own((await call(`/api/projects/${other.id}/reviews`)).data.entries), []);
 
   // The minion's tool: list, read one, save what it learned.
-  const tool = async (args: Record<string, unknown>) => {
+  const tool = async (args: Record<string, unknown>, name = 'review_set') => {
     const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), minion.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
     try {
       const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
       const { result } = await reply;
       return { error: !!result.isError, text: result.content[0].text as string };
     } finally {
@@ -118,6 +118,12 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   const saved = await tool({ slug: 'claims', body: '# Claims\n\n## Notes\n\nCara passed the hedged ones.', version: 1, note: 'Calibration' });
   assert.equal(saved.text, 'Saved claims as version 2.');
   assert.ok((await tool({ slug: 'claims', enabled: false })).error);
+  // Phase 3: a round's verdict, and a person's disagreement, recorded with the tools.
+  assert.equal((await tool({ slug: 'claims', run: { round: 1, verdict: 'fail' } })).text, 'Recorded round 1 of claims: fail.');
+  assert.ok((await tool({ slug: 'claims', run: { round: 1, verdict: 'meh' } })).error);
+  assert.equal((await tool({ slug: 'claims', person: 'Cara', words: 'Hedging is fine here.' }, 'record_verdict')).text, 'Recorded on claims: Cara, "Hedging is fine here.". Its later runs read it.');
+  assert.match((await tool({})).text, /\nclaims \(critic, on, trial, 0% first-round pass\): schedule: monthly$/);
+  assert.match((await tool({ slug: 'claims' })).text, /## Verdicts[^]*Cara, \d{4}-\d\d-\d\d, on #\d+: "Hedging is fine here\."/);
 });
 
 // Phase 2 (#1052), in a scheme that isn't Citadel: the kit's reviewers switch per scheme, the pre-ship review's switch
@@ -197,4 +203,49 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   const chatty = await call(`${url}/describe`, { method: 'POST', body: { text: 'Something else' } });
   assert.equal(chatty.status, 502);
   assert.match(chatty.data.error, /wasn't the proposal/);
+});
+
+test('phase 3 in a scheme of its own: a panel with a referee, run order, the record and verdicts, and a blocking critic holds the ship', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Glade' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Make the glade glow', properties: { type: 'feature' } } });
+  const url = `/api/projects/${p.id}/reviews`;
+  const tm = page.coordinator.id;
+  for (const [slug, kind] of [['look', 'critic'], ['taste-a', 'critic'], ['taste-b', 'critic'], ['taste-ref', 'referee']]) {
+    assert.equal((await call(url, { method: 'POST', body: { slug, kind, when: 'creative: art', body: `# ${slug}` }, as: tm })).status, 201);
+  }
+  // The Taskmaster groups the panel and sets the hand-offs; a minion may not.
+  for (const slug of ['taste-a', 'taste-b', 'taste-ref']) assert.equal((await call(`${url}/${slug}`, { method: 'PATCH', body: { panel: 'Taste' }, as: tm })).data.panel, 'Taste');
+  assert.equal((await call(`${url}/look`, { method: 'PATCH', body: { panel: 'Taste' }, as: minion.id })).status, 403);
+  const handOff = await call(`${url}/look`, { method: 'PATCH', body: { on_fail: [{ after: 1, to: 'taste-ref' }, { after: 2, to: 'person' }] }, as: tm });
+  assert.match(handOff.data.text, /^on_fail: taste-ref after 1 fail, person after 2 fails$/m);
+  assert.equal((await call(`${url}/look`, { method: 'PATCH', body: { on_fail: [{ after: 1, to: 'ghost' }] } })).status, 400);
+  const moved = await call(`${url}/look/move`, { method: 'POST', body: { dir: 'down' } });
+  assert.equal(moved.status, 200);
+  assert.equal((await call(`${url}/look/move`, { method: 'POST', body: { dir: 'down' }, as: minion.id })).status, 403);
+
+  // Calibrated and set to block: its fail on this minion holds the ship.
+  await call(`${url}/look`, { method: 'PATCH', body: { trial: false } });
+  await call(`${url}/look`, { method: 'PATCH', body: { gate: 'block' } });
+  for (const [slug, verdict] of [['taste-a', 'pass'], ['taste-b', 'fail'], ['taste-ref', 'pass'], ['look', 'fail']]) {
+    assert.equal((await call(`${url}/${slug}/runs`, { method: 'POST', body: { round: 1, verdict }, as: minion.id })).status, 201);
+  }
+  assert.equal((await call(`${url}/look/runs`, { method: 'POST', body: { round: 1, verdict: 'pass' } })).status, 403, 'only a minion records a run');
+  const { data: { ticket: t } } = await call(`/api/tickets/${minion.id}`);
+  mkdirSync(join(t.cwd, 'tools'), { recursive: true });
+  writeFileSync(join(t.cwd, 'tools', 'land.sh'), 'exit 1\n');
+  const held = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end' }) });
+  assert.equal(held.status, 400);
+  assert.match((await held.json()).error, /^Not handed off: Look \(`look`, last verdict fail\) blocks this ship\./);
+
+  // A person disagrees in chat; the minion records it, and the run turns amber.
+  assert.equal((await call(`${url}/look/verdicts`, { method: 'POST', body: { person: 'Josh', words: 'x' } })).status, 403, 'no Add box for people (Q13)');
+  const v = await call(`${url}/look/verdicts`, { method: 'POST', body: { person: 'Josh', words: 'The glow is meant to be faint.' }, as: minion.id });
+  assert.equal(v.status, 201);
+  const look = (await call(url)).data.entries.find((e: any) => e.slug === 'look');
+  assert.deepEqual([look.runs.length, look.runs[0].disagreed, look.rate, look.verdicts[0].minion], [1, true, 0, `#${minion.number}`]);
+  assert.match(look.text, /## Verdicts[\s\S]*Josh, \d{4}-\d\d-\d\d, on #\d+: "The glow is meant to be faint\."/);
+  assert.equal((await call(`${url}/look/verdicts/${v.data.id}`, { method: 'DELETE', as: minion.id })).status, 403);
+  assert.equal((await call(`${url}/look/verdicts/${v.data.id}`, { method: 'DELETE' })).status, 200);
+  assert.deepEqual((await call(url)).data.entries.find((e: any) => e.slug === 'look').verdicts, []);
 });

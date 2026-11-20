@@ -2,21 +2,30 @@
 // Everyone in the scheme reads it; people and the Taskmaster change anything. A minion saves only an entry's body,
 // for the critic loop's learning step (citadel:critique step 9): the switches stay a person's call (Q10, Q12).
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
-import { BUILT_INS, calibratedText, isKit, loadStarters, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type EntryFields, type ReviewEntry } from '../review-set.ts';
+import { BUILT_INS, calibratedText, isKit, loadStarters, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type EntryFields, type ReviewEntry, type ReviewSet, type Verdict } from '../review-set.ts';
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
 import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
 import { turnEnv } from '../turn-launch.ts';
 import { join } from 'node:path';
-import type { Project } from '../db.ts';
+import type { Project, Ticket } from '../db.ts';
 
 /** An entry for the page: a kit built-in's `when` and `what` are the kit's, and its text is only the scheme's additions. */
-const view = (e: ReviewEntry) => {
+const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[] } = {}) => {
   const kit = isKit(e) ? BUILT_INS.find((b) => b.slug === e.slug) : undefined;
   return {
-    ...e, kit: !!kit, what: kit?.what ?? null, when: kit?.when ?? (whenText(e.triggers) || 'ask'), text: kit ? e.body : renderEntry(e),
+    ...e, kit: !!kit, what: kit?.what ?? null, when: kit?.when ?? (whenText(e.triggers) || 'ask'), text: kit ? e.body : renderEntry(e, { verdicts: more.verdicts }),
     calibrated: e.calibration ? calibratedText(e.calibration) : null,
+    // The record (Q4) and people's verdicts (Q13), read-only here: only a minion adds to them.
+    runs: more.record?.runs ?? [], rate: more.record?.rate ?? null, firsts: more.record?.firsts ?? 0, stuck: more.record?.stuck ?? null, verdicts: more.verdicts ?? [],
   };
 };
+type Record_ = ReturnType<ReviewSet['record']> extends Map<number, infer R> ? R : never;
+/** One entry as the page shows it, with its record and verdicts. */
+function viewOne(app: App, project: Project, e: ReviewEntry) {
+  return view(e, { record: app.store.reviews.record(project.id).get(e.id), verdicts: app.store.reviews.verdicts(project.id).get(e.id) });
+}
+/** The minion as the record names it: #N, or the Taskmaster. */
+const minionName = (caller: Ticket) => (caller.kind === 'coordinator' ? 'Taskmaster' : caller.number != null ? `#${caller.number}` : caller.title);
 
 /** The kit's standard audits (kit/schedules/) as the page shows them: switched by the scheme's schedule row, its one source of truth. */
 function audits(app: App, project: Project) {
@@ -32,7 +41,7 @@ function run<T>(f: () => T): T {
   try {
     return f();
   } catch (err) {
-    if (err instanceof ReviewError) throw new HttpError(/^stale:|already has/.test(err.message) ? 409 : /^No entry|has no version/.test(err.message) ? 404 : 400, err.message.replace(/^stale: /, ''));
+    if (err instanceof ReviewError) throw new HttpError(/^stale:|already has/.test(err.message) ? 409 : /^No (entry|verdict)|has no version/.test(err.message) ? 404 : 400, err.message.replace(/^stale: /, ''));
     throw err;
   }
 }
@@ -51,6 +60,11 @@ function fieldsFrom(body: Record<string, any>): Partial<EntryFields> {
     f[k] = body[k];
   }
   if (body.position !== undefined) f.position = body.position;
+  if (body.panel !== undefined) {
+    if (body.panel !== null && typeof body.panel !== 'string') throw new HttpError(400, 'panel is text, or empty for none');
+    f.panel = body.panel?.trim() || null;
+  }
+  if (body.on_fail !== undefined) f.on_fail = Array.isArray(body.on_fail) && !body.on_fail.length ? null : body.on_fail;
   if (body.context !== undefined) f.context = body.context;
   if (body.triggers !== undefined) f.triggers = body.triggers;
   else if (body.when !== undefined) {
@@ -69,6 +83,8 @@ function noteFor(f: Partial<EntryFields>): string {
   if (f.trial !== undefined && keys.every((k) => k === 'trial' || k === 'calibration')) return f.trial ? 'Put on trial' : 'Marked good';
   if (keys.length === 1 && f.gate !== undefined) return f.gate === 'block' ? 'Set to block the ship' : 'Set to advise';
   if (keys.length === 1 && f.gives_label !== undefined) return f.gives_label ? 'Gives the risk label' : 'No longer gives the risk label';
+  if (keys.length === 1 && f.panel !== undefined) return f.panel ? `On panel ${f.panel}` : 'Off its panel';
+  if (keys.length === 1 && f.on_fail !== undefined) return 'Hand-offs on a fail set';
   return 'Edited by hand';
 }
 
@@ -77,7 +93,9 @@ export const reviewRoutes: Route[] = [
     method: 'GET', path: '/api/projects/:project/reviews', who: ['person', 'taskmaster', 'minion'],
     handler({ res, app, project }) {
       app.store.reviews.ensureBuiltIns(project.id);
-      return json(res, 200, { entries: app.store.reviews.list(project.id).map(view), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id) });
+      const record = app.store.reviews.record(project.id);
+      const verdicts = app.store.reviews.verdicts(project.id);
+      return json(res, 200, { entries: app.store.reviews.list(project.id).map((e) => view(e, { record: record.get(e.id), verdicts: verdicts.get(e.id) })), starters: loadStarters(), audits: audits(app, project), label: app.store.reviews.labelGiver(project.id) });
     },
   },
   {
@@ -111,7 +129,7 @@ export const reviewRoutes: Route[] = [
       if (!triggers && starterWhen && starterWhen !== 'set by the extending rubric') triggers = run(() => parseWhen(starterWhen));
       const e = run(() => app.store.reviews.create(project.id, { ...f, slug, name: f.name ?? nameFor(slug), triggers: triggers ?? {}, stage: f.stage ?? stageFor(triggers ?? {}), trial: true }, session.name));
       broadcast(app, project);
-      return json(res, 201, view(e));
+      return json(res, 201, viewOne(app, project, e));
     },
   },
   {
@@ -152,7 +170,7 @@ export const reviewRoutes: Route[] = [
         if (!c || typeof c !== 'object') throw new HttpError(400, 'calibration is {hits, notes, false_alarms, controls, model}');
         const e = run(() => app.store.reviews.calibrate(project.id, slug, c, session.name));
         broadcast(app, project);
-        return json(res, 200, view(e));
+        return json(res, 200, viewOne(app, project, e));
       }
       const was = app.store.reviews.get(project.id, slug);
       // A person taking an entry off trial marks it good (Q12): the record says who vouched for it instead of a run's counts.
@@ -160,7 +178,52 @@ export const reviewRoutes: Route[] = [
       const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 200) : noteFor(f);
       const e = run(() => app.store.reviews.save(project.id, slug, f, session.name, note, body.version));
       broadcast(app, project);
-      return json(res, 200, view(e));
+      return json(res, 200, viewOne(app, project, e));
+    },
+  },
+  {
+    // Run order (Q7): one place up or down within its column.
+    method: 'POST', path: '/api/projects/:project/reviews/:slug/move', who: ['person', 'taskmaster'], refuse: 'Only people and Taskmasters set the run order',
+    async handler({ req, res, app, session, project, params }) {
+      const { dir } = (await readJson(req)) ?? {};
+      if (dir !== 'up' && dir !== 'down') throw new HttpError(400, 'dir is up or down');
+      app.store.reviews.ensureBuiltIns(project.id);
+      const e = run(() => app.store.reviews.move(project.id, decodeURIComponent(params.slug), dir, session.name));
+      broadcast(app, project);
+      return json(res, 200, viewOne(app, project, e));
+    },
+  },
+  {
+    // The run record (Q4): a minion records each round of a critic or reviewer it ran, with its verdict.
+    method: 'POST', path: '/api/projects/:project/reviews/:slug/runs', who: ['minion', 'taskmaster'], refuse: 'Only the minion that ran it records a run',
+    async handler({ req, res, app, caller, project, params }) {
+      const { round, verdict } = (await readJson(req)) ?? {};
+      app.store.reviews.ensureBuiltIns(project.id);
+      const r = run(() => app.store.reviews.recordRun(project.id, decodeURIComponent(params.slug), { ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!), round, verdict }));
+      broadcast(app, project);
+      return json(res, 201, r);
+    },
+  },
+  {
+    // A person's disagreement with a verdict (Q13, Josh: "Only the minion records it"): no button or Add box for people.
+    method: 'POST', path: '/api/projects/:project/reviews/:slug/verdicts', who: ['minion', 'taskmaster'], refuse: "Only a minion records a verdict, when a person disagrees with a critic in its chat",
+    async handler({ req, res, app, caller, project, params }) {
+      const { person, words } = (await readJson(req)) ?? {};
+      app.store.reviews.ensureBuiltIns(project.id);
+      const v = run(() => app.store.reviews.recordVerdict(project.id, decodeURIComponent(params.slug), { person, words, ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!) }));
+      broadcast(app, project);
+      return json(res, 201, v);
+    },
+  },
+  {
+    // Edit by hand can remove a recorded verdict.
+    method: 'DELETE', path: '/api/projects/:project/reviews/:slug/verdicts/:id', who: ['person', 'taskmaster'], refuse: 'Only people and Taskmasters remove a recorded verdict',
+    handler({ res, app, project, params }) {
+      const id = Number(params.id);
+      if (!Number.isInteger(id)) throw new HttpError(400, 'Name the verdict by its number');
+      run(() => app.store.reviews.removeVerdict(project.id, decodeURIComponent(params.slug), id));
+      broadcast(app, project);
+      return json(res, 200, { ok: true });
     },
   },
   {
@@ -174,7 +237,7 @@ export const reviewRoutes: Route[] = [
       if (!Number.isInteger(version)) throw new HttpError(400, 'Name the version to restore');
       const e = run(() => app.store.reviews.restore(project.id, decodeURIComponent(params.slug), version, session.name));
       broadcast(app, project);
-      return json(res, 200, view(e));
+      return json(res, 200, viewOne(app, project, e));
     },
   },
 ];

@@ -69,6 +69,27 @@ The spec is the decisions table in the shared folder's `handoffs/handoff-review-
   login (sender pays), which reads the set and proposes new bodies. The page shows each as before and after; Apply
   is an ordinary save, so History undoes it. Its spend isn't counted in Citadel's usage, as an ultra review's isn't.
 
+## Phase 3: wiring and record (#1054)
+
+- **Order, panels and hand-offs live on the entry** (Q7, all four). `position` is the run order within a column;
+  `panel` names a group whose judges run at once and whose referee merges their verdicts; `on_fail` lists hand-off
+  steps (`professor`, `person`, or another entry's slug, each after N failed rounds; a critic with none hands off as
+  `professor after 2 fails, person after 3`). Rendered rubrics carry `panel:` and `on_fail:`, and the turn's Review set
+  line spells out the run order. `citadel:critique` follows them instead of a hard-wired chain. The page and the
+  describe agent both set them; a minion can't.
+- **The record is one row per round** (`review_runs`, Q4): a minion records each round with `review_set` `run`. The
+  page shows the last 10 as dots and the first-round pass rate over the last 20 first rounds, and flags an entry whose
+  last 5 or more first rounds all passed or all failed.
+- **Block holds the ship server-side.** `hand_off_land` (and a feeder's merge into a build) refuses while an entry that
+  is on, off trial and set to Block has a last run on that minion other than pass. A later passing round lifts it, or
+  a person's go named on the hand-off.
+- **Verdicts are recorded by the minion only** (Q13, Josh: "only the minion records them. No 'I disagree' button on
+  cards and no Add box on the page"). `record_verdict` stores who, their words and the minion, and marks that minion's
+  last run of the entry amber. Each entry's rubric carries its verdicts in `## Verdicts` unless its "your verdicts"
+  switch is off (on by default: a disagreement only helps if the next run reads it). Edit by hand removes one.
+- **The requester's words** (Q8) are a per-entry switch, off by default: on, the rubric carries the minion's first
+  message, quoted.
+
 ## Why not keep repo files
 
 - Repo files need a commit, and a ship, for every switch flip.

@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { BUILT_INS, importAllRubrics, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { readProposals } from '../src/review-describe.ts';
+import { BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -255,6 +256,7 @@ test('a database phase 1 made gets the phase 2 columns', () => {
   set.ensureBuiltIns(3);
   assert.equal(set.get(3, 'ui')?.gives_label, false);
   assert.equal(set.save(3, 'ui', { body: 'More.' }, 'Josh', 'x').version, 2);
+  assert.equal(set.save(3, 'ui', { panel: 'Taste', on_fail: CRITIC_ON_FAIL }, 'Josh', 'x').panel, 'Taste', 'and the phase 3 ones');
   assert.equal(new ReviewSet(db).list(3).length, BUILT_INS.length + 1, 'a second open adds nothing');
 });
 
@@ -265,4 +267,145 @@ test('a lens off with the pre-ship review on: the turn hears only the lens', () 
   const line = kitLine(set.list(3), join(root, 'lens-only'));
   assert.doesNotMatch(line, /pre-ship review is off/);
   assert.match(line, /^Kit reviewers: This scheme switched off: Lens: Tests\. .*an off lens stays out of the reviewer's brief/);
+});
+
+test('run order, panels and hand-offs: saved, checked, rendered, and told to the turn', () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'look', name: 'Look', stage: 'work' }, 'Josh');
+  set.create(3, { slug: 'taste-a', name: 'Taste A', stage: 'work', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'taste-b', name: 'Taste B', stage: 'work', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'taste-ref', name: 'Taste referee', kind: 'referee', stage: 'work', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'alone', name: 'Alone', stage: 'ship' }, 'Josh');
+  assert.equal(orderLine(set.list(3)), 'work: `look` → [panel Taste: `taste-a`, `taste-b` judge at once; referee `taste-ref` merges]', 'a lone entry in a column needs no order');
+  let e = set.move(3, 'look', 'down', 'Josh');
+  assert.equal(set.list(3).filter((x) => x.stage === 'work')[1].slug, 'look');
+  assert.match(set.versions(3, 'look')[0].note, /^Run order: after Taste A$/);
+  assert.throws(() => set.move(3, 'alone', 'up', 'Josh'), /already first/);
+  e = set.save(3, 'look', { on_fail: [{ after: 1, to: 'taste-ref' }, { after: 3, to: 'person' }] }, 'Josh', 'x');
+  assert.match(renderEntry(e), /^on_fail: taste-ref after 1 fail, person after 3 fails$/m);
+  assert.match(renderEntry(set.get(3, 'taste-a')!), /^panel: Taste$/m);
+  assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 2, to: 'nobody' }] }, 'Josh', 'x'), /isn't in this scheme's review set/);
+  assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 2, to: 'look' }] }, 'Josh', 'x'), /to itself/);
+  assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 3, to: 'person' }, { after: 2, to: 'professor' }] }, 'Josh', 'x'), /rising/);
+  assert.throws(() => set.save(3, 'look', { panel: 'x'.repeat(41) }, 'Josh', 'x'), /1 to 40/);
+  assert.equal(set.save(3, 'taste-b', { panel: '  ' } as any, 'Josh', 'x').panel, null, 'an empty panel is none');
+});
+
+test('the run record: dots, first-round pass rate, a stuck entry, and the ship hold', () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'ui', name: 'UI', gate: 'block' }, 'Josh');
+  set.create(3, { slug: 'copy', name: 'Copy', gate: 'advise' }, 'Josh');
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  set.recordRun(3, 'copy', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  assert.deepEqual(set.holds(3, 40), [{ slug: 'ui', name: 'UI', verdict: 'fail' }], 'an advisory fail holds nothing');
+  assert.deepEqual(set.holds(3, 41), [], "another minion's ship isn't held");
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 2, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 40), [], 'a pass in a later round lifts it');
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 3, verdict: 'ask' });
+  assert.equal(set.holds(3, 40).length, 1, 'gone to a person still holds');
+  set.save(3, 'ui', { trial: true }, 'Josh', 'x');
+  assert.deepEqual(set.holds(3, 40), [], 'on trial it only advises');
+  assert.throws(() => set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'maybe' }), /verdict is pass, fail, ask/);
+  assert.throws(() => set.recordRun(3, 'nope', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' }), /No entry named nope/);
+  for (let i = 0; i < 12; i++) set.recordRun(3, 'copy', { ticketId: 50 + i, minion: `#${50 + i}`, round: 1, verdict: 'pass' });
+  const rec = set.record(3);
+  const copy = rec.get(set.get(3, 'copy')!.id)!;
+  assert.equal(copy.runs.length, 10, 'the last 10 runs');
+  assert.equal(copy.runs.at(-1)!.minion, '#61', 'oldest first, newest last');
+  assert.deepEqual([copy.firsts, copy.rate, copy.stuck], [13, 92, null], '12 of 13 first rounds passed');
+  const ui = rec.get(set.get(3, 'ui')!.id)!;
+  assert.deepEqual([ui.firsts, ui.rate, ui.stuck], [1, 0, null], 'one first round is too few to call it stuck');
+  for (let i = 0; i < 4; i++) set.recordRun(3, 'ui', { ticketId: 70 + i, minion: `#${70 + i}`, round: 1, verdict: 'fail' });
+  assert.equal(set.record(3).get(set.get(3, 'ui')!.id)!.stuck, 'fail', 'five first rounds, all failed');
+});
+
+test("a blocking entry's fail is lifted by a later pass from what judges in its place: its panel's referee or its hand-off", () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'layout', name: 'Layout', gate: 'block', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'taste-ref', name: 'Taste referee', kind: 'referee', panel: 'Taste' }, 'Josh');
+  set.create(3, { slug: 'copy', name: 'Copy', gate: 'block' }, 'Josh');
+  set.create(3, { slug: 'tone', name: 'Tone' }, 'Josh');
+  set.save(3, 'copy', { on_fail: [{ after: 1, to: 'tone' }] }, 'Josh', 'x');
+  set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
+  set.recordRun(3, 'layout', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  set.recordRun(3, 'copy', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['layout', 'copy'], 'a pass from before the fail lifts nothing');
+  set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
+  set.recordRun(3, 'tone', { ticketId: 41, minion: '#41', round: 2, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['copy'], "the referee's merged pass governs the panel; another minion's hand-off pass doesn't count");
+  set.recordRun(3, 'tone', { ticketId: 40, minion: '#40', round: 2, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 40), [], 'the hand-off passed it');
+});
+
+test("hand-offs to an entry switched off drop out of the rubric, and a kit reviewer's file carries people's verdicts", () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3);
+  set.create(3, { slug: 'copy', name: 'Copy' }, 'Josh');
+  set.create(3, { slug: 'tone', name: 'Tone' }, 'Josh');
+  set.save(3, 'copy', { on_fail: [{ after: 1, to: 'tone' }, { after: 3, to: 'person' }] }, 'Josh', 'x');
+  set.save(3, 'tone', { enabled: false }, 'Josh', 'x');
+  const dir = join(root, 'dangling');
+  renderSet(set.list(3), dir, new Map());
+  assert.match(readFileSync(join(dir, 'copy.md'), 'utf8'), /^on_fail: person after 3 fails$/m);
+  set.recordVerdict(3, 'pre-ship-review', { person: 'Josh', words: 'Style nits are not blockers here.', ticketId: 40, minion: '#40' }, Date.UTC(2026, 10, 19));
+  const kdir = join(root, 'kit-verdicts');
+  kitLine(set.list(3), kdir, set.verdicts(3));
+  assert.match(readFileSync(join(kdir, 'pre-ship-review.md'), 'utf8'), /## Verdicts[\s\S]*Style nits are not blockers here/);
+});
+
+test("people's verdicts: recorded by a minion, an amber dot, read by the next run unless switched off, and removable", () => {
+  const { set } = fresh();
+  const e = set.create(3, { slug: 'ui', name: 'UI' }, 'Josh');
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  set.recordRun(3, 'ui', { ticketId: 41, minion: '#41', round: 1, verdict: 'fail' });
+  const v = set.recordVerdict(3, 'ui', { person: 'Josh', words: 'The tight spacing there is on purpose.', ticketId: 40, minion: '#40' }, Date.UTC(2026, 10, 19));
+  const runs = set.record(3).get(e.id)!.runs;
+  assert.deepEqual(runs.map((r) => r.disagreed), [true, false], "only that minion's run turns amber");
+  const verdicts = set.verdicts(3);
+  assert.equal(verdicts.get(e.id)![0].words, 'The tight spacing there is on purpose.');
+  const text = renderEntry(e, { verdicts: verdicts.get(e.id) });
+  assert.match(text, /## Verdicts\n\nPeople disagreed with this entry's verdicts\. Judge the way they did:\n\n- Josh, 2026-11-19, on #40: "The tight spacing there is on purpose\."/);
+  const off = set.save(3, 'ui', { context: { verdicts: false } }, 'Josh', 'x');
+  assert.doesNotMatch(renderEntry(off, { verdicts: verdicts.get(e.id) }), /## Verdicts/, 'switched off, the runs stop reading them');
+  const dir = join(root, 'verdicts-set');
+  set.save(3, 'ui', { context: {} }, 'Josh', 'x');
+  renderSet(set.list(3), dir, set.verdicts(3));
+  assert.match(readFileSync(join(dir, 'ui.md'), 'utf8'), /on purpose/, "the turn's rubric file carries them");
+  assert.throws(() => set.recordVerdict(3, 'ui', { person: 'Josh', words: ' ', ticketId: 40, minion: '#40' }), /own words/);
+  set.removeVerdict(3, 'ui', v.id);
+  assert.equal(set.verdicts(3).get(e.id), undefined);
+  assert.throws(() => set.removeVerdict(3, 'ui', v.id), /No verdict/);
+});
+
+test("the requester's words: off by default, the minion's first message in the brief when on", () => {
+  const { db, set } = fresh();
+  db.exec("CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER, kind TEXT, data TEXT)");
+  db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'note', '{}');
+  db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'user_message', JSON.stringify({ author: 'Cara', text: 'Make the tree glow.\nSoftly.' }));
+  db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'user_message', JSON.stringify({ author: 'Josh', text: 'Later words' }));
+  const words = set.requesterWords(40);
+  assert.deepEqual(words, { author: 'Cara', text: 'Make the tree glow.\nSoftly.' });
+  assert.equal(set.requesterWords(99), null);
+  const e = set.create(3, { slug: 'ui', name: 'UI' }, 'Josh');
+  assert.doesNotMatch(renderEntry(e, { requester: words }), /requester's words/);
+  const on = set.save(3, 'ui', { context: { requester: true } }, 'Josh', 'x');
+  assert.match(renderEntry(on, { requester: words }), /## The requester's words\n\nWhat Cara asked this minion for, in their own words \(the brief may quote them\):\n\n> Make the tree glow\.\n> Softly\./);
+});
+
+test("the describe agent may change a scheme entry's gate, panel and hand-offs, never a kit entry's", () => {
+  const { set } = fresh();
+  set.ensureBuiltIns(3);
+  set.create(3, { slug: 'ui', name: 'UI', body: '# UI' }, 'Josh');
+  const reply = JSON.stringify({ note: 'ok', edits: [
+    { slug: 'ui', settings: { panel: 'Taste', on_fail: [{ after: 1, to: 'person' }], gate: 'advise' }, why: 'Panel' },
+    { slug: 'finding-checker', settings: { gate: 'block' } },
+    { slug: 'ui', body: 'second edit of the same entry is dropped' },
+  ] });
+  const { proposals } = readProposals(reply, set.list(3));
+  assert.equal(proposals.length, 1, 'a settings-only edit of a kit entry proposes nothing');
+  assert.deepEqual(proposals[0].settings, { gate: 'advise', panel: 'Taste', on_fail: [{ after: 1, to: 'person' }] });
+  assert.deepEqual(proposals[0].settings_before, { gate: null, panel: null, on_fail: null });
+  assert.equal(proposals[0].after, '# UI', 'the body is kept when the edit leaves it out');
+  const moved = readProposals(JSON.stringify({ note: 'ok', edits: [{ slug: 'ui', settings: { position: 7 } }] }), set.list(3)).proposals[0];
+  assert.deepEqual([moved.settings, moved.settings_before], [{ position: 7 }, { position: set.get(3, 'ui')!.position }], 'and its run order');
 });

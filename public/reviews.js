@@ -3,6 +3,8 @@
 // it reviews, its context, and Edit by hand and History. Every save is a new version; New starts on trial (Q12).
 // Phase 2 (#1052): the kit's own reviewers and audits are on it too, switched per scheme; Block or Advise is locked
 // while an entry is on trial; and a describe box asks an agent for edits, shown as before and after with Apply.
+// Phase 3 (#1054): run order ("↓ then"), panels as one dashed box with their referee, hand-offs on a fail, each entry's
+// last runs as dots with its first-round pass rate, and the verdicts minions recorded (read-only; Edit by hand removes).
 import { ago, api, h, icon, view } from './base.js';
 import { collapseRuns, diffLines } from './plan-diff.js';
 import { optimistic } from './ui/optimistic.js';
@@ -96,15 +98,53 @@ function board() {
       h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => select(null, 'new') }, '+ New'));
   }
   return h('div', { class: 'rv-board' }, ...cols.map(([stage, label]) => {
-    const here = state.entries.filter((e) => e.stage === stage);
-    const lenses = here.filter(isLens);
-    const list = here.filter((e) => !isLens(e)).map(card);
-    if (lenses.length) list.splice(here.findIndex(isLens), 0, lensesCard(lenses));
+    const list = columnUnits(state.entries.filter((e) => e.stage === stage));
     if (stage === 'schedule') list.push(...state.audits.map(auditCard));
     return h('section', { class: 'rv-col', 'aria-label': label },
       h('h3', {}, label),
       list.length ? list : h('p', { class: 'muted rv-none' }, 'None'));
   }));
+}
+
+/**
+ * A column in run order: the lenses as one card, a panel as one box, and "↓ then" between two of the scheme's own that
+ * run, as the turn's run order says (orderLine in src/review-set.ts). The kit's own keep their own flow.
+ */
+function columnUnits(here) {
+  const out = [];
+  const seen = new Set();
+  for (const e of here) {
+    const key = isLens(e) ? 'lens' : e.panel && !e.kit ? `panel:${e.panel}` : null;
+    if (key && seen.has(key)) continue;
+    // A panel sits where its first member that's on runs (orderLine), not at a switched-off one above it.
+    if (key !== 'lens' && key && !e.enabled && here.some((x) => x.panel === e.panel && !x.kit && x.enabled)) continue;
+    if (key) seen.add(key);
+    if (key === 'lens') out.push({ node: lensesCard(here.filter(isLens)) });
+    else if (key) {
+      const members = here.filter((x) => x.panel === e.panel && !x.kit);
+      out.push({ node: panelBox(e.panel, members), runs: members.some((x) => x.enabled) });
+    } else out.push({ node: card(e), runs: !e.kit && e.enabled });
+  }
+  return out.flatMap((u, i) => i && u.runs && out[i - 1].runs ? [h('div', { class: 'rv-then', 'aria-hidden': 'true' }, '↓ then'), u.node] : [u.node]);
+}
+
+/** A panel (Q7): its judges look at the same work at once and its referee merges their verdicts into one. */
+function panelBox(name, members) {
+  const judges = members.filter((x) => x.kind !== 'referee');
+  const refs = members.filter((x) => x.kind === 'referee');
+  const on = judges.filter((x) => x.enabled).length;
+  const ref = refs.some((x) => x.enabled);
+  return h('div', { class: 'rv-panel', role: 'group', 'aria-label': `Panel ${name}` },
+    h('div', { class: 'rv-panel-head' }, h('b', {}, name), h('span', { class: 'muted' }, ref ? ': judge together, referee merges' : ': judge together')),
+    ...judges.map(card), ...refs.map(card),
+    ref ? h('p', { class: 'muted rv-panel-cost' }, `${on} judge${on === 1 ? '' : 's'} + referee: ${on + 1} model calls a run`)
+      : h('p', { class: 'rv-warn rv-panel-cost', role: 'note' }, `No referee on: each judge's verdict stands on its own (${on} model call${on === 1 ? '' : 's'} a run). Add a referee to the panel to merge them.`));
+}
+
+/** Its last runs, oldest first: green pass, red fail, amber where a person disagreed, grey where it asked a person. */
+function dots(runs) {
+  return h('span', { class: 'rv-dots', role: 'img', 'aria-label': `Last ${runs.length} runs: ${runs.map((r) => r.disagreed ? 'disagreed' : r.verdict).join(', ')}` },
+    runs.map((r) => h('i', { class: `is-${r.disagreed ? 'disagreed' : r.verdict}`, title: `${r.minion}, round ${r.round}: ${r.verdict}${r.disagreed ? ', and a person disagreed' : ''} · ${pacific(r.at)}` })));
 }
 
 function card(e) {
@@ -113,7 +153,8 @@ function card(e) {
     onclick: () => select(e.slug), onkeydown: (ev) => { if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); select(e.slug); } } },
   h('div', { class: 'rv-card-top' }, h('span', { class: 'rv-card-name' }, e.name), sw),
   h('div', { class: 'rv-card-when' }, e.kit ? e.when : whenLine(e)),
-  chips(e));
+  chips(e),
+  e.runs?.length ? h('div', { class: 'rv-card-rec' }, dots(e.runs), e.rate === null ? null : h('span', { class: 'muted' }, `${e.rate}%`)) : null);
 }
 
 const isLens = (e) => e.kit && e.slug.startsWith('lens-');
@@ -133,6 +174,7 @@ function chips(e) {
     e.kind !== 'critic' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, e.kind) : null,
     e.trial ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: "On trial: it advises and blocks nothing until it's calibrated" }, 'trial') : null,
     e.gate === 'block' ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: 'Its fail blocks the ship' }, 'blocks') : null,
+    e.stuck ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: `Its last ${e.firsts} first rounds all ${e.stuck === 'pass' ? 'passed: it may be too easy' : 'failed: it may be too strict, or the work keeps missing it'}` }, e.stuck === 'pass' ? 'always passes' : 'always fails') : null,
     labelGiver()?.slug === e.slug ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "Gives the risk label that decides whether a ship waits for a person's go" }, 'risk label') : null,
     e.kit ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: "The kit's own: its text stays in the kit, and this scheme switches it and adds to it" }, 'kit')
       : e.extends ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: `On top of the kit's ${e.extends} starter, so kit fixes reach it` }, 'kit') : null,
@@ -246,7 +288,7 @@ function detail() {
     e.extends ? h('li', {}, `The kit's ${e.extends} starter, under this scheme's own lines`) : null,
     ...guides.map((g) => h('li', {}, h('a', { href: g.href, ...(/^https?:/.test(g.href) ? { target: '_blank', rel: 'noopener' } : {}) }, g.label || g.href))),
     ...(ctx.paths ?? []).map((p) => h('li', {}, h('code', {}, p))),
-    ctx.verdicts ? h('li', {}, 'Your past verdicts on its work') : null,
+    ctx.verdicts !== false ? h('li', {}, `Your past verdicts on its work${e.verdicts?.length ? ` (${e.verdicts.length})` : ''}`) : null,
     ctx.requester ? h('li', {}, "The requester's own words") : null,
   ].filter(Boolean);
   return h('aside', { class: 'rv-detail' },
@@ -260,14 +302,106 @@ function detail() {
     section('Reviews', h('p', {}, e.kit ? e.when : whenLine(e)), e.kit ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
     e.kit ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, "None: it reads the kit's text alone. Edit by hand or describe a change to add to it."))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
-    e.kit ? null : section('With the others', h('p', { class: 'muted' }, 'Runs on its own: no order, hand-off or panel yet.')),
-    section('Record', e.calibrated ? h('p', {}, `Calibrated ${e.calibrated}`) : null,
-      h('p', { class: 'muted' }, 'No verdicts recorded yet. Once minions record them, the last runs show here.')),
+    e.kit ? null : section('With the others', ...withOthers(e)),
+    section('Record', e.calibrated ? h('p', {}, `Calibrated ${e.calibrated}`) : null, ...record(e)),
+    e.verdicts?.length ? section('Verdicts', verdictList(e, false)) : null,
     h('div', { class: 'rv-actions' },
       h('button', { type: 'button', class: 'cui-btn', onclick: () => select(e.slug, 'edit') }, 'Edit by hand'),
       h('button', { type: 'button', class: 'cui-btn', 'aria-pressed': String(state.mode === 'history'), onclick: () => select(e.slug, state.mode === 'history' ? 'view' : 'history') }, 'History')),
     state.mode === 'history' ? history(e) : null,
     h('p', { class: 'muted rv-ver' }, `Version ${e.version}, saved by ${e.updated_by} ${ago(e.updated_at)}`));
+}
+
+/** Its runs, the first-round pass rate, and a warning when it always passes or always fails (Q4). */
+function record(e) {
+  if (!e.runs?.length) return [h('p', { class: 'muted' }, 'No runs recorded yet. Each round a minion runs it shows here as a dot.')];
+  return [
+    h('p', { class: 'rv-rec' }, dots(e.runs), e.rate === null ? null : h('span', {}, ` ${e.rate}% `), h('span', { class: 'muted' }, e.rate === null ? ` last ${e.runs.length} runs` : `first-round pass, last ${e.firsts} first rounds`)),
+    e.stuck ? h('p', { class: 'rv-warn', role: 'note' }, e.stuck === 'pass' ? `Its last ${e.firsts} first rounds all passed. A critic that never fails may be too easy: calibrate it, or tighten what fails.` : `Its last ${e.firsts} first rounds all failed. It may be too strict, or the work keeps missing the same thing: read its findings.`) : null,
+  ].filter(Boolean);
+}
+
+/** What people said when they disagreed with it (Q13): only a minion records one; Edit by hand can remove one. */
+function verdictList(e, removable) {
+  return h('ul', { class: 'rv-verdicts' }, e.verdicts.map((v) => h('li', {},
+    h('q', {}, v.words),
+    h('span', { class: 'muted' }, ` ${v.person}, `, h('time', { title: pacific(v.at) }, ago(v.at)), `, on ${v.minion}`),
+    removable ? h('button', { type: 'button', class: 'cui-btn cui-small cui-ghost', onclick: () => removeVerdict(e, v) }, 'Remove') : null)));
+}
+
+async function removeVerdict(e, v) {
+  const s = state;
+  try {
+    await api(`${url(e.slug)}/verdicts/${v.id}`, { method: 'DELETE' });
+    const x = s.entries.find((y) => y.slug === e.slug);
+    if (x) x.verdicts = x.verdicts.filter((y) => y.id !== v.id);
+    toast('Removed: its next runs no longer read it');
+    if (state === s) draw();
+  } catch (err) {
+    toast(`Couldn't remove it: ${err.message}`);
+  }
+}
+
+/** Order, panel and hand-offs (Q7): where it runs in its column, who it judges with, and where a fail goes. */
+function withOthers(e) {
+  const col = state.entries.filter((x) => x.stage === e.stage);
+  const i = col.findIndex((x) => x.slug === e.slug);
+  const label = COLUMNS.find(([v]) => v === e.stage)?.[1] ?? e.stage;
+  const moveBtn = (dir, text, at) => h('button', { type: 'button', class: 'cui-btn cui-small', disabled: !at, 'aria-label': `Run ${dir === 'up' ? 'earlier' : 'later'}`, onclick: () => move(e, dir) }, text);
+  const names = [...new Set(state.entries.filter((x) => x.panel && !x.kit).map((x) => x.panel))];
+  const panel = h('input', { class: 'cui-input', value: e.panel ?? '', placeholder: 'None', maxlength: 40, list: 'rv-panels', 'aria-label': 'Panel',
+    onchange: (ev) => { const v = ev.target.value.trim() || null; if (v !== (e.panel ?? null)) setSwitch(e.slug, { panel: v }); } });
+  return [
+    h('div', { class: 'rv-order' }, h('span', {}, `Runs ${i + 1} of ${col.length} ${label.toLowerCase()}`), moveBtn('up', '↑', i > 0), moveBtn('down', '↓', i < col.length - 1)),
+    h('label', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Panel'), panel, h('datalist', { id: 'rv-panels' }, names.map((n) => h('option', { value: n }))),
+      h('span', { class: 'muted rv-hint' }, e.kind === 'referee' ? "As the panel's referee it merges the judges' verdicts into one." : 'Entries with the same panel judge the same work at once, and its referee merges their verdicts.')),
+    onFailEditor(e),
+  ];
+}
+
+function move(e, dir) {
+  const s = state;
+  const col = s.entries.filter((x) => x.stage === e.stage);
+  const i = col.findIndex((x) => x.slug === e.slug);
+  const other = col[dir === 'up' ? i - 1 : i + 1];
+  if (!other) return;
+  const swap = () => {
+    const a = s.entries.indexOf(e), b = s.entries.indexOf(other);
+    if (a < 0 || b < 0) return;
+    [s.entries[a], s.entries[b]] = [s.entries[b], s.entries[a]];
+    if (state === s) draw();
+  };
+  optimistic({
+    key: `reviews:${s.projectId}:move:${e.slug}`,
+    apply: swap,
+    send: () => api(`${url(e.slug)}/move`, { method: 'POST', body: { dir } }),
+    undo: swap,
+    label: `move ${e.name}`,
+  }).then(() => load(), () => {});
+}
+
+/** Hand off on a fail: after n failed rounds the work goes to the professor, a person or another entry. */
+function onFailEditor(e) {
+  const fallback = e.kind === 'critic' ? 'professor after 2 fails, person after 3' : null;
+  const steps = (e.on_fail ?? []).map((x) => ({ ...x }));
+  const targets = [['professor', 'the professor'], ['person', 'a person'], ...state.entries.filter((x) => x.slug !== e.slug && !x.kit).map((x) => [x.slug, x.name])];
+  const box = h('div', { class: 'rv-onfail' });
+  const save = h('button', { type: 'button', class: 'cui-btn cui-small cui-primary', hidden: true, onclick: () => setSwitch(e.slug, { on_fail: steps.length ? steps : null }) }, 'Save hand-offs');
+  const changed = () => { save.hidden = JSON.stringify(steps) === JSON.stringify(e.on_fail ?? []); };
+  const rows = () => box.replaceChildren(
+    ...steps.map((st, k) => h('div', { class: 'rv-onfail-row' },
+      h('span', {}, 'After'),
+      h('input', { class: 'cui-input', type: 'number', min: 1, max: 10, value: st.after, 'aria-label': 'Failed rounds', oninput: (ev) => { st.after = Number(ev.target.value); changed(); } }),
+      h('span', {}, 'fails, to'),
+      h('select', { class: 'cui-input', 'aria-label': 'Hand it to', onchange: (ev) => { st.to = ev.target.value; changed(); } }, targets.map(([v, l]) => h('option', { value: v, selected: v === st.to }, l))),
+      h('button', { type: 'button', class: 'cui-btn cui-small cui-ghost', 'aria-label': 'Remove this step', onclick: () => { steps.splice(k, 1); rows(); changed(); } }, '×'))),
+    h('div', { class: 'rv-actions' },
+      steps.length < 4 ? h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => { const last = steps.at(-1); steps.push({ after: Math.min(10, (last?.after ?? 1) + 1), to: last ? 'person' : 'professor' }); rows(); changed(); } }, '+ Step') : null,
+      save));
+  rows();
+  return h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Hand off on a fail'),
+    h('span', { class: 'muted rv-hint' }, e.on_fail?.length ? 'Each step takes over from the one before.' : fallback ? `None set: as every critic, ${fallback}.` : 'None set: its fails go back to the author.'),
+    box);
 }
 
 /** Beside the pre-ship review's switch, before anyone flips it (Q10): what off means for this scheme's ships. */
@@ -346,6 +480,8 @@ function editForm(e) {
   const effort = h('select', { class: 'cui-input' }, [['', "The kit's pick"], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']].map(([v, l]) => h('option', { value: v, selected: v === (e.effort ?? '') }, l)));
   const body = h('textarea', { class: 'cui-input rv-bodytext', rows: 18, spellcheck: false }, e.body);
   const note = h('input', { class: 'cui-input', placeholder: 'Edited by hand' });
+  const verdicts = h('input', { type: 'checkbox', checked: e.context?.verdicts !== false });
+  const requester = h('input', { type: 'checkbox', checked: !!e.context?.requester });
   const err = h('p', { class: 'error', hidden: true });
   const save = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Save');
   const submit = async (ev) => {
@@ -353,7 +489,8 @@ function editForm(e) {
     save.disabled = true;
     err.hidden = true;
     try {
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: entry(e.slug)?.version ?? e.version } });
+      const context = { ...e.context, verdicts: verdicts.checked, requester: requester.checked };
+      const saved = await api(url(e.slug), { method: 'PATCH', body: { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: entry(e.slug)?.version ?? e.version } });
       state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';
@@ -371,6 +508,10 @@ function editForm(e) {
     field('When it runs', when, 'Like diff: public/**, schedule: monthly, or ask. Parts join with |'),
     h('div', { class: 'rv-pair' }, field('Model', model), field('Effort', effort)),
     field(e.extends ? `Its own lines, under the kit's ${e.extends}` : 'The rubric', body, 'Markdown with ## sections: what it checks, what passes, what fails.'),
+    h('fieldset', { class: 'rv-ctx-switches' }, h('legend', { class: 'rv-label' }, 'Its context also has'),
+      h('label', { class: 'rv-check' }, verdicts, h('span', {}, 'Your verdicts: what people said when they disagreed with it')),
+      h('label', { class: 'rv-check' }, requester, h('span', {}, "The requester's words: the minion's first message"))),
+    e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
     field('What changed', note),
     err,
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')));
@@ -402,6 +543,7 @@ function kitForm(e) {
     h('h3', {}, `Edit ${e.name}`),
     h('p', { class: 'muted' }, e.what),
     field("This scheme's additions", body, "Read with the kit's own text and handed to its Grunt: what to look for here, what to let pass."),
+    e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
     field('What changed', note),
     err,
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')));
@@ -442,7 +584,9 @@ async function describe(ask) {
 
 function proposal(ask, p) {
   const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
-  const runs = collapseRuns(diffLines(p.before, p.after)).map((r) => r.gap
+  // Settings (phase 3: gate, panel, hand-offs) diff as lines above the body's.
+  const sets = (o) => Object.entries(o ?? {}).map(([k, v]) => `${k}: ${k === 'on_fail' ? (v?.length ? v.map((x) => `${x.to} after ${x.after}`).join(', ') : 'the default') : v ?? 'none'}`).join('\n');
+  const runs = collapseRuns(diffLines(`${sets(p.settings_before)}${p.settings ? '\n\n' : ''}${p.before}`, `${sets(p.settings)}${p.settings ? '\n\n' : ''}${p.after}`)).map((r) => r.gap
     ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text)))
     : row(r.op, r.text));
   const drop = () => { ask.proposals = ask.proposals.filter((x) => x !== p); draw(); };
@@ -451,7 +595,7 @@ function proposal(ask, p) {
     b.disabled = true;
     const s = state; // a scheme switch during the save leaves the new scheme's entries alone
     try {
-      const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
+      const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, ...p.settings, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
       const i = s.entries?.findIndex((x) => x.slug === p.slug) ?? -1;
       if (i >= 0) s.entries[i] = saved;
       ask.applied.push(`Applied. Version ${saved.version} of ${saved.name}; History can undo it.`);

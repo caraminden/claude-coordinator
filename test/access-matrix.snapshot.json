@@ -1853,12 +1853,52 @@
   "m1": "404 No entry named nope",
   "m2": "404 No entry named nope"
  },
+ "POST /api/projects/:p/reviews/nope/move": {
+  "anon": "401 Not logged in",
+  "person": "400 dir is up or down",
+  "member": "400 dir is up or down",
+  "outsider": "404 No such scheme",
+  "tmA": "400 dir is up or down",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/projects/:p/reviews/nope/restore": {
   "anon": "401 Not logged in",
   "person": "400 Name the version to restore",
   "member": "400 Name the version to restore",
   "outsider": "404 No such scheme",
   "tmA": "400 Name the version to restore",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/reviews/nope/runs": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion that ran it records a run",
+  "member": "403 Only the minion that ran it records a run",
+  "outsider": "403 Only the minion that ran it records a run",
+  "tmA": "404 No entry named nope in this scheme's review set",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No entry named nope in this scheme's review set",
+  "m2": "404 No entry named nope in this scheme's review set"
+ },
+ "POST /api/projects/:p/reviews/nope/verdicts": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion records a verdict, when a person disagrees with a critic in its chat",
+  "member": "403 Only a minion records a verdict, when a person disagrees with a critic in its chat",
+  "outsider": "403 Only a minion records a verdict, when a person disagrees with a critic in its chat",
+  "tmA": "404 No entry named nope in this scheme's review set",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "404 No entry named nope in this scheme's review set",
+  "m2": "404 No entry named nope in this scheme's review set"
+ },
+ "DELETE /api/projects/:p/reviews/nope/verdicts/1": {
+  "anon": "401 Not logged in",
+  "person": "404 No entry named nope",
+  "member": "404 No entry named nope",
+  "outsider": "404 No such scheme",
+  "tmA": "404 No entry named nope",
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"

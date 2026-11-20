@@ -82,6 +82,31 @@
 .rv-check input { flex: none; width: auto; min-height: 0; margin: 0; }
 .rv-check:has(input:disabled) { opacity: 0.55; }
 .rv-added { margin: 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Phase 3 (#1054): run order, panels, the record's dots and people's verdicts. */
+.rv-then { align-self: center; font-size: 0.8em; color: var(--muted); line-height: 1; }
+.rv-panel { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem; border: 1.5px dashed var(--line); border-radius: 12px; }
+.rv-panel-head { font-size: 0.88em; overflow-wrap: anywhere; }
+.rv-panel-cost { margin: 0; font-size: 0.82em; }
+.rv-card-rec, .rv-rec { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.rv-rec { margin: 0; gap: 0.3rem; }
+.rv-dots { display: inline-flex; gap: 2px; }
+.rv-dots i { width: 8px; height: 8px; border-radius: 2px; background: var(--muted); }
+.rv-dots i.is-pass { background: var(--done); }
+.rv-dots i.is-fail { background: var(--error); }
+.rv-dots i.is-disagreed { background: var(--waiting); }
+.rv-verdicts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9em; }
+.rv-verdicts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.4rem; overflow-wrap: anywhere; }
+.rv-verdicts .cui-btn { margin-left: auto; }
+.rv-order { display: flex; align-items: center; gap: 0.4rem; font-size: 0.92em; }
+.rv-order > span { flex: 1; }
+.rv-onfail { display: flex; flex-direction: column; gap: 0.35rem; }
+.rv-onfail-row { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9em; }
+.rv-onfail-row .cui-input { min-height: 0; padding: 0.25rem 0.4rem; font-size: 0.95em; }
+.rv-onfail-row input { width: 3.2rem; flex: none; }
+.rv-onfail-row select { flex: 1; min-width: 0; }
+.rv-onfail-row .cui-btn { flex: none; }
+.rv-ctx-switches { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; border: 0; }
+.rv-ctx-switches legend { padding: 0; margin-bottom: 0.2rem; }
 
 @media (max-width: 800px) {
   .rv-scheme, .rv-head .close-view.wide-only { display: none; }

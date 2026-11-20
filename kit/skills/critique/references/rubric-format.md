@@ -14,7 +14,7 @@ an entry with the `review_set` tool or on the page, never by editing the rendere
 next turn writes again. A scheme with none on runs no critic.
 
 The page owns `name`, `extends`, `when`, `model` and `effort` as fields, the on/off and trial
-switches, and Block or Advise (written as `gate`) and the last calibration (`calibrated`), which win
+switches, and Block or Advise (written as `gate`), the panel, the hand-offs (`on_fail`) and the last calibration (`calibrated`), which win
 over the same keys in the text; the entry's own text holds every other key and the sections. An entry on top of a starter
 stores only its additions: the kit's starter is read fresh each run, so a kit fix reaches it.
 
@@ -34,7 +34,7 @@ moved into the set once (Build 4) and leave the repos; a Rubrics line is obsolet
 | `model` | no | `opus` · `sonnet` · `haiku` | The critic's model. Default `opus` for `creative:` rubrics (taste), `sonnet` otherwise (rules). |
 | `effort` | no | `low` · `medium` · `high` | The critic's effort. Default `high` with opus, `medium` with sonnet. |
 | `scale` | no | `pass/fail` (default) · `<word> 1-5, pass at <n>` | A score beside the verdict, with its anchors under `## Scale`. Delve's art: `cool 1-5, pass at 4`. |
-| `max_rounds` | no | integer, default 3 | Critic rounds an item gets before it goes to the person with its open findings. |
+| `max_rounds` | no | integer, default 3 | Critic rounds an item gets before it goes to the person with its open findings. An `on_fail:` with a `person` step sets the last round instead. |
 | `max_findings` | no | positive integer, default 3 | The most findings the critic returns per item, ranked most important first. Raise it for items with many parts (a contact sheet of many frames), where 3 hides real hits. |
 | `cross_family` | no | `off` (default) · `final` | `final`: Codex re-judges the pass verdicts once, read-only; images go to it as `--image` attachments. |
 | `gate` | no | `advisory` (default) · `blocks-ready` | Advisory: blockers are fixed or listed as "Not fixed: why", like reviewer findings. `blocks-ready`: the work isn't ready until the critic passes it or the person decides. |
@@ -42,6 +42,8 @@ moved into the set once (Build 4) and leave the repos; a Rubrics line is obsolet
 | `playbook` | no | a repo path | Fixes tried per kind of finding and how people judged them, for `citadel:professor`. |
 | `extends` | no | `citadel:critique/rubrics/<name>` | A kit starter whose frontmatter and sections this file builds on (below). |
 | `trial` | no | `true` | Set by Citadel on a new entry (Q12, Build 4): it runs as `gate: advisory` whatever its `gate` says, until a calibration passes (more than half the notes hit, no false alarms on controls) or a person marks it good. |
+| `panel` | no | a name | Set on the page: the rubrics of a column with the same panel judge the same items at once, and the panel's referee (kind referee) merges their verdicts (SKILL.md, "Order, panels and hand-offs"). |
+| `on_fail` | no | `<to> after <n> fails, ...` | Set on the page: where an item goes after that many failed rounds: `professor`, `person`, or another entry's slug. Default for a critic: `professor after 2 fails, person after 3`. |
 | `calibrated` | no | `<date>, <model>: <hits>/<flagged> hits, <false>/<controls> false alarms` | The last blind trial's result ([`calibrate.md`](calibrate.md)). |
 
 Unknown keys are ignored. Values are read by an agent, but keep the frontmatter valid YAML: one line
@@ -64,6 +66,11 @@ These headings, in this order. Leave out a section that has nothing yet, except 
 - `## Context`: last, written by Citadel from the entry's Context on the page: the guides and rules
   it links (read each before judging), and the code and docs paths it may read. It isn't in the
   entry's own text, so a save never carries it.
+- `## Verdicts`: written by Citadel from the verdicts minions recorded with `record_verdict`: each
+  time a person disagreed with this entry, who, when, on which minion, and their words. Judge the
+  way they did. On unless the page's "your verdicts" switch is off.
+- `## The requester's words`: written by Citadel when the page's "the requester's words" switch is
+  on: the minion's first message, quoted. A brief may quote it; it is the ask, not the person's picks.
 
 A rubric with its own headings (Delve's taste.md) keeps them: the critic reads the whole body, and
 the learning step writes under the heading that serves each job.

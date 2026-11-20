@@ -77,6 +77,30 @@ A fresh critic every round. It gets its own last findings, never the professor's
 arguments, so it stays as blind as the person. With more than 2 critics, or a second round, it's a
 fan-out: name a report file in each brief (`citadel:subagents`, "Fan-outs").
 
+### Order, panels and hand-offs
+
+The scheme's page sets how its entries work together (Josh, 2026-11-19, Build 4 phase 3), and the
+turn's "Review set:" line gives the run order per column when it matters. Follow it instead of
+running every rubric at once:
+
+- **Order:** run the rubrics of a column in that order. A later one's brief adds the earlier ones'
+  verdict lines for the same items (`<name> critic: fail, 2 blockers`), never their findings.
+- **Panel** (`panel:` in the frontmatter, `[panel <name>: ...]` in the line): its judges run at
+  once on the same items, as separate Grunts. Then one more `citadel:critic` Grunt follows the
+  panel's referee rubric (kind referee) with every judge's report, and returns one verdict per item:
+  that merged verdict is the one step 4 acts on. A panel costs one model call per judge plus one.
+  A panel with no referee: each judge's verdict stands on its own.
+- **Hand-offs** (`on_fail:`): after that many failed rounds an item goes to the step it names:
+  `professor` (step 5), `person` (an ask card, as step 6 ends), or another entry's slug, whose
+  rubric judges the item's next round in its place. With no `on_fail:`, a critic hands off as
+  `professor after 2 fails, person after 3`: step 5 and `max_rounds`. An `on_fail:` replaces
+  steps 5 and 6's own triggers: the professor comes in only where it names `professor`, and a
+  `person` step is the last round (with none, `max_rounds` still is).
+- **Record every round:** after each round of each rubric (a panel's judges and its referee too),
+  call `review_set` with its slug and `run: {round, verdict}`. The verdict is `ask` when an item went
+  to a person, else `fail` when an item needs another round, else `pass`. The page's dots and pass
+  rate come from these, and a blocking entry's record holds your ship (step 8).
+
 ## 4. Act on each verdict
 
 - **pass:** done for this item.
@@ -155,7 +179,9 @@ The result goes to people as one line per rubric, in the ready note when it fits
 With `gate: advisory` (the default), open blockers are handled like reviewer findings: fixed, or
 listed under "Not fixed: <why>". With `gate: blocks-ready`, the work isn't ready while an item has
 open blockers and no person's decision, unless the rubric has `trial: true`: a rubric on trial runs as
-`gate: advisory` whatever its `gate` says. On a review page, each take shows its critic line and the
+`gate: advisory` whatever its `gate` says. Citadel holds it too: `hand_off_land` refuses while a
+blocking entry's last recorded run on you is `fail` or `ask`; a passing round lifts it, or a person's
+go on a ship card. On a review page, each take shows its critic line and the
 takes sort by verdict (`citadel:docs-and-mocks`, its `kinds.md`, "Critic lines").
 
 *Done when* every item passed, went to the person, or is listed as not fixed with a reason, and the
@@ -163,7 +189,15 @@ result line is written.
 
 ## 9. Learn from the person
 
-The step that makes the critic better each week. Whenever a person gives a verdict on work a critic
+The step that makes the critic better each week.
+
+**When a person disagrees** with a critic's or reviewer's verdict (in this chat or on a card: "that's
+fine as it is", "it should have caught this"), call `record_verdict` that same turn with the entry's
+slug, who, and their words quoted (Josh, 2026-11-19: "Only the minion records it"; people have no
+button for it). It shows on the entry's page, turns your run of it amber, and every later run reads
+it in the rubric's `## Verdicts` section. Then edit the rubric as below.
+
+Whenever a person gives a verdict on work a critic
 judged (a note, an approval, a pick on a review page read with `artifact_data`, a sent-back item),
 check `critic.md` and write the rubric that turn with the `review_set` tool: read the entry by its
 slug, edit its own body, and save it whole with the version you read (a save is a version people see

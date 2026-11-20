@@ -21,13 +21,14 @@ Once this is live in `~/claude-coordinator` (after the landing deploy):
 ```sh
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/priority.conf ~/.config/systemd/user/claude-coordinator.service.d/
 systemctl --user daemon-reload
-systemctl --user show claude-coordinator -p MemorySwapMax -p CPUWeight -p OOMScoreAdjust
-# expect MemorySwapMax=0, CPUWeight=1000, OOMScoreAdjust=100
+systemctl --user show claude-coordinator -p MemorySwapMax -p CPUWeight -p OOMScoreAdjust -p ManagedOOMPreference
+# expect MemorySwapMax=0, CPUWeight=1000, OOMScoreAdjust=100, ManagedOOMPreference=omit
 ```
 
 `daemon-reload` applies the swap and CPU settings to the running server straight away.
 `OOMScoreAdjust` and swapping the server's old pages back in wait for its next restart, which the
-next deploy does. To undo: `rm ~/.config/systemd/user/claude-coordinator.service.d/priority.conf`,
+next deploy does. `ManagedOOMPreference=omit` (#1257) keeps systemd-oomd from ever picking the server;
+systemd marks the cgroup with the `user.oomd_omit` xattr when it sets the cgroup up, at the latest on that restart. To undo: `rm ~/.config/systemd/user/claude-coordinator.service.d/priority.conf`,
 then `systemctl --user daemon-reload`.
 
 ## 2. ananicy-cpp: the biggest CPU problem (the server's fix needs no sudo)

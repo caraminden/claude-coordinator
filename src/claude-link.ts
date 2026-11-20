@@ -722,7 +722,7 @@ export class ClaudeLink {
     await this.containers.removeVolume(name);
     this.credentials.remove(uid, 'claude_runner');
     // Every account's meter goes too, or the next account linked would show the old one's limit (#1270 C4).
-    for (const a of set?.accounts ?? [{ n: 1 }]) this.store.deleteSetting(accountUsageKey(uid, a.n));
+    for (let n = 1; n <= MAX_ACCOUNTS; n++) this.store.deleteSetting(accountUsageKey(uid, n));
   }
 
   /** Sign out one of several accounts and remove its folder; the others, and the container, stay. */

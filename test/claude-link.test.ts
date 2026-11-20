@@ -227,7 +227,8 @@ test('unlinking one of several accounts removes its sign-in and meters, keeps th
 });
 
 test("unlinking every account clears each one's meter, so a fresh account linked in its place starts at zero (#1270 C4)", async () => {
-  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  // Account 1 went before this fix, its meter left behind: the full unlink clears it too, as a new link starts at account 1.
+  const { link, uid } = linkedPerson([acct(2)]);
   store.setSetting(`usage:user:${uid}`, { weekly: null, session: null, updatedAt: 1 });
   store.setSetting(`usage:user:${uid}:account:2`, { weekly: null, session: null, updatedAt: 1 });
   await link.unlink(uid);

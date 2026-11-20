@@ -46,6 +46,9 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
     return user && store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
   };
   if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);
+  // A message from someone disabled after it queued is still theirs (personOf drops them): its turn is refused, not moved onto another login.
+  const disabled = batch.map((m) => (m.from ? undefined : store.findUser('name', m.author))).find((u) => u?.disabled_at);
+  if (disabled) return disabled.id;
   // A person's own Taskmaster runs for its person, but never on someone else's request: a turn another person starts
   // there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail name
   // no person, so they leave it on its person's.
@@ -70,7 +73,6 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
 export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null, from?: number): string | null {
   const project = store.getProject(ticket.project_id);
   const named = from ? undefined : store.findUser('name', author);
-  if (named?.disabled_at) return claudeRefusal(named, linked);
   const id = project ? turnPayer(store, ticket, project, [{ author, from }], messagePerson(store)) : null;
   const who = store.getUser(id ?? -1);
   if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";

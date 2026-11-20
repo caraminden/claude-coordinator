@@ -213,7 +213,7 @@ test("the refusal check asks the person a personal Taskmaster's or the Overlord'
 });
 
 test("a disabled person's minion runs no turn on any start path, not only a new message (#1270 C3)", async () => {
-  const { store, runner, hers, olive, games } = payerWorld('payer-disabled.db');
+  const { store, runner, hers, josh, olive, games } = payerWorld('payer-disabled.db');
   // Her Claude is linked and ready: only her disabled login stops it.
   const link = { place: () => ({ host: true as const }), linked: () => 'linked' as const };
   runner.placeFor = (person, warm) => turnPlace(store, link, person, warm);
@@ -224,6 +224,11 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
   assert.equal(runner.isRunning(hers.id), false);
   (runner as any).resume(hers.id, 1);
   await until('the resume is refused', () => notes(store, hers.id).filter((n) => /Olive's login is disabled/.test(n)).length === 2);
+  assert.equal(runner.isRunning(hers.id), false);
+  // Her message queued before she was disabled is still hers: its start is refused, not moved onto the minion's last person.
+  store.updateTicket(hers.id, { person_id: josh.id });
+  runner.send(hers.id, 'Olive', 'one more thing');
+  await until('her queued message is refused', () => notes(store, hers.id).filter((n) => /Olive's login is disabled/.test(n)).length === 3);
   assert.equal(runner.isRunning(hers.id), false);
 });
 

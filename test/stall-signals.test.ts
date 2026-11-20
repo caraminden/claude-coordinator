@@ -56,7 +56,7 @@ test('a red run with no names it can read counts by its command; output from oth
 });
 
 test('a test command counts only as the command a segment runs', () => {
-  for (const yes of ['citadel-test test/a.test.ts', 'cd /w && npx tsc --noEmit', 'citadel-heavy cargo test --workspace', 'FOO=1 npm test', 'timeout 300 node --test test/', 'make x; pytest -q', './gradlew :app:testDebug'])
+  for (const yes of ['citadel-test test/a.test.ts', 'cd /w && npx tsc --noEmit', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here ./gradlew :app:testDebug', 'FOO=1 npm test', 'timeout 300 node --test test/', 'make x; pytest -q', './gradlew :app:testDebug'])
     assert.ok(testCommand(yes) || /tsc/.test(yes), yes);
   for (const no of ['cat $TMPDIR/citadel-test.log', 'grep -rn pytest pyproject.toml', 'rg jest package.json', 'echo "npm test"', 'git log --grep cargo test'])
     assert.ok(!testCommand(no), no);

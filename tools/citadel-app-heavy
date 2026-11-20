@@ -20,6 +20,8 @@ export CITADEL_HEAVY_WHO="${app:-an app} (app)"
 cap=${CITADEL_HEAVY_APP_CAP:-600}
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 heavy=$(dirname "$(readlink -f "$0")")/citadel-heavy
+# A step works on the app's files and data here, so it never goes to the repo's CI (#1160).
+export CITADEL_HEAVY_HERE=1
 
 if command -v flock >/dev/null && mkdir -p "$dir" 2>/dev/null && exec 9>>"$dir/apps"; then
   flock -n 9 || { say "another app holds the apps' heavy slot: waiting for it (at most 10 min a hold)"; flock 9; }

@@ -52,6 +52,30 @@ jobs:
             echo "XDG_RUNTIME_DIR=$run" >>"$GITHUB_ENV"
             echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$run/bus" >>"$GITHUB_ENV"
           fi
+      # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
+      # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
+      - name: pwsh and PSScriptAnalyzer for the .ps1 lint
+        run: |
+          set -euo pipefail
+          v=7.6.9 dir=$HOME/.local/pwsh
+          if [ ! -x "$dir/$v/pwsh" ]; then
+            mkdir -p "$dir/$v"
+            curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C "$dir/$v"
+            chmod +x "$dir/$v/pwsh"
+          fi
+          echo "$dir/$v" >>"$GITHUB_PATH"
+          "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
+      # Chrome for Testing's headless shell, where test/browser.ts looks for Playwright's (the build perigee has).
+      - name: headless Chromium for the browser tests
+        run: |
+          set -euo pipefail
+          v=156.0.8078.4 dir=$HOME/.cache/ms-playwright/chromium_headless_shell-1248
+          if [ ! -x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
+            mkdir -p "$dir"
+            curl -fsSL -o "$RUNNER_TEMP/chs.zip" "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip"
+            python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
+            chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
+          fi
 
       - name: the command
         shell: bash

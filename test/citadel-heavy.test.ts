@@ -395,7 +395,7 @@ test('a history write that hangs holds no slot: the next job runs', async () => 
 
 // Perigee's small slot (#1160, Josh 2026-11-20: "One small slot here"): plain jobs share one slot, niced, and leave
 // the others to priority jobs, which take them from the top.
-test('plain jobs share one slot at nice 19, and a priority job takes another from the top', async () => {
+test('plain jobs share one slot at nice 19, and a priority job takes the one above it, not every slot', async () => {
   const { dir, env } = folder(3);
   const small = { ...env, CITADEL_HEAVY_PLAIN_SLOTS: undefined };
   const go = join(root, 'go-small');
@@ -414,6 +414,6 @@ test('plain jobs share one slot at nice 19, and a priority job takes another fro
   }
   assert.equal(await a.done, 0);
   assert.equal(readFileSync(join(root, 'small-nice'), 'utf8').trim(), '19');
-  assert.ok(!existsSync(join(dir, 'slot-1')), 'the deploy took the top slot, slot 3, not the next one up');
-  assert.ok(existsSync(join(dir, 'slot-2')));
+  assert.ok(existsSync(join(dir, 'slot-1')), 'the deploy took the one slot above the plain one');
+  assert.ok(!existsSync(join(dir, 'slot-2')), 'deploy builds get one slot more than plain jobs, not every slot');
 });

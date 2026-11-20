@@ -16,6 +16,7 @@ import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 import { machineQueries } from './db/machines.ts';
 import { pushQueries } from './db/push.ts';
+import { viewQueries } from './db/views.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
@@ -4004,9 +4005,9 @@ export class Store {
  * Each area's queries live in src/db/<area>.ts and are attached to Store's prototype here (#1313), so callers keep calling
  * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
  */
-type AreaQueries = typeof machineQueries & typeof pushQueries;
+type AreaQueries = typeof machineQueries & typeof pushQueries & typeof viewQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, pushQueries]) {
+for (const area of [machineQueries, pushQueries, viewQueries]) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

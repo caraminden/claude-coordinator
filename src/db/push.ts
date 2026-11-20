@@ -1,23 +1,7 @@
-// A person's saved views, and push: browsers' Web Push subscriptions and phones' FCM tokens (#1313: src/db.ts by area).
-import type { PushSubscriptionRow, SavedView, Store } from '../db.ts';
+// Push: browsers' Web Push subscriptions and phones' FCM tokens (#1313: src/db.ts by area).
+import type { PushSubscriptionRow, Store } from '../db.ts';
 
 export const pushQueries = {
-  listViews(this: Store, projectId: number, owner: string): SavedView[] {
-    const rows = this.db.prepare('SELECT * FROM person_views WHERE project_id = ? AND owner = ? ORDER BY name COLLATE NOCASE').all(projectId, owner) as any[];
-    return rows.map((r) => ({ ...r, picks: JSON.parse(r.picks) }));
-  },
-
-  /** Save the picks under a name; saving under a name this person already has replaces that view. */
-  saveView(this: Store, projectId: number, owner: string, name: string, picks: SavedView['picks']) {
-    this.db
-      .prepare('INSERT INTO person_views (project_id, owner, name, picks, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, owner, name) DO UPDATE SET picks = excluded.picks, created_at = excluded.created_at')
-      .run(projectId, owner, name, JSON.stringify(picks), Date.now());
-  },
-
-  deleteView(this: Store, projectId: number, owner: string, id: number): boolean {
-    return this.db.prepare('DELETE FROM person_views WHERE project_id = ? AND owner = ? AND id = ?').run(projectId, owner, id).changes > 0;
-  },
-
   /** A phone's FCM token for a person and contraption (#1138); a token seen before moves here and is fresh again. */
   savePushDevice(this: Store, contraptionId: number, userId: number, token: string, platform: string) {
     const now = Date.now();

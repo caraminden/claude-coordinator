@@ -51,7 +51,8 @@ function classMethods(): string[] {
   const start = text.indexOf('\nexport class Store {');
   assert.ok(start > 0, 'src/db.ts declares `export class Store {`');
   const body = text.slice(start, text.indexOf('\n}\n', start));
-  const names = [...body.matchAll(/^ {2}(?:(?:private|static|async|get|set|readonly) )*([A-Za-z_$][\w$]*)\s*[<(]/gm)].map((m) => m[1]);
+  // A method, or a field holding a function (`name = () => ...`), at the class body's indent.
+  const names = [...body.matchAll(/^ {2}(?:(?:private|static|async|get|set|readonly) )*([A-Za-z_$][\w$]*)\s*(?:[<(]|(?::[^=\n]*)?=\s*(?:async\s*)?(?:function\b|\(|[A-Za-z_$][\w$]*\s*=>))/gm)].map((m) => m[1]);
   return names.filter((n) => n !== 'constructor');
 }
 

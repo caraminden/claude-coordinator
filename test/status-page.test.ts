@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { pacificDay } from '../src/contraption-errors.ts';
 import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
-import { APP_ERRORS_WARN, StatusPage, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
+import { APP_ERRORS_WARN, StatusPage, rateTone, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
 // A database backup that is never stale for these tests' clocks, so the backups line stays out of their verdicts.
@@ -170,7 +170,7 @@ test('a viewer outside Citadel sees its health but not its CI', async () => {
   assert.equal(admin.ci?.workflows[0].conclusion, 'failure');
   assert.equal(admin.ciVisible, true);
   assert.equal(admin.ships.last?.changes.length, 1);
-  assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests']);
+  assert.deepEqual(admin.verdict.reasons, [], 'one red workflow with no run counts is not a rate');
 });
 
 test('health readings and host samples are kept a week and a day', () => {
@@ -255,4 +255,28 @@ test('a missed night turns the Citadel verdict red and names what is missing', a
   assert.equal(data.citadel.verdict.tone, 'bad');
   assert.ok(data.citadel.verdict.reasons.includes('backups: no database backup on disk'));
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('failure share sets the colour: one failure in many stays green, then yellow, then red', () => {
+  assert.equal(rateTone(1, 20), 'ok', '1 in 20 is green');
+  assert.equal(rateTone(1, 2), 'ok', 'a single failure never colours, however small the window');
+  assert.equal(rateTone(2, 4), 'ok', 'under the minimum count of runs');
+  assert.equal(rateTone(2, 20), 'warn', '10% is yellow');
+  assert.equal(rateTone(5, 20), 'warn');
+  assert.equal(rateTone(6, 20), 'bad', '30% is red');
+  assert.equal(rateTone(0, 0), 'ok');
+});
+
+test('CI with one failed run in twenty leaves the verdict green; six in twenty is red', async () => {
+  const { store, citadel } = setup('cirate');
+  const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => ({ status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
+  let bad = 1;
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000,
+    ciSnapshot: () => [{ id: citadel.id, view: mk(bad) as any }] });
+  const admin = { canSee: () => true, admin: true, key: 'a' };
+  assert.equal((await page.build(admin)).citadel.verdict.tone, 'ok');
+  bad = 6;
+  const c = (await page.build(admin)).citadel;
+  assert.equal(c.verdict.tone, 'bad');
+  assert.deepEqual(c.verdict.reasons, ['6 of the last 20 CI runs failed']);
 });

@@ -614,9 +614,6 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .look-prose { margin: 0; font-size: 0.88em; color: var(--muted); }
 
 /* Plain-words help (#1131): a label that explains itself on hover or tap, and the "How Citadel works" page. */
-.gloss { text-decoration: underline dotted color-mix(in srgb, currentColor 55%, transparent); text-underline-offset: 0.2em; cursor: help; }
-.gloss-tip { display: flex; flex-direction: column; gap: 0.25rem; max-width: 22rem; }
-.gloss-tip p { margin: 0; }
 .help-page { max-width: 46rem; }
 .help-steps { list-style: none; margin: 1rem 0; padding: 0; display: flex; flex-direction: column; gap: 1.6rem; counter-reset: step; }
 .help-step { counter-increment: step; }

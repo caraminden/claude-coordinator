@@ -559,7 +559,7 @@ export function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${working ? 'running' : t.status}` }),
-      h('h2', coord ? { 'data-gloss': 'taskmaster' } : { title: threadFullName(t) }, threadTitleParts(t)),
+      h('h2', coord ? {} : { title: threadFullName(t) }, threadTitleParts(t)),
       presenceHead(t),
       coord && view.merged ? tmViewSwitch() : '',
       phone ? h('span', { class: 'spacer' }) : '',

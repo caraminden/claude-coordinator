@@ -18,15 +18,19 @@ test('the nine starting words are defined, each in a sentence or two', () => {
 
 test('every label that asks for a word asks for one that is defined', () => {
   const used = new Set<string>();
-  for (const [f, src] of sources) for (const m of src.matchAll(/\bgloss\('([a-z]+)'|'data-gloss': '([a-z]+)'/g)) used.add(m[1] ?? m[2]);
+  for (const [f, src] of sources) for (const m of src.matchAll(/\bgloss\('([a-z]+)'/g)) used.add(m[1]);
   assert.deepEqual([...used].filter((k) => !(k in WORDS)), [], 'a gloss names a word help-words.js lacks');
-  assert.deepEqual(Object.keys(WORDS).filter((k) => !used.has(k)), [], 'a defined word no label explains');
 });
 
 test('the page reads the same file and its pictures exist', () => {
   const page = readFileSync(join(PUBLIC, 'help.js'), 'utf8');
   assert.match(page, /from '\.\/help-words\.js'/);
   for (const m of page.matchAll(/\[\s*'([a-z]+)',\s*'[^']+'\]/g)) assert.ok(existsSync(join(PUBLIC, `help-${m[1]}.png`)), `help-${m[1]}.png`);
+});
+
+test('labels carry no tip or dotted underline (Josh, 2026-11-20)', () => {
+  const css = readFileSync(join(PUBLIC, 'settings.css'), 'utf8');
+  assert.ok(!/\.gloss/.test(css) && !sources.some(([, s]) => /data-gloss|mountGloss/.test(s)));
 });
 
 test('chat text is never glossed', () => {

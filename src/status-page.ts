@@ -27,6 +27,20 @@ const STALL_WARN_S = 5;
 export const APP_ERRORS_WARN = 10;
 
 export type Tone = 'ok' | 'warn' | 'bad';
+
+/** Failure share from which a rate turns yellow, and red (Josh, 2026-11-20: one failure is not trouble). Starting numbers; tune here. */
+export const RATE_WARN = 0.1;
+export const RATE_BAD = 0.3;
+/** Fewest runs, and fewest failures, before a share counts: 1 of 2 is 50% but not news. */
+export const RATE_MIN_RUNS = 5;
+export const RATE_MIN_FAILED = 2;
+
+/** The colour of `failed` out of `total` runs by share. Failure counts of state (a failed unit, the last deploy) don't use this. */
+export function rateTone(failed: number, total: number): Tone {
+  if (total < RATE_MIN_RUNS || failed < RATE_MIN_FAILED) return 'ok';
+  const share = failed / total;
+  return share >= RATE_BAD ? 'bad' : share >= RATE_WARN ? 'warn' : 'ok';
+}
 export interface Verdict { tone: Tone; reasons: string[] }
 
 /** The last STATUS_DAYS Pacific days, oldest first, as 2026-11-19. */
@@ -267,7 +281,7 @@ export class StatusPage {
     } : null;
     const citadelUnits = (units ?? []).filter((u) => CITADEL_UNITS.includes(u.unit));
     const desktops = (this.deps.desktops?.() ?? []).map((pc) => ({ host: pc.host, verdict: pc.verdict, now: pc.now, restarts: pc.restarts, seen: pc.series.some((s) => s[1] !== null) }));
-    // The verdict: bad on a failed unit; warn on a restart that wasn't a ship, a long stall, low memory or disk, or red CI.
+    // The verdict: bad on a failed unit; warn on a restart that wasn't a ship, a long stall, low memory or disk; CI by its share of failed runs.
     const reasons: [Tone, string][] = [];
     for (const u of citadelUnits) if (u.active === 'failed') reasons.push(['bad', `${u.unit} failed`]);
     if (units === null) reasons.push(['warn', 'its services couldn\'t be read']);
@@ -281,8 +295,11 @@ export class StatusPage {
     const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
     const backupMissing = backupProblems(backup, now);
     if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`]);
-    const red = ci?.workflows.filter((w) => w.conclusion && w.conclusion !== 'success') ?? [];
-    if (red.length) reasons.push(['warn', `CI red on main: ${red.map((w) => w.name).join(', ')}`]);
+    if (ci) {
+      const failedRuns = ci.runs - ci.green;
+      const tone = rateTone(failedRuns, ci.runs);
+      if (tone !== 'ok') reasons.push([tone, `${failedRuns} of the last ${ci.runs} CI runs failed`]);
+    }
     return {
       verdict: worst(reasons),
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
@@ -361,7 +378,11 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   const reasons: [Tone, string][] = [];
   if (unit && unit.load !== 'not-found' && unit.active !== 'active' && unit.active !== 'activating' && unit.active !== 'reloading') reasons.push(['bad', `its service is ${unit.active}`]);
   if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed']);
-  else if (dFailed.some(Boolean)) reasons.push(['warn', `${dFailed.reduce((x, y) => x + y, 0)} failed deploy${dFailed.reduce((x, y) => x + y, 0) > 1 ? 's' : ''} this week`]);
+  else {
+    const nFailed = dFailed.reduce((x, y) => x + y, 0);
+    const tone = rateTone(nFailed, deploys.length);
+    if (tone !== 'ok') reasons.push([tone, `${nFailed} of ${deploys.length} deploys failed this week`]);
+  }
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`]);
   if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`]);
   const backup = appBackup(join(home, '.local/share', a.name), now);

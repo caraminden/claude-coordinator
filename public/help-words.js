@@ -1,9 +1,6 @@
-// Plain-words help (#1131): Citadel's own words, said once. The hover and tap tips on labels in the app's chrome
-// (gloss) and the "How Citadel works" page (help.js) both read WORDS, so they can't drift. Not for chat text: agents'
-// replies and people's messages never get these underlines (Josh's handoff, 2026-11-19). Every scheme: the words
+// Plain-words help (#1131): Citadel's own words, said once. The "How Citadel works" page (help.js) and the welcome page read WORDS. Every scheme: the words
 // describe Citadel, not any one scheme. A member reads the copy before it ships.
 import { h } from './base.js';
-import { mountTips } from './ui/tip.js';
 
 /** key: the word as a label shows it, and one sentence (two at most) of what it is. */
 export const WORDS = {
@@ -18,25 +15,7 @@ export const WORDS = {
   contraption: { word: 'Contraption', def: 'A contraption is a small app that runs inside Citadel, with its own page and often its own agent.' },
 };
 
-/**
- * `children` as a label that explains itself: a tip on hover and a tap (a long press on a button or
- * link). `more` adds a second line under the sentence. The element carries no title, so only one box ever opens.
- */
-export function gloss(key, children, more) {
-  return h('span', { class: 'gloss', 'data-gloss': key, 'data-gloss-more': more ?? null }, children);
-}
-
-let tips = null;
-/** Start the glossary's tips on every `.gloss` in the page, once. */
-export function mountGloss() {
-  tips ??= mountTips(document.body, {
-    selector: '[data-gloss]',
-    body: (el) => {
-      const w = WORDS[el.dataset.gloss];
-      if (!w) return null;
-      const box = h('div', { class: 'gloss-tip' }, h('strong', {}, w.word), h('p', { class: 'cui-tip-text' }, w.def));
-      if (el.dataset.glossMore) box.append(h('p', { class: 'cui-tip-text muted' }, el.dataset.glossMore));
-      return box;
-    },
-  });
+/** A label that names a Citadel word. No tip, no underline (Josh, 2026-11-20: "not worth the annoyance"); the help page keeps the definitions. */
+export function gloss(_key, children) {
+  return h('span', {}, children);
 }

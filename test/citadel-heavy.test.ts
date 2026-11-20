@@ -150,7 +150,7 @@ test("a priority waiter's marker that stopped being freshened doesn't hold the l
 test('without a usable lock folder it warns and runs anyway', () => {
   const blocker = join(root, 'a-file');
   writeFileSync(blocker, '');
-  const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(blocker, 'locks') }, encoding: 'utf8' });
+  const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_DIR: join(blocker, 'locks') }, encoding: 'utf8' });
   assert.equal(r.stdout, 'ran\n');
   assert.match(r.stderr, /without waiting for a slot/);
 });

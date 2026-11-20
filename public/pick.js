@@ -91,7 +91,7 @@ async function deliver(el, chatId, coordinator) {
 export function describe(el) {
   const part = el.dataset?.part;
   const within = el.parentElement?.closest('[data-part]')?.dataset.part;
-  const name = shorten(el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.innerText || el.value || '');
+  const name = shorten(el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.innerText || buttonValue(el) || '');
   const kind = kindOf(el);
   const size = `${innerWidth}×${innerHeight}`;
   const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -104,6 +104,10 @@ export function describe(el) {
   ].join('\n');
   return { label, text };
 }
+
+// A field's typed value never goes in the message (it could be a password or a token, and sent past looksSecret): only
+// a button input's value, which is its label.
+const buttonValue = (el) => (el instanceof HTMLInputElement && /^(button|submit|reset)$/.test(el.type) ? el.value : '');
 
 const shorten = (t) => {
   const s = String(t).replace(/\s+/g, ' ').trim();

@@ -9,6 +9,7 @@ import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { ShipLessons } from './ship-lessons.ts';
+import { Ideas } from './ideas.ts';
 import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
@@ -1252,6 +1253,35 @@ CREATE TABLE IF NOT EXISTS ship_lessons (
   taken_note TEXT
 );
 CREATE INDEX IF NOT EXISTS ship_lessons_scheme ON ship_lessons(project_id, at);
+-- The ideas ledger (src/ideas.ts, #1150): one row per idea a scheme was shown, on a choices page (page, card) or in a
+-- handoff with no page (page '', card = the handoff's path). It fills itself from picks, handoffs, starts and ships;
+-- status_manual and link_manual are hand edits the scan never undoes. No foreign keys: a row outlives its minion.
+CREATE TABLE IF NOT EXISTS ideas (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  page TEXT NOT NULL DEFAULT '',
+  card TEXT NOT NULL,
+  collection TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  source_number INTEGER,
+  pick TEXT,
+  pick_label TEXT,
+  decided_by TEXT,
+  words TEXT,
+  decided_at INTEGER,
+  handoff TEXT,
+  ticket_id INTEGER,
+  number INTEGER,
+  link_manual INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'proposed',
+  status_manual TEXT,
+  manual_by TEXT,
+  manual_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (project_id, page, card)
+);
+CREATE INDEX IF NOT EXISTS ideas_handoff ON ideas(project_id, handoff);
 -- Who touched a minion (#919): requested, assigned, wrote in its chat or answered its card. It only grows;
 -- left_at is set when the person leaves it, and a later touch rejoins. Updates reach each touched person's Taskmaster.
 CREATE TABLE IF NOT EXISTS ticket_touches (
@@ -1498,6 +1528,7 @@ export const SCHEMA_HISTORY = [
   [86, 'memory_proposals (#1111)'],
   [87, 'ship_lessons (#1119)'],
   [88, 'minion_index and handoff_index, full-text (#1156)'],
+  [89, 'ideas (#1150)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1544,6 +1575,8 @@ export class Store {
   claims: Claims;
   /** Three lines after every ship, per scheme (src/ship-lessons.ts, #1119). */
   lessons: ShipLessons;
+  /** The ideas ledger, per scheme (src/ideas.ts, #1150). */
+  ideas: Ideas;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
   /** Past minions and handoffs, full-text, for search_minions and the scout (src/minion-index.ts, #1156). */
@@ -1574,6 +1607,7 @@ export class Store {
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
+    this.ideas = new Ideas(this.db);
       this.memory = new Memory(this);
       this.minionIndex = new MinionIndex(this);
       this.memoryProposals = new MemoryProposals(this.db);
@@ -1603,6 +1637,7 @@ export class Store {
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
+    this.ideas = new Ideas(this.db);
     this.memory = new Memory(this);
     this.minionIndex = new MinionIndex(this);
     this.memoryProposals = new MemoryProposals(this.db);

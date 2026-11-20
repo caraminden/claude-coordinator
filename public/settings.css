@@ -508,6 +508,20 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 @media (prefers-reduced-motion: reduce) { .memory-group > summary > svg, .memory-stat { transition: none; } }
 .memory-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0; font-size: 0.85em; padding: 0.5rem 0.65rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
 .memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
+.memory-tidy[hidden] { display: none; }
+.memory-tidy .settings-section { margin-top: 0.75rem; }
+.memory-changes { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.6rem 0; }
+.memory-change { border-left: 3px solid var(--h); padding: 0.45rem 0.6rem; background: var(--panel); border-radius: 0 6px 6px 0; }
+.memory-change-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; cursor: pointer; }
+.memory-change-head input { margin: 0; width: auto; flex: none; }
+.memory-change-head { margin-bottom: 0; color: var(--ink); }
+.memory-change-head code { overflow-wrap: anywhere; }
+.memory-change-notick { display: inline-grid; place-items: center; width: 1rem; height: 1rem; font-weight: 700; color: var(--waiting); }
+.memory-change-why { margin: 0.25rem 0 0 1.5rem; color: var(--muted); font-size: 0.9em; }
+.memory-change-diff { margin: 0.25rem 0 0 1.5rem; font-size: 0.9em; }
+.memory-change-diff summary { cursor: pointer; color: var(--muted); }
+.memory-change-diff .instructions-diff { max-height: 18rem; overflow: auto; }
+.memory-actions .spacer { flex: 1; }
 .memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 /* Instructions aids: size meter and outline, and the repo setup card (read-only). */

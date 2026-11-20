@@ -3,9 +3,9 @@
 // Only MEMORY.md loads at a start (its first 200 lines or 25 KB); notes are read when needed, so a note the index
 // doesn't list, or one whose recheck date passed, is what "needs tidying" means here. A closed minion it names is history.
 import { api, h, icon, view } from './base.js';
-import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
+import { settingsRow, settingsSection, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
-import { emptyCard, meter, statTiles } from './look.js';
+import { emptyCard, meter, showFirst, statTiles, toneChip } from './look.js';
 
 const kb = (b) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`);
 const day = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
@@ -30,6 +30,80 @@ let pickedFolder = null;
 /** Why a note needs tidying, or '' when it doesn't. */
 export const tidyReason = (n) => (!n.inIndex ? 'Not in MEMORY.md, so sessions never find it'
   : n.flags.datesPast.length ? `Date passed: ${n.flags.datesPast.join(', ')}` : '');
+
+// The curator's changes (#1111): each kind's chip tone and word.
+const ACTION = { edit: ['info', 'Edit'], add: ['ok', 'New note'], delete: ['danger', 'Delete'], index: ['violet', 'Index line'], flag: ['warn', 'Flag'] };
+
+/**
+ * The memory curator's proposed tidy (#1111; Josh, 2026-11-19): a tick per change, deletes unticked until a person
+ * ticks each ("Delete, each ticked"), flags only to read. Apply writes the ticked ones; Put back undoes an applied tidy
+ * for 30 days. `changed` reloads the notes after either.
+ */
+function tidyReview(p, changed) {
+  const url = `api/projects/${p.id}/memory-proposals`;
+  const box = h('div', { class: 'memory-tidy', hidden: true });
+  const draw = (d) => {
+    box.hidden = !d.open && !d.kept.length;
+    const rows = [];
+    if (d.open) {
+      const o = d.open;
+      const ticks = new Map();
+      const apply = h('button', { type: 'button' });
+      const count = () => { const n = [...ticks.values()].filter((t) => t.checked).length; apply.textContent = `Apply ${n} ticked`; apply.disabled = !n; };
+      const items = o.changes.map((c) => {
+        const [tone, word] = ACTION[c.action];
+        const tick = c.action === 'flag' ? null : h('input', { type: 'checkbox', checked: c.action !== 'delete' && !c.drifted, disabled: c.drifted, 'aria-label': `${word} ${c.file}`, onchange: count });
+        if (tick) ticks.set(c.id, tick);
+        const diff = c.diff.length ? h('details', { class: 'memory-change-diff' }, h('summary', {}, 'Show the change'),
+          h('pre', { class: 'instructions-diff' }, ...c.diff.map((x) => h('div', { class: x.op === '+' ? 'add' : x.op === '-' ? 'del' : 'gap' }, x.op === '…' ? '…' : `${x.op} ${x.text}`)))) : null;
+        return h('div', { class: 'memory-change', 'data-hue': c.action === 'delete' ? 'danger' : c.action === 'flag' ? 'waiting' : 'running' },
+          h('label', { class: 'memory-change-head' }, tick ?? h('span', { class: 'memory-change-notick', 'aria-hidden': 'true' }, '!'),
+            toneChip(tone, word), h('code', {}, c.file), c.drifted ? toneChip('neutral', 'Changed since') : null),
+          h('div', { class: 'memory-change-why' }, c.reason), diff);
+      });
+      count();
+      const status = h('span', { class: 'muted', role: 'status' });
+      const buttons = [apply, h('button', { type: 'button', class: 'secondary' }, 'Turn it all down')];
+      const decide = (ids) => optimistic({
+        key: `memory-tidy:${o.id}`,
+        apply: () => { for (const b of buttons) b.disabled = true; status.textContent = ids.length ? 'Applying…' : 'Turning it down…'; },
+        send: () => api(`${url}/${o.id}/decide`, { method: 'POST', body: { apply: ids } }),
+        undo: () => { for (const b of buttons) b.disabled = false; count(); status.textContent = ''; },
+        label: ids.length ? 'apply the memory tidy' : 'turn the memory tidy down',
+      }).then((r) => { draw(r.view); changed(); }, () => {});
+      apply.onclick = () => decide([...ticks].filter(([, t]) => t.checked).map(([id]) => id));
+      buttons[1].onclick = () => decide([]);
+      const kinds = Object.keys(ACTION).map((a) => [a, o.changes.filter((c) => c.action === a).length]).filter(([, n]) => n);
+      const [row] = settingsRow({ icon: 'doc', hue: 'waiting', title: `Proposed tidy${o.ticket ? ` from #${o.ticket}` : ''} · ${day(o.created_at)}`,
+        summary: `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`, open: true },
+        statTiles(...kinds.map(([a, n]) => [String(n), ACTION[a][1].toLowerCase() + (n === 1 ? '' : 's'), a === 'delete' ? 'danger' : a === 'flag' ? 'waiting' : 'running'])),
+        showFirst({ key: `memory-tidy:${o.id}`, items: items, n: 8, noun: 'changes', wrap: (xs) => h('div', { class: 'memory-changes' }, ...xs) }),
+        h('div', { class: 'memory-actions' }, status, h('span', { class: 'spacer' }), ...buttons),
+        h('p', { class: 'muted small look-prose' }, 'Deletes start unticked: tick each one you want gone. Flags are for you to judge and change nothing. A note edited since the proposal is skipped.'));
+      rows.push(row);
+    }
+    for (const k of d.kept) {
+      const back = h('button', { type: 'button', class: 'secondary', onclick: () => {
+        if (!confirm(`Put back every note this tidy changed, as it was on ${day(k.decided_at)}? Edits made since to those notes are lost.`)) return;
+        optimistic({
+          key: `memory-tidy:${k.id}`,
+          apply: () => { back.disabled = true; },
+          send: () => api(`${url}/${k.id}/restore`, { method: 'POST' }),
+          undo: () => { back.disabled = false; },
+          label: 'put the memory tidy back',
+        }).then((r) => { draw(r.view); changed(); }, () => {});
+      } }, 'Put back');
+      const [row] = settingsRow({ icon: 'doc', hue: 'done', title: `Tidy applied by ${k.decided_by} · ${day(k.decided_at)}`, summary: `${k.counts || 'nothing took'} · can be put back until ${day(k.until)}` },
+        h('div', { class: 'memory-actions' }, h('span', { class: 'muted' }, `Its old notes are kept until ${day(k.until)}.`), h('span', { class: 'spacer' }), back));
+      rows.push(row);
+    }
+    box.replaceChildren(...settingsSection('Curator', ...rows));
+    box.querySelector('.settings-section')?.setAttribute('data-hue', 'waiting');
+  };
+  const load = () => api(url).then(draw, () => {});
+  load();
+  return box;
+}
 
 export function memoryPage() {
   const p = view.project;
@@ -208,10 +282,11 @@ export function memoryPage() {
   const load = () => api(url).then((d) => { folders = d.folders; if (folders.length) render(); else meta.textContent = 'No memory folder yet: the scheme has no repo or no login.'; },
     (err) => { meta.textContent = `Couldn't read the notes: ${err.message}`; });
   load();
+  const review = tidyReview(p, load);
   return h('section', { class: 'artifacts-main people-main memory-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(), meta),
-    folderBar, stats, search, list);
+    review, folderBar, stats, search, list);
 }

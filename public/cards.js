@@ -192,6 +192,14 @@ function notesBody(card) {
   ];
 }
 
+/** A memory tidy card (#1111): nothing changes until a member ticks changes on the Memory page, which this links. */
+function memoryBody(card, ticketId) {
+  return [
+    h('div', {}, 'Nothing changes until a member ticks what to keep on ', h('a', { href: `#/p/${card.memory.project}/memory` }, 'the Memory page'), '. Deletes each need their own tick.'),
+    h('details', {}, h('summary', {}, 'Every change'), markdown(card.plan, ticketId)),
+  ];
+}
+
 /** A revised plan (#907): what changed against the plan it replaces, the whole plan as the body, the changes one tap away. */
 function revisionBody(card, prev, ticketId) {
   const c = planChanges(prev.plan, card.plan, prev.summary, card.summary);
@@ -217,7 +225,9 @@ export function planCard(ticketId, card, opts = {}) {
   const m = card.machine;
   // A release key card (#837): approved or rejected like a machine's notes, by any member of the app's scheme.
   const k = card.releaseKey;
-  const fixed = m || k;
+  // A memory tidy card (#1111): decided change by change on the Memory page, so it links there and has no buttons.
+  const mem = card.memory;
+  const fixed = m || k || mem;
   const mayApprove = !m || !!account?.admin || (m.owner != null && m.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
   const hint = mayApprove ? '' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
@@ -225,6 +235,7 @@ export function planCard(ticketId, card, opts = {}) {
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
   const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, fixed ? 'Reject' : 'Revise');
+  if (mem) approve.hidden = revise.hidden = true;
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed }, fixed ? 'Reject' : 'Send notes');
@@ -232,11 +243,11 @@ export function planCard(ticketId, card, opts = {}) {
   const prev = fixed || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
   if (!fixed) view.lastPlan = mine;
-  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
+  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : mem ? 'proposes a memory tidy' : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const el = h('div', { class: 'qcard pcard' },
     head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : 'Plan'), card.summary),
-    h('div', { class: 'pbody' }, m ? notesBody(card) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : mem ? 'Memory' : 'Plan'), card.summary),
+    h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
   let rank = 0;

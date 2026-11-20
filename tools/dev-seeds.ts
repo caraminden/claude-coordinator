@@ -12,6 +12,8 @@ import { projectDir } from '../src/workspace.ts';
 import { readAgentFiles } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
+import { memoryFolders, readFolder } from '../src/memory-files.ts';
+import { checkChanges, countLine } from '../src/memory-curator.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 import { templateBlobs } from '../src/kit-sync.ts';
@@ -825,8 +827,30 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}")`;
     },
   },
+  'memory-tidy': {
+    about: 'Orders → Memory, Curator (#1111): the memory scenario plus an open memory tidy from a curator run (an edit, an index line, a delete, a flag) and an applied one that Put back can still undo',
+    seed(c) {
+      SCENARIOS.memory.seed(c);
+      const repo = c.store.getProject(c.project.id)!.repo_dir!;
+      const folder = memoryFolders(repo, [{ label: 'server', configDir: join(c.dataDir, 'claude') }])[0];
+      const view = readFolder(folder, () => false);
+      const old = c.store.memoryProposals.create({ project_id: c.project.id, ticket_id: null, folder: folder.id, changes: checkChanges(view, [{ action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax', reason: 'Not in the index, so no session finds it' }]) }, Date.now() - 6 * 86_400_000).proposal;
+      c.store.memoryProposals.decide(old.id, { status: 'applied', changes: old.changes.map((x) => ({ ...x, outcome: 'applied' })), backup: [{ file: 'perigee-shell.md', text: readFileSync(join(folder.dir, 'perigee-shell.md'), 'utf8'), line: null }], by: c.who }, Date.now() - 6 * 86_400_000);
+      const run = minion(c, 'Memory curator', {}, 'chore');
+      const changes = checkChanges(view, [
+        { action: 'edit', file: 'released-means-released.md', text: '---\nname: Released means released\ndescription: A target is live only when its people can get that version; ship, not land\nmetadata:\n  type: feedback\n---\n\nCara 2026-11-18: say "released" only once people can get the build.\nIn everything people read, a change going onto main is "shipping" (merged in from ship-not-land).\n', line: '- [Released means released](released-means-released.md) — live only when people can get it; ship, not land', reason: 'ship-not-land says the same kind of thing: merged into this note' },
+        { action: 'delete', file: 'ship-not-land.md', reason: 'Merged into released-means-released' },
+        { action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax or bash -c', reason: 'Not in the index, so no session finds it' },
+        { action: 'delete', file: 'fable-burst.md', reason: 'Its recheck date passed five days ago' },
+        { action: 'flag', file: 'for-cara-next-time.md', reason: 'Names a closed minion; live state: make it a pointer' },
+      ]);
+      const { proposal } = c.store.memoryProposals.create({ project_id: c.project.id, ticket_id: run.id, folder: folder.id, changes });
+      c.store.addEvent(run.id, 'plan', { id: `memory-${proposal.id}`, status: 'pending', summary: `Memory tidy: ${countLine(changes)}`, plan: changes.map((x) => `- **${x.action}** \`${x.file}\`: ${x.reason}`).join('\n'), memory: { proposal: proposal.id, project: c.project.id, counts: countLine(changes) } });
+      return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}"; the card is in #${run.number})`;
+    },
+  },
   decisions: {
-    about: "Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    about:"Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
     seed(c) {
       SCENARIOS.memory.seed(c);
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });

@@ -229,7 +229,7 @@ export class DeployWatch {
     const kept = new Map<string, Reading[]>();
     const read = (at: number, len: number) => {
       const key = `${at}:${len}`;
-      const r = this.settled.get(key) ?? this.readings(at, len).map((r) => ({ ...r, first: null, top: [] }));
+      const r = this.settled.get(key) ?? kept.get(key) ?? this.readings(at, len).map((r) => ({ ...r, first: null, top: [] }));
       if (at + len <= now) kept.set(key, r);
       return r;
     };

@@ -422,7 +422,7 @@ test('report: an alert ends the watch, later checks show as not run, and no erro
   void store;
 });
 
-test('report: a window already read is not read again, and a deploy that left the watch leaves the cache (#1178)', () => {
+test('report: a window already read is not read again; a newly due one is (#1178)', () => {
   const { store, clock, w, deploy, errors } = setup();
   deploy(sha('0'));
   clock.now += 60 * MIN;
@@ -445,9 +445,14 @@ test('report: a window already read is not read again, and a deploy that left th
 });
 
 test('turnOutcomes finds error events through their own index, not by walking every event of the window (#1178)', () => {
-  const { file } = setup();
-  const db = new DatabaseSync(file, { readOnly: true });
-  const plan = db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%'").all(0, 1).map((r: any) => r.detail).join(' | ');
-  db.close();
-  assert.match(plan, /USING INDEX events_errors/);
+  const { store } = setup();
+  const sql: string[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((q: string) => (sql.push(q), prepare(q))) as typeof store.db.prepare;
+  store.turnOutcomes(0, 1);
+  store.db.prepare = prepare;
+  const errs = sql.find((q) => q.includes("kind = 'error'"));
+  assert.ok(errs, 'turnOutcomes reads error events');
+  const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`).all(...Array(errs.split('?').length - 1).fill(0)).map((r: any) => r.detail).join(' | ');
+  assert.match(plan, /USING (COVERING )?INDEX events_errors/);
 });

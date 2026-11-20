@@ -58,8 +58,15 @@ export class MinionIndex {
     const rows = this.db.prepare(`SELECT id, number, title, coalesce(closed_at, updated_at) AS at FROM tickets
       WHERE project_id = :p AND kind = 'ticket' AND status = 'closed' AND (coalesce(closed_at, updated_at) > :at OR (coalesce(closed_at, updated_at) = :at AND id > :id))
       ORDER BY at, id LIMIT :max`).all({ p: projectId, at, id, max }) as { id: number; number: number; title: string; at: number }[];
-    for (const t of rows) this.indexTicket(projectId, t);
-    if (rows.length) this.store.setSetting(this.markKey(projectId), [rows.at(-1)!.at, rows.at(-1)!.id]);
+    for (const t of rows) {
+      // One unreadable transcript is skipped, not retried: the mark must still pass it, or the scheme's index stops there.
+      try {
+        this.indexTicket(projectId, t);
+      } catch (e) {
+        console.error(`minion index: skipped #${t.number} (ticket ${t.id}): ${(e as Error).message}`);
+      }
+      this.store.setSetting(this.markKey(projectId), [t.at, t.id]);
+    }
     return rows.length;
   }
 

@@ -81,6 +81,27 @@ test('a closed minion is indexed with its brief, last words and the files it wro
   assert.deepEqual((store.minionIndex.search(A.id, 'renamed') as any[]).map((h) => h.title), ['Seeding, renamed']);
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM minion_index WHERE rowid = ?').get(open.id)!.n, 1);
 
+  // A transcript that breaks the indexer is skipped; the next closed minion still gets in.
+  const bad = store.createTicket({ project_id: A.id, title: 'Broken transcript', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(bad.id, { status: 'closed' });
+  const after = seeder(store, A.id, 'Closed after the broken one');
+  const index = store.minionIndex as any;
+  const real = index.indexTicket;
+  index.indexTicket = function (p: number, t: { id: number }) {
+    if (t.id === bad.id) throw new Error('bad json');
+    return real.call(this, p, t);
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(store.minionIndex.indexClosed(A.id), 2);
+  } finally {
+    console.error = quiet;
+    index.indexTicket = real;
+  }
+  assert.equal(store.minionIndex.indexClosed(A.id), 0, 'the broken one is not retried');
+  assert.ok((store.minionIndex.search(A.id, 'closed after broken') as any[]).some((h) => h.ticket_id === after.id));
+
   // since: only minions closed on or after it.
   assert.deepEqual(store.minionIndex.search(A.id, 'seed', { since: Date.now() + 60_000 }), []);
 

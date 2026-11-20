@@ -19,6 +19,9 @@
              its content dims after 0.2s, takes no clicks, and a ring sits sticky in its top right corner.
    Skeleton: <span class="cui-skeleton" data-width="short|medium|long" aria-hidden="true"></span> lines for a
              first load, in a busy region; <div class="cui-skeleton-card" aria-hidden="true"> holds a card's lines.
+   States:   ui/state.js: loadingLine() draws div.cui-loading (a cui-spin and text; role="status"), failedLine(text, { retry })
+             div.cui-failed with a Retry button, emptyState(title, line) div.cui-empty (data-tone: the mark's colour),
+             tabs({ items, onSelect }) div.cui-tabs of button.cui-tab (role="tab", aria-selected, arrow keys).
    Tooltip:  <span data-tip="Life: 1,234">…</span> with ui/tip.js's mountTips(); it draws div.cui-tip.
    Status:   <div class="cui-status" role="status"></div>, always drawn, 22px tall, empty when there's nothing to
              say; inside it <span class="cui-status-text"> (one line, cut off with …), after a cui-spin while working;
@@ -230,6 +233,35 @@
 @keyframes cui-shimmer { to { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) { :where(.cui-skeleton)::before { animation: none; } }
 @media (forced-colors: active) { :where(.cui-skeleton)::before { border: 1px solid GrayText; } }
+
+/* States (ui/state.js): a loading line, a failure with its retry, an empty card and tabs. The loading line's
+   page gives the loading line a min-height of what replaces it, so the swap moves nothing. */
+:where(.cui-loading) { display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; color: var(--citadel-muted); font-size: var(--citadel-size-body); }
+:where(.cui-failed) { display: flex; align-items: center; flex-wrap: wrap; gap: var(--citadel-space-2); color: var(--citadel-danger); font-size: var(--citadel-size-body); }
+:where(.cui-empty) {
+  --cui-tone: var(--citadel-ok);
+  display: flex; align-items: center; gap: var(--citadel-space-3); box-sizing: border-box; padding: var(--citadel-space-2) var(--citadel-space-3);
+  border: 1px solid color-mix(in srgb, var(--cui-tone) 25%, var(--citadel-border)); border-radius: var(--citadel-radius);
+  background: color-mix(in srgb, var(--cui-tone) 6%, var(--citadel-surface));
+}
+:where(.cui-empty[data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
+:where(.cui-empty[data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
+:where(.cui-empty[data-tone="info"]) { --cui-tone: var(--citadel-info); }
+:where(.cui-empty[data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
+:where(.cui-empty[data-tone="neutral"]) { --cui-tone: var(--citadel-muted); }
+:where(.cui-empty-mark) {
+  flex: none; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; font-weight: 700;
+  color: var(--cui-tone); background: color-mix(in srgb, var(--cui-tone) 15%, var(--citadel-surface));
+}
+:where(.cui-empty-text) { display: flex; flex-direction: column; min-width: 0; }
+:where(.cui-empty-text > span) { color: var(--citadel-muted); }
+:where(.cui-tabs) { display: flex; gap: var(--citadel-space-1); border-bottom: 1px solid var(--citadel-border); }
+:where(.cui-tab) {
+  display: inline-flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; margin: 0 0 -1px; padding: var(--citadel-space-2) var(--citadel-space-3);
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--citadel-muted); font: inherit; cursor: pointer;
+}
+:where(.cui-tab:hover) { color: var(--citadel-text); }
+:where(.cui-tab[aria-selected="true"]) { color: var(--citadel-text); font-weight: 650; border-bottom-color: var(--citadel-accent); }
 
 /* Tooltip (ui/tip.js's mountTips draws it; you write only data-tip on the thing): a card on the surface in
    the top layer, fixed, so opening it never moves the page. tip.js sets left, top and max-height so it stays

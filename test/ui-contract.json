@@ -40,6 +40,12 @@
       "mountDialogs",
       "openDialog"
     ],
+    "state.js": [
+      "emptyState",
+      "failedLine",
+      "loadingLine",
+      "tabs"
+    ],
     "status.js": [
       "statusSlot",
       "statusSlotHtml",
@@ -109,9 +115,14 @@
       "cui-dialog",
       "cui-dialog-head",
       "cui-dropping",
+      "cui-empty",
+      "cui-empty-mark",
+      "cui-empty-text",
+      "cui-failed",
       "cui-ghost",
       "cui-icon",
       "cui-input",
+      "cui-loading",
       "cui-notice",
       "cui-primary",
       "cui-rec",
@@ -124,6 +135,8 @@
       "cui-status-text",
       "cui-steady",
       "cui-switch",
+      "cui-tab",
+      "cui-tabs",
       "cui-time",
       "cui-tip",
       "cui-tip-error",

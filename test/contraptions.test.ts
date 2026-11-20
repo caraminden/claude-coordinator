@@ -1,7 +1,7 @@
 // Contraptions' registry (src/contraptions.ts, the brief's section 1): who a contraption is enabled
 // for, its key files, identity headers, bearer keys, and the admin routes.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -77,6 +77,18 @@ test('an identity header verifies with its own contraption\'s public key only, u
   assert.ok(part);
   // Another SESSION_SECRET (a preview, a copy of the database) can't sign.
   assert.equal(new Contraptions(store, 't'.repeat(40), keys).signIdentity('mandate', josh), null);
+});
+
+test("a contraption's frame gets the clipboard only when its citadel-app.json asks for writes (#1086)", async () => {
+  const home = join(root, 'home');
+  const reader = new Contraptions(store, SECRET, keys);
+  reader.appsHome = home;
+  const manifest = (name: string, body: string) => { mkdirSync(join(home, 'apps', name), { recursive: true }); writeFileSync(join(home, 'apps', name, 'citadel-app.json'), body); };
+  manifest('writes', JSON.stringify({ start: ['node'], clipboard: 'write' }));
+  manifest('plain', JSON.stringify({ start: ['node'] }));
+  manifest('broken', '{ not json');
+  for (const [name, want] of [['writes', true], ['plain', false], ['broken', false], ['missing', false]] as const) assert.equal(await reader.clipboard({ name, folder: null }), want, name);
+  assert.equal(await reader.clipboard({ name: 'elsewhere', folder: join(home, 'apps', 'writes') }), true, 'its own folder, when it has one');
 });
 
 test('a bearer contraption key names its contraption, and rotating replaces both keys', () => {

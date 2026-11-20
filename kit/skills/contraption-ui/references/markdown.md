@@ -35,7 +35,8 @@ the picture plain. Tell your app's agent this in its prompt if it should point a
   inside Citadel's frame that takes the person out of Citadel.
 - Fenced code blocks drawn by `markdownElement`/`updateMarkdown` get a Copy button
   (`.cui-copy`, top right, shown on hover; always on a phone) that copies the code exactly. For
-  your own Copy buttons, `copyText(text)` resolves whether it worked and also works on plain http.
+  your own Copy buttons, `copyText(text)` resolves whether it worked and also works on plain http and in Citadel's
+  frame, which gives an app no clipboard rights of its own (#1086): call it from the click itself, never on load.
 - A fence tagged with where it runs gets a coloured header saying so (#898): `powershell-admin` (amber, "Run as
   administrator"), `powershell` (`ps1`, `pwsh`), `wsl`, `fish` (perigee), `bash` (`sh`, `zsh`, `shell`, `console`), `cmd`.
   Any other tag draws plain. **Rule for agents: every command a person runs by hand goes in its own fenced block

@@ -49,23 +49,29 @@ export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<s
 const HAND_ROLLED = /navigator\.clipboard|execCommand\(\s*['"]copy['"]|citadel\.send\s*\(/;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
-/** The HTML pages `text` links that hand-roll an answer or copy button, as absolute paths. */
-/** Whether the page, or a local script it loads other than the kit's own mockkit.js, has an answer or copy button of its own. */
-function rolledOwn(file: string): boolean {
-  if (statSync(file).size > MAX_PAGE_BYTES) return false;
+/** The page's text and that of the local scripts it loads, less the kit's own mockkit.js. */
+function pageText(file: string): string {
+  if (statSync(file).size > MAX_PAGE_BYTES) return '';
   const html = readFileSync(file, 'utf8');
-  if (HAND_ROLLED.test(html)) return true;
+  let text = html;
   for (const [, src] of html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"':?#]+)["']/gi)) {
     if (basename(src) === 'mockkit.js') continue;
     try {
       const js = join(dirname(file), src);
-      if (statSync(js).size <= MAX_PAGE_BYTES && HAND_ROLLED.test(readFileSync(js, 'utf8'))) return true;
+      if (statSync(js).size <= MAX_PAGE_BYTES) text += `\n${readFileSync(js, 'utf8')}`;
     } catch {
       // A missing script is the page's own problem.
     }
   }
-  return false;
+  return text;
 }
+
+// A copy with nothing a person does to start it (#1086): Windows Defender's ClickFix check flags a page that fills the
+// clipboard on its own, and Chrome lets a framed page with clipboard rights do it with no click.
+// shortcut: any click or key handler on the page counts as the copy's, so a page that has both a button and a copy on
+// load passes; parse the script if a page like that turns up.
+const COPY = /navigator\.clipboard\.write|execCommand\(\s*['"]copy['"]/;
+const CLICK = /\bon(click|keydown|keyup|pointerup|mouseup)\b|addEventListener\(\s*['"](click|keydown|keyup|pointerup|mouseup)['"]/i;
 
 export async function handRolledPages(text: string, cfg: LinkCheckConfig): Promise<string[]> {
   const pages: string[] = [];
@@ -73,7 +79,8 @@ export async function handRolledPages(text: string, cfg: LinkCheckConfig): Promi
     if (fileType(abs)?.kind !== 'html') continue;
     const found = await resolveFile(abs, cfg.cwd, cfg.roots);
     try {
-      if (found && rolledOwn(found.file)) pages.push(abs);
+      const text = found ? pageText(found.file) : '';
+      if (HAND_ROLLED.test(text)) pages.push(COPY.test(text) && !CLICK.test(text) ? `${abs}: copies with no click or key press to start it` : abs);
     } catch {
       // Unreadable: the broken-link check speaks for it.
     }
@@ -223,7 +230,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const pages = rolled.length
     ? `These pages have an answer or copy button of their own (navigator.clipboard, execCommand('copy') or citadel.send):\n${rolled.map((p) => `- ${p}`).join('\n')}\n`
       + 'People answer a page only through the mock kit\'s Send dock, which posts straight into your chat: ask with mock.picks instead '
-      + '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay.\n'
+      + '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay, '
+      + 'if a click or key press starts it: a page that fills the clipboard on its own trips Windows Defender\'s ClickFix check.\n'
     : '';
   const choice = choices.length
     ? `These pages ask with pick bars, but no card in the chat opens them:\n${choices.map((p) => `- ${p}`).join('\n')}\n`

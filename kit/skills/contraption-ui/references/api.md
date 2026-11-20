@@ -862,6 +862,7 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 | `build` | Up to 20 shell commands, run in the repo root in order at nice 10, with `PATH` as above and none of Citadel's variables (no `PORT`, `DATA_DIR`). Each runs in a heavy slot (shown as `<name> deploy`) in its own systemd unit, `citadel-build-<name>.service`, so a Citadel restart doesn't kill it. Any failing fails the deploy |
 | `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20. Time waiting in line for a heavy slot doesn't count |
 | `disk_warn_gb` | A number of GB above 0: Settings marks the app once its `DATA_DIR` passes it ("Heavy steps and disk use") |
+| `clipboard` | `"write"` lets your page call `navigator.clipboard.writeText` itself (the frame gets `clipboard-write`); leave it out otherwise. Without it, a framed app can't touch the clipboard on its own, as Windows Defender flags any page that copies a command with no click (#1086). Citadel UI's `copyText` needs no opt-in: called from a click, it copies the old way. Takes effect on the next page load after a deploy |
 | `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A Roll back to last green past a commit that touched one is refused (below) |
 
 The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes

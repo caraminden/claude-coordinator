@@ -36,6 +36,8 @@ test('a manifest is checked: what an app may set, and nothing Citadel sets', () 
   assert.equal(m.workdir, '.');
   assert.equal(m.timers.backup.workdir, '.');
   assert.equal(parseManifest(JSON.stringify({ start: ['node', 'server.ts'], workdir: 'companion/' })).workdir, 'companion');
+  assert.equal(m.clipboard, null, 'no clipboard unless the app asks (#1086)');
+  assert.equal(parseManifest(JSON.stringify({ start: ['node'], clipboard: 'write' })).clipboard, 'write');
   for (const [bad, says] of [
     ['nope', /isn't JSON/],
     [{}, /start must be a list/],
@@ -48,6 +50,8 @@ test('a manifest is checked: what an app may set, and nothing Citadel sets', () 
     [{ start: ['node'], timers: { 'Bad Name': { command: ['x'], on_calendar: 'daily' } } }, /short slug/],
     [{ start: ['node'], timers: { b: { command: ['x'] } } }, /on_calendar/],
     [{ start: ['node'], health: 'health' }, /health must be a path/],
+    [{ start: ['node'], clipboard: 'read' }, /clipboard must be "write"/],
+    [{ start: ['node'], clipboard: true }, /clipboard must be "write"/],
   ] as const) assert.throws(() => parseManifest(typeof bad === 'string' ? bad : JSON.stringify(bad)), says, JSON.stringify(bad));
 });
 

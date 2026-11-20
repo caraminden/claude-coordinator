@@ -139,6 +139,19 @@ test('a linked page with its own clipboard or send button is sent back; a kit pa
   assert.equal(await reply(`\`${mine}/clip.html\``), null);
 });
 
+test('a linked page that copies with no click or key press to start it is named as such (#1086)', async () => {
+  writeFileSync(join(mine, 'onload.html'), `<script>addEventListener('load', () => navigator.clipboard.writeText('iwr x | iex'))</script>`);
+  writeFileSync(join(mine, 'clicked.html'), `<button>Copy</button><script>document.querySelector('button').addEventListener('click', () => navigator.clipboard.writeText(t))</script>`);
+  writeFileSync(join(mine, 'loader.js'), "document.execCommand('copy')");
+  writeFileSync(join(mine, 'split-click.html'), '<button onclick="go()">Copy</button><script src="loader.js"></script>');
+  const v = await reply(`[a](${mine}/onload.html), [b](${mine}/clicked.html) and [c](${mine}/split-click.html)`);
+  assert.equal(v?.decision, 'block');
+  assert.ok(v.reason.includes(`- ${join(mine, 'onload.html')}: copies with no click or key press to start it`), v.reason);
+  assert.ok(v.reason.includes(`- ${join(mine, 'clicked.html')}\n`), 'a copy in a click handler is only the usual nudge');
+  assert.ok(v.reason.includes(`- ${join(mine, 'split-click.html')}\n`), "a click in the page and the copy in its script count together");
+  assert.match(v.reason, /ClickFix/);
+});
+
 test('a linked choices page with no card that opens it is sent back; its card, open or settled, lets it through (#804)', async () => {
   writeFileSync(join(mine, 'takes.html'), '<title>Takes</title><script src="mockkit.js"></script><script>mock.boards([]);</script>');
   writeFileSync(join(mine, 'plain.html'), '<p>no picks</p>');

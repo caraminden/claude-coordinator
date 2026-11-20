@@ -6,7 +6,7 @@
 // nice activity graphs or something?") and "Grouped by scheme". Kept from #1140: "After you answer a card: Move to
 // the next card", and the list as one element kept across pages, so moving between its chats keeps its scroll.
 // It's drawn at once from the last answer this browser had, then refreshed behind. Rows keep their place for the
-// whole visit: an answered one is ticked off where it was, and one that arrives joins the bottom of its scheme with
+// whole visit: an answered one is gone at once (Josh, 2026-11-20), and one that arrives joins the bottom of its scheme with
 // a "new" tag (no reflow without input).
 import { HOME_LINE, api, h, isCoordinator, jumpHref, me, threadHref, view, pacificWeekdayClock } from './base.js';
 import { usage } from './core.js';
@@ -98,7 +98,7 @@ export function homeEvent(event) {
 
 // ---- drawing ----
 
-/** `ids` in the order this visit shows them: the ones already shown keep their place (gone ones too), new ones join the bottom. */
+/** `ids` in the order this visit shows them: the ones already shown keep their place (gone ones keep theirs, so a returning row sits where it was), new ones join the bottom. */
 const stable = (shown, ids) => [...shown, ...ids.filter((id) => !shown.includes(id))];
 
 /** Forget an answer fetched for someone else (a sign-out and in on this browser doesn't reload the page). */
@@ -150,21 +150,16 @@ function drawPanel() {
   }
   visit.shown = []; // the rows top to bottom, scheme by scheme, for moveOn
   const sections = names.map((s) => {
-    const ids = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
+    const all = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
+    visit.shown.push(...all); // gone ones too: moveOn needs the answered row's place
+    // A row that left Home's list (answered, a mention opened, withdrawn) is gone at once; Josh, 2026-11-20: "these should just be gone once done".
+    const ids = all.filter((id) => rows.has(id));
     if (!ids.length) return null;
-    visit.shown.push(...ids);
     return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name), ...ids.map((id) => {
-      const { t, items } = rows.has(id) ? { t: tickets.get(id), items: rows.get(id) } : visit.last.get(id);
+      const t = tickets.get(id), items = rows.get(id);
       // The row's card and spend badges open on Home too, not in the scheme.
       const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));
-      if (!rows.has(id)) {
-        // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
-        row.classList.add('done');
-        row.classList.remove('yours', 'unread');
-        const chip = h('span', { class: 'state done-chip' }, '✓ Done');
-        const state = row.querySelector('.state');
-        if (state) state.replaceWith(chip); else row.querySelector('.name')?.after(chip);
-      } else if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
+      if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
       return row;
     }));
   }).filter(Boolean);

@@ -217,11 +217,15 @@ test('tools/watchdog.ts pushes once when the newest backup is a day old, and nam
   writeFileSync(old, 'x');
   const ago = new Date(Date.now() - 30 * 3_600_000);
   utimesSync(old, ago, ago);
+  // A stand-in Citadel that answers /api/health, so "all up" doesn't hang on a live one at 8573 (CI has none).
+  const health = createServer((req, res) => res.writeHead(200).end('ok'));
+  const healthPort = await listen(health);
+  after(() => health.close());
   const stateFile = join(dir, 'state.json');
   // It has been missing for 11 minutes already: the push is due now.
   writeFileSync(stateFile, JSON.stringify({ backup: { title: 'Nightly backup', since: Date.now() - 11 * MIN, why: 'x', alerted: false } }));
   const run = () => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
-    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake },
+    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, WATCHDOG_CITADEL_PORT: String(healthPort) },
   }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
   const out = await run();
   assert.match(out, /Nightly backup: the database backup is 30 h old/);

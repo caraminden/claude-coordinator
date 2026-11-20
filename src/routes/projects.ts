@@ -1052,10 +1052,12 @@ export const projectRoutes: Route[] = [
   {
     // A person's own Settings save (#1162): what already says the new words, shown before the save so they can save
     // anyway or keep editing. The matcher only: a minion's edit adds its Grunt's findings, a person reads the list.
-    method: 'POST', path: '/api/projects/:project/instructions/overlaps', who: ['person'],
-    async handler({ req, res, app, project }) {
+    // The Taskmaster's set_app_instructions and set_project_instructions ask it first too (#1211).
+    method: 'POST', path: '/api/projects/:project/instructions/overlaps', who: PEOPLE_AND_TASKMASTER,
+    async handler({ req, res, app, project, caller }) {
       const body = await readJson(req);
       if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
+      if (caller && body.scope === 'citadel' && caller.project_id !== GLOBAL_OWNER) throw new HttpError(403, `Only people and the ${APP_NAME} scheme's ${AGENT_NAME} edit the ${APP_NAME}-wide instructions`);
       if (typeof body.text !== 'string' || body.text.length > MAX_INSTRUCTIONS * 2) throw new HttpError(400, 'text must be text');
       const before = body.scope === 'citadel' ? app.store.appInstructions().text : project.instructions;
       const found = settingsOverlaps(app, project, body.scope, before, body.text.replace(/\r\n/g, '\n').trim());

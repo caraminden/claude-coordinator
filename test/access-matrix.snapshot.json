@@ -1668,8 +1668,8 @@
   "person": "400 scope must be \"scheme\" or \"citadel\"",
   "member": "400 scope must be \"scheme\" or \"citadel\"",
   "outsider": "404 No such scheme",
-  "tmA": "403 Not available to the Taskmaster",
-  "tmB": "403 Not available to the Taskmaster",
+  "tmA": "400 scope must be \"scheme\" or \"citadel\"",
+  "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

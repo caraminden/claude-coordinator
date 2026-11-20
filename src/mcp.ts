@@ -818,8 +818,8 @@ const TOOLS = [
   {
     name: 'set_project_instructions',
     description:
-      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
+      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway).',
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose.' } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
@@ -897,8 +897,8 @@ const APP_INSTRUCTION_TOOLS = [
   {
     name: 'set_app_instructions',
     description:
-      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
+      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change; new words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway). A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose.' } }, required: ['instructions'] },
   },
 ];
 
@@ -1958,6 +1958,22 @@ async function approve(args: any): Promise<string> {
 }
 
 /** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
+/**
+ * The overlap check a person's Settings save gets (#1162), before the Taskmaster saves rule text (#1211): refused with
+ * what already says the new words, unless it passes repeats_ok.
+ */
+async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<void> {
+  if (args.repeats_ok === true) return;
+  const { found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text: wholeText(args) });
+  if (!found.length) return;
+  const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
+  throw new Error([
+    `Nothing was saved: the new words repeat what is already written elsewhere.`,
+    ...found.map((o: any) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
+    `Put the change where it is already said, or point there in a few words. If the repeat is on purpose, call again with repeats_ok: true.`,
+  ].join('\n'));
+}
+
 function wholeText(args: any): string {
   if (typeof args.instructions !== 'string') {
     throw new Error(`instructions is required and must be text: send the whole new text. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
@@ -2142,6 +2158,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
+      await repeatsFirst('citadel', args);
       const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
       return app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`;
     }
@@ -2337,6 +2354,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'rotate_contraption_keys':
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
+      await repeatsFirst('scheme', args);
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
       return project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.';
     }

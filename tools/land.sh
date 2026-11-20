@@ -637,7 +637,7 @@ preflight() {
 [ "$mode" = into ] || [ "$mode" = full ] || [ "$lane" = light ] || preflight
 
 # The guard tests, on the rebased commit before a CI run is spent (#1240). Each checks the repo's files against what
-# main already holds (a schema number, the prompts' budget, dated one-until rules, the UI contract), so a branch that
+# main already holds (a schema number, the prompts' budget, the tests' own wait helpers, the UI contract), so a branch that
 # was clean alone can break one only together with main: the smoke check, on the branch as it was, can't see that, and
 # on 2026-11-20 these four were most of CI's real reds. A second or two. Only the ones the repo has; a feeder's merge
 # into a build (--into) skips them as it skips CI, and its build's own land runs them.

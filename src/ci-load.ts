@@ -159,7 +159,8 @@ export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects:
   for (const j of jobs) {
     if (!here(j.runner)) continue;
     const p = pool(j.repo, j.labels);
-    if (!poolOf.has(`${j.repo}/${j.runner}`)) p.runners.push(j.runner);
+    // A runner with several labels (#1240's side runner) takes jobs from more than one pool: it is in each.
+    if (!p.runners.includes(j.runner)) p.runners.push(j.runner);
     poolOf.set(`${j.repo}/${j.runner}`, p);
     if (j.status === 'in_progress') p.busy++;
     if (now - j.created > DAY_MS || !Number.isFinite(j.started)) continue;

@@ -67,6 +67,14 @@ test('a pool is a repo\'s runners with the same labels: its runners, who is busy
   assert.deepEqual(pools(PC, [], [idle], projects, NOW).map((x) => [x.title, x.runners]), [['caraminden/claude-coordinator', [`${PC}-linux`]]]);
 });
 
+test('a runner that takes two pools\' jobs (a side label, #1240) is in both pools, so neither pool drops out', () => {
+  const CC = 'caraminden/claude-coordinator';
+  const side = `${PC}-linux-2`;
+  const got = pools(PC, [job({ repo: CC, runner: `${PC}-linux`, labels: 'citadel-ci-linux' }), job({ repo: CC, runner: side, labels: 'citadel-ci-linux' }),
+    job({ repo: CC, runner: side, labels: 'citadel-ci-linux,citadel-ci-linux-side', status: 'in_progress', created: NOW - MIN, started: NOW - MIN, ended: NaN })], [], projects, NOW);
+  assert.deepEqual(got.map((x) => [x.labels, x.runners, x.busy]), [['citadel-ci-linux', [`${PC}-linux`, side], 0], ['citadel-ci-linux,citadel-ci-linux-side', [side], 1]]);
+});
+
 test('the rule: fine, could do more, full, overloading, and no samples', () => {
   const v = (samples: Sample[], jobs: LoadJob[]) => verdict(samples, pools(PC, jobs, samples, projects, NOW), jobs, NOW);
   assert.match(v(window(), full()).text, /^Fine: CPU averaged 30% over the last 15 min, nothing is waiting\.$/);

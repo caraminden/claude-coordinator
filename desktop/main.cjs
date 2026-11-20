@@ -42,10 +42,6 @@ function open(url = START.href) {
   });
   const wc = win.webContents;
   win.once('ready-to-show', () => win.show());
-  // The page's CSS and scripts ask `(display-mode: window-controls-overlay)` for the installed web app's title bar
-  // layout; Electron answers "browser", so it is told the mode the window really has.
-  wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) emulateOverlay(wc, 'start'); });
-  wc.on('did-navigate', () => emulateOverlay(wc, 'navigate'));
   wc.once('did-finish-load', started);
   wc.setWindowOpenHandler(({ url }) => {
     const r = route(url, START, ALIASES);
@@ -64,14 +60,6 @@ function open(url = START.href) {
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.on('closed', () => { win = null; });
   win.loadURL(url);
-}
-
-function emulateOverlay(wc, when) {
-  try {
-    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
-    wc.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'display-mode', value: 'window-controls-overlay' }] })
-      .then(() => console.log('emulate ok', when, wc.getURL()), (err) => console.warn('emulate failed', when, err.message));
-  } catch (err) { console.warn('emulate attach failed', when, err.message); }
 }
 
 /** Tell #1148's launcher this build is up, once its window has a page in it. */

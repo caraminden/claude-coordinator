@@ -692,7 +692,7 @@ CREATE INDEX IF NOT EXISTS events_errors ON events(created_at) WHERE kind = 'err
 -- Notes and people's messages by id (#1251), partial like events_errors: Home's ship notes walked every claude row since a
 -- visit (13.6 s of the loop), and the memory indexer seeked into every minion of a scheme for new messages (23 s on a busy disk).
 CREATE INDEX IF NOT EXISTS events_notes ON events(id) WHERE kind = 'note';
-CREATE INDEX IF NOT EXISTS events_asks ON events(id) WHERE kind = 'user_message';
+CREATE INDEX IF NOT EXISTS events_asks ON events(id, ticket_id) WHERE kind = 'user_message';
 -- What recentCards found of each card, kept across restarts (#762): the first person's reply after it, an approval's result,
 -- and the newest event looked at. The card's minion and own id are kept to tell it from a later card that took a deleted id.
 CREATE TABLE IF NOT EXISTS card_fates (

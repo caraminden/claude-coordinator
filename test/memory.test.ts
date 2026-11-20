@@ -389,10 +389,19 @@ test('indexing finds new messages through events_asks, not a seek into every min
   await store.memory.index(P.id, embed, 'fake');
   const ids = seen.find((sql) => /SELECT e\.id FROM events e/.test(sql));
   assert.ok(ids, 'pendingTurns reads the message ids first');
-  const plan = (prepare(`EXPLAIN QUERY PLAN ${ids}`).all(1, 0) as { detail: string }[]).map((r) => r.detail).join(' | ');
+  const plan = (prepare(`EXPLAIN QUERY PLAN ${ids}`).all(1, 0, 1e9) as { detail: string }[]).map((r) => r.detail).join(' | ');
   // A seek per minion was 2,200 random reads a pass on a big scheme: on a disk busy after a deploy it held the loop 23 s.
-  assert.match(plan, /^SEARCH e USING INDEX events_asks/, plan);
+  // Covering: the walk reads ticket_id from the index, not a page of the events table per message.
+  assert.match(plan, /^SEARCH e USING COVERING INDEX events_asks/, plan);
   assert.doesNotMatch(plan, /TEMP B-TREE/, plan);
+});
+
+test("a quiet scheme's mark moves past other schemes' messages, so the next pass doesn't walk them again (#1251)", async () => {
+  const { store, A, b1 } = world(join(root, 'quiet.db'));
+  let last = 0;
+  for (let i = 0; i < 5; i++) last = turn(store, b1.id, 'cara', `question ${i}`, `answer ${i}`).id;
+  await store.memory.index(A.id, embed, 'fake');
+  assert.ok((store.getSetting<number>(`memory_turns_after:${A.id}`) ?? 0) >= last, "the mark moves past B's messages");
 });
 
 test('indexing sorts message ids, never message text', async () => {

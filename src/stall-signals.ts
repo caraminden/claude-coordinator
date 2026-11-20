@@ -17,6 +17,8 @@ export const SHIP_FAILS = 2;
 const words = (alts: string) => new RegExp(`(?:^|[\\s;&|(\`])(?:${alts})(?=$|[\\s;&|)\`])`, 'i');
 const TESTS = words(String.raw`citadel-test|node\s+--test|(?:npm|pnpm|yarn)\s+(?:run\s+)?test|cargo\s+(?:test|nextest)|pytest|vitest|jest|go\s+test|\S*run-tests(?:\.sh)?|\S*gradlew\s+\S*[tT]est|deno\s+test|bun\s+test|dotnet\s+test`);
 const CHECKS = words(String.raw`cargo\s+(?:build|check|clippy)|tsc|(?:npm|pnpm|yarn)\s+run\s+(?:build|lint|check|typecheck)|eslint|\S*gradlew\s+\S*(?:build|assemble)\w*|dotnet\s+build|go\s+(?:build|vet)`);
+const LAND = /(?:^|[\s;&|(])\S*tools\/land\.sh(?=$|\s)/;
+const SHIP = 'ship';
 /** A shell command that runs tests, in any scheme's stack. */
 export const testCommand = (cmd: string) => TESTS.test(cmd);
 /** A shell command that checks the code: a test run, a build, type check or lint. */
@@ -82,8 +84,10 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
   if (ev?.parent_tool_use_id || !Array.isArray(ev?.message?.content)) return { signals, changed };
   for (const b of ev.message.content) {
     if (ev.type === 'assistant' && b?.type === 'tool_use') {
-      if (b.name === 'Bash' && typeof b.input?.command === 'string' && checkCommand(b.input.command)) {
-        s.pending[b.id] = short(b.input.command, 200);
+      // A ship the minion runs itself (the land tool, or land.sh in a build's own turn) counts like a handed-off one.
+      const ship = b.name === 'mcp__thread__land' || (b.name === 'Bash' && LAND.test(b.input?.command ?? ''));
+      if (ship || (b.name === 'Bash' && typeof b.input?.command === 'string' && checkCommand(b.input.command))) {
+        s.pending[b.id] = ship ? SHIP : short(b.input.command, 200);
         changed = true;
         continue;
       }
@@ -98,6 +102,10 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
       delete s.pending[b.tool_use_id];
       changed = true;
       const out = typeof b.content === 'string' ? b.content : '';
+      if (cmd === SHIP) {
+        if (b.is_error || /^tools\/land\.sh exited [1-9]/.test(out)) signals.push(...shipFailed(s, 'land.sh run by the minion'));
+        continue;
+      }
       const names = testCommand(cmd) ? failingTests(out) : [];
       if (!b.is_error && !names.length) {
         // Green: a test run ends the stretch; a passing build or lint says nothing about the tests.
@@ -118,7 +126,7 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
   return { signals, changed };
 }
 
-/** A failed ship (src/land.ts settle); `kind` is classifyLandFailure's, or 'unclassified'. */
+/** A failed ship (src/land.ts settle, or a land.sh run in the minion's own turn); `kind` is classifyLandFailure's, or what ran it. */
 export function shipFailed(s: StallState, kind: string): Signal[] {
   s.ships.push(kind);
   return s.ships.length === SHIP_FAILS ? [{ kind: 'failed-ships', what: `${SHIP_FAILS} failed ships`, evidence: [`kinds: ${s.ships.join(', ')}`] }] : [];

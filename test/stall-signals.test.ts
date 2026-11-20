@@ -89,6 +89,16 @@ test('two failed ships fire, naming their kinds', () => {
   assert.deepEqual(shipFailed(s, 'own-test'), []);
 });
 
+test('a land.sh the minion runs itself counts as a ship; a clean one does not', () => {
+  const s = emptyState();
+  const land = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `t${++ids}`, name: 'mcp__thread__land', input: {} }] } };
+  assert.deepEqual(feed(s, [land, result('tools/land.sh exited 0.\n\nmain is now at abc1234')]), []);
+  assert.deepEqual(feed(s, [run('tools/land.sh --into build/3 --full'), result('Exit code 1\nconflict', true)]), []);
+  const got = feed(s, [{ ...land, message: { ...land.message, content: [{ ...land.message.content[0], id: `t${++ids}` }] } }, result('tools/land.sh exited 1 (read its output: main only moved if it says so).')]);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].kind, 'failed-ships');
+});
+
 test('nextStep follows the tiers: Sonnet up to Opus medium, then high, then Fable; Fable off stops at Opus high', () => {
   const after = '2026-12-01';
   assert.deepEqual(nextStep('claude-sonnet-5-5', 'medium', true, after), { model: 'claude-opus-5-5', effort: 'medium' });

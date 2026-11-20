@@ -1,0 +1,117 @@
+// Ships go first on the CI desktop (#1268; Cara, 2026-11-20, "Plan approved: build it this way"): every SHIP_POLL_MS
+// this asks GitHub which ship runs (a `land/…` branch) are going in each repo with runners on a runner agent's PC, and
+// which runner each of their jobs is on, and sends that list to the runner agents. While a list names runners, the
+// agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts it (runner-agent.mjs).
+import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
+import type { GithubEnv } from './scheme-repo.ts';
+
+export const SHIP_POLL_MS = 15_000;
+const RATE_LIMITED_MS = 5 * 60_000;
+/** A ship run's branch: what every scheme's land.sh pushes (Cara, 2026-11-20: "No, ship branches only"). */
+export const SHIP_BRANCH = /^land\//;
+
+export interface Ship { repo: string; runner: string }
+
+export interface ShipWatchDeps {
+  /** owner/name, lowercase, of every repo with runners on a runner agent's PC (repeats are fine). */
+  repos: () => string[];
+  /** The GitHub login that reads a repo: its scheme's; null when no scheme has it, so it isn't read. */
+  as: (repo: string) => GithubEnv | null;
+  send: (ships: Ship[]) => void;
+  get?: GhGet;
+  log?: (line: string) => void;
+}
+
+export class ShipWatch {
+  private deps: ShipWatchDeps;
+  private get: GhGet;
+  private cache = new Map<string, { etag: string | null; body: any }>();
+  // Each repo's ships at its last good read: a read that fails keeps them, so a GitHub hiccup doesn't lift a squeeze.
+  private last = new Map<string, Ship[]>();
+  private pausedUntil = 0;
+  private busy = false;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private said = '';
+
+  constructor(deps: ShipWatchDeps) {
+    this.deps = deps;
+    this.get = deps.get ?? ghGet;
+  }
+
+  start() {
+    this.timer ??= setInterval(() => void this.tick(), SHIP_POLL_MS);
+    this.timer.unref?.();
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  /** One look: the runners on a ship's job now, sent to the agents. Nothing is sent while GitHub says to wait. */
+  async tick(now = Date.now()): Promise<Ship[] | null> {
+    if (this.busy || now < this.pausedUntil) return null;
+    this.busy = true;
+    const used = new Set<string>();
+    let failed = false;
+    try {
+      const repos = new Set(this.deps.repos().map((r) => r.toLowerCase()));
+      for (const repo of [...this.last.keys()]) if (!repos.has(repo)) this.last.delete(repo);
+      for (const repo of repos) {
+        const as = this.deps.as(repo);
+        if (as === null) continue;
+        try {
+          this.last.set(repo, await this.ships(repo, as, used));
+        } catch (err: any) {
+          if (err instanceof RateLimited) throw err;
+          failed = true;
+          this.say(`Ship watch: ${repo}: ${err?.message ?? err}`);
+        }
+      }
+      for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
+      const ships = [...this.last.values()].flat();
+      this.deps.send(ships);
+      if (!failed) this.said = '';
+      return ships;
+    } catch (err: any) {
+      if (!(err instanceof RateLimited)) throw err;
+      this.pausedUntil = now + RATE_LIMITED_MS;
+      this.say('Ship watch: GitHub says to slow down; looking again in 5 minutes (the agents lift any squeeze meanwhile).');
+      return null;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async ships(repo: string, as: GithubEnv, used: Set<string>): Promise<Ship[]> {
+    const runs: any[] = (await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used))?.workflow_runs ?? [];
+    const out: Ship[] = [];
+    for (const r of runs) {
+      if (!SHIP_BRANCH.test(String(r?.head_branch ?? '')) || !Number.isInteger(r?.id)) continue;
+      const jobs: any[] = (await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used))?.jobs ?? [];
+      // shortcut: any self-hosted runner counts, as every one is on Cara's desktop today; send each PC only its own ships once another PC has runners.
+      for (const j of jobs) if (j?.status === 'in_progress' && typeof j.runner_name === 'string' && j.runner_name && Array.isArray(j.labels) && j.labels.includes('self-hosted')) out.push({ repo, runner: j.runner_name });
+    }
+    return out;
+  }
+
+  private async read(path: string, as: GithubEnv, used: Set<string>): Promise<any> {
+    used.add(path);
+    const had = this.cache.get(path);
+    const r = await this.get(path, had?.etag ?? null, as);
+    if (r.status === 304 && had) return had.body;
+    if (r.status === 200) {
+      this.cache.set(path, { etag: r.etag, body: r.body });
+      return r.body;
+    }
+    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
+    throw new Error(`GitHub answered ${r.status} for ${path}`);
+  }
+
+  /** A problem is logged once until a look goes through. */
+  private say(line: string) {
+    if (line === this.said) return;
+    this.said = line;
+    (this.deps.log ?? console.error)(line);
+  }
+}

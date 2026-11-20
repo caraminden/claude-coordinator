@@ -3,10 +3,11 @@
 // Here the scripts are faked (a node one-liner stands in for PowerShell); the Windows side is untested until installed.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkJob, JobRunner, jobCommand, personIdle, redact, runCommand, runnerUse, Sampler } from '../public/runner-agent.mjs';
+import { checkJob, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
@@ -120,7 +121,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.equal(online.runners, true);
     // The cap and yield (#552): started from its folder with the cap and the agent's pid, its lines in the agent's log.
     const held = await until('keep-runners.ps1 to start', async () => existsSync(logFile) && /keep-runners: holding: .*/.exec(readFileSync(logFile, 'utf8'))?.[0]);
-    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid}`), held);
+    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid} -SqueezePercent 30`), held);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
     const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
@@ -233,4 +234,85 @@ test('a line that arrives in pieces comes back whole: the sampler reads one long
   const { code, output } = await runCommand({ command: '/bin/sh', args: ['-c', 'echo first; printf "%s" \'{"procs":[[1,0,"sy\'; sleep 0.2; printf "%s" \'stem32",2,3]]\'; sleep 0.2; echo "}"'] }, process.env);
   assert.equal(code, 0);
   assert.deepEqual(output.split('\n'), ['first', '{"procs":[[1,0,"system32",2,3]]}']);
+});
+
+// Ships go first (#1268): the agent's half. The units and runners are faked; systemctl is a recorder.
+function linuxRunners() {
+  const units = mkdtempSync(join(tmpdir(), 'squeeze-'));
+  const unit = (name: string, dir: string) => writeFileSync(join(units, name), `# citadel-repo=x\n[Service]\nExecStart=/bin/bash ${dir}/bin/runsvc.sh\n`);
+  unit('citadel-runner-caraminden-claude-coordinator.service', '/opt/r/actions-runner-claude-coordinator');
+  unit('citadel-runner-caraminden-claude-coordinator-2.service', '/opt/r/actions-runner-claude-coordinator-2');
+  unit('citadel-runner-caraminden-twireader.service', '/opt/r/actions-runner-twireader');
+  unit('citadel-runner-caraminden-twireader-2.service', '/opt/r/actions-runner-twireader-2');
+  writeFileSync(join(units, 'citadel-runner-agent.service'), 'ExecStart=/usr/bin/node agent.mjs\n');
+  const who: Record<string, { name: string; repo: string }> = {
+    '/opt/r/actions-runner-claude-coordinator': { name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/claude-coordinator' },
+    '/opt/r/actions-runner-claude-coordinator-2': { name: 'DESKTOP-G248IJ8-linux-2', repo: 'caraminden/claude-coordinator' },
+    '/opt/r/actions-runner-twireader': { name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/twireader' },
+    '/opt/r/actions-runner-twireader-2': { name: 'DESKTOP-G248IJ8-linux-2', repo: 'caraminden/twireader' },
+  };
+  const calls: string[] = [];
+  let clock = 0;
+  let working = ['/opt/r/actions-runner-claude-coordinator-2', '/opt/r/actions-runner-twireader'];
+  const squeeze = new LinuxSqueeze({
+    units, cores: 16, identity: (dir: string) => who[dir], now: () => clock,
+    procs: () => working.map((d, i) => ({ pid: i, ppid: 1, path: `${d}/bin/Runner.Worker`, cpu: 0, mem: 0 })),
+    run: async ({ args }: { args: string[] }) => (calls.push(`${args[2]} ${args[3]}`), { code: 0, output: '' }),
+  });
+  return { squeeze, calls, units, tick: (ms: number) => (clock += ms), work: (dirs: string[]) => (working = dirs) };
+}
+
+test('Linux: while a ship runs, every other runner unit gets a CPUQuota sharing about 30% of the cores among those running a job', async () => {
+  const { squeeze, calls, units } = linuxRunners();
+  try {
+    await squeeze.update(cleanShips([{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]));
+    // 16 cores: 30% is 480% of one core; one other unit (twireader's first) runs a job, so each other unit may use all of it.
+    assert.deepEqual(calls.sort(), [
+      'citadel-runner-caraminden-claude-coordinator.service CPUQuota=480%',
+      'citadel-runner-caraminden-twireader-2.service CPUQuota=480%',
+      'citadel-runner-caraminden-twireader.service CPUQuota=480%',
+    ]);
+  } finally {
+    rmSync(units, { recursive: true, force: true });
+  }
+});
+
+test('Linux: a quota changes only when its share does, and the squeeze lifts when the list empties or stops coming for 2 minutes', async () => {
+  const { squeeze, calls, units, tick, work } = linuxRunners();
+  try {
+    const ship = cleanShips([{ repo: 'CaraMinden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]);
+    await squeeze.update(ship);
+    calls.length = 0;
+    await squeeze.update(ship);
+    assert.deepEqual(calls, [], 'the same share is not set again every 15 seconds');
+    work(['/opt/r/actions-runner-claude-coordinator-2', '/opt/r/actions-runner-twireader', '/opt/r/actions-runner-twireader-2']);
+    await squeeze.update(ship);
+    assert.equal(calls.length, 3);
+    assert.ok(calls.every((c) => c.endsWith('CPUQuota=240%')), calls.join('; '));
+    calls.length = 0;
+    await squeeze.update([]);
+    assert.equal(calls.length, 3);
+    assert.ok(calls.every((c) => c.endsWith('CPUQuota=')), calls.join('; '));
+    await squeeze.update(ship);
+    calls.length = 0;
+    tick(SHIP_HOLD_MS - 1);
+    await squeeze.tick();
+    assert.deepEqual(calls, []);
+    tick(1);
+    await squeeze.tick();
+    assert.ok(calls.length === 3 && calls.every((c) => c.endsWith('CPUQuota=')), 'Citadel silent for 2 minutes: lifted');
+  } finally {
+    rmSync(units, { recursive: true, force: true });
+  }
+});
+
+test('Windows: the ships go to ships.json beside keep-runners.ps1 with a 2-minute expiry, malformed entries dropped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ships-'));
+  try {
+    writeShips(dir, cleanShips([{ repo: 'CaraMinden/Peek-Auras', runner: 'DESKTOP-G248IJ8' }, { repo: 5 }, null, { repo: 'a/b', runner: 'x'.repeat(201) }]), 1000);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'ships.json'), 'utf8')), { until: 1000 + SHIP_HOLD_MS, ships: [{ repo: 'caraminden/peek-auras', runner: 'desktop-g248ij8' }] });
+    assert.ok(!existsSync(join(dir, 'ships.json.new')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

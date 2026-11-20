@@ -334,9 +334,10 @@ It comes back by itself: the agent starts it at every boot and every install, an
 it ends with the agent. A job's limits stay on its processes while they run, so an agent install leaves the running
 runners capped.
 
-**Proof.** `keep-runners.ps1 -Prove` runs a throwaway job capped at 25%, whose process starts one CPU-burning
-grandchild per core, and reports whether the grandchildren are in the job, at below-normal priority, and what share of
-the PC the job used. `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
+**Proof.** `keep-runners.ps1 -Prove` runs a throwaway job capped at 50% with two slots in it, as the ship squeeze
+below sets them up: one with no cap of its own and one squeezed to 10% of the PC. Each starts one CPU-burning
+grandchild per core. It reports whether the grandchildren are in their slots and the job, at below-normal priority,
+what share of the PC each slot and the job used, and that the squeezed slot speeds up once its squeeze is lifted. `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
 PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\citadel-runner-agent\keep-runners.ps1 -Prove`.
 
 **WSL** (by hand, once, as Cara). WSL's VM has no job object Windows can cap; `.wslconfig` is what limits it
@@ -358,6 +359,56 @@ Runners take it at their next start, which the `wsl --shutdown` gives them.
 **What has been tested** (#552): the job type compiles with struct sizes matching Windows x64 (pwsh on perigee),
 every script passes the `.ps1` lint, and the agent's start of `keep-runners.ps1` runs in `test/runner-agent.test.ts`
 with a fake PowerShell. The job itself has only run where `-Prove` runs: on the desktop, at the agent's next install.
+
+## Ships go first (#1268)
+
+Cara, 2026-11-20, "Plan approved: build it this way. ("Ships go first on the CI desktop: while any scheme's ship run
+is going, every other runner there drops to about a third of the PC")". On Nov 19, 23:13-23:35 PST, Peek's Windows
+builds and the test box took the whole PC and Citadel's ship suite in WSL outran `land.sh`'s 6-minute wait. So while
+any scheme's ship run (a `land/…` branch: Peek's, Mandate's, ToC's, Citadel's) has a job on a runner here, every other
+runner on the PC is squeezed; Delve's PR checks are not ships (Cara, "No, ship branches only"). Nothing changes when
+no ship is running: the 75% cap above is all there is.
+
+- **Who knows a ship is running.** Citadel (`src/ci-ships.ts`) asks GitHub every 15 seconds which `land/…` runs are
+  in progress in each repo with runners here, and which self-hosted runner each running job is on, and sends that list
+  (repo and runner name) to both runner agents. Same-named runners in two repos are told apart by repo.
+- **Windows.** The agent writes the list to `C:\ProgramData\citadel-runner-agent\ships.json` with an expiry 2 minutes
+  out. `keep-runners.ps1` gives each runner its own slot, a job named `Global\CitadelCiRunner-<folder>` nested in the
+  shared 75% job, names it from the runner's `.runner` file, and re-reads `ships.json` every 2 seconds. While a ship
+  runs, the slots not on a ship share `-SqueezePercent` (30, `SQUEEZE_PERCENT` in `public/runner-agent.mjs`) of the
+  PC, split evenly among the ones running a job; a ship's slot keeps no cap of its own (only the shared 75%). A
+  runner whose slot can't nest in the shared job (a session runner already in its logon task's job) gets the same
+  share of the PC on its own job.
+- **WSL.** The Linux agent finds each `citadel-runner-*` service's folder, names it the same way, and sets
+  `systemctl set-property --runtime <unit> CPUQuota=` on every runner not on a ship: 30% of the VM's cores split among
+  the ones running a job (with `processors=16`, 480% for one, 240% for two). An empty `CPUQuota=` lifts it.
+- **Lifting.** An empty list lifts the squeeze at once (both agents get one every 15 seconds); if Citadel goes quiet
+  (restart, GitHub hiccup, the agent's link down), it lifts after 2 minutes on its own. A rate limit from GitHub pauses
+  the watch for 5 minutes, so the squeeze lifts meanwhile.
+- **Every scheme.** Any repo with a runner on this PC is watched, through its own scheme's GitHub login; nothing is
+  keyed to Citadel's repo. A squeezed build still runs, just slower, and returns to its normal share the moment the
+  ship ends.
+
+**Install (Cara, once, after this ships).** Both agents need the new scripts; the lines below reuse each agent's own
+token from its folder, so nothing needs copying. In PowerShell **as administrator**:
+
+```powershell
+$u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken (Get-Content -Raw "$env:ProgramData\citadel-runner-agent\machine-token").Trim()
+```
+
+It ends with `-Prove`, which now proves the squeeze too. Then, for WSL, in the distro as root (`wsl -d citadel-ci -u root`):
+
+```bash
+u='http://perigee.tail59477f.ts.net:8574'; f=$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN=$(cat /opt/citadel-runner-agent/machine-token) bash "$f" "$u"
+```
+
+Neither restarts a runner or the PC; running jobs keep going and are squeezed from the next sweep.
+
+**What has been tested** (#1268): the watcher against a fake GitHub (`test/ci-ships.test.ts`), the hub sending the
+list to both agents (`test/machine-relay.test.ts`), the Linux quotas and the ships file (`test/runner-agent.test.ts`),
+and `keep-runners.ps1`'s share maths, `ships.json` reading and runner naming in pwsh on perigee with the job calls
+faked (`test/keep-runners.test.ts`). Nested job objects themselves only run where `-Prove` runs: on the desktop, at
+the install above.
 
 ## Point the workflows at it
 

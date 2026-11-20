@@ -324,6 +324,8 @@ export class CiLoad {
   private flusher: ReturnType<typeof setInterval> | null = null;
   private first: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
+  // Each agent's newest sample since the server started: which repos have runners on its PC (runnerRepos).
+  private latest = new Map<number, Sample>();
 
   constructor(store: Store, deps: CiLoadDeps) {
     this.store = store;
@@ -363,6 +365,7 @@ export class CiLoad {
   /** A runner agent's sample, kept for 14 days. */
   add(machineId: number, body: unknown, now = Date.now()) {
     const data = JSON.stringify(cleanSample(body, now));
+    this.latest.set(machineId, JSON.parse(data));
     this.pending.push({ machine: machineId, at: now, data });
     if (this.recent) {
       this.recent.push({ machine: machineId, at: now, s: JSON.parse(data) });
@@ -371,8 +374,14 @@ export class CiLoad {
     this.kept = null;
   }
 
+  /** The repos (owner/name, lowercase) whose runners an agent's newest sample in the last 10 minutes lists (#1268). */
+  runnerRepos(now = Date.now()): string[] {
+    return [...new Set([...this.latest.values()].filter((s) => now - s.at < 10 * MIN).flatMap((s) => s.runners.map((r) => r.repo)).filter(Boolean))];
+  }
+
   /** A deleted machine's samples go with it (its rows cascade). */
   forget(machineId: number) {
+    this.latest.delete(machineId);
     this.recent = this.recent?.filter((r) => r.machine !== machineId) ?? null;
     this.pending = this.pending.filter((r) => r.machine !== machineId);
     this.kept = null;

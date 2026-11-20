@@ -17,7 +17,7 @@
 // It dials out to Citadel like the machine agent (public/machine-agent.mjs) and holds an event stream open, so the
 // PC needs no open port. tools/ci-runner/install-runner-agent.ps1 installs it; tools/ci-runner/README.md says how.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, readdirSync, readlinkSync, realpathSync, statfsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, hostname, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -312,7 +312,7 @@ const KEEPER_AGAIN_MS = 60_000;
 export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows') {
   return {
     command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid)],
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid), '-SqueezePercent', String(SQUEEZE_PERCENT)],
   };
 }
 
@@ -332,6 +332,89 @@ export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
     log(`keep-runners.ps1 ended (exit ${code}); starting it again in ${Math.round(again / 1000)}s.`);
     setTimeout(() => keepRunners(dir, log, again), again).unref();
   });
+}
+
+// ---- Ships go first (#1268; Cara, 2026-11-20, "Plan approved: build it this way") ----
+// Citadel sends the runners on a ship run (any scheme's land/ branch) every 15 seconds. While a list names any, every
+// other runner on the PC is held to SQUEEZE_PERCENT of it together, shared among those running a job; a list that
+// stops coming lifts it after SHIP_HOLD_MS, so a Citadel that went away never leaves runners squeezed.
+export const SQUEEZE_PERCENT = 30;
+export const SHIP_HOLD_MS = 2 * 60_000;
+
+/** Citadel's list, kept to well-formed entries, names and repos lowercase. */
+export function cleanShips(raw) {
+  const text = (v) => (typeof v === 'string' && v.length <= 200 ? v.toLowerCase() : '');
+  return (Array.isArray(raw) ? raw : []).map((s) => ({ repo: text(s?.repo), runner: text(s?.runner) })).filter((s) => s.repo && s.runner).slice(0, 200);
+}
+
+/** Windows: the list for keep-runners.ps1, which reads ships.json beside it every 2 seconds, with its expiry. */
+export function writeShips(dir, ships, now = Date.now()) {
+  const file = join(dir, 'ships.json');
+  writeFileSync(`${file}.new`, JSON.stringify({ until: now + SHIP_HOLD_MS, ships }));
+  renameSync(`${file}.new`, file);
+}
+
+/**
+ * Linux (WSL): each Citadel runner unit's CPUQuota, set at runtime (gone at the next boot): about SQUEEZE_PERCENT of
+ * the cores shared among the units off the ship running a job, while a ship runs; none otherwise.
+ */
+export class LinuxSqueeze {
+  constructor({ run = runCommand, units = '/etc/systemd/system', cores = cpus().length, procs = linuxProcs, identity = runnerIdentity, now = Date.now, log = () => {} } = {}) {
+    Object.assign(this, { run, units, cores, procs, identity, now, log, ships: [], until: 0, set: new Map(), said: '', queue: Promise.resolve() });
+  }
+
+  /** Each Citadel runner unit with its runner's repo and name, from the unit add-runner.sh wrote and its .runner. */
+  runners() {
+    let names = [];
+    try { names = readdirSync(this.units).filter((f) => /^citadel-runner-.+\.service$/.test(f)); } catch {}
+    return names.flatMap((unit) => {
+      try {
+        const dir = /^ExecStart=\/bin\/bash (.+)\/bin\/runsvc\.sh$/m.exec(readFileSync(join(this.units, unit), 'utf8'))?.[1];
+        return dir ? [{ unit, dir, ...this.identity(dir) }] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  update(ships) {
+    this.ships = ships;
+    this.until = this.now() + SHIP_HOLD_MS;
+    return this.next();
+  }
+
+  /** Lifts the squeeze once Citadel hasn't renewed it in time. */
+  tick() {
+    if (!this.until || this.now() < this.until) return Promise.resolve();
+    this.ships = [];
+    this.until = 0;
+    return this.next();
+  }
+
+  /** One apply at a time: a list that comes while systemctl runs waits its turn. */
+  next() {
+    this.queue = this.queue.then(() => this.apply());
+    return this.queue;
+  }
+
+  async apply() {
+    const onShip = (r) => this.ships.some((s) => s.repo === r.repo.toLowerCase() && s.runner === r.name.toLowerCase());
+    const runners = this.runners();
+    const others = this.ships.length ? runners.filter((r) => !onShip(r)) : [];
+    const working = new Set(this.procs().map((p) => /^(.*)\/bin\/Runner\.Worker$/.exec(p.path)?.[1]).filter(Boolean));
+    const busy = Math.max(1, others.filter((r) => working.has(r.dir)).length);
+    const quota = Math.max(10, Math.round((this.cores * SQUEEZE_PERCENT) / busy));
+    for (const r of runners) {
+      const want = others.includes(r) ? `${quota}%` : '';
+      if ((this.set.get(r.unit) ?? '') === want) continue;
+      const { code, output } = await this.run({ command: 'systemctl', args: ['set-property', '--runtime', r.unit, `CPUQuota=${want}`] }, process.env, 30_000);
+      if (code === 0) this.set.set(r.unit, want);
+      else this.log(`Couldn't set ${r.unit}'s CPUQuota to "${want}": ${output.split('\n').at(-1)}`);
+    }
+    const now = this.ships.length ? `A ship runs on ${this.ships.map((s) => `${s.repo} ${s.runner}`).join(', ')}: ${others.length} other Linux runner(s) held to CPUQuota=${quota}% each.` : 'No ship runs: every Linux runner has its normal share again.';
+    if (now !== this.said && (this.ships.length || this.said)) this.log(now);
+    this.said = now;
+  }
 }
 
 /** Server-sent events from a fetch body, one parsed JSON message per event. */
@@ -411,6 +494,19 @@ async function main() {
   };
   sample();
   if (os === 'windows') keepRunners(jobs.dir, log);
+  const squeeze = os === 'linux' ? new LinuxSqueeze({ log }) : null;
+  if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
+  let shipError = '';
+  const ships = async (raw) => {
+    try {
+      if (squeeze) await squeeze.update(cleanShips(raw));
+      else writeShips(jobs.dir, cleanShips(raw));
+      shipError = '';
+    } catch (err) {
+      if (err.message !== shipError) log(`Couldn't pass on the ships (said once): ${err.message}`);
+      shipError = err.message;
+    }
+  };
 
   let retry = 0;
   for (;;) {
@@ -436,6 +532,8 @@ async function main() {
           throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
         } else if (msg.runners) {
           answer(msg.runners);
+        } else if (msg.ships) {
+          ships(msg.ships);
         }
       }
       throw new Error('the connection closed');

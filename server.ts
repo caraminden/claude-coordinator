@@ -32,6 +32,7 @@ import { ciFinished, postCard, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { ShipWatch } from './src/ci-ships.ts';
 import { MachineJobs } from './src/machine-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
@@ -1406,6 +1407,18 @@ const ciLoad = new CiLoad(store, {
   mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
 });
 if (!BOOT_CHECK) ciLoad.start();
+// Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
+// agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
+const shipWatch = new ShipWatch({
+  // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
+  repos: () => [...ciLoad.runnerRepos(), ...store.listProjects().filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted'))).map((p) => repoSlug(p.repo_url) ?? '')].filter(Boolean),
+  as: (repo) => {
+    const p = store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo);
+    return p ? githubOf(p.repo_dir!) : null;
+  },
+  send: (ships) => machines.sendShips(ships),
+});
+if (!BOOT_CHECK) shipWatch.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));

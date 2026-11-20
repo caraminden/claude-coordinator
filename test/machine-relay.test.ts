@@ -146,3 +146,21 @@ test('a lend keeps gpu_off only when it is true', () => {
   assert.deepEqual(cleanLend({ server: null, workspaces: [], gpu_off: true }), { server: null, workspaces: [], gpu_off: true });
   assert.deepEqual(cleanLend({ server: null, workspaces: [], gpu_off: 'yes' }), { server: null, workspaces: [] });
 });
+
+test('ships (#1268) go to every runner agent at each look, and to one that connects while a ship runs, never to a lent machine', () => {
+  const { store, relay, box } = world();
+  const win = store.createMachine('win-runners', 'y', 'Cara');
+  const wsl = store.createMachine('wsl-runners', 'z', 'Cara');
+  const lent = stream();
+  const windows = stream();
+  relay.connectAgent(box, lent, { host: 'h', command: 'fake-mcp' });
+  relay.connectAgent(win, windows, { host: 'pc', command: 'citadel runner agent', runners: true, os: 'windows' });
+  const ships = [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8' }];
+  relay.sendShips(ships);
+  const linux = stream();
+  relay.connectAgent(wsl, linux, { host: 'wsl', command: 'citadel runner agent', runners: true, os: 'linux' });
+  relay.sendShips([]);
+  assert.deepEqual(windows.sent.filter((m) => m.ships), [{ ships }, { ships: [] }]);
+  assert.deepEqual(linux.sent.filter((m) => m.ships), [{ ships }, { ships: [] }]);
+  assert.ok(!lent.sent.some((m) => m.ships));
+});

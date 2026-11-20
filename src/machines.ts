@@ -407,6 +407,7 @@ export class MachineRelay {
     if (mcp) this.store.updateMachine(machine.id, mcp);
     const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners || info.managed ? [] : ['mcp'], managed: !info.runners && !!info.managed, found: [], workspaces: [], problems: [], timers: [], runners: !!info.runners, os: info.os ?? 'windows' };
     this.agents.set(machine.id, agent);
+    if (agent.runners && this.shipList.length) res.write(`data: ${JSON.stringify({ ships: this.shipList })}\n\n`);
     // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent would refuse as busy.
     this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
     this.onChange();
@@ -531,6 +532,13 @@ export class MachineRelay {
   /** Machines whose CI runner agent for `os` (#510) is connected now (#328). */
   runnerMachines(os: 'windows' | 'linux' = 'windows'): Machine[] {
     return this.store.listMachines().filter((m) => { const a = this.agents.get(m.id); return a?.runners && a.os === os; });
+  }
+
+  /** The runners on a ship run's job now (#1268), sent to every runner agent at each look and to one as it connects. */
+  private shipList: { repo: string; runner: string }[] = [];
+  sendShips(ships: { repo: string; runner: string }[]) {
+    this.shipList = ships;
+    for (const agent of this.agents.values()) if (agent.runners) agent.res.write(`data: ${JSON.stringify({ ships })}\n\n`);
   }
 
   /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */

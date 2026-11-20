@@ -322,6 +322,9 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   return { spec, size };
 }
 
+/** Plan cards (by event id) a person is answering right now: a second answer to the same card is refused (#1287 F3). */
+const deciding = new Set<number>();
+
 export const ticketRoutes: Route[] = [
   {
     // An ultra review's size, before the person confirms (#432). Person-only like starting one.
@@ -895,57 +898,66 @@ export const ticketRoutes: Route[] = [
       if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
       if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
-      if (card.machine && notes === null) {
-        const machine = store.getMachine(card.machine.id);
-        if (!machine) throw new HttpError(409, `${card.machine.name} was removed`);
-        if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
-        // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
-        if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
-        await patchMachine(app, session, machine, { notes: card.plan });
+      // One answer per card: the key, the notes and the install each take time (keytool, a write) before the card says "approved",
+      // so a second click in that gap would run them again after the first one's answer. Held until the card's new status is readable.
+      if (deciding.has(event.id)) throw new HttpError(409, `${card.by}'s card is being answered right now`);
+      deciding.add(event.id);
+      try {
+        if (card.machine && notes === null) {
+          const machine = store.getMachine(card.machine.id);
+          if (!machine) throw new HttpError(409, `${card.machine.name} was removed`);
+          if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${card.machine.owner ? `${card.machine.owner}, who owns ${card.machine.name},` : 'an admin'}${card.machine.owner ? ' or an admin' : ''} can approve its notes`);
+          // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
+          if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
+          await patchMachine(app, session, machine, { notes: card.plan });
+        }
+        // A host tool installs software on the server every scheme's turns share: a member of the Citadel scheme approves it (Josh, 2026-11-19).
+        if (card.hostTool && notes === null && !session.admin) throw new HttpError(403, `Only a member of the ${APP_NAME} scheme can approve installing software on the server`);
+        if (ins && notes === null) {
+          // Save anyway writes what the card showed, or nothing: a Settings save since then isn't overwritten unseen.
+          if (ins.scope === 'citadel' && !session.admin) throw new HttpError(403, `Only a ${APP_NAME} admin or a member of the ${APP_NAME} scheme can save the ${APP_NAME}-wide text`);
+          const now = ins.scope === 'citadel' ? store.appInstructions().text : store.getProject(ins.project)?.instructions;
+          if (now !== ins.old) throw new HttpError(409, 'The instructions changed since this edit was held; ask the minion to make it again');
+          await saveInstructions(app, id, ins, `${ins.by}, saved by ${session.name}`);
+        }
+        // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
+        if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
+        const result = { status: body.verdict === 'approve' ? 'approved' : fixed || body.verdict === 'reject' ? 'rejected' : 'revising', by: session.name, at: Date.now() };
+        store.setEventData(event.id, { ...card, ...result });
+        runner.emit(id, 'plan_result', { id: card.id, ...result });
+        runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`);
+        deliverAnswer(app, id, session.name, ins
+          ? notes === null
+            ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'
+            : body.verdict === 'reject'
+              ? `Cancelled: your instructions edit is dropped and nothing was saved. Don't make it again unless asked.${notes ? `\n\n${notes}` : ''}`
+              : `Work it in: nothing was saved. Put your change where the card shows it is already said, or reword it to point there in a few words, then call edit_instructions again.${notes ? `\n\n${notes}` : ''}`
+          : card.hostTool
+          ? notes === null
+            ? card.hostTool.source === 'pacman'
+              ? `Approved: ${toolLabel(card.hostTool)} goes in the host tools list. You get a message saying who runs the install.`
+              : `Approved: ${toolLabel(card.hostTool)} is installing on the server now (\`${card.hostTool.command}\`). You get a message once it's in. Keep working on what doesn't depend on it.`
+            : `Rejected installing ${toolLabel(card.hostTool)}; nothing was installed.${notes ? `\n\n${notes}` : ''}`
+          : card.releaseKey
+          ? notes === null
+            ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
+            : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
+          : card.machine
+          ? notes === null
+            ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
+            : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
+          : notes === null
+            ? `Plan approved: build it this way. ("${card.summary}")`
+            : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
+          { plan: { planId: card.id, verdict: body.verdict } });
+        // After the answer, so its message comes first; it runs behind the click (an install can take minutes).
+        if (card.hostTool && notes === null) void approveHostTool(app, id, card.hostTool, session.name);
+        personWrote(ctx);
+        return json(res, 202, ticketView(app, id));
+      } finally {
+        await ownWrites();
+        deciding.delete(event.id);
       }
-      // A host tool installs software on the server every scheme's turns share: a member of the Citadel scheme approves it (Josh, 2026-11-19).
-      if (card.hostTool && notes === null && !session.admin) throw new HttpError(403, `Only a member of the ${APP_NAME} scheme can approve installing software on the server`);
-      if (ins && notes === null) {
-        // Save anyway writes what the card showed, or nothing: a Settings save since then isn't overwritten unseen.
-        if (ins.scope === 'citadel' && !session.admin) throw new HttpError(403, `Only a ${APP_NAME} admin or a member of the ${APP_NAME} scheme can save the ${APP_NAME}-wide text`);
-        const now = ins.scope === 'citadel' ? store.appInstructions().text : store.getProject(ins.project)?.instructions;
-        if (now !== ins.old) throw new HttpError(409, 'The instructions changed since this edit was held; ask the minion to make it again');
-        await saveInstructions(app, id, ins, `${ins.by}, saved by ${session.name}`);
-      }
-      // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
-      if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
-      const result = { status: body.verdict === 'approve' ? 'approved' : fixed || body.verdict === 'reject' ? 'rejected' : 'revising', by: session.name, at: Date.now() };
-      store.setEventData(event.id, { ...card, ...result });
-      runner.emit(id, 'plan_result', { id: card.id, ...result });
-      runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`);
-      deliverAnswer(app, id, session.name, ins
-        ? notes === null
-          ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'
-          : body.verdict === 'reject'
-            ? `Cancelled: your instructions edit is dropped and nothing was saved. Don't make it again unless asked.${notes ? `\n\n${notes}` : ''}`
-            : `Work it in: nothing was saved. Put your change where the card shows it is already said, or reword it to point there in a few words, then call edit_instructions again.${notes ? `\n\n${notes}` : ''}`
-        : card.hostTool
-        ? notes === null
-          ? card.hostTool.source === 'pacman'
-            ? `Approved: ${toolLabel(card.hostTool)} goes in the host tools list. You get a message saying who runs the install.`
-            : `Approved: ${toolLabel(card.hostTool)} is installing on the server now (\`${card.hostTool.command}\`). You get a message once it's in. Keep working on what doesn't depend on it.`
-          : `Rejected installing ${toolLabel(card.hostTool)}; nothing was installed.${notes ? `\n\n${notes}` : ''}`
-        : card.releaseKey
-        ? notes === null
-          ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
-          : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
-        : card.machine
-        ? notes === null
-          ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
-          : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
-        : notes === null
-          ? `Plan approved: build it this way. ("${card.summary}")`
-          : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
-        { plan: { planId: card.id, verdict: body.verdict } });
-      // After the answer, so its message comes first; it runs behind the click (an install can take minutes).
-      if (card.hostTool && notes === null) void approveHostTool(app, id, card.hostTool, session.name);
-      personWrote(ctx);
-      return json(res, 202, ticketView(app, id));
     },
   },
   {

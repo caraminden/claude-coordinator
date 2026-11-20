@@ -161,6 +161,20 @@ test('make_release_key is offered with the home apps, and its call posts the car
   assert.equal((await events('plan')).at(-1).releaseKey.app, 'later');
 });
 
+test('approving and rejecting one key card at the same moment gives the minion one answer (#1287 F3)', async () => {
+  await idle();
+  const card = (await events('plan')).filter((c: any) => c.releaseKey?.app === 'later').at(-1);
+  assert.equal(card.status, 'pending');
+  const before = (await events('user_message')).length;
+  const both = await Promise.allSettled([verdict('Dana', card.id, 'approve'), verdict('Cara', card.id, 'revise', 'No')]);
+  assert.deepEqual(both.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+  assert.match(String((both.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason), /409/);
+  await idle();
+  assert.equal((await events('user_message')).length, before + 1, 'one answer reached the minion');
+  const done = (await events('plan')).find((c: any) => c.id === card.id);
+  assert.equal(existsSync(join(keyDir, 'later-release.jks')), done.status === 'approved', 'the card says what happened');
+});
+
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, whose scheme's apps are twi and later. */
 async function mcp(method: string, params: object) {
   const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {

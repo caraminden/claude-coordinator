@@ -45,7 +45,8 @@ import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
-import { errorText, followOrigins } from './src/scheme-repo.ts';
+import { followOrigins } from './src/scheme-repo.ts';
+import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { curatorTarget } from './src/memory-curator.ts';
@@ -144,7 +145,6 @@ const DATA_DIR = process.env.DATA_DIR ?? DEFAULT_DATA_DIR;
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
 // every thread gets full access.
-const THREAD_PERMISSION_MODE = 'bypassPermissions';
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
@@ -647,25 +647,8 @@ if (!BOOT_CHECK) {
  * caller sends its first message. Properties must be checked already. Throws HttpError 500, leaving
  * nothing behind, when the worktree can't be made.
  */
-async function newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null; build?: number | null }, by: string) {
-  const { id, number } = store.createTicket({ project_id: project.id, title: m.title, permission_mode: THREAD_PERMISSION_MODE, created_by: by });
-  const { notes } = store.props.set('minion', id, project.id, m.props, by);
-  store.props.startStage(id);
-  if (m.model || m.effort) store.updateTicket(id, { model: m.model ?? null, effort: m.effort ?? null });
-  // Its build before its worktree: a build with a branch is what it branches from (build branches).
-  if (m.build) {
-    store.updateTicket(id, { build: m.build });
-    store.props.setBuild(id, m.build, by);
-  }
-  try {
-    const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, m.title, m.build ?? null);
-    store.setTicketDir(id, dir.cwd, dir.branch);
-    await ownWrites(); // a request's reply shows its folder and branch (#1244)
-  } catch (err: any) {
-    store.deleteTicket(id);
-    throw new HttpError(500, `Could not create working directory: ${errorText(err)}`);
-  }
-  return { id, number: number!, notes };
+async function newMinion(project: Project, m: NewMinionSpec, by: string) {
+  return makeMinion(store, project, m, by, (id, number) => createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number, m.title, m.build ?? null), ownWrites); // a request's reply shows its folder and branch (#1244)
 }
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked

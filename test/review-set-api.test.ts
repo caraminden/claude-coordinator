@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -316,4 +317,40 @@ test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, e
     assert.equal((await tool(minion.id, { slug: 'art', ...f })).error, true, JSON.stringify(f));
   }
   assert.equal((await one('art')).model, 'sonnet');
+});
+
+test("a scheme's own reviewing agent files are entries: read live, guessed or kind:, one row with a same-named entry, and gone when deleted", async () => {
+  // Not Citadel: a scheme with its own repo holding three agents (#1089).
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Agent Files' } });
+  const repo = join(root, 'agent-files-repo');
+  const agents = join(repo, '.claude', 'agents');
+  mkdirSync(agents, { recursive: true });
+  writeFileSync(join(agents, 'art-critic.md'), '---\nname: art-critic\ndescription: Judges new art against the art bible\n---\n\nYou judge art.\n');
+  writeFileSync(join(agents, 'art-professor.md'), '---\nname: art-professor\ndescription: Teaches fixes for art the critic keeps failing\n---\n\nYou teach.\n');
+  writeFileSync(join(agents, 'balance-tuner.md'), '---\nname: balance-tuner\ndescription: Tunes numbers\n---\nTune.\n');
+  writeFileSync(join(agents, 'copy-judge.md'), '---\nname: copy-judge\ndescription: Judges copy\nkind: none\n---\nNo.\n');
+  const url = `/api/projects/${p.id}/reviews`;
+  // A rubric entry made before its file came is one row with that file's text (Q4 "One").
+  assert.equal((await call(url, { method: 'POST', body: { slug: 'art-professor', name: 'Art professor', kind: 'teacher', body: '## Rules\nFix palettes first.' } })).status, 201);
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
+  db.close();
+  const { data } = await call(url);
+  const by = (s: string) => data.entries.find((e: any) => e.slug === s);
+  assert.equal(by('balance-tuner'), undefined, 'not a reviewing agent');
+  assert.equal(by('copy-judge'), undefined, 'kind: none leaves it off');
+  const critic = by('art-critic');
+  assert.deepEqual([critic.kind, critic.file, critic.what, critic.agent?.path, critic.agent?.text.trim()], ['critic', '.claude/agents/art-critic.md', 'Judges new art against the art bible', '.claude/agents/art-critic.md', 'You judge art.']);
+  const prof = by('art-professor');
+  assert.deepEqual([prof.file, prof.agent?.path, prof.agent?.text.trim(), data.entries.filter((e: any) => e.slug === 'art-professor').length], [null, '.claude/agents/art-professor.md', 'You teach.', 1]);
+  // Its additions and switch save; its text, kind and name stay the file's.
+  assert.equal((await call(`${url}/art-critic`, { method: 'PATCH', body: { body: 'Pixel art at whole scales.', version: critic.version } })).status, 200);
+  const kindTry = await call(`${url}/art-critic`, { method: 'PATCH', body: { kind: 'reviewer', version: critic.version + 1 } });
+  assert.equal(kindTry.status, 400);
+  assert.match(kindTry.data.error, /agent file \.claude\/agents\/art-critic\.md/);
+  assert.equal((await call(`${url}/art-critic`, { method: 'PATCH', body: { on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], version: critic.version + 1 } })).status, 200);
+  // The file is read live: deleted, the entry stays with no text, so the page can say it's gone.
+  rmSync(join(agents, 'art-critic.md'));
+  const gone = (await call(url)).data.entries.find((e: any) => e.slug === 'art-critic');
+  assert.deepEqual([gone.file, gone.agent, gone.body], ['.claude/agents/art-critic.md', null, 'Pixel art at whole scales.']);
 });

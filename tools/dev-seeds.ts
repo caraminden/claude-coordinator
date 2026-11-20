@@ -9,6 +9,7 @@ import { deflateSync } from 'node:zlib';
 import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import { projectDir } from '../src/workspace.ts';
+import { readAgentFiles } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
@@ -1012,6 +1013,15 @@ mock.boards('#takes', { boards: [
       mk('copy-critic', 'Copy critic', 'critic', { gate: 'block', on_fail: [{ after: 1, to: 'layout-critic' }, { after: 3, to: 'person' }] });
       mk('a11y-checker', 'Accessibility checker', 'checker', { stage: 'ship', context: { requester: true } });
       r.ensureBuiltIns(id);
+      // The scheme's own agent files (#1089): a shader critic read from its repo, its text live, and a sound one since deleted.
+      const repo = c.project.repo_dir ?? join(projectDir(c.dataDir, id), 'repo');
+      mkdirSync(join(repo, '.claude', 'agents'), { recursive: true });
+      if (!c.project.repo_dir) c.store.setProjectRepoDir(id, repo);
+      writeFileSync(join(repo, '.claude', 'agents', 'shader-critic.md'), '---\nname: shader-critic\ndescription: Judges a new or changed shader in motion, against the look bible\n---\n\nYou judge shaders from a clip, never a still.\n\n## Blockers\n\n- Banding in a gradient\n- A flash brighter than the UI\n');
+      writeFileSync(join(repo, '.claude', 'agents', 'sound-critic.md'), '---\nname: sound-critic\ndescription: Judges new sounds\n---\nListen.\n');
+      r.ensureAgents(id, readAgentFiles(repo));
+      rmSync(join(repo, '.claude', 'agents', 'sound-critic.md'));
+      r.save(id, 'shader-critic', { body: 'Our water shader foams at the shore: judge the foam line too.\n' }, c.who, 'Edited by hand');
       mk('art-professor', 'Art professor', 'teacher', { triggers: {}, body: '## For fixes\n\nRead the palette ramp first; name a tone, a pixel size and a frame range.\n' });
       mk('art-critic', 'Art critic', 'critic', { triggers: { creative: 'new or changed art' }, on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }] });
       const now = Date.now();

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { readProposals } from '../src/review-describe.ts';
-import { BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { agentKind, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -441,4 +441,49 @@ test('a critic hands a second fail to its teacher entry: the file keeps the step
   set.save(9, 'art-teacher', { enabled: false }, 'Cara', 'off');
   renderSet(set.list(9), dir);
   assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: person after 3 fails\n/);
+});
+
+test("a scheme's agent files: kind from name, description or kind:, one entry each unless a same-named one exists, and the turn hears them", () => {
+  assert.equal(agentKind('art-critic', ''), 'critic');
+  assert.equal(agentKind('claim-referee', 'Judges claims'), 'referee');
+  assert.equal(agentKind('art-professor', 'Judges nothing'), 'teacher', 'the name wins over the description');
+  assert.equal(agentKind('helper', 'Reviews migrations before a ship'), 'reviewer');
+  assert.equal(agentKind('balance-tuner', 'Tunes numbers'), null);
+  assert.equal(agentKind('art-critic', '', 'none'), null, 'kind: none leaves a critic off');
+  assert.equal(agentKind('balance-tuner', '', 'audit'), 'audit');
+  const repo = join(root, 'agents-repo');
+  const dir = join(repo, '.claude', 'agents');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'Shader_Critic.md'), '---\nname: shader-critic\ndescription: "Judges shaders"\n---\n\nYou judge shaders.\n');
+  writeFileSync(join(dir, 'art-professor.md'), '---\ndescription: Teaches art fixes\n---\nTeach.\n');
+  writeFileSync(join(dir, 'tuner.md'), '---\ndescription: Tunes\nkind: checker\n---\nCheck.\n');
+  writeFileSync(join(dir, 'notes.txt'), 'not an agent');
+  const files = readAgentFiles(repo);
+  assert.deepEqual(files.map((f) => [f.slug, f.kind, f.path, f.description]), [
+    ['shader-critic', 'critic', '.claude/agents/Shader_Critic.md', 'Judges shaders'],
+    ['art-professor', 'teacher', '.claude/agents/art-professor.md', 'Teaches art fixes'],
+    ['tuner', 'checker', '.claude/agents/tuner.md', 'Tunes'],
+  ]);
+  assert.equal(files[0].text.trim(), 'You judge shaders.');
+  assert.deepEqual(readAgentFiles(null), []);
+  assert.deepEqual(readAgentFiles(join(root, 'no-such-repo')), []);
+
+  const { set } = fresh();
+  set.create(3, { slug: 'art-professor', name: 'Art professor', kind: 'teacher', body: 'Fix palettes first.' }, 'Josh');
+  set.ensureAgents(3, files);
+  set.ensureAgents(3, files);
+  const own = set.list(3).filter((e) => e.source?.startsWith('agent:'));
+  assert.deepEqual(own.map((e) => [e.slug, e.kind, e.source]), [['shader-critic', 'critic', 'agent:.claude/agents/Shader_Critic.md'], ['tuner', 'checker', 'agent:.claude/agents/tuner.md']], 'once each; the same-named entry stays the scheme\'s');
+  assert.throws(() => set.save(3, 'shader-critic', { kind: 'reviewer' }, 'Josh', 'x'), /agent file \.claude\/agents\/Shader_Critic\.md/);
+  set.save(3, 'shader-critic', { body: 'Look at banding.' }, 'Josh', 'Edited by hand');
+  set.save(3, 'tuner', { enabled: false }, 'Josh', 'Turned off');
+  // The file's text is its own: it isn't a rubric in the set or the run order.
+  assert.equal(renderSet(set.list(3), join(root, 'agents-set')), 1, 'only the same-named rubric entry');
+  assert.deepEqual(readdirSync(join(root, 'agents-set')), ['art-professor.md']);
+  assert.doesNotMatch(orderLine(set.list(3)), /shader-critic|tuner/);
+  const kdir = join(root, 'agents-kit');
+  const line = kitLine(set.list(3), kdir);
+  assert.match(line, /switched off its own agents .*tuner.*\.claude\/agents\/tuner\.md/);
+  assert.match(line, /own reviewing agents, whose text is their file: .*shader-critic/);
+  assert.match(readFileSync(join(kdir, 'shader-critic.md'), 'utf8'), /\.claude\/agents\/Shader_Critic\.md[\s\S]*Look at banding/);
 });

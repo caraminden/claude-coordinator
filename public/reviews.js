@@ -333,7 +333,7 @@ function detail() {
     h('div', { class: 'rv-switch-row' }, sw, h('span', {}, e.enabled ? 'On' : 'Off')),
     e.slug === 'pre-ship-review' ? preShipNote(e) : null,
     e.kit || e.file || e.kind === 'teacher' ? null : judging(e),
-    e.kit || e.file ? section('What it does', h('p', {}, e.what || "Its file has no description: add a description line to its frontmatter.")) : null,
+    e.kit || e.agent && e.file ? section('What it does', h('p', {}, e.what || "Its file has no description: add a description line to its frontmatter.")) : null,
     e.kind === 'teacher' ? section('When it runs', h('p', {}, e.kit || e.file ? e.when : 'When a critic hands it a stubborn fail'), handOffs(e))
       : section('Reviews', h('p', {}, e.kit || e.file ? e.when : whenLine(e)), e.kit || e.file ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
     e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path),

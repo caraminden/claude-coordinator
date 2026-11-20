@@ -40,7 +40,7 @@ const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[]; a
   const file = isAgentFile(e) ? e.source!.slice(6) : null;
   const own = kit ? undefined : (more.agents ?? []).find((a) => (file ? a.path === file : !isKit(e) && a.slug === e.slug));
   return {
-    ...e, kit: !!kit, file, what: kit?.what ?? (file ? own?.description || null : null), when: kit?.when ?? (file ? 'When a skill, the scheme\'s instructions or a minion calls it: its description says when' : whenText(e.triggers) || 'ask'),
+    ...e, kit: !!kit, file, what: kit?.what ?? (file ? own?.description || null : null), when: kit?.when ?? (file ? 'When a skill or a minion calls it, as its description says' : whenText(e.triggers) || 'ask'),
     text: kit || file ? e.body : renderEntry(e, { verdicts: more.verdicts }),
     agent: kit ? kitAgent(e.slug) : own ? { path: own.path, text: own.text } : null,
     calibrated: e.calibration ? calibratedText(e.calibration) : null,

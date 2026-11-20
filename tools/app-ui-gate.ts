@@ -3,7 +3,7 @@
 // name the kit doesn't define), run on one app's own pages from its repo or CI.
 //
 //   node tools/app-ui-gate.ts --app-dir <app repo> [--paths /,/settings] [--mode report|gate] [--out <dir>]
-//        [--name <app>] [--cmd 'node server.ts'] [--workdir app] [--env K=V ...] [--widths 1440,390] [--health /healthz]
+//        [--allow <json>] [--name <app>] [--cmd 'node server.ts'] [--workdir app] [--env K=V ...] [--widths 1440,390] [--health /healthz]
 //
 // It starts the app as Citadel would (citadel-app.json's start, workdir and env, on a free port with BASE_PATH,
 // CITADEL_URL and CITADEL_KEYS pointing at the fake Citadel), so the app must be built already. Pages load
@@ -38,6 +38,45 @@ export function contractFindings(texts: Record<string, string>) {
   return out;
 }
 
+const WORDS: [string, RegExp][] = [
+  ['contraption', /\bcontraptions?\b/i], ['minion', /\bminions?\b/i], ['scheme', /\bschemes?\b/i], ['taskmaster', /\btaskmasters?\b/i],
+  ['grunt', /\bgrunts?\b/i], ['/home/', /\/home\//], ['shared/project', /shared\/project/], ['tickets/', /\btickets\//],
+];
+export type Allow = { word: string; file?: string; reason: string };
+
+/** Citadel's own words, or a raw server path, in text an app's people read (#1181). The line it can draw: in a page's HTML
+ *  that is its text plus title, alt, placeholder, aria-label and value attributes (script, style and comments are cut out);
+ *  in a script it is the string literals with a space in them (prose), since a bare identifier or URL is code. It can't tell
+ *  a prose string a person sees from one that only goes to a log, and it doesn't read an app agent's prompt, so a hit in a
+ *  script is a candidate; an allow-list entry (word, optional file, a reason) records a real exception. */
+export function wordFindings(texts: Record<string, string>, allow: Allow[]) {
+  for (const a of allow) if (!a?.reason?.trim() || !a.word) throw new Error('an allow-list entry needs a word and a reason');
+  const out: { file: string; where: 'page' | 'script'; word: string; text: string }[] = [];
+  const add = (file: string, where: 'page' | 'script', text: string) => {
+    for (const [word, re] of WORDS) {
+      const m = re.exec(text);
+      if (m && !allow.some((a) => a.word.toLowerCase() === word && (!a.file || a.file === file)) && !out.some((o) => o.file === file && o.word === word && o.where === where))
+        out.push({ file, where, word, text: text.slice(Math.max(0, m.index - 30), m.index + 40).replace(/\s+/g, ' ').trim() });
+    }
+  };
+  for (const [file, raw] of Object.entries(texts)) {
+    if (/\.css$/.test(file)) continue;
+    if (/\.m?js$/.test(file)) { scriptStrings(raw).forEach((t) => add(file, 'script', t)); continue; }
+    let h = raw.replace(/<!--[\s\S]*?-->/g, '');
+    for (const m of h.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) scriptStrings(m[1]).forEach((t) => add(file, 'script', t));
+    h = h.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '');
+    for (const m of h.matchAll(/\b(?:title|alt|placeholder|aria-label|aria-description|value)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) add(file, 'page', m[1] ?? m[2]);
+    add(file, 'page', h.replace(/<[^>]*>/g, ' '));
+  }
+  return out;
+}
+
+/** The string literals of a script that read as prose (they hold a space), comments cut out. */
+function scriptStrings(js: string) {
+  const t = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
+  return [...t.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2] ?? (m[3] ?? '').replace(/\$\{[^}]*\}/g, ' ')).filter((x) => /\s/.test(x.trim()));
+}
+
 function args(argv: string[]) {
   const o: any = { paths: ['/'], mode: 'report', widths: [1440, 390], env: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -51,6 +90,7 @@ function args(argv: string[]) {
     else if (a === '--workdir') o.workdir = v();
     else if (a === '--health') o.health = v();
     else if (a === '--widths') o.widths = v().split(',').map(Number);
+    else if (a === '--allow') o.allow = resolve(v());
     else if (a === '--env') o.env.push(v());
     else throw new Error(`unknown option ${a}`);
   }
@@ -104,9 +144,12 @@ export async function gate(o: ReturnType<typeof args>) {
       pages.push({ path: p, ok: r.ok, error: r.error, counts: r.counts, pages: (r.pages ?? []).map((x: any) => ({ width: x.width, findings: x.findings })) });
     }
     const contractF = contractFindings(texts);
+    // Allow-list: --allow, else <app>/ui-gate-allow.json: [{ "word": "scheme", "file": "/", "reason": "a colour scheme" }]
+    const allowFile = o.allow ?? join(o.dir, 'ui-gate-allow.json');
+    const wordF = wordFindings(texts, existsSync(allowFile) ? JSON.parse(readFileSync(allowFile, 'utf8')) : []);
     const measured = pages.reduce((n, p) => n + Object.values(p.counts ?? {}).reduce((a: number, b) => a + (b as number), 0), 0);
     const errors = pages.filter((p) => p.error).length;
-    return { app: name, mode: o.mode, measured, contract: contractF, pages, errors, clean: !measured && !contractF.length && !errors };
+    return { app: name, mode: o.mode, measured, contract: contractF, words: wordF, pages, errors, clean: !measured && !contractF.length && !wordF.length && !errors };
   } finally {
     await stop();
   }
@@ -118,6 +161,7 @@ export function markdown(r: Awaited<ReturnType<typeof gate>>) {
     l.push(`## ${p.path}`, p.error ? `Could not measure: ${p.error}` : Object.keys(p.counts ?? {}).length ? p.pages.flatMap((x: any) => (x.findings ?? []).map((f: any) => `- ${x.width}px ${f.check}: ${String(f.selector ?? f.text ?? '').slice(0, 90)}`)).join('\n') : 'No measure findings.', '');
   }
   l.push('## Kit contract', r.contract.length ? r.contract.map((c) => `- ${c.kind} \`${c.name}\` in ${c.file}`).join('\n') : 'No unknown cui-* classes or --citadel-* names.');
+  l.push('', '## Citadel words', r.words?.length ? r.words.map((w) => `- ${w.word} (${w.where}) in ${w.file}: "${w.text}"`).join('\n') : 'No internal words or server paths in what people read.');
   return l.join('\n') + '\n';
 }
 

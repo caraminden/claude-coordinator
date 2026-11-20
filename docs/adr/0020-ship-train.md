@@ -22,7 +22,10 @@ the last one in line waited for every run ahead of it.
   and `deploy:` lines, so the server posts its shipped line and risk label as for any ship (`src/land.ts`).
 - **The handshake** is a verdict file per rider, `<state>/train/<ticket>`, written by the front: riding, moving,
   back, landed or refused. Each rider reads it in the queue's wait check, and once more when it gets the lock.
-  `tools/land.sh` documents each format above `train_verdict`.
+  `tools/land.sh` documents each format above `train_verdict`. deploy.sh lets go of the line once a restart is queued,
+  while the restart is still judged (#566), so a rider can get the lock with its verdict still `moving`: while the
+  front's process lives, the rider hands the line on and waits outside it for the verdict. A train whose restart is
+  rolled back comes off main, and its riders hear `back`, never `landed`.
 
 Who is passed over (each keeps its place, and ships on its own when it reaches the front):
 

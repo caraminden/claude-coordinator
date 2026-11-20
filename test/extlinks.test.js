@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { firefoxLink, firefoxAvailable, appLink, appSrc, classifyLink, mountLinkHandler, SCHEME } from '../public/extlinks.js';
+import { firefoxLink, firefoxAvailable, appLink, appSrc, classifyLink, mountLinkHandler, SCHEME, downloadAddress, firefoxDownload } from '../public/extlinks.js';
 
 // #988: "Open links in Firefox". An external web link becomes citadel-firefox:<address>; anything else stays alone.
 const base = 'https://cara.apps.example.net/c/';
@@ -137,4 +137,83 @@ test('classifyLink: a page in transdata on Citadel\'s host (no apps domain), and
   }
   assert.equal(kindOf('/apps/transdata/ingest', frameAt, 'transdata', true), 'page', 'before Citadel\'s lists arrive nothing same-origin leaves the page');
   assert.equal(classifyLink('/apps/transdata/ingest', frameAt, { self: 'transdata', firefox: true }).kind, 'page');
+});
+
+// #1184: with the switch on, a download goes to Firefox too. Citadel's own file addresses need a login Firefox doesn't
+// have, so they go through a short-lived download link the server mints; anything else goes as it is.
+test('downloadAddress: download-attribute links, ?download addresses and installer files are downloads', () => {
+  const at = 'https://cara.apps.example.net/c/';
+  assert.equal(downloadAddress('api/tickets/5/file?path=a.zip&download', at, false), 'https://cara.apps.example.net/c/api/tickets/5/file?path=a.zip&download');
+  assert.equal(downloadAddress('api/artifacts/9/raw?v=3&download', at, false), 'https://cara.apps.example.net/c/api/artifacts/9/raw?v=3&download');
+  assert.equal(downloadAddress('api/tickets/5/uploads/notes.txt', at, true), 'https://cara.apps.example.net/c/api/tickets/5/uploads/notes.txt', 'a download attribute');
+  assert.equal(downloadAddress('/apps/mandate/android/mandate-7.apk', at, false), 'https://cara.apps.example.net/apps/mandate/android/mandate-7.apk', 'a release APK');
+  assert.equal(downloadAddress('/api/projects/2/ci-files/4/citadel-0.3.xpi', at, false), 'https://cara.apps.example.net/api/projects/2/ci-files/4/citadel-0.3.xpi');
+  for (const ext of ['zip', 'exe', 'msi', 'msix', 'xpi', 'crx', 'apk', '7z', 'tgz']) assert.ok(downloadAddress(`https://example.com/x.${ext}`, at, false), ext);
+  assert.equal(downloadAddress('api/tickets/5/file?path=a.md', at, false), null, 'a file that opens in Citadel');
+  assert.equal(downloadAddress('https://example.com/zip', at, false), null);
+  assert.equal(downloadAddress('#/p/2/t/9', at, false), null);
+  assert.equal(downloadAddress('mailto:a@b.c', at, true), null, 'only web addresses');
+  assert.equal(downloadAddress('blob:https://cara.apps.example.net/1', at, true), null, 'a blob the page made stays in the browser');
+  assert.equal(downloadAddress('data:text/plain,hi', at, true), null);
+});
+
+test('a download click goes to Firefox with the switch on; switch off or a modifier key leaves it to Chrome', () => {
+  const handlers = [];
+  globalThis.addEventListener = (type, fn) => handlers.push([type, fn]);
+  let on = false;
+  const seen = [];
+  mountLinkHandler({ on: () => on, own: () => ['cara.apps.example.net'], open: (u) => seen.push(['ff', u]), download: (u) => seen.push(['dl', u]), openApp: (l) => seen.push(['app', l.name]), base: () => 'https://cara.apps.example.net/c/' });
+  const fire = (href, attr, extra = {}, here = false) => {
+    const e = { type: 'click', button: 0, target: { closest: () => ({ getAttribute: () => href, hasAttribute: (n) => (n === 'download' && attr) || (n === 'data-here' && here) }) }, preventDefault() { this.prevented = true; }, stopPropagation() {}, ...extra };
+    for (const [t, fn] of handlers) if (t === e.type) fn(e);
+    return e.prevented === true;
+  };
+  assert.equal(fire('api/artifacts/9/raw?v=3&download', false), false, 'switch off: Chrome downloads it');
+  assert.equal(fire('api/tickets/5/uploads/a.bin', true), false);
+  assert.equal(fire('/apps/mandate/android/mandate-7.apk', false), true, 'switch off: an app path still opens the app view, as before');
+  assert.deepEqual(seen, [['app', 'mandate']]);
+  on = true;
+  assert.equal(fire('api/artifacts/9/raw?v=3&download', false), true);
+  assert.equal(fire('api/tickets/5/uploads/a.bin', true), true);
+  assert.equal(fire('/apps/mandate/android/mandate-7.apk', false), true);
+  assert.equal(fire('api/artifacts/9/raw?v=3&download', false, { ctrlKey: true }), false, 'a modifier key downloads in Chrome anyway');
+  assert.equal(fire('api/artifacts/9/raw?v=3&download', false, { shiftKey: true }), false);
+  assert.equal(fire('api/tickets/5/file?path=a.md', false), false, 'not a download: the page shows it');
+  assert.equal(fire('citadel-firefox-link.ps1', true, {}, true), false, 'data-here (the setup script) stays in this browser');
+  assert.deepEqual(seen.slice(1), [
+    ['dl', 'https://cara.apps.example.net/c/api/artifacts/9/raw?v=3&download'],
+    ['dl', 'https://cara.apps.example.net/c/api/tickets/5/uploads/a.bin'],
+    ['dl', 'https://cara.apps.example.net/apps/mandate/android/mandate-7.apk'],
+  ]);
+});
+
+test('a page with no download handler (a framed contraption) leaves downloads alone', () => {
+  const handlers = [];
+  globalThis.addEventListener = (type, fn) => handlers.push([type, fn]);
+  mountLinkHandler({ on: () => true, own: () => [], open: () => assert.fail('no Firefox'), base: () => 'https://transdata.citadel.zip/apps/transdata/' });
+  const e = { type: 'click', button: 0, target: { closest: () => ({ getAttribute: () => 'export.zip', hasAttribute: () => true }) }, preventDefault() { this.prevented = true; }, stopPropagation() {} };
+  for (const [, fn] of handlers) fn(e);
+  assert.equal(e.prevented, undefined);
+});
+
+test('firefoxDownload: a Citadel file goes to Firefox through a short-lived link; anything else as it is', async () => {
+  const origin = 'https://cara.apps.example.net';
+  const launched = [];
+  const posted = [];
+  const post = async (path) => (posted.push(path), { path: '/c/api/dl/TOKEN123' });
+  const launch = (a) => (launched.push(a), true);
+  await firefoxDownload(`${origin}/c/api/artifacts/9/raw?v=3&download`, { origin, post, launch });
+  assert.deepEqual(posted, ['/c/api/artifacts/9/raw?v=3&download']);
+  assert.deepEqual(launched, [`${origin}/c/api/dl/TOKEN123`], 'Firefox gets the signed address, never the login-gated one');
+  await firefoxDownload(`${origin}/apps/mandate/android/mandate-7.apk`, { origin, post, launch });
+  await firefoxDownload('https://example.com/x.zip', { origin, post, launch });
+  assert.equal(posted.length, 1, 'an app path or an outside address needs no link');
+  assert.deepEqual(launched.slice(1), [`${origin}/apps/mandate/android/mandate-7.apk`, 'https://example.com/x.zip']);
+});
+
+test('firefoxDownload: when the server gives no link, Chrome downloads it as before', async () => {
+  const origin = 'https://cara.apps.example.net';
+  const chrome = [];
+  await firefoxDownload(`${origin}/c/api/tickets/5/file?path=a.zip&download`, { origin, post: async () => { throw new Error('403'); }, launch: () => assert.fail('no Firefox'), fallback: (a) => chrome.push(a) });
+  assert.deepEqual(chrome, [`${origin}/c/api/tickets/5/file?path=a.zip&download`]);
 });

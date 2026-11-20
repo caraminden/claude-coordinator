@@ -599,6 +599,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/download-links": {
+  "anon": "401 Not logged in",
+  "person": "400 Not a file Citadel can link to",
+  "member": "400 Not a file Citadel can link to",
+  "outsider": "400 Not a file Citadel can link to",
+  "tmA": "403 Only people make download links",
+  "tmB": "403 Only people make download links",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/files/t1-0.zzzzzz.forged/report.md": {
   "anon": "403 This link has expired; open the file from Citadel again",
   "person": "404 That file is no longer there",

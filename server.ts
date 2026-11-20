@@ -21,6 +21,7 @@ import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
+import { DownloadLinks, downloadLinks, linkSession } from './src/download-links.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
@@ -1463,6 +1464,13 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
     if (isBackupPath(url.pathname)) {
       await serveBackup(app, BACKUP_SCHEME, req, res, url);
+    } else if (DownloadLinks.token(url.pathname) !== null) {
+      // A short-lived download link Firefox opens with no login (#1184): that one file's GET, replayed as its person.
+      const link = req.method === 'GET' || req.method === 'HEAD' ? downloadLinks.redeem(DownloadLinks.token(url.pathname)!) : null;
+      const session = link && linkSession(store, link.uid);
+      if (!link || !session) throw new HttpError(410, 'This download link has expired: download the file from Citadel again');
+      req.url = link.path;
+      await routes(app, req, res, requestUrl(req), session);
     } else if (url.pathname.startsWith('/api/')) {
       const session = auth.session(req);
       // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
@@ -1476,9 +1484,10 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       apps.serve(req, res);
     } else if (preview) {
       const session = auth.session(req);
-      // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
+      // An HTML page's files under its file token come from a frame that sends no cookies, and a download link (#1184) from
+      // Firefox, which has none; the preview checks the token.
       const [, build, id, rest] = preview;
-      const tokened = /^\/(c\/)?api\/files\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
+      const tokened = /^\/(c\/)?api\/(files|dl)\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
       // People only, signed in to the live app; a page load without a login goes to the login.
       if (!tokened && (!session || session.agent !== undefined)) {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();

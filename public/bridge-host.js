@@ -4,8 +4,6 @@
 // It never sends by itself. A page can also open one of its own pictures to draw on (#946), and send the
 // marked copies with its text.
 
-import { firefoxLink, firefoxOn, launchFirefox } from './extlinks.js';
-
 export const TAG = 'citadel-bridge-1';
 const MAX_TEXT = 10_000;
 const MAX_ENTRIES = 100;
@@ -38,7 +36,6 @@ export function readRequest(e, from = frames) {
     const items = Array.isArray(m.items) && m.items.length <= 500 ? m.items.filter((i) => i && typeof i === 'object').map(({ collection, id, title, label }) => ({ collection, id, title, label })) : null;
     return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text, ...(m.keepOpen === true ? { keepOpen: true } : {}), ...(m.images?.length ? { images: m.images.map(({ mediaType, data }) => ({ mediaType, data })) } : {}), ...(items?.length ? { items } : {}) } };
   }
-  if (m.op === 'link' && typeof m.url === 'string' && m.url.length <= 4000) return { frame, req: { id: m.id, op: 'link', page: m.page, url: m.url } };
   if (m.op === 'draw' && typeof m.src === 'string' && m.src.length <= 4000) return { frame, req: { id: m.id, op: 'draw', page: m.page, src: m.src } };
   return null;
 }
@@ -115,13 +112,6 @@ async function onMessage(e) {
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
   if (req.op === 'typing') return void (typedAt = Date.now());
   try {
-    if (req.op === 'link') {
-      // A page's link to another site: Firefox when this device's switch says so (extlinks.js, #988), else the page opens its own tab.
-      // Only for a click in a frame (a tab's click can't be seen from here), like send and draw.
-      const clicked = !!frame.iframe && (!navigator.userActivation || navigator.userActivation.isActive);
-      const opened = clicked && firefoxOn() && !!firefoxLink(req.url, location.href, [location.hostname]) && launchFirefox(req.url);
-      return reply({ ok: true, result: { opened } });
-    }
     if (req.op === 'draw') {
       if (!frame.draw) throw new Error('Drawing on a picture works only in Citadel\'s viewer');
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');

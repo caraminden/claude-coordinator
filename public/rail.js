@@ -13,7 +13,7 @@
 
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { optimistic } from './ui/optimistic.js';
-import { appHash, appLink, classifyLink, firefoxDownload, firefoxLink, firefoxOn, launchFirefox, mirrorFirefox, mirroredOn, mountLinkHandler, onFirefoxChange } from './extlinks.js';
+import { appHash, appLink, classifyLink, mountLinkHandler } from './extlinks.js';
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -26,9 +26,7 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * Citadel and a contraption's page may be on different origins (src/apps.ts, APPS_DOMAIN), so they talk only by
  * postMessage, each checking the other window is the one it framed or was framed by. Contraption → Citadel: hello
  * { installed }, rail { open }, bar (its .cui-topbar, frames.js), key and blur (Alt+`, appswitch.js). Citadel →
- * contraption: state { hasRail, narrow, firefox, own }, strip { vars }. A contraption's click on an external link, once `firefox` says
- * the switch "Open links in Firefox" is on (extlinks.js, #988): ext { url }, which `own` (hosts that are Citadel's) kept
- * it from sending for a link into Citadel. A contraption's installed window → Citadel's page in its
+ * contraption: state { hasRail, narrow, own, apps, domain }, strip { vars }. A contraption's installed window → Citadel's page in its
  * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
 export const FRAME = 'citadel-frame-1';
@@ -37,7 +35,7 @@ const post = (win, type, data = {}) => win?.postMessage({ protocol: FRAME, type,
 const framedIn = typeof window === 'object' && window.parent !== window ? window.parent : null;
 
 // Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
-let hostState = { hasRail: false, firefox: false, own: [], apps: {}, domain: null };
+let hostState = { hasRail: false, own: [], apps: {}, domain: null };
 const host = inContraption && framedIn ? {
   openRail: () => post(framedIn, 'rail', { open: true }),
   closeRail: () => post(framedIn, 'rail', { open: false }),
@@ -147,10 +145,10 @@ export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
 const frameWindows = () => [...document.querySelectorAll('#frames iframe')].map((f) => f.contentWindow);
 function tellFrames(to = frameWindows()) {
   if (inContraption) return;
-  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, firefox: firefoxOn(), own: ownHosts(), apps: appHosts(), domain: appsDomain() });
+  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, own: ownHosts(), apps: appHosts(), domain: appsDomain() });
 }
 
-/** The hosts that are Citadel's own: its page, and each contraption's own host (#827). Links to them are never sent to Firefox. */
+/** The hosts that are Citadel's own: its page, and each contraption's own host (#827). Links to them stay in Citadel. */
 const ownHosts = () => [location.hostname, root.hostname];
 // Each app's own host -> its name: a link to one opens in Citadel's app view (extlinks.js appLink).
 // The apps domain (APPS_DOMAIN), read off an app's address <name>.<domain>: every host on it is Citadel's.
@@ -622,7 +620,6 @@ if (typeof document !== 'undefined') {
           if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) { markInstalled(name, d.installed); syncInstall(); }
           tellFrames([e.source]);
         } else if (d.type === 'rail') d.open ? openRail() : closeRail();
-        else if (d.type === 'ext' && typeof d.url === 'string' && firefoxOn() && firefoxLink(d.url, location.href, ownHosts())) launchFirefox(d.url);
         else if (d.type === 'go-url' && typeof d.url === 'string') {
           if (classifyLink(d.url, location.href, { own: ownHosts(), apps: appHosts(), domain: appsDomain() }).kind === 'window') location.assign(d.url);
         } else if (d.type === 'app' && typeof d.url === 'string') {
@@ -638,8 +635,7 @@ if (typeof document !== 'undefined') {
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.
-      mirrorFirefox(d.firefox === true);
-      hostState = { hasRail: !!d.hasRail, firefox: d.firefox === true, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null };
+      hostState = { hasRail: !!d.hasRail, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null };
       if (narrow.matches !== !!d.narrow) {
         narrow.matches = !!d.narrow;
         narrow.dispatchEvent(new Event('change'));
@@ -788,35 +784,29 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }
 
-// "Open links in Firefox" (#988): Citadel's own pages act on a click; a framed contraption sends the address up to Citadel.
-// Downloads go to Firefox from Citadel's own pages only (#1184): a contraption's files need its own login, which a link can't carry.
+// Links: Citadel's own pages act on a click; a framed contraption sends the address up to Citadel.
 if (typeof document !== 'undefined' && !inContraption) {
-  mountLinkHandler({ on: firefoxOn, own: ownHosts, apps: appHosts, domain: appsDomain, self: () => null, open: launchFirefox, download: (address) => firefoxDownload(address), openWindow: (url) => location.assign(url), openApp: (link) => { location.hash = appHash(link); } });
-  onFirefoxChange(() => tellFrames());
+  mountLinkHandler({ own: ownHosts, apps: appHosts, domain: appsDomain, self: () => null, openWindow: (url) => location.assign(url), openApp: (link) => { location.hash = appHash(link); } });
 }
 if (typeof document !== 'undefined' && host) {
   // classifyLink (extlinks.js) decides, from this page's own app and Citadel's lists as they are: never trimmed here.
   mountLinkHandler({
-    on: () => hostState.firefox,
     own: () => hostState.own,
     apps: () => hostState.apps,
     domain: () => hostState.domain,
     self: showing,
     openWindow: (url) => post(framedIn, 'go-url', { url }),
-    open: (url) => post(framedIn, 'ext', { url }),
     openApp: (_link, url) => post(framedIn, 'app', { url }),
   });
 }
 
-// An app's own window, no Citadel around it: the same rule, with the switch from the cookie a framed visit left (or Citadel's own storage on its origin).
+// An app's own window, no Citadel around it: the same rule.
 if (typeof document !== 'undefined' && inContraption && !framedIn) {
   mountLinkHandler({
-    on: () => firefoxOn() || mirroredOn(),
     own: ownHosts,
     apps: appHosts,
     domain: appsDomain,
     self: () => showing() ?? appHosts()[location.hostname] ?? null,
-    open: launchFirefox,
     openWindow: (url) => location.assign(url),
     openApp: (link) => openLayer({ name: link.name, href: new URL(appHash(link), root).href }),
   });

@@ -24,7 +24,7 @@
       const id = ++seq;
       const timer = setTimeout(() => {
         pending.delete(id);
-        if (op !== 'hello' && op !== 'link') cutOff();
+        if (op !== 'hello') cutOff();
         reject(new Error(op === 'hello' ? NO_VIEWER : 'Citadel did not answer'));
       }, ms);
       pending.set(id, { resolve, reject, timer });
@@ -330,8 +330,6 @@
     }
     if (!/^https?:$/.test(url.protocol) || url.origin === location.origin) return;
     e.preventDefault();
-    const tab = () => window.open(url.href, '_blank', 'noopener');
-    // The viewer opens it in Firefox when the person's device is set to (#988); else, or if it doesn't answer, a tab.
-    (host ? ready.then((ok) => (ok ? request('link', { url: url.href }, 3000) : Promise.reject())) : Promise.reject()).then((r) => r.opened || tab(), tab);
+    window.open(url.href, '_blank', 'noopener');
   });
 })

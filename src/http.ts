@@ -62,9 +62,8 @@ export class HttpError extends Error {
 
 export const SECURITY_HEADERS = {
   // blob: lets the composer preview pasted images before they are sent. frame-ancestors 'self': a
-  // contraption's installed window shows Citadel's page in a frame over its own (rail.js, #311). frame-src
-  // citadel-firefox: lets "Open links in Firefox" launch its protocol through a hidden frame (public/extlinks.js, #988).
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob: data:; frame-src 'self' citadel-firefox:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+  // contraption's installed window shows Citadel's page in a frame over its own (rail.js, #311).
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob: data:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };
@@ -72,7 +71,7 @@ export const SECURITY_HEADERS = {
 /** With APPS_DOMAIN (src/apps.ts): Citadel's pages frame contraptions on their own hosts, and a contraption's installed window frames Citadel's. */
 export function framedWithApps(domain: string) {
   SECURITY_HEADERS['Content-Security-Policy'] = SECURITY_HEADERS['Content-Security-Policy']
-    .replace("frame-src 'self'", `frame-src 'self' *.${domain}`).replace("frame-ancestors 'self'", `frame-ancestors 'self' *.${domain}`);
+    .replace("frame-ancestors 'self'", `frame-src 'self' *.${domain}; frame-ancestors 'self' *.${domain}`);
 }
 
 // Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long

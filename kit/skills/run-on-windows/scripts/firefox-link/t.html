@@ -1,9 +1,0 @@
-<!doctype html>
-<title>cf988</title>
-<script>
-  onbeforeunload = (e) => { e.preventDefault(); document.title = 'UNLOAD-PROMPT'; };
-  // Tests: the pagehide/visibility must not fire when a protocol launch happens.
-  addEventListener('pagehide', () => { document.title = 'PAGEHIDE'; });
-</script>
-<button id="b" autofocus style="font-size:40px"
-  onclick="document.title = 'clicked'; const f = document.createElement('iframe'); f.hidden = true; f.src = 'citadel-firefox:https://example.com/?a=1&b=2#x'; document.body.append(f); setTimeout(() => f.remove(), 5000)">open</button>

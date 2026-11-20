@@ -3496,6 +3496,16 @@ export class Store {
       .all(since, until, payer) as unknown as SpendRowRaw[];
   }
 
+  /** Bug minions of every scheme created since `since`, with their brief's first 1,000 characters: the third-fix flag's pool (#1157). */
+  bugBriefs(since: number): { project_id: number; number: number; title: string; at: number; brief: string }[] {
+    return this.db
+      .prepare(`SELECT k.project_id, k.number, k.title, k.created_at AS at,
+          coalesce((SELECT substr(json_extract(e.data, '$.text'), 1, 1000) FROM events e WHERE e.ticket_id = k.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1), '') AS brief
+        FROM tickets k JOIN properties p ON p.target_type = 'minion' AND p.target_id = k.id JOIN property_keys pk ON pk.id = p.key_id AND pk.key = 'type'
+        WHERE k.created_at >= ? AND k.kind != 'coordinator' AND k.number IS NOT NULL AND p.value = 'bug'`)
+      .all(since) as unknown as { project_id: number; number: number; title: string; at: number; brief: string }[];
+  }
+
   /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
   addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };

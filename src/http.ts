@@ -3,6 +3,7 @@ import type { Presence } from './presence.ts';
 import type { ClaudeLink } from './claude-link.ts';
 import type { CodexLink } from './codex-link.ts';
 import type { Contraptions } from './contraptions.ts';
+import type { Fcm } from './fcm.ts';
 import type { AppServices } from './app-services.ts';
 import type { ContraptionTurns } from './contraption-turns.ts';
 import type { ErrorDigest } from './contraption-errors.ts';
@@ -277,6 +278,8 @@ export interface App {
   codex: CodexLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */
   contraptions: Contraptions;
+  /** Push to contraptions' Android apps through Firebase (src/fcm.ts, #1138). */
+  fcm: Fcm;
   /** Contraptions' systemd user services (src/app-services.ts). */
   services: AppServices;
   /** Contraption turns: the turn API's engine (src/contraption-turns.ts). */

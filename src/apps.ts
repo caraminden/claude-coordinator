@@ -33,6 +33,8 @@ export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
 export const MAX_BODY = 20 * 1024 * 1024;
 /** A contraption page's big uploads (#832): /apps/_citadel/uploads/<app>[/<id>], the protocol in src/chunked-uploads.ts. */
 const UPLOADS = /^\/apps\/_citadel\/uploads\/([a-z0-9-]+)(?:\/([^/]+))?$/;
+/** A phone's push registration from the Android shell (#1138, src/fcm.ts): POST or DELETE { token }. */
+const PUSH = /^\/apps\/_citadel\/push\/([a-z0-9-]+)$/;
 /** How often open streams and websockets are checked against who the contraption is enabled for. */
 const SWEEP_MS = 2000;
 
@@ -417,6 +419,8 @@ export class AppProxy {
     if (host !== null && !this.store.getContraption(host)) return void res.writeHead(404, text).end('Not found');
     const upload = UPLOADS.exec(url.pathname);
     if (upload) return this.upload(req, res, url, host, upload[1], upload[2]);
+    const push = PUSH.exec(url.pathname);
+    if (push) return this.pushDevice(req, res, host, push[1]);
     if (req.method !== 'GET' && req.method !== 'HEAD') return void res.writeHead(405, text).end('Method not allowed');
     const session = this.who(req, host);
     if (!session) return void res.writeHead(401, text).end('Not logged in');
@@ -480,6 +484,32 @@ export class AppProxy {
     } catch (err) {
       if (res.headersSent) return void res.destroy();
       answer(err instanceof HttpError ? err.status : 500, { error: err instanceof HttpError ? err.message : 'Internal error' });
+    }
+  }
+
+  /**
+   * The Android shell registers (POST) or forgets (DELETE) a phone's FCM token for the person signed in, on the app's
+   * own host (cc_app) or Citadel's (cc_session). The same gate as uploads: signed in, enabled for it, same origin.
+   */
+  private async pushDevice(req: IncomingMessage, res: ServerResponse, host: string | null, name: string) {
+    const answer = (status: number, error?: string) =>
+      void (error === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error })));
+    const row = this.store.getContraption(name);
+    if (!row || (host !== null && host !== name)) return answer(404, 'Not found');
+    if (req.method !== 'POST' && req.method !== 'DELETE') return answer(405, 'Method not allowed');
+    const session = this.who(req, host);
+    if (!session) return answer(401, 'Not logged in');
+    if (host !== null && crossOrigin(req)) return answer(403, 'Cross-origin request');
+    if (!this.contraptions.enabled(row.name, session.uid!)) return answer(403, `You don't have access to ${row.title}`);
+    try {
+      const body = await readJson(req, 16 * 1024);
+      if (typeof body.token !== 'string' || !body.token || body.token.length > 4096) throw new HttpError(400, 'token must be a string of 1 to 4096 characters');
+      if (req.method === 'DELETE') return void (await this.store.deletePushDevice(body.token, session.uid!), answer(204));
+      if ((body.platform ?? 'android') !== 'android') throw new HttpError(400, 'platform must be android');
+      await this.store.savePushDevice(row.id, session.uid!, body.token, 'android');
+      answer(204);
+    } catch (err) {
+      answer(err instanceof HttpError ? err.status : 500, err instanceof HttpError ? err.message : 'Internal error');
     }
   }
 

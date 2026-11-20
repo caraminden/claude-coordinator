@@ -4,7 +4,7 @@
 //
 // It answers the calls `references/api.md` describes, with the same statuses and body shapes:
 //   turns (SSE, scripted), cancel, messages, verdict, sessions, media + openrouter, spend, asks, home,
-//   minions, relay.
+//   minions, relay, push (each enabled person has one phone, and every send reaches it).
 // Citadel's own repo runs it against the real API (test/fake-citadel-contract.test.ts), so the two can't
 // drift. What it leaves out: the audit, caps, containers, jobs, embeddings and secrets; a call to one of
 // those answers 404 `not_faked` so a test never passes by accident.
@@ -94,6 +94,8 @@ export interface FakeCitadel {
   verdicts: { turn: string; verdict: string; reason?: string }[];
   asks: Record<string, unknown>[];
   spend: Record<string, unknown>[];
+  /** POST /api/contraptions/push bodies that passed its checks, with the logins it skipped. */
+  pushes: { to: string[]; title?: string; body?: string; open?: string; tag?: string; data?: Record<string, string>; skipped: string[] }[];
   relayed: { to: string; method: string; path: string; identity: string }[];
   close(): Promise<void>;
 }
@@ -104,6 +106,31 @@ const json = (res: ServerResponse, status: number, body: unknown, headers: Recor
 const fail = (res: ServerResponse, status: number, error: string) => json(res, status, { error });
 const under = (path: string, entry: string) => path === entry || path.startsWith(entry.endsWith('/') ? entry : `${entry}/`);
 const whole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1;
+
+/** Why a push body would be refused (Citadel's src/fcm.ts parsePush), or null. */
+function pushProblem(app: string, b: any): string | null {
+  const to = typeof b?.to === 'string' ? [b.to] : b?.to;
+  if (!Array.isArray(to) || !to.length || to.length > 100 || to.some((l) => typeof l !== 'string' || !l || l.length > 200)) return 'to must be a login, or a list of 1 to 100 logins';
+  for (const [k, max, min] of [['title', 200, 1], ['body', 2000, 0], ['open', 1000, 0], ['tag', 100, 0]] as const) {
+    if (b[k] !== undefined && (typeof b[k] !== 'string' || b[k].length < min || b[k].length > max)) return `${k} must be a string of at most ${max} characters`;
+  }
+  if (b.title === undefined && (b.body !== undefined || b.open !== undefined || b.tag !== undefined)) return 'body, open and tag go with a title';
+  if (b.open !== undefined && (!b.open.startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]|%2e|%2f|%5c|\/\.\.?(\/|$|\?|#)/i.test(b.open))) return `open must be a path under /apps/${app}/`;
+  const data: Record<string, string> = {};
+  if (b.data !== undefined) {
+    if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) return 'data must be an object of string values';
+    for (const [k, v] of Object.entries(b.data)) {
+      if (typeof v !== 'string') return `data.${k} must be a string`;
+      if (!k || k.startsWith('citadel_') || ['from', 'notification', 'message_type'].includes(k) || k.startsWith('google.') || k.startsWith('gcm.')) return `data key "${k}" is reserved`;
+      data[k] = v;
+    }
+  }
+  if (b.title === undefined && !Object.keys(data).length) return 'Send a title or data (or both)';
+  // Firebase's 4 KB, counted over the data block Citadel sends (the app's keys plus citadel_*).
+  const sent = { ...data, citadel_app: app, ...(b.title === undefined ? {} : { citadel_title: b.title, citadel_body: b.body ?? '', citadel_open: b.open, citadel_tag: b.tag }) };
+  const bytes = Object.entries(sent).reduce((n, [k, v]) => n + (v === undefined ? 0 : Buffer.byteLength(k) + Buffer.byteLength(v)), 0);
+  return bytes > 4096 ? `the data block comes to ${bytes} bytes; Firebase takes at most 4096` : null;
+}
 
 export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> {
   const keys = generateKeyPairSync('ed25519');
@@ -131,7 +158,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       if (!p) throw new Error(`fake Citadel: no person ${person}`);
       return sign1(extra.app ?? opts.app, keys.privateKey, p, extra);
     },
-    turns: [], canceled: [], messages: [], verdicts: [], asks: [], spend: [], relayed: [],
+    turns: [], canceled: [], messages: [], verdicts: [], asks: [], spend: [], pushes: [], relayed: [],
     close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => { rmSync(keysDir, { recursive: true, force: true }); r(); }); }),
   };
 
@@ -234,6 +261,18 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         f.spend.push(b);
         const month = f.spend.reduce((s, x) => s + (x.usd as number), 0);
         return json(res, 200, { month_usd: month, cap_usd: null, over: false, over_cap: false });
+      }
+      if (path === '/api/contraptions/push' && m === 'POST') {
+        const b = await body(req, res, 64 * 1024);
+        if (b === undefined) return;
+        const bad = pushProblem(opts.app, b);
+        if (bad) return fail(res, 400, bad);
+        const to: string[] = [...new Set<string>(typeof b.to === 'string' ? [b.to] : b.to)];
+        const skipped = to.filter((l) => !people.some((p) => p.login === l && p.apps.includes(opts.app)));
+        const data = b.data && Object.keys(b.data).length ? b.data : undefined;
+        f.pushes.push({ to, title: b.title, body: b.body, open: b.open, tag: b.tag, data, skipped });
+        const devices = to.length - skipped.length;
+        return json(res, 200, { devices, sent: devices, dropped: 0, skipped });
       }
       if (path === '/api/contraptions/asks' && m === 'POST') {
         const b = await body(req, res, 23_000_000);

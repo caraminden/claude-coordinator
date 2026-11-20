@@ -21,7 +21,7 @@ export const WRITES = [
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
   'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting',
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
-  'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'insertEvent', 'putFates',
+  'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
   'props.backfillOther', 'props.setBuild', 'schedules.ran', 'memory.deleteTicket',
 ];
 

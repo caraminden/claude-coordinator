@@ -13,6 +13,7 @@ export const SECRET: Record<string, string[]> = {
   machine_jobs: ['input_token_hash', 'kind_hash'],
   machine_job_kinds: ['hash'],
   push_subscriptions: ['endpoint', 'p256dh', 'auth'],
+  contraption_push_devices: ['token'],
 };
 /** Settings rows whose value is a secret: turn-token nonces. */
 const SECRET_SETTINGS = "key LIKE 'agent-nonce:%'";

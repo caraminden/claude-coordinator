@@ -47,6 +47,12 @@ const probes: Probe[] = [
   { name: 'ask: wrong content type', method: 'POST', path: '/api/contraptions/asks', raw: 'x', type: 'text/plain' },
   { name: 'spend', method: 'POST', path: '/api/contraptions/spend', body: { service: 'azure-speech', usd: 0.42 } },
   { name: 'spend: no usd', method: 'POST', path: '/api/contraptions/spend', body: { service: 'azure-speech' } },
+  // Push: only refusals, which are checked before the key file is (a real send here would read the box's own).
+  { name: 'push: no to', method: 'POST', path: '/api/contraptions/push', body: { title: 'Hi' } },
+  { name: 'push: no title or data', method: 'POST', path: '/api/contraptions/push', body: { to: 'josh' } },
+  { name: 'push: open elsewhere', method: 'POST', path: '/api/contraptions/push', body: { to: 'josh', title: 'Hi', open: '/apps/other/x' } },
+  { name: 'push: reserved data key', method: 'POST', path: '/api/contraptions/push', body: { to: ['josh'], data: { citadel_x: '1' } } },
+  { name: 'push: data not strings', method: 'POST', path: '/api/contraptions/push', body: { to: ['josh'], data: { n: 1 } } },
   { name: 'sessions', path: `/api/contraptions/sessions?person=${Josh.id}` },
   { name: 'sessions: not enabled', path: `/api/contraptions/sessions?person=${Dana.id}` },
   { name: 'delete a missing session', method: 'DELETE', path: `/api/contraptions/sessions/nope?person=${Josh.id}` },
@@ -148,4 +154,14 @@ test('a relayed call reaches the other app signed for it, with from and fromTitl
   const claims = JSON.parse(Buffer.from(seen.split('.')[1], 'base64url').toString());
   assert.deepEqual([claims.app, claims.from, claims.sub], ['ledger', 'mandate', 1]);
   assert.equal((await call('/private')).status, 404); // not under relay_paths
+});
+test('a push reaches each enabled person\'s one phone, and the fake records it with the logins it skipped', async () => {
+  const fake = await startFakeCitadel({ app: 'peek-auras', people: [{ id: 1, login: 'tester', name: 'T' }, { id: 2, login: 'off', name: 'O', apps: [] }] });
+  after(() => fake.close());
+  const res = await fetch(`${fake.url}/api/contraptions/push`, {
+    method: 'POST', headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: ['tester', 'off', 'nobody', 'tester'], title: 'Hi', open: '/apps/peek-auras/x', data: { k: 'v' } }),
+  });
+  assert.deepEqual([res.status, await res.json()], [200, { devices: 1, sent: 1, dropped: 0, skipped: ['off', 'nobody'] }]);
+  assert.deepEqual(fake.pushes, [{ to: ['tester', 'off', 'nobody'], title: 'Hi', body: undefined, open: '/apps/peek-auras/x', tag: undefined, data: { k: 'v' }, skipped: ['off', 'nobody'] }]);
 });

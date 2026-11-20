@@ -36,6 +36,7 @@ import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
+import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
@@ -703,6 +704,8 @@ const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.w
 // A shipped run's GitHub artifact, copied into the CI store so its release links a file on perigee (#673).
 // Big uploads (#832); UPLOAD_FLOOR_GB moves the free-disk floor (tests, a dev copy on a small disk).
 const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Number(process.env.UPLOAD_FLOOR_GB) * 1024 ** 3 : DISK_FLOOR);
+// Push to contraptions' Android apps (#1138); CITADEL_FCM_API points a test at a stub Firebase.
+const fcm = new Fcm(fcmKeyPath(), { api: process.env.CITADEL_FCM_API || undefined });
 const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
 // Last green and the pins come from lastGreen below, read only once refreshes run.
 const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) } });
@@ -1375,7 +1378,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

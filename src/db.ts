@@ -1167,6 +1167,19 @@ CREATE TABLE IF NOT EXISTS contraption_errors (
   last_at INTEGER NOT NULL,
   PRIMARY KEY (contraption_id, day, kind, key)
 );
+-- Phones that take a contraption's push (#1138, src/fcm.ts): the Firebase token the Android shell registered at
+-- /apps/_citadel/push/<app>, whose phone it is and for which app. One row per token: registered again by someone
+-- else, or for another app, the phone moves. The token reaches the phone, so it is a secret (src/db-view.ts).
+CREATE TABLE IF NOT EXISTS contraption_push_devices (
+  id INTEGER PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS contraption_push_devices_user ON contraption_push_devices(contraption_id, user_id);
 -- One row per release of a scheme's target (#625, specs/release-monitor.md): the version people got, the minions
 -- in it (JSON [{ ticketId, number, title, stages }]), when its first change started on its way and went live,
 -- how it ended, and each stage's length in s (JSON { stage: s }). src/releases.ts writes and reads them.
@@ -1464,6 +1477,7 @@ export const SCHEMA_HISTORY = [
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
   [84, 'contraptions.subdir (#1136)'],
+  [85, 'contraption_push_devices (#1138)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3786,6 +3800,26 @@ export class Store {
 
   deleteView(projectId: number, owner: string, id: number): boolean {
     return this.db.prepare('DELETE FROM person_views WHERE project_id = ? AND owner = ? AND id = ?').run(projectId, owner, id).changes > 0;
+  }
+
+  /** A phone's FCM token for a person and contraption (#1138); a token seen before moves here and is fresh again. */
+  savePushDevice(contraptionId: number, userId: number, token: string, platform: string) {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO contraption_push_devices (token, contraption_id, user_id, platform, created_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(token) DO UPDATE SET contraption_id = excluded.contraption_id, user_id = excluded.user_id, platform = excluded.platform, seen_at = excluded.seen_at`)
+      .run(token, contraptionId, userId, platform, now, now);
+  }
+
+  /** Forget a phone: a dead token, or (with userId) a person's own phone signing out. */
+  deletePushDevice(token: string, userId: number | null = null) {
+    this.db.prepare('DELETE FROM contraption_push_devices WHERE token = ? AND (? IS NULL OR user_id = ?)').run(token, userId, userId);
+  }
+
+  /** The tokens of these people's phones for a contraption. */
+  pushDevices(contraptionId: number, userIds: number[]): string[] {
+    if (!userIds.length) return [];
+    return (this.db.prepare(`SELECT token FROM contraption_push_devices WHERE contraption_id = ? AND user_id IN (${userIds.map(() => '?').join(', ')}) ORDER BY id`)
+      .all(contraptionId, ...userIds) as { token: string }[]).map((r) => r.token);
   }
 
   listPushSubscriptions(): PushSubscriptionRow[] {

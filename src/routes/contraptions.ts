@@ -21,6 +21,7 @@ import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
 import { makeApp } from '../make-app.ts';
+import { pushToPeople } from '../fcm.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
 import { HttpError, json, oneOf, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
@@ -319,6 +320,10 @@ export const contraptionRoutes: Route[] = [
     });
     return json(res, 200, { model: app.memory.model, vectors: vecs.map((v) => [...v]) });
   }),
+  // Push to people's phones (#1138, src/fcm.ts): a notification and/or silent data to the Android app of each
+  // person named who has this contraption enabled.
+  fromContraption('POST', '/api/contraptions/push', async ({ req, res, app }, c) =>
+    json(res, 200, await pushToPeople(app.store, (name, uid) => app.contraptions.enabled(name, uid), app.fcm, c, await readJson(req, 64 * 1024)))),
   // #421: whether a person is a member of the app's home scheme, and its minions' progress for members.
   fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
     const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));

@@ -504,6 +504,51 @@ Authorization: Bearer <contraption.key>
   whether to keep going.
 - Minions report theirs with the `report_spend` tool.
 
+## Push to a person's phone: `POST /api/contraptions/push`
+
+Your Android app (one built on Citadel's shared shell, the `citadel:android-app` skill) can get
+notifications and silent data from your server. Citadel does the sending through Firebase, for every app;
+you don't need a Firebase project or key of your own.
+
+**The phone side.** The shell registers the phone. Your page asks for it with
+`await Capacitor.Plugins.CitadelShell.enablePush()`: that call asks Android for notification permission,
+then registers this phone's token for the signed-in person and your app. Make the call from a button
+the person taps, not on load. `disablePush()` forgets the phone, and `pushStatus()` answers
+`{ enabled, available, permission }`. The shell calls `/apps/_citadel/push/<app>` itself, on your host
+(`POST {token, platform: "android"}` registers the phone and `DELETE {token}` forgets it, 204 either way;
+401 when the person is signed out, 403 when your app isn't enabled for them). A token belongs to one
+person and one app: when a phone registers it again, the token moves to whoever is signed in now.
+
+**The send.**
+
+```
+POST /api/contraptions/push
+Authorization: Bearer <contraption.key>
+{ "to": ["cara", "josh"], "title": "Report ready", "body": "Tuesday's take",
+  "open": "/apps/voice/#/takes/12", "tag": "take-12", "data": { "take": "12" } }
+→ 200 { "devices": 3, "sent": 3, "dropped": 0, "skipped": [] }
+```
+
+- `to`: one login, or a list of 1 to 100 logins. Only people your app is enabled for right now get it.
+  Anyone else, and any login nobody has, comes back in `skipped`. A person with no phone registered
+  just adds nothing to `devices`.
+- **A notification:** send a `title` (1 to 200 characters). `body` (at most 2000 characters), `open` and
+  `tag` (at most 100 characters) are optional, and they only go with a title. `open` is the page a tap
+  opens, a path under `/apps/<your app>/` (at most 1000 characters, no `..`). Without `open`, a tap opens
+  the app. A later push with the same `tag` replaces the notification that's still showing.
+- **Silent data:** `data` is an object of string values. The phone's `PushHandler` gets it, even when the
+  app isn't running (the `citadel:android-app` skill). Send `data` with no title for a silent push, or
+  both together. The keys `citadel_*`, `from`, `notification`, `message_type`, `google.*` and `gcm.*` are
+  refused: Citadel's own keys (`citadel_title`, `citadel_body`, `citadel_open`, `citadel_tag`,
+  `citadel_app`) carry the notification.
+- **Size:** the whole data block has to fit in Firebase's 4 KB. That counts your keys and values plus
+  Citadel's keys, so a long body leaves less room for data.
+- **The answer:** `devices` is how many phones were tried. `sent` is how many Firebase took. `dropped`
+  is tokens Firebase called dead, which Citadel deletes; the shell registers the phone again on its next
+  launch. Any other failure is logged and the phone kept.
+- A body that isn't valid gets a 400. If this Citadel has no Firebase key yet, the answer is a 503 that
+  names the file the key goes in.
+
 ## Asks: bug reports, feature asks and data
 
 `POST /api/contraptions/asks` sends a person's report to your home scheme, as them (tested):
@@ -993,6 +1038,7 @@ red would hold a real release. So name what your updater gates on.
 | Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
 | Embed call | 16 texts of 4,000 characters |
+| Push | 100 logins a send; title 200, body 2000, open 1000, tag 100 characters; data block 4 KB with Citadel's keys |
 | `/app-api/read` timeout, answer | 15 s, 64 KB |
 | Open paths, relay paths | 20 each |
 | Timers | 5 |
@@ -1007,6 +1053,9 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-19:** Push to a person's phone: `POST /api/contraptions/push` sends a notification and/or
+  silent data to their Android app, through the shared shell ("Push to a person's phone"). The fake
+  Citadel answers it as well, giving each enabled person one phone, and records the sends in `fake.pushes`.
 - **2026-11-19:** New apps in one call: a scheme's Taskmaster calls `make_app` and gets a tested,
   signed-in, backed-up app in `apps/<name>/` of its own repo, with a minion to ship it ("The registry
   entry"). An app can live in a folder of a repo (`subdir`); a ship that doesn't touch that folder

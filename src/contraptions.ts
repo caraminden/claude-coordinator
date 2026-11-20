@@ -29,7 +29,7 @@ export const DEFAULT_CONTRAPTIONS_DIR = join(homedir(), '.config', 'citadel', 'c
 /** A contraption's name: a slug, used in paths and its key folder. */
 export const CONTRAPTION_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 /** Names Citadel's own /api/contraptions/ routes take, so no contraption may have them. */
-export const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions', 'media', 'openrouter']);
+export const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions', 'media', 'openrouter', 'push']);
 
 /** How long a signed identity header holds, in seconds. */
 export const IDENTITY_TTL = 60;

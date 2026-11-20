@@ -314,9 +314,10 @@ export function wrapperAlive(dir: string): boolean | null {
 /**
  * Whether a process this server can see runs `dir`'s wrapper (turn-launch's `<node> <pin>/turn-wrapper.ts <dir>`). A rootless
  * container's processes are in the host's /proc under host pids, so a container turn's wrapper shows here while it lives,
- * stalled or not; once its container or exec dies it doesn't. Only for a stale heartbeat: it reads every process's cmdline.
+ * stalled or not; once its container or exec dies it doesn't. Only for a stale heartbeat, or a container turn with no pid.json
+ * at a restart (reattach): it reads every process's cmdline.
  */
-export function wrapperInProc(dir: string): boolean {
+export function wrapperInProc(dir: string, orStarting = false): boolean {
   let pids: string[];
   try {
     pids = readdirSync('/proc').filter((n) => /^\d+$/.test(n));
@@ -333,8 +334,9 @@ export function wrapperInProc(dir: string): boolean {
       continue; // ended meanwhile
     }
     if (argv.at(-1) === '') argv.pop();
-    // `<node> <pin>/turn-wrapper.ts <dir>` exactly: a podman exec or conmon whose argv also ends in dir isn't the wrapper.
-    if (argv.at(-1) === dir && argv.at(-2)?.endsWith('/turn-wrapper.ts')) return true;
+    // `<node> <pin>/turn-wrapper.ts <dir>` exactly: a podman exec or conmon whose argv also ends in dir isn't the wrapper,
+    // unless `orStarting` asks for those too (a podman exec in its own scope outlives the server that ran it).
+    if (argv.at(-1) === dir && (orStarting || argv.at(-2)?.endsWith('/turn-wrapper.ts'))) return true;
   }
   return false;
 }
@@ -370,6 +372,8 @@ const savingKey = (ticketId: number) => `saving:${ticketId}`;
 const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 /** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
 const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
+/** A resume a restart must still start: its count, the messages it carries, and (an account switch's, #779) how it resumes. */
+type OwedResume = { resumes: number; queued?: QueuedMessage[]; limitTries?: number; onAccount?: true };
 /** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
 export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
@@ -562,6 +566,8 @@ export class Runner {
   limitFallbackMs = 60 * 60 * 1000;
   private limitTimer?: NodeJS.Timeout;
   private lastLimitResume = 0;
+  /** Limit waits whose resume is under way here (restoring the session, say): kept saved until a turn takes them, so a restart still resumes. */
+  private limitStarting = new Set<number>();
   /** Whether the model's API can be reached; one probe for the whole server while any thread waits on the network (#366). */
   netProbe: () => Promise<boolean> = apiReachable;
   /** The first wait before probing, doubling after each failed probe up to netProbeMaxMs. */
@@ -1358,14 +1364,17 @@ export class Runner {
         if (saving) this.lanes.run(t.id, 'session save cut off by a restart', () => this.saveAfterTurn(t.id, saving.configDir, null));
         // Messages that waited for that save start a turn once it is in.
         const waiting = this.store.getSetting<QueuedMessage[]>(waitingKey(t.id));
-        if (waiting?.length && t.status !== 'running') {
+        const owed = t.status !== 'running' ? this.store.getSetting<OwedResume>(owedKey(t.id)) : null;
+        if (waiting?.length && t.status !== 'running' && !owed) {
           this.queues.set(t.id, [...waiting]);
           later.push(() => this.next(t.id));
         }
-        const owed = t.status !== 'running' ? this.store.getSetting<{ resumes: number; queued?: QueuedMessage[] }>(owedKey(t.id)) : null;
+        // An owed resume takes them instead: one turn, not a plain one and then the resume. They were saved from the
+        // queue the owed record's messages went into, so they are the newer copy.
         if (owed) {
-          if (owed.queued?.length) this.queues.set(t.id, [...owed.queued]);
-          later.push(() => this.resume(t.id, owed.resumes));
+          const q = waiting?.length ? waiting : owed.queued;
+          if (q?.length) this.queues.set(t.id, [...q]);
+          later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount));
         }
         if (t.status === 'running') {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
@@ -1466,6 +1475,9 @@ export class Runner {
 
   /** Follow a turn a previous server started, if it still runs or ended while no server watched it. */
   private reattach(ticketId: number, turn: TurnState): boolean {
+    // A container turn the last server was still starting (#468 S03-5): its start chain beat for it and died with that
+    // server, so a fresh beat says nothing. With no wrapper run (no pid.json) and nothing left to start one, it was interrupted.
+    if (turn.container && turn.dir && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f))) && !wrapperInProc(turn.dir, true)) return false;
     const live = this.follow(ticketId, turn);
     if (this.gone(live)) {
       clearInterval(live.timer);
@@ -1495,15 +1507,19 @@ export class Runner {
    * that were queued behind the cut-off one.
    */
   private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false) {
+    // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
+    const waited = this.limitStarting.has(ticketId);
     // Someone's message got in first; its turn took the queue, and that is resume enough.
-    if (this.isRunning(ticketId)) return;
+    if (this.isRunning(ticketId)) return void (waited && this.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
-    this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
+    const ran = this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') return this.store.deleteSetting(owedKey(ticketId));
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
+      // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
+      if (waited && !this.limitStarting.has(ticketId)) return;
       const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
@@ -1517,6 +1533,8 @@ export class Runner {
       // It carries on the interrupted turn, so it runs for that turn's person.
       return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
     }));
+    // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
+    if (waited) void ran.then(() => this.limitStarting.has(ticketId) && this.cancelLimitWait(ticketId));
   }
 
   /**
@@ -1660,6 +1678,7 @@ export class Runner {
 
   /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
   private waitForLimit(ticketId: number, resetAt: number, tries: number, accounts?: LimitedAccount[]): number {
+    this.limitStarting.delete(ticketId);
     const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
     let at = resetAt + this.limitDelayMs;
     for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
@@ -1671,6 +1690,7 @@ export class Runner {
 
   /** Stop waiting on the usage limit (a stop, a dismissal); true if it was waiting. */
   cancelLimitWait(ticketId: number): boolean {
+    this.limitStarting.delete(ticketId);
     const list = this.limitResumes();
     if (!list.some((w) => w.ticket === ticketId)) return false;
     this.saveLimitResumes(list.filter((w) => w.ticket !== ticketId));
@@ -1718,7 +1738,7 @@ export class Runner {
   /** Time the next usage-limit resume: the earliest due, and never sooner than a gap after the last (limitGapMs, or limitProvenGapMs for waits a turn getting through released). */
   private armLimitTimer() {
     clearTimeout(this.limitTimer);
-    const list = this.limitResumes();
+    const list = this.limitResumes().filter((w) => !this.limitStarting.has(w.ticket));
     if (!list.length) return;
     const due = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs)!.due;
     // setTimeout overflows past 24.8 days; a weekly limit is at most 7.
@@ -1727,13 +1747,15 @@ export class Runner {
   }
 
   private limitResumeNext() {
-    const list = this.limitResumes();
+    const list = this.limitResumes().filter((w) => !this.limitStarting.has(w.ticket));
     const next = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs);
     const w = next?.wait;
     if (!w || next.due > Date.now()) return this.armLimitTimer();
     this.lastLimitResume = Date.now();
-    this.saveLimitResumes(list.filter((x) => x !== w));
-    // No turn runs while it waits: starting one ends the wait (startTurn).
+    // The wait and its held messages stay saved until the resume's turn takes them (startTurn ends the wait), as a network
+    // wait does: a restart while the resume restores the session still resumes (A2, #1286).
+    this.limitStarting.add(w.ticket);
+    this.armLimitTimer();
     this.resume(w.ticket, 0, w.tries, !!w.codex);
   }
 
@@ -3386,6 +3408,9 @@ export class Runner {
     }
     const why = limit ? reason! : `This account's Claude sign-in expired: link it again in Settings → Your account.`;
     this.emit(ticketId, 'note', { text: `${why}\nCarrying on with ${next.label} (account ${next.n}): this turn picks up where it stopped.` });
+    // Owed until its turn takes it (takeQueue): it waits behind this turn's save, and the turn's own record is gone,
+    // so a restart meanwhile would otherwise leave nothing to say it carries on (A1, #1286).
+    this.store.setSetting(owedKey(ticketId), { resumes: 0, ...(turn.limitTries ? { limitTries: turn.limitTries } : {}), onAccount: true } satisfies OwedResume);
     this.resume(ticketId, 0, turn.limitTries ?? 0, false, 0, true);
     return true;
   }

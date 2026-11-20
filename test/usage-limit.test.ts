@@ -209,10 +209,9 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.ok(shown.some(([tid, live]) => tid === id && live === 122005), 'the size went out while the turn ran');
     assert.equal(runner.view(t).context_window, 1000000);
     assert.equal(runner.view(t).context_live, null);
+    // A size left over from a turn that never sent a result isn't live once no turn runs.
     (runner as any).contextSizes.set(id, 90000);
-    assert.equal(runner.view(t).context_live, 90000);
-    (runner as any).contextSizes.set(id, 20000);
-    assert.equal(runner.view(t).context_live, 20000);
+    assert.equal(runner.view(t).context_live, null);
     (runner as any).contextSizes.delete(id);
     setRelease('ok');
     // A relay (no person of its own) waits for the payer's reset; a person's own message would try now (#477).

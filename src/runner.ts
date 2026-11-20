@@ -837,7 +837,7 @@ export class Runner {
       payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
-      context_live: this.contextSizes.get(ticket.id) ?? null,
+      context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
       context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
       last_turn_end: this.store.lastTurnEnd(ticket.id),

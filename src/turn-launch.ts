@@ -1,6 +1,7 @@
 // What a turn is launched with: the pinned copies of the server files it runs, its hooks, settings,
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
+import { LIVE_MANIFEST } from './host-tools.ts';
 import { msgEnv, msgSettings } from './msg-settings.ts';
 import { cpSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -606,7 +607,10 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     if (tmp) env.XDG_RUNTIME_DIR = tmp;
   }
   env = { ...env, ...androidEnv(homedir(), env.PATH) };
-  env = { ...env, ...facts.env.heavy, PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':') };
+  // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
+  env = { ...env, ...facts.env.heavy, PATH: [join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
+  // The server's host tools list (#1147), which propose_host_tool names; the live checkout is in every container too.
+  env.COORDINATOR_HOST_TOOLS = LIVE_MANIFEST;
   // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
   if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
   if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;

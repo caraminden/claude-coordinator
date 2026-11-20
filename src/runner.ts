@@ -613,7 +613,7 @@ export class Runner {
    * The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts).
    * It carries the calling turn's own token: a fresh one would log that turn's tools out (#225).
    */
-  hostEnv(ticket: Ticket, token: string): Record<string, string> {
+  hostEnv(ticket: Ticket, token?: string): Record<string, string> {
     const project = this.store.getProject(ticket.project_id);
     // land.sh's retro_log and run-tests.sh's log_flake write there, as they do from a turn.
     const shared = project && this.sharedDir(project);

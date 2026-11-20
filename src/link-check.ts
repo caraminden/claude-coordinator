@@ -108,7 +108,7 @@ export async function cardlessChoices(text: string, cfg: LinkCheckConfig, docs: 
 const DIRECT = /(^should\b[^?]*\?|\bwant me to|\bshould I|\bshall I|\bdo you want|would you like|which (one|of these|do you|would you|should)|ok(ay)? to (merge|land|ship|start|close|delete|go)|(want|like) (a|the|that|me)\b[^.?!\n]{0,90}\?|or (should|do|would|shall) (I|we)|(go|merge|land|ship|start) (it|them|now)\?)/i;
 const OFFER = /(?<!(\b(it|they|he|she|will|'ll|would|and)\s))\b((just )?say (the word|go|so|which)|let me know (which|if|whether)|tell me (which|if|whether)|if you('d| would)? (want|like|prefer)\b[^.\n]{0,80}(say|tell|I('ll| can| will))|(it's|is|that's) your call\b)/i;
 const QUOTED = /"[^"\n]*"|“[^”\n]*”/g;
-const CARD_TOOLS = /^mcp__[a-z-]+__(ask_question|propose_plan|propose_machine_notes|make_release_key)$/;
+const CARD_TOOLS = /^mcp__[a-z-]+__(ask_question|propose_plan|propose_machine_notes|propose_host_tool|make_release_key)$/;
 
 /** Whether this turn (the transcript after its last real prompt) called a card tool; null if the transcript can't be read. */
 function postedCard(transcript?: string): boolean | null {

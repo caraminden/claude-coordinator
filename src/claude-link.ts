@@ -47,7 +47,8 @@ const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-cont
  * (Delve's tools/windows-build.sh, #290; the rest of ~/.local/share/godot is editor state, the person's own),
  * and the Android SDK (#379).
  */
-export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk'];
+// .config/mise: mise's global config, which says which version of an approved host tool (#1147) its shims run.
+export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.config/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk'];
 /** The shared Android toolchain tools/android/install-sdk.sh puts on the host (#379): the SDK, mise's JDK 21 and Gradle's defaults. */
 export const ANDROID_SDK = '.local/share/android-sdk';
 export const ANDROID_JDK = '.local/share/mise/installs/java/temurin-21';

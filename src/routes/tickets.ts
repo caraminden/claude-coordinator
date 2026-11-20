@@ -45,6 +45,8 @@ import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '..
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
 import { machineNotes, patchMachine } from './machines.ts';
+import { installCommand, LIVE_MANIFEST, listed, parseHostTool, readManifest, sourceName, toolLabel } from '../host-tools.ts';
+import { approveHostTool } from '../host-tool-ship.ts';
 import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
@@ -314,9 +316,9 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
  * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones,
  * and a release key card (#837) that app's.
  */
-function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string } }) {
+function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; hostTool?: { source: string; package: string } }) {
   const { store, runner } = app;
-  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : 'plan');
+  const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.hostTool ? `tool:${c.hostTool.source}:${c.hostTool.package}` : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {
     const old = JSON.parse(e.data);
     if (old?.status !== 'pending' && old?.status !== 'revising') continue;
@@ -787,6 +789,28 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    method: 'POST', path: '/api/tickets/:ticket/host-tool', who: ['minion'], refuse: 'Only the minion itself can propose a host tool in its chat',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      // propose_host_tool (#1147; Josh, 2026-11-19): a card showing the exact install; only a member of the Citadel scheme approves it.
+      let tool;
+      try {
+        tool = parseHostTool(await readJson(req));
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      if (listed(readManifest(LIVE_MANIFEST), tool)) throw new HttpError(400, `${toolLabel(tool)} is on the server already: it's in the host tools list`);
+      const command = installCommand(tool);
+      const byHand = tool.source === 'pacman';
+      const event = postPlan(app, ticket.id, {
+        summary: `Install ${toolLabel(tool)} on the server`,
+        plan: `${tool.why}\n\n${byHand ? 'A person runs, by hand (the server has no root)' : 'Approve runs, on the server'}:\n\n\`\`\`\n${command}\n\`\`\`\n\nFrom ${sourceName(tool.source)}. It is listed in the host tools list, which a rebuild of the server installs from.`,
+        hostTool: { ...tool, command },
+      });
+      return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id) });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/release-key', who: ['self'], refuse: 'Only the minion or Taskmaster itself can ask for a release key in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
@@ -815,10 +839,11 @@ export const ticketRoutes: Route[] = [
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
-      const fixed = card.machine || card.releaseKey;
+      // A host tool card (#1147) too.
+      const fixed = card.machine || card.releaseKey || card.hostTool;
       const notes = body.verdict === 'approve' ? null : fixed && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
-      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : 'A newer plan replaced this one');
-      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
+      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       if (card.machine && notes === null) {
         const machine = store.getMachine(card.machine.id);
         if (!machine) throw new HttpError(409, `${card.machine.name} was removed`);
@@ -827,13 +852,21 @@ export const ticketRoutes: Route[] = [
         if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
         await patchMachine(app, session, machine, { notes: card.plan });
       }
+      // A host tool installs software on the server every scheme's turns share: a member of the Citadel scheme approves it (Josh, 2026-11-19).
+      if (card.hostTool && notes === null && !session.admin) throw new HttpError(403, `Only a member of the ${APP_NAME} scheme can approve installing software on the server`);
       // A release key card (#837): any member of the app's home scheme makes the key, as the Releases page's button does.
       if (card.releaseKey && notes === null) await makeKey(app, session, card.releaseKey.app);
       const result = { status: body.verdict === 'approve' ? 'approved' : fixed ? 'rejected' : 'revising', by: session.name, at: Date.now() };
       store.setEventData(event.id, { ...card, ...result });
       runner.emit(id, 'plan_result', { id: card.id, ...result });
       runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? 'Approved' : `Sent back${notes ? `: ${notes}` : ''}`}`);
-      deliverAnswer(app, id, session.name, card.releaseKey
+      deliverAnswer(app, id, session.name, card.hostTool
+        ? notes === null
+          ? card.hostTool.source === 'pacman'
+            ? `Approved: ${toolLabel(card.hostTool)} goes in the host tools list. You get a message saying who runs the install.`
+            : `Approved: ${toolLabel(card.hostTool)} is installing on the server now (\`${card.hostTool.command}\`). You get a message once it's in. Keep working on what doesn't depend on it.`
+          : `Rejected installing ${toolLabel(card.hostTool)}; nothing was installed.${notes ? `\n\n${notes}` : ''}`
+        : card.releaseKey
         ? notes === null
           ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
           : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
@@ -845,6 +878,8 @@ export const ticketRoutes: Route[] = [
           ? `Plan approved: build it this way. ("${card.summary}")`
           : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
         { plan: { planId: card.id, verdict: body.verdict } });
+      // After the answer, so its message comes first; it runs behind the click (an install can take minutes).
+      if (card.hostTool && notes === null) void approveHostTool(app, id, card.hostTool, session.name);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },

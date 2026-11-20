@@ -269,6 +269,24 @@ const PROPOSE_PLAN = {
   },
 };
 
+// propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.
+const HOST_TOOLS_LIST = process.env.COORDINATOR_HOST_TOOLS;
+const PROPOSE_HOST_TOOL = {
+  name: 'propose_host_tool',
+  description:
+    `Propose installing a command-line tool on the server every turn runs on (yours too, in a container, which can't install one), as a card in this chat showing the exact install command. Only a member of the ${APP_NAME} scheme can approve it: approve installs it with mise (an Arch package is installed by a person, as the server has no root) and ships its line in the server's host tools list, which a rebuild installs from; reject installs nothing. Either comes as a message. Pin one exact version and say in why what it's for.${HOST_TOOLS_LIST ? ` What the server has already: ${HOST_TOOLS_LIST}.` : ''} A newer proposal for the same package replaces an open one. Link every mention of the card, as with propose_plan.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      source: { type: 'string', enum: ['mise', 'npm', 'pypi', 'cargo', 'github', 'pacman'], description: "Where it comes from: mise (mise's own tools and registry, e.g. jq, go), npm, pypi (a Python CLI), cargo (a Rust crate, built from source: minutes), github (a release binary, package owner/repo), pacman (an Arch package)" },
+      package: { type: 'string', maxLength: 140, description: 'Its name in that source, e.g. "ripgrep", "@biomejs/biome", "BurntSushi/ripgrep"' },
+      version: { type: 'string', maxLength: 64, description: 'One exact version, e.g. "14.1.1": no ranges, no "latest"' },
+      why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
+    },
+    required: ['source', 'package', 'version', 'why'],
+  },
+};
+
 const PROPOSE_MACHINE_NOTES = {
   name: 'propose_machine_notes',
   description:
@@ -2189,6 +2207,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
+    case 'propose_host_tool': {
+      const { href } = await call('POST', `/api/tickets/${TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
+      return `The host tool card is in the chat; its link is ${href}. Link every mention of it, e.g. [the host tool card below](${href}). Only a member of the ${APP_NAME} scheme can approve it, and the answer comes as a message, then another once it's installed. Keep working on what doesn't depend on it.`;
+    }
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
@@ -2407,7 +2429,7 @@ function toolListAll() {
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
   if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

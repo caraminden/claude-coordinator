@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -9,6 +9,10 @@ import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
 import { APP_ERRORS_WARN, StatusPage, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
+// A database backup that is never stale for these tests' clocks, so the backups line stays out of their verdicts.
+mkdirSync(join(root, 'backups'));
+writeFileSync(join(root, 'backups', 'coordinator-2026-11-19.db'), 'x');
+utimesSync(join(root, 'backups', 'coordinator-2026-11-19.db'), new Date('2100-01-01'), new Date('2100-01-01'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -142,7 +146,8 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.deepEqual(c.host.series[0].slice(1), [95, 95]);
   assert.equal(c.verdict.tone, 'bad');
   assert.deepEqual(c.verdict.reasons, ['claude-coordinator-prune.timer failed', 'a 6.2 s stall in the last day', 'under 10% of memory free', 'under 10% of disk free']);
-  assert.ok(c.slots.some((s) => s.key === 'backups') && c.slots.some((s) => s.key === 'line'));
+  assert.ok(c.slots.some((s) => s.key === 'line') && !c.slots.some((s) => s.key === 'backups'), 'the backups slot became the real tile');
+  assert.deepEqual(c.backup.problems, []);
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {
@@ -234,4 +239,14 @@ test('time to ship (#1132): a slow day sends exactly one nudge per target per da
   assert.equal(page.nudgeSlowShips(), 0, 'one more slow ship that day: still nothing');
   now += DAY;
   assert.equal(page.nudgeSlowShips(), 0, 'tomorrow has no slow ship yet');
+});
+
+test('a missed night turns the Citadel verdict red and names what is missing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'status-backup-'));
+  const { store } = setup('backup');
+  const page = new StatusPage({ store, dataDir: dir, home: dir, bootAt: Date.now(), commit: 'abc', ownScheme: () => null });
+  const data = await page.build({ canSee: () => true, admin: true, key: 'k' });
+  assert.equal(data.citadel.verdict.tone, 'bad');
+  assert.ok(data.citadel.verdict.reasons.includes('backups: no database backup on disk'));
+  rmSync(dir, { recursive: true, force: true });
 });

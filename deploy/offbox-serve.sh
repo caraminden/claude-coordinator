@@ -14,7 +14,7 @@ app_names='^apps/[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?/[0-9]{4}-[0-9]{2}-[0-9]{2}/[
 key_names='^keys/[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?-release\.(jks|pass)$'
 
 case ${cmd:-} in
-  list) exec cat -- "$OUT/SHA256SUMS" ;;
+  list) touch -- "$OUT/.pulled" 2>/dev/null || true; exec cat -- "$OUT/SHA256SUMS" ;; # the desktop's pull starts with a list: Status reads this file's time (#1142)
   get)
     if [[ -z ${extra:-} && (${name:-} =~ $names || ${name:-} =~ $key_names || (${name:-} =~ $app_names && $name != *..*)) && -f $OUT/$name && ! -L $OUT/$name ]]; then exec cat -- "$OUT/$name"; fi
     echo "No such backup: ${name:-}" >&2

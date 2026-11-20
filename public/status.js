@@ -193,8 +193,18 @@ function citadelTiles(c, days, now, ships, redraw) {
       { tone: c.unitsFailed ? 'warn' : c.units.some((u) => u.active === 'failed') ? 'bad' : null }),
     tile('CI desktop', c.desktops.length ? c.desktops.map((pc) => pcWord(pc)[1]).join(', ') : 'None', 'Its load is on the CI page',
       h('ul', { class: 'st-list' }, ...c.desktops.map((pc) => { const [tone, word] = pcWord(pc); return h('li', {}, h('a', { href: `#/p/${view?.projectId ?? 2}/ci` }, pc.host), toneChip(tone, word)); }))),
+    backupTile(c.backup, now),
     ...c.slots.map(slot),
   ];
+}
+
+/** Backup freshness (#1142): the last database backup, the last off-box pull, and each app yes or no. Red when a night is missing. */
+function backupTile(b, now) {
+  const bad = b.problems.length > 0;
+  return tile('Backups', !b.db ? 'No database backup' : `Database ${ago(b.db.at)}`,
+    `${b.db ? `${bytes(b.db.size)} · ` : ''}off-box copy ${b.pulledAt === null ? 'not pulled yet' : `pulled ${ago(b.pulledAt)}`}${bad ? ` · ${b.problems.join('; ')}` : ''}`,
+    h('ul', { class: 'st-list' }, ...b.apps.map((a) => h('li', {}, a.title, toneChip(a.ok ? 'ok' : a.day ? 'danger' : 'neutral', a.ok ? `yes, ${a.day}` : a.day ? `no, last ${a.day}` : 'no')))),
+    { tone: bad ? 'bad' : null, wide: true });
 }
 
 function appTiles(a, days, ships, redraw) {
@@ -220,7 +230,8 @@ function appTiles(a, days, ships, redraw) {
       null, { tone: a.verdict.reasons.some((r) => r.includes('GB')) ? 'warn' : null }),
     a.errors.top.length ? tile('Top errors this week', `${a.errors.top[0].count}× ${a.errors.top[0].kind}`, `last ${ago(a.errors.top[0].last_at)}`,
       h('ul', { class: 'st-list st-errors' }, ...a.errors.top.map((e) => h('li', {}, h('span', { class: 'st-err' }, e.sample || e.kind), h('span', { class: 'muted' }, `${e.count}× ${e.kind}`)))), { wide: true }) : null,
-    slot({ key: 'backup', title: 'Last backup', note: 'When it last ran and whether it worked: coming in Build 5.' }),
+    tile('Last backup', a.backup.day ? (a.backup.ok ? 'Yes' : 'Stale') : 'None yet', a.backup.day ? `Its newest nightly folder is ${a.backup.day}` : 'It has not written backups/<day>/ under its data folder',
+      null, { tone: a.backup.day && !a.backup.ok ? 'warn' : null }),
   ].filter(Boolean);
 }
 

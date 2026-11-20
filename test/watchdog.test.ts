@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -169,13 +169,15 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   const fake = join(dir, 'systemctl');
   writeFileSync(fake, '#!/bin/sh\necho ActiveState=failed\necho UnitFileState=enabled\n');
   chmodSync(fake, 0o755);
+  mkdirSync(join(dir, 'backups'));
+  writeFileSync(join(dir, 'backups', 'coordinator-2026-11-19.db'), 'x'); // a fresh night, so only Citadel is down
   const stateFile = join(dir, 'state.json');
   writeFileSync(stateFile, JSON.stringify({ citadel: { title: 'Citadel', since: Date.now() - 11 * MIN, why: 'failed', alerted: false } }));
   const run = (env: object = {}) => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
     env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, ...env },
   }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
   const out = await run();
-  assert.match(out, /1 watched, down: Citadel: failed/);
+  assert.match(out, /2 watched, down: Citadel: failed/);
   assert.match(out, /Pushing to Cara: Citadel down: Down: Citadel 11 min \(failed\)\./);
   assert.equal(got.length, 1);
   assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
@@ -193,4 +195,42 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   await again({ PUSH_SUBJECT: 'mailto:ops@example.com' });
   assert.equal(sub(), 'mailto:ops@example.com');
   assert.equal(got.length, 3);
+});
+
+test('tools/watchdog.ts pushes once when the newest backup is a day old, and names what is missing', async () => {
+  const dir = mkdtempSync(join(root, 'backup-'));
+  const store = new Store(join(dir, 'coordinator.db'));
+  store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  loadVapidKeys(dir);
+  const got: unknown[] = [];
+  const push = createServer((req, res) => (req.resume(), got.push(req.url), res.writeHead(201).end()));
+  const port = await listen(push);
+  after(() => push.close());
+  const ua = createECDH('prime256v1');
+  ua.generateKeys();
+  store.savePushSubscription('Cara', `http://127.0.0.1:${port}/sub`, ua.getPublicKey().toString('base64url'), randomBytes(16).toString('base64url'));
+  const fake = join(dir, 'systemctl');
+  writeFileSync(fake, '#!/bin/sh\necho ActiveState=active\necho UnitFileState=enabled\n');
+  chmodSync(fake, 0o755);
+  mkdirSync(join(dir, 'backups'));
+  const old = join(dir, 'backups', 'coordinator-2026-11-18.db');
+  writeFileSync(old, 'x');
+  const ago = new Date(Date.now() - 30 * 3_600_000);
+  utimesSync(old, ago, ago);
+  const stateFile = join(dir, 'state.json');
+  // It has been missing for 11 minutes already: the push is due now.
+  writeFileSync(stateFile, JSON.stringify({ backup: { title: 'Nightly backup', since: Date.now() - 11 * MIN, why: 'x', alerted: false } }));
+  const run = () => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
+    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake },
+  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
+  const out = await run();
+  assert.match(out, /Nightly backup: the database backup is 30 h old/);
+  assert.match(out, /Pushing to Cara: Nightly backup down/);
+  assert.equal(got.length, 1);
+  await run();
+  assert.equal(got.length, 1, 'one push, not one a round');
+  // A fresh backup clears it.
+  writeFileSync(old, 'y');
+  const back = await run();
+  assert.match(back, /all up/);
 });

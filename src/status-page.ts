@@ -3,12 +3,14 @@
 // (deploys, errors, agent turns, who used it, disk), each with a week of daily history. Read-only: it only reads
 // what other parts already record, plus perigee's memory and disk, which HostSampler samples every 5 minutes.
 import { readFile, statfs } from 'node:fs/promises';
-import { loadavg } from 'node:os';
+import { homedir, loadavg } from 'node:os';
 import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay } from './contraption-errors.ts';
+import { join } from 'node:path';
+import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -87,6 +89,8 @@ export interface StatusDeps {
   /** systemctl --user show for these units; left out where they can't be read (a preview, a test). */
   unitStates?: (units: string[]) => Promise<UnitState[]>;
   now?: () => number;
+  /** Where apps' DATA_DIRs are under (~/.local/share/<name>); the real home unless a test says otherwise. */
+  home?: string;
   /** Tell a scheme's Taskmaster (a wake): the slow-ship nudge. Left out in a preview or a test that doesn't send. */
   tell?: (projectId: number, text: string) => void;
   mem?: () => Promise<{ total: number; avail: number }>;
@@ -203,12 +207,12 @@ export class StatusPage {
       now,
       days,
       shipTimes,
-      citadel: this.citadel(viewer, now, days, since, units),
-      apps: apps.map((a) => appVitals(store, a, now, days, since, unitOf(`citadel-app-${a.name}.service`), this.deps.diskUse?.(a) ?? null)),
+      citadel: this.citadel(viewer, now, days, since, units, apps),
+      apps: apps.map((a) => appVitals(store, a, now, days, since, unitOf(`citadel-app-${a.name}.service`), this.deps.diskUse?.(a) ?? null, this.deps.home)),
     };
   }
 
-  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[] | null): CitadelStatus {
+  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[] | null, apps: ContraptionRow[]): CitadelStatus {
     const { store, bootAt } = this.deps;
     const dayOf = (at: number) => pacificDay(at);
     const blank = () => Object.fromEntries(days.map((d) => [d, 0])) as Record<string, number>;
@@ -274,6 +278,9 @@ export class StatusPage {
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`]);
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free']);
+    const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
+    const backupMissing = backupProblems(backup, now);
+    if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`]);
     const red = ci?.workflows.filter((w) => w.conclusion && w.conclusion !== 'success') ?? [];
     if (red.length) reasons.push(['warn', `CI red on main: ${red.map((w) => w.name).join(', ')}`]);
     return {
@@ -287,10 +294,10 @@ export class StatusPage {
       unitsFailed: units === null,
       units: citadelUnits.map((u) => ({ unit: u.unit, load: u.load, active: u.active, sub: u.sub })),
       desktops,
+      backup: { ...backup, problems: backupMissing },
       // Tiles still to come: the minions that build them fill these in (Build 5, lane 3).
       slots: [
         { key: 'line', title: 'Ship line', note: 'Who is shipping and who waits: coming with the line panel.' },
-        { key: 'backups', title: 'Backups', note: 'When each backup last ran and whether it worked: coming in Build 5.' },
       ],
     };
   }
@@ -305,7 +312,7 @@ function shipChanges(r: ReleaseRow): string[] {
 }
 
 /** One app's week: deploys, errors, agent turns and who ran them, disk, its service, and a verdict. */
-export function appVitals(store: Store, a: ContraptionRow, now: number, days: string[], since: number, unit: UnitState | null, disk: DiskUse | null): AppStatus {
+export function appVitals(store: Store, a: ContraptionRow, now: number, days: string[], since: number, unit: UnitState | null, disk: DiskUse | null, home = homedir()): AppStatus {
   const dayOf = (at: number) => pacificDay(at);
   const idx = new Map(days.map((d, i) => [d, i]));
   const zero = () => days.map(() => 0);
@@ -357,6 +364,8 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   else if (dFailed.some(Boolean)) reasons.push(['warn', `${dFailed.reduce((x, y) => x + y, 0)} failed deploy${dFailed.reduce((x, y) => x + y, 0) > 1 ? 's' : ''} this week`]);
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`]);
   if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`]);
+  const backup = appBackup(join(home, '.local/share', a.name), now);
+  if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`]);
   return {
     name: a.name, title: a.title, icon: a.icon, scheme: a.home_scheme,
     verdict: worst(reasons),
@@ -365,8 +374,7 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
     errors: { counts: eCount, kinds, top, lastDay },
     turns: { counts: tCount, tokens: tTokens, people: [...people.entries()].sort((x, y) => y[1] - x[1]).map(([name, turns]) => ({ name, turns })) },
     disk: disk ? { bytes: disk.data_bytes, at: disk.measured_at, warn_gb: disk.warn_gb } : null,
-    // Filled in by the backup freshness minion (Build 5, lane 3).
-    backup: null,
+    backup,
   };
 }
 
@@ -384,6 +392,8 @@ export interface CitadelStatus {
   unitsFailed: boolean;
   units: { unit: string; load: string; active: string; sub: string }[];
   desktops: { host: string; verdict: PcView['verdict']; now: PcView['now']; restarts: number[]; seen: boolean }[];
+  /** Backup freshness (#1142): problems is what a missed night names; empty when all is well. */
+  backup: BackupInfo & { problems: string[] };
   slots: { key: string; title: string; note: string }[];
 }
 
@@ -398,7 +408,7 @@ export interface AppStatus {
   errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };
   turns: { counts: number[]; tokens: number[]; people: { name: string; turns: number }[] };
   disk: { bytes: number; at: number; warn_gb: number | null } | null;
-  backup: null;
+  backup: { day: string | null; ok: boolean };
 }
 
 export interface StatusData {

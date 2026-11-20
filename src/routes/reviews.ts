@@ -118,6 +118,7 @@ export const reviewRoutes: Route[] = [
     // New: blank, or on top of a kit starter (`extends`), and always on trial first (Q12).
     method: 'POST', path: '/api/projects/:project/reviews', who: ['person', 'taskmaster'], refuse: 'Only people and Taskmasters add reviewers and critics; ask your Taskmaster',
     async handler({ req, res, app, session, project }) {
+      app.store.reviews.ensureBuiltIns(project.id);
       const body = await readJson(req);
       const f = fieldsFrom(body);
       const starter = f.extends ? loadStarters().find((s) => s.slug === f.extends) : null;

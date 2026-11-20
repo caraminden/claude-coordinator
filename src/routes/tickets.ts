@@ -1234,7 +1234,7 @@ export const ticketRoutes: Route[] = [
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       // No risk label is high (Q10, Build 4): a scheme whose pre-ship review is off, with nothing else giving the label, has every ship wait for a person's go.
       const labeller = app.store.reviews.labelGiver(ticket.project_id);
-      const unlabelled = !labeller ? "this scheme's pre-ship review is off and nothing else gives the risk label" : !body.risk ? 'it has no risk label' : '';
+      const unlabelled = labeller ? '' : "this scheme's pre-ship review is off and nothing else gives the risk label";
       const h: Handoff = unlabelled
         ? { summary: str(body.summary, 'Summary', 300), risk: 'high', reason: `No risk label: ${unlabelled}${typeof body.risk_reason === 'string' && body.risk_reason.trim() ? `. ${body.risk_reason.trim()}` : ''}`.slice(0, 300) }
         : { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
@@ -1242,7 +1242,7 @@ export const ticketRoutes: Route[] = [
       // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
       const project = app.store.getProject(ticket.project_id);
       const goFrom = project?.go_from ?? 'high';
-      if (body.into === undefined && needsGo(goFrom, h.risk)) {
+      if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk))) {
         if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first`);
         h.go = str(body.go, 'Go', 200);
       } else if (body.into === undefined && project && offSkills(project).includes('self-review')) {

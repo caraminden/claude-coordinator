@@ -161,6 +161,12 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   assert.equal(handOff.status, 400);
   assert.match((await handOff.json()).error, /pre-ship review is off and nothing else gives the risk label, so this ship waits for a person's go/);
 
+  // Even where the scheme's go threshold is never, an unlabelled ship waits for a go (Q10).
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { go_from: 'never' } });
+  const never = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end' }) });
+  assert.equal(never.status, 400);
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { go_from: 'high' } });
+
   // A new entry is on trial: it can't block or give the label until it's calibrated.
   await call(url, { method: 'POST', body: { slug: 'gatekeeper', when: 'ask', body: '# Gate' } });
   const gk = `${url}/gatekeeper`;

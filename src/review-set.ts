@@ -333,6 +333,7 @@ function onlyCalibratedJudge(e: EntryFields): void {
 /** Refuse a field a save can't hold, so a bad request changes nothing. */
 function check(f: Partial<EntryFields>): void {
   if (f.slug !== undefined && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(f.slug)) throw new ReviewError('The name in files (slug) is kebab-case: lowercase letters, digits and dashes, like ui-screenshots');
+  if (f.slug === 'audits') throw new ReviewError('audits is kept for the audits route: pick another name');
   if (f.slug !== undefined && f.slug.length > 60) throw new ReviewError('The slug is at most 60 characters');
   if (f.name !== undefined && (typeof f.name !== 'string' || !f.name.trim() || f.name.length > 80)) throw new ReviewError('A name is 1 to 80 characters');
   if (f.kind !== undefined && !(KINDS as readonly string[]).includes(f.kind)) throw new ReviewError(`kind is one of ${KINDS.join(', ')}`);

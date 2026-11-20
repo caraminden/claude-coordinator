@@ -41,7 +41,7 @@ export function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit
 
 /**
  * What already speaks to an edit's new words: a registered rule outside its home, or a paragraph elsewhere sharing a
- * run of words or most of its words. The sections of the edited text that the edit touches are left out, so a new
+ * run of words. The sections of the edited text that the edit touches are left out, so a new
  * bullet isn't flagged against its own neighbours.
  */
 export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scope: Scope, before: string, text: string): Overlap[] {

@@ -105,9 +105,6 @@ export function findCopies(sources: Source[], homes: Map<string, string | null>,
   return out;
 }
 
-const STOP = new Set('about after again also any been before being both but can cannot does each else even every from have here into its just like many more most must never next none not once only other over same should some such than that their them then there these they this those through under until upon very what when where which while who whom why will with would your yours'.split(' '));
-const content = (s: string) => new Set(norm(s).split(' ').filter((w) => w.length > 3 && !STOP.has(w)).map((w) => w.replace(/(ing|ed|es|s)$/, '')));
-
 /** A paragraph elsewhere that speaks to the same thing as an edit's new words. */
 export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string }
 
@@ -119,31 +116,25 @@ export function added(before: string, text: string): Para[] {
 
 /**
  * What already speaks to an edit's new paragraphs: a registered rule they repeat (outside its home section), and any
- * paragraph in the sources that shares a run of words with them or most of their content words.
+ * paragraph in the sources that shares a run of RUN_WORDS words with them (Josh, 2026-11-20, #1211: no word-share test).
  * `inHome(rule, para)` says whether a new paragraph sits in that rule's own home, where its phrases belong.
  */
 export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: RuleHome, p: Para) => boolean, rules = RULE_HOMES): Overlap[] {
   const out: Overlap[] = [];
   const seen = new Set<string>();
   const push = (o: Overlap) => { const k = `${o.label}|${o.line}|${o.why}`; if (!seen.has(k)) { seen.add(k); out.push(o); } };
-  const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text), qw: content(q.text) }))) : [];
+  const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text) }))) : [];
   for (const p of news) {
     for (const rule of rules) {
       const hits = phraseHits(p.text, rule);
       if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
     }
     const pr = runs(p.text);
-    const pw = content(p.text);
     const pn = norm(p.text);
-    for (const { s, q, qn, qr, qw } of others) {
+    for (const { s, q, qn, qr } of others) {
       if (!qn || qn === pn) continue;
-      let why: string | null = null;
-      for (const r of qr) if (pr.has(r)) { why = `shares "${r}"`; break; }
-      if (!why) {
-        const both = [...pw].filter((w) => qw.has(w)).length;
-        if (both >= 6 && both / Math.min(pw.size, qw.size) >= 0.6) why = `shares ${both} of its words`;
-      }
-      if (why) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why });
+      const run = sharedRun(q.text, pr);
+      if (run) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why: `shares "${run}"` });
     }
   }
   return out;

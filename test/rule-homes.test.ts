@@ -48,3 +48,11 @@ test('an edit that repeats a rule or another place lists what already says it', 
   // In its own home the rule's phrases belong there.
   assert.ok(!overlapsFor(news, [], () => true).length);
 });
+
+// Josh, 2026-11-20 (#1211): "Drop the extra 60% test". Phrases plus word runs only: a paragraph that shares most of
+// its words with another, in another order and with no run of RUN_WORDS, is not listed.
+test('sharing most words without a run of them is not a repeat', () => {
+  const news = added('', 'Session context size times model calls is the cost, so jobs stay small and noisy work stays outside.');
+  const others: Source[] = [{ label: 'kit/skills/x/SKILL.md', href: null, text: 'Cost is model calls times context size: keep big jobs in small contexts and keep noisy work out of the session.\n' }];
+  assert.deepEqual(overlapsFor(news, others, () => false), []);
+});

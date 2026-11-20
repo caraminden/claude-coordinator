@@ -817,7 +817,7 @@ export function myInstructionsEditor() {
 
 /**
  * Before a person's save (#1162): the server's matcher lists what already says the new words (a registered rule outside
- * its one home, or a paragraph elsewhere sharing most of its words), and the save goes ahead only on Save anyway.
+ * its one home, or a paragraph elsewhere sharing a run of its words), and the save goes ahead only on Save anyway.
  * Resolves true to save. A failed check never blocks a save.
  */
 async function checkRepeats(scope, text, box, status) {

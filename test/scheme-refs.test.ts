@@ -119,7 +119,7 @@ test('message_ticket and cards are refused once per number; message_taskmaster i
 test('the hook script prints a deny decision, or nothing', () => {
   const entry = schemeRefsHooks(refsFile, join(root, 'sent-script'));
   assert.equal(entry.matcher, SCHEME_REFS_MATCHER);
-  const [node, script, config] = entry.hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
+  const [node, script, config] = entry.hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
   assert.equal(script, SCHEME_REFS);
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   const bad = { hook_event_name: 'PreToolUse', tool_name: 'mcp__coordinator__message_ticket', tool_input: { text: peek } };

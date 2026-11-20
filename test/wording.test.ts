@@ -132,7 +132,7 @@ test('the hook script prints a deny decision, or nothing', () => {
   assert.equal(entry.matcher, WORDING_MATCHER);
   for (const t of ['mcp__thread__message_coordinator', 'mcp__coordinator__message_ticket', 'mcp__thread__propose_plan', 'Write', 'Edit']) assert.match(t, new RegExp(WORDING_MATCHER));
   assert.doesNotMatch('mcp__thread__set_properties', new RegExp(WORDING_MATCHER));
-  const [node, script, config] = entry.hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
+  const [node, script, config] = entry.hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
   assert.equal(script, WORDING);
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   const bad = { hook_event_name: 'PreToolUse', tool_name: 'mcp__thread__propose_plan', tool_input: { summary: 'Plan', plan: 'Fold the new data into the templates.' } };

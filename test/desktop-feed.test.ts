@@ -153,6 +153,18 @@ test("CI's publisher publishes a run's build once and tells the Taskmaster, wait
   assert.equal(told.length, 2);
   assert.match(told[1], /couldn't publish CI run 12's build/);
   assert.equal((await feeds.index(3, 'app'))!.current, 1, 'PCs keep build 1');
+  files.set(13, await build('b.zip', { 'A.exe': 'v2' }));
+  await publish(t, { id: 13, sha: 'g' });
+  assert.equal((await feeds.index(3, 'app'))!.current, 2);
+  await publish(t, { id: 11, sha: 'def0123456' });
+  assert.equal((await feeds.index(3, 'app'))!.current, 1, 'a roll back pins run 11 again: the feed goes back to its build');
+  await publish(t, { id: 13, sha: 'g' });
+  assert.equal((await feeds.index(3, 'app'))!.current, 2, 'clearing the pin follows the newest run again');
+  await feeds.publish({ projectId: 3, app: 'app', file: await build('b.zip', { 'A.exe': 'by hand' }) });
+  const restarted = ciPublisher({ feeds, tell: (_p, t) => told.push(t), file: async (_p, run) => files.get(run) ?? null });
+  await restarted(t, { id: 13, sha: 'g' });
+  assert.equal((await feeds.index(3, 'app'))!.current, 3, 'a by-hand publish stands after a restart while CI still names the run it followed');
+  assert.equal(told.length, 3, 'run 13 was news once; following it again, and the restart, were not');
 });
 
 test("a ci target's desktop settings are kept only when well formed", () => {
@@ -192,7 +204,14 @@ test('the open routes serve the feed, a kept build and the install zip, and 404 
     const inst = await fetch(`${base}/5/app/install.zip`);
     assert.equal(inst.status, 200);
     assert.equal(inst.headers.get('content-type'), 'application/zip');
-    for (const path of ['5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
+    // The desktop folder sits on a mount minions' containers can write: a link planted there is never served.
+    const dir = join(dataDir, 'projects', '5', 'desktop', 'app');
+    await symlink(join(dataDir, 'secret'), join(dir, 'app-9.zip'));
+    await writeFile(join(dataDir, 'secret'), 'secret');
+    const index = JSON.parse(await readFile(join(dir, 'feed.json'), 'utf8'));
+    index.builds.push({ ...index.builds[0], build: 9, zip: 'app-9.zip' });
+    await writeFile(join(dir, 'feed.json'), JSON.stringify(index));
+    for (const path of ['5/app/app-9.zip', '5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
       assert.equal((await fetch(`${base}/${path}`)).status, 404, path);
     }
   } finally {

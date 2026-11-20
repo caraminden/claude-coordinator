@@ -44,8 +44,8 @@ On every start the launcher:
 ## Publishing
 
 - **By hand:** `publish_desktop` with `app` (lower case, digits, dashes) and `path` (a build you made)
-  or `ci_file` (a CI store id). It gets Citadel's next number. The reply links the feed and the
-  first-install zip.
+  or `ci_file` (a CI store id). It gets Citadel's next number and stands until CI publishes another
+  run. The reply links the feed and the first-install zip.
 - **From CI:** give the scheme's Windows ci target a `desktop` block in the repo's `citadel-app.json`,
   and upload the build to the CI store as `kind=release` (`citadel:ci-store`):
 

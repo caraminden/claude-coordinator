@@ -52,6 +52,8 @@ export interface DesktopIndex {
   current: number;
   /** Newest first. */
   builds: DesktopBuild[];
+  /** The CI run (`ci:<run id>`) the feed last followed: a later by-hand publish stands until CI moves on, a restart too. */
+  ci?: string;
 }
 
 export interface PublishAsk {
@@ -67,6 +69,8 @@ export interface PublishAsk {
   commit?: string;
   source?: string;
   by?: string;
+  /** CI's own publish: the feed follows this run, and the run it followed last is a no-op (ciPublisher). */
+  follow?: boolean;
 }
 
 export interface Published {
@@ -130,7 +134,14 @@ export class DesktopFeeds {
   async zip(projectId: number, app: string, name: string): Promise<string | null> {
     const index = await this.index(projectId, app);
     const b = index?.builds.find((x) => x.zip === name);
-    return b ? join(this.dir(projectId, app), b.zip) : null;
+    return b ? this.kept(projectId, app, b) : null;
+  }
+
+  /** A build's zip on disk, only as the server names it and as a plain file: the folder sits on the projects mount minions' containers can write. */
+  private async kept(projectId: number, app: string, b: DesktopBuild): Promise<string | null> {
+    if (b.zip !== `${app}-${b.build}.zip`) return null;
+    const p = join(this.dir(projectId, app), b.zip);
+    return (await lstat(p).catch(() => null))?.isFile() ? p : null;
   }
 
   publish(ask: PublishAsk): Promise<Published> {
@@ -149,7 +160,9 @@ export class DesktopFeeds {
     // A CI run (or a roll back to one) that is already here: the feed names it again, no new number.
     const seen = ask.source ? index.builds.find((b) => b.source === ask.source) : undefined;
     if (seen) {
-      if (index.current !== seen.build) await writeIndex(dir, { ...index, current: seen.build });
+      if (ask.follow && index.ci === ask.source) return { build: seen, already: true, ...paths };
+      const next = { ...index, current: seen.build, ...(ask.follow ? { ci: ask.source } : {}) };
+      if (index.current !== next.current || index.ci !== next.ci) await writeIndex(dir, next);
       return { build: seen, already: true, ...paths };
     }
     const st = await stat(ask.file).catch(() => null);
@@ -173,7 +186,7 @@ export class DesktopFeeds {
       };
       const builds = [entry, ...index.builds];
       const kept = builds.slice(0, KEEP);
-      await writeIndex(dir, { ...index, current: build, builds: kept });
+      await writeIndex(dir, { ...index, current: build, builds: kept, ...(ask.follow ? { ci: ask.source } : {}) });
       for (const b of builds.slice(KEEP)) await rm(join(dir, b.zip), { force: true });
       return { build: entry, ...paths };
     } finally {
@@ -190,11 +203,13 @@ export class DesktopFeeds {
       const dir = this.dir(projectId, app);
       const index = await this.index(projectId, app);
       const b = index?.builds.find((x) => x.build === index.current);
-      if (!index || !b) return null;
+      const src = index && b ? await this.kept(projectId, app, b) : null;
+      if (!index || !b || !src) return null;
       const key = createHash('sha256').update(`${b.build} ${b.sha256} ${feedUrl} ${launcher.sha256}`).digest('hex').slice(0, 16);
-      const name = `install-${key}.zip`;
+      // Named by build: one per address Citadel is reached at, and those of older builds go.
+      const name = `install-${b.build}-${key}.zip`;
       const out = join(dir, name);
-      if (await stat(out).then(() => true, () => false)) return out;
+      if ((await lstat(out).catch(() => null))?.isFile()) return out;
       const tmp = await mkdtemp(join(dir, '.install-'));
       try {
         const top = join(tmp, app);
@@ -202,9 +217,9 @@ export class DesktopFeeds {
         await copyFile(launcher.path, join(top, `${app}.exe`));
         await writeFile(join(top, 'launcher.json'), JSON.stringify({ app, feed: feedUrl, ...(index.title ? { title: index.title } : {}) }, null, 2));
         await writeFile(join(top, 'state.json'), JSON.stringify({ current: { id: b.build, exe: b.exe, started: b.started }, failed: [] }, null, 2));
-        await unzip(join(dir, b.zip), join(top, 'versions', String(b.build)));
+        await unzip(src, join(top, 'versions', String(b.build)));
         await zipFolder(tmp, join(tmp, name));
-        for (const old of await readdir(dir)) if (/^install-[0-9a-f]+\.zip$/.test(old)) await rm(join(dir, old), { force: true });
+        for (const old of await readdir(dir)) if (/^install-\d+-[0-9a-f]+\.zip$/.test(old) && !old.startsWith(`install-${b.build}-`)) await rm(join(dir, old), { force: true });
         await rename(join(tmp, name), out);
         return out;
       } finally {
@@ -226,12 +241,21 @@ function exeName(exe: unknown): exe is string {
 }
 
 /** Unpack a build into `into`; the folder that holds it (a lone top folder is stripped). Refuses links and odd files. */
+/** What an archive unpacks to, read from its listing before anything is written: a small zip can unpack to fill the disk. */
+const MAX_UNPACKED = 8 * 1024 ** 3;
+const UNPACKED_SIZE = 'import sys,tarfile,zipfile\nf=sys.argv[1]\nprint(sum(i.file_size for i in zipfile.ZipFile(f).infolist()) if zipfile.is_zipfile(f) else sum(m.size for m in tarfile.open(f)))';
+
 async function unpack(file: string, into: string): Promise<string> {
   await mkdir(into, { recursive: true });
   const name = basename(file).toLowerCase();
   try {
+    const archive = name.endsWith('.zip') || name.endsWith('.tar.gz') || name.endsWith('.tgz');
+    if (archive) {
+      const { stdout } = await run('python3', ['-I', '-c', UNPACKED_SIZE, file], { maxBuffer: 1 << 20, timeout: 10 * 60_000 });
+      if (!(Number(stdout) <= MAX_UNPACKED)) throw new DesktopError(`The build unpacks to ${stdout.trim()} bytes; the most is ${MAX_UNPACKED}`);
+    }
     if (name.endsWith('.zip')) await unzip(file, into);
-    else if (name.endsWith('.tar.gz') || name.endsWith('.tgz')) await run('tar', ['-xzf', file, '-C', into, '--no-same-owner', '--no-same-permissions'], { maxBuffer: 1 << 20 });
+    else if (archive) await run('tar', ['-xzf', file, '-C', into, '--no-same-owner', '--no-same-permissions'], { maxBuffer: 1 << 20, timeout: 10 * 60_000 });
     else if (name.endsWith('.exe')) await copyFile(file, join(into, basename(file)));
     else throw new DesktopError('A build is a .zip, .tar.gz or .tgz of its folder, or the .exe alone');
   } catch (err) {
@@ -302,23 +326,25 @@ export interface CiPublishDeps {
 
 /**
  * Publishes the build a ci target with a desktop app has out (Josh, 2026-11-19: "Auto from CI, plus by hand"): its newest
- * released run, or the run a roll back pins. Each run once per server start (a restart finds it already published).
+ * released run, or the run a roll back pins. The index keeps the run it followed last, so a by-hand publish stands until CI
+ * moves to another run, through restarts too. A run that failed to publish isn't tried again until the server restarts.
  */
 export function ciPublisher(d: CiPublishDeps) {
-  const tried = new Set<string>();
+  const failed = new Set<string>();
   const busy = new Set<string>();
   return (t: { projectId: number; name: string; desktop: DesktopTarget }, run: { id: number; sha: string }) => {
     const key = `${t.projectId}/${t.desktop.app}/${run.id}`;
-    if (tried.has(key) || busy.has(key)) return;
+    if (failed.has(key) || busy.has(key)) return;
     busy.add(key);
     return (async () => {
+      if ((await d.feeds.index(t.projectId, t.desktop.app))?.ci === `ci:${run.id}`) return;
       const file = await d.file(t.projectId, run.id);
       if (!file) return;
-      tried.add(key);
       try {
-        const out = await d.feeds.publish({ projectId: t.projectId, app: t.desktop.app, file, exe: t.desktop.exe, started: t.desktop.started, title: t.desktop.title ?? t.name, commit: run.sha, source: `ci:${run.id}`, by: 'ci' });
+        const out = await d.feeds.publish({ projectId: t.projectId, app: t.desktop.app, file, exe: t.desktop.exe, started: t.desktop.started, title: t.desktop.title ?? t.name, commit: run.sha, source: `ci:${run.id}`, by: 'ci', follow: true });
         if (!out.already) d.tell(t.projectId, `${t.name}: published desktop build ${out.build.build} of ${t.desktop.app} from CI run ${run.id} (${run.sha.slice(0, 9)}). PCs pick it up on their next start; a first install is at ${out.install}.`);
       } catch (err) {
+        failed.add(key);
         d.log?.(`desktop: publishing ${key} failed: ${(err as Error).message}`);
         d.tell(t.projectId, `${t.name}: couldn't publish CI run ${run.id}'s build to the ${t.desktop.app} desktop feed: ${(err as Error).message}. PCs keep the build they have. Fix the build or citadel-app.json's desktop settings; the next green run tries again, or publish_desktop publishes a build by hand.`);
       }

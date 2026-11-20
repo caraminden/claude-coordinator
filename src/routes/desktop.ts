@@ -2,7 +2,7 @@
 // Citadel is reachable only over the tailnet, and a build holds nothing a scheme's members couldn't already share.
 // Publishing takes a scheme's minion, Taskmaster or member.
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { DesktopError, DesktopFeeds, type PublishAsk } from '../desktop-feed.ts';
 import { HttpError, isSecure, json, readJson, type App, type Ctx, type Route } from '../http.ts';
@@ -20,7 +20,8 @@ export function origin(req: Ctx['req']): string {
 }
 
 async function send(ctx: Ctx, file: string | null, type: string, name: string) {
-  const size = file && (await stat(file).then((s) => (s.isFile() ? s.size : null), () => null));
+  // lstat: a link planted in the desktop folder (it sits on a writable mount) is never followed.
+  const size = file && (await lstat(file).then((s) => (s.isFile() ? s.size : null), () => null));
   if (!file || size === null) throw new HttpError(404, 'Not found');
   ctx.res.writeHead(200, {
     'Content-Type': type, 'Content-Length': size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache',

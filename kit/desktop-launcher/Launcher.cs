@@ -257,7 +257,8 @@ namespace Citadel.Desktop
             Log("build " + b.Id + " failed its start (" + why + "): rolling back to " + (state.Current == null ? "nothing" : "build " + state.Current.Id));
             state.Failed.Add(b.Id);
             state.Pending = null;
-            Save(state);
+            // A full disk mustn't keep the app from starting: the old build still runs, and the next start tries this one again.
+            try { Save(state); } catch (Exception e) { Log("couldn't save that build " + b.Id + " failed: " + e.Message); }
             TryDeleteDir(P("versions", b.Id.ToString()));
             if (state.Current == null) throw new Exception(Title + "'s first build didn't start (" + why + "): see launcher.log.");
             StartPlain(state.Current);
@@ -319,7 +320,9 @@ namespace Citadel.Desktop
         /// <summary>Download a build, check its size and SHA-256 against the feed, and unpack it into versions\&lt;build&gt;.</summary>
         Build Stage(Feed f)
         {
-            if (string.IsNullOrEmpty(f.Exe) || f.Exe.IndexOfAny(new[] { '/', '\\', ':' }) >= 0) throw new Exception("the feed's exe isn't a file name");
+            // A path inside the build, as the server takes it ("App.exe", "bin/App.exe"): no root, drive or "..".
+            if (string.IsNullOrEmpty(f.Exe) || f.Exe.IndexOfAny(new[] { '\\', ':' }) >= 0 || f.Exe.StartsWith("/")
+                || Array.Exists(f.Exe.Split('/'), s => s.Length == 0 || s == "." || s == "..")) throw new Exception("the feed's exe isn't a path inside the build");
             Directory.CreateDirectory(Versions);
             string id = f.Build.ToString();
             string zip = P("versions", id + ".zip.part");

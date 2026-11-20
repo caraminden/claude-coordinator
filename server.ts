@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
+import { shellOff, shellWorker } from './src/shell.ts';
 import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
@@ -151,6 +152,8 @@ async function loadAssets() {
   const dark = darkManifest(assets);
   ASSETS = assets;
   ASSET_VERSION = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
+  // The page knows its own version (#1144): one the service worker kept from before a ship reloads into the new one.
+  assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', ASSET_VERSION)));
   DARK_MANIFEST = dark;
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
@@ -1298,6 +1301,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
   let body = ASSETS.get(name);
   if (!body) throw new HttpError(404, 'Not found');
+  if (name === 'sw.js') body = Buffer.from(shellWorker(body.toString('utf8'), ASSET_VERSION, ASSETS.keys(), shellOff(DATA_DIR)));
   const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
   // Contraptions' pages load these on every page: a 304 until a deploy changes them.
   if (etag) {
@@ -1305,6 +1309,9 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
     const asked = String(req.headers['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
     if (asked.includes(headers.ETag) || asked.includes('*')) return void res.writeHead(304, headers).end();
   }
+  // The service worker keeps only files of the version it was made for (public/sw.js); its own copy names that version
+  // and the files, or is the off switch's worker (src/shell.ts).
+  headers['X-Front-Version'] = ASSET_VERSION;
   if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
   if (name === 'manifest.webmanifest') {
     if (/dark/.test(String(req.headers[COLOR_SCHEME_HINT.toLowerCase()] ?? ''))) body = DARK_MANIFEST;

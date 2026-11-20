@@ -1,28 +1,69 @@
-// Lets browsers offer "Install app" and shows push notifications. It caches nothing: every request
-// goes to the network as usual, so chat data is never stale and a deploy's new app.js loads like it
-// would without a worker.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+// Lets browsers offer "Install app", shows push notifications, and keeps the app shell on the device (#1144): Citadel's
+// own static files, cached under the front end's version, so the installed app opens with no network. Never API answers
+// (what a person may see is decided per request), never contraptions under /apps/ (they bring their own worker), never
+// the backup chat at /backup (it must load however broken the app's own files are) or a preview.
+//
+// The server fills SHELL in when it serves this file (src/shell.ts): { version, urls }. A ship changes the version, so
+// browsers see a new worker, which keeps the new files and drops the old ones. With the server's off switch on, SHELL
+// stays null: this worker then drops every kept file, reloads the windows it served from them, and caches nothing.
+const SHELL = null; // filled in by the server (src/shell.ts)
+const CACHE = SHELL && `shell-${SHELL.version}`;
+const KEPT = new Set(SHELL?.urls ?? []);
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  if (SHELL) event.waitUntil(keep());
+});
+
+/** Fetch and keep every shell file, all of this version or none: a ship landing mid-install fails it, and the next try gets the newer worker. */
+async function keep() {
+  const answers = await Promise.all(SHELL.urls.map(async (url) => {
+    const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+    if (!res.ok || res.headers.get('X-Front-Version') !== SHELL.version) throw new Error(`${url} is not front end ${SHELL.version}`);
+    return [url, res];
+  }));
+  const cache = await caches.open(CACHE);
+  await Promise.all(answers.map(([url, res]) => cache.put(url, res)));
+}
+
+self.addEventListener('activate', (event) => event.waitUntil((async () => {
+  const old = (await caches.keys()).filter((k) => k.startsWith('shell-') && k !== CACHE);
+  await Promise.all(old.map((k) => caches.delete(k)));
+  await self.clients.claim();
+  // The off switch: windows opened from kept files load again from the network.
+  if (!SHELL && old.length) {
+    for (const w of await self.clients.matchAll({ type: 'window' })) if (new URL(w.url).pathname.startsWith('/c/')) w.navigate(w.url).catch(() => {});
+  }
+})()));
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.mode !== 'navigate') return;
+  const url = new URL(event.request.url);
+  const path = url.pathname;
   // Contraptions under /apps/ bring their own worker, if any (src/apps.ts); this one keeps out of them.
-  const path = new URL(event.request.url).pathname;
   if (path.startsWith('/apps/')) return;
   // Nor the backup chat (src/backup.html), which must load however broken the app's own files are.
   if (path === '/backup' || path.startsWith('/backup/')) return;
-  event.respondWith(fetch(event.request).then(
-    // Caddy's bare 502 when nothing serves the port: a restart that outlasted systemd's socket, or a failed one (#493).
-    // Not a preview's: its own 502 and 503 pages say why it stopped (src/previews.ts).
-    (res) => [502, 503, 504].includes(res.status) && !path.startsWith('/preview/') ? restarting() : res,
-    () => new Response(
-      '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
-      '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +
-      '<a href="">Try again</a></body>',
-      { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
-    ),
-  ));
+  const page = event.request.mode === 'navigate';
+  const key = page ? (path === '/c/' || path === '/c/index.html') && '/c/' : path;
+  if (CACHE && event.request.method === 'GET' && url.origin === self.location.origin && KEPT.has(key)) {
+    // A kept file at once; a missing one (evicted, or not kept yet) from the network as usual.
+    return event.respondWith(caches.open(CACHE).then((c) => c.match(key)).then((hit) => hit ?? (page ? load(event.request, path) : fetch(event.request))));
+  }
+  if (page) event.respondWith(load(event.request, path));
 });
+
+/** A page load from the network: a restart's or a lost connection's own page when that is all there is. */
+const load = (request, path) => fetch(request).then(
+  // Caddy's bare 502 when nothing serves the port: a restart that outlasted systemd's socket, or a failed one (#493).
+  // Not a preview's: its own 502 and 503 pages say why it stopped (src/previews.ts).
+  (res) => [502, 503, 504].includes(res.status) && !path.startsWith('/preview/') ? restarting() : res,
+  () => new Response(
+    '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
+    '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +
+    '<a href="">Try again</a></body>',
+    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+  ),
+);
 
 /** A page that says the server is restarting and reloads itself every 3 s until the app loads instead. */
 const restarting = () => new Response(

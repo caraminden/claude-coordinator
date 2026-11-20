@@ -126,9 +126,9 @@ function drawPanel() {
     const row = inboxRow(items, { href: homeHash, scheme: schemeTag });
     row.classList.toggle('active', view?.home && view.id === id);
     if (!rows.has(id)) {
-      // Answered: ticked off where it was, until the next visit.
+      // Gone from Home (answered, a mention opened, or withdrawn): ticked off where it was, until the next visit.
       row.classList.add('done');
-      row.querySelector('.asks')?.replaceChildren(h('span', { class: 'chip done-chip' }, '✓ Answered'));
+      row.querySelector('.asks')?.replaceChildren(h('span', { class: 'chip done-chip' }, '✓ Done'));
     } else if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
     return row;
   });

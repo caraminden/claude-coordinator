@@ -73,7 +73,11 @@ export async function api(path, opts = {}) {
   });
   const data = await res.json().catch(() => ({}));
   // A copy, as callers change what they're given; histories are kept from the chat's own page (core.js keepOpenChat).
-  if (get && res.ok && !/events/.test(path)) answers.set(path, JSON.stringify(data));
+  if (get && res.ok && !/events/.test(path) && replayable(path)) {
+    answers.delete(path); // newest last, so the cap drops the longest unasked
+    answers.set(path, JSON.stringify(data));
+    if (answers.size > ANSWERS_MAX) answers.delete(answers.keys().next().value);
+  }
   if (res.status === 401 && path !== 'api/login') {
     me = null;
     forgetKept();
@@ -97,13 +101,16 @@ const KEPT_CHARS = 1_500_000; // localStorage holds about 5M characters per site
 export const KEPT_EVENTS = 80;
 /** Every GET answer this session, newest per path, as text: what a chat's opening asked for. Histories are kept apart. */
 const answers = new Map();
+const ANSWERS_MAX = 200;
+/** Only these can be part of a chat's opening: a search or a filtered list never is. */
+const replayable = (path) => !/\?/.test(path) || /\?tickets=(open|closed)$/.test(path);
 let replay = null;
 
 /** The answers a cold open of chat `ticketId` in scheme `projectId` asks for, from this session's. */
 export function keptAnswers(projectId, ticketId) {
   const out = {};
   for (const [path, text] of answers) {
-    if (/\?/.test(path) && !/\?tickets=(open|closed)$/.test(path)) continue;
+    if (!replayable(path)) continue;
     const p = path.match(/^api\/projects\/(\d+)/)?.[1];
     const t = path.match(/^api\/tickets\/(\d+)/)?.[1];
     if ((p && Number(p) !== projectId) || (t && Number(t) !== ticketId)) continue;

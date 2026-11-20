@@ -19,6 +19,7 @@ process.stdin.on('data', (d) => (input += d));
 process.stdin.on('end', () => {
   fs.appendFileSync(${JSON.stringify(prompts)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
   if (fs.existsSync(${JSON.stringify(join(root, 'fail'))})) { console.error('usage limit reached'); process.exit(1); }
+  if (fs.existsSync(${JSON.stringify(join(root, 'mute'))})) process.exit(3);
   const result = JSON.stringify({ verdicts: [{ n: 1, verdict: 'repeats', why: 'Same card rule, said again.' }, { n: 7, verdict: 'fine', why: 'not a place' }] });
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result }));
 });
@@ -86,5 +87,17 @@ test('a failed check says so and gives no verdicts', async () => {
     assert.match(r.data.failed, /usage limit/);
   } finally {
     rmSync(join(root, 'fail'));
+  }
+});
+
+// People read the reason in the Settings list, so a silent exit names the exit, not the command line.
+test('a check that exits with nothing says so in plain words', async () => {
+  writeFileSync(join(root, 'mute'), '');
+  try {
+    const r = await verdicts(REPEAT);
+    assert.match(r.data.failed, /Claude stopped with no answer \(exit 3\)/);
+    assert.doesNotMatch(r.data.failed, /Command failed|--output-format/);
+  } finally {
+    rmSync(join(root, 'mute'));
   }
 });

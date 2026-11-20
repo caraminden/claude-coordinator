@@ -92,7 +92,9 @@ export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeB
   try {
     const out = await new Promise<string>((done, fail) => {
       const child = execFile(argv[0], argv.slice(1), { cwd: place.host ? o.cwd : undefined, env, timeout: o.timeoutMs ?? TIMEOUT_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
-        if (err && !stdout) fail(new Error(`The agent didn't answer: ${(stderr || err.message).trim().split('\n').pop()?.slice(0, 300)}`));
+        // err.message is the whole command line: people read this, so say what happened instead.
+        const why = () => (err!.killed ? `it ran past ${Math.round((o.timeoutMs ?? TIMEOUT_MS) / 1000)} s` : stderr.trim().split('\n').pop() || `Claude stopped with no answer (exit ${err!.code ?? err!.signal})`);
+        if (err && !stdout) fail(new Error(`The agent didn't answer: ${why().slice(0, 300)}`));
         else done(stdout);
       });
       child.stdin?.end(prompt);

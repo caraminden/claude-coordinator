@@ -134,6 +134,8 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .instructions-repeats p { margin: 0 0 0.4rem; }
 .instructions-repeats ul { margin: 0 0 0.6rem; padding-left: 1.2rem; overflow-wrap: anywhere; }
 .instructions-repeats li + li { margin-top: 0.3rem; }
+.instructions-repeats .row { margin: 0.2rem 0 0.6rem; }
+.instructions-repeats > p:last-child { margin-bottom: 0; }
 .instructions-repeats .repeat-verdict { display: block; }
 .instructions-repeats .repeat-verdict.strong { font-weight: 600; }
 /* Approval rules and plugin folders: the editor's two lists */

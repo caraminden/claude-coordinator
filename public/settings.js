@@ -838,9 +838,10 @@ async function checkRepeats(scope, text, box, status) {
     const note = h('p', { class: 'muted' }, 'Sonnet is reading these on your Claude login to say which really repeat.');
     box.replaceChildren(
       h('p', {}, h('strong', {}, 'Already said elsewhere. '), 'Work your change in where it is already written, or point there in a few words, or save it anyway.'),
+      // The buttons sit above the list, so verdicts filling in below never move them (no reflow without input).
+      h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')),
       h('ul', {}, ...found.map((o, i) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`), marks[i]))),
-      note,
-      h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')));
+      note);
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
     void fillVerdicts(scope, text, box, marks, note);

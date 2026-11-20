@@ -335,8 +335,8 @@ export function wrapperInProc(dir: string, orStarting = false): boolean {
     }
     if (argv.at(-1) === '') argv.pop();
     // `<node> <pin>/turn-wrapper.ts <dir>` exactly: a podman exec or conmon whose argv also ends in dir isn't the wrapper,
-    // unless `orStarting` asks for those too (a podman exec in its own scope outlives the server that ran it).
-    if (argv.at(-1) === dir && (orStarting || argv.at(-2)?.endsWith('/turn-wrapper.ts'))) return true;
+    // unless `orStarting` asks for the podman exec too (one in its own scope outlives the server that ran it).
+    if (argv.at(-1) === dir && (argv.at(-2)?.endsWith('/turn-wrapper.ts') || (orStarting && argv.includes('exec')))) return true;
   }
   return false;
 }
@@ -1480,7 +1480,8 @@ export class Runner {
   private reattach(ticketId: number, turn: TurnState): boolean {
     // A container turn the last server was still starting (#468 S03-5): its start chain beat for it and died with that
     // server, so a fresh beat says nothing. With no wrapper run (no pid.json) and nothing left to start one, it was interrupted.
-    if (turn.container && turn.dir && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f))) && !wrapperInProc(turn.dir, true)) return false;
+    // The process scan goes first: a wrapper that ends during it has written its files by the time they are checked.
+    if (turn.container && turn.dir && !wrapperInProc(turn.dir, true) && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f)))) return false;
     const live = this.follow(ticketId, turn);
     if (this.gone(live)) {
       clearInterval(live.timer);

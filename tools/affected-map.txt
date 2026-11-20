@@ -35,7 +35,7 @@ src/previews.ts: test/relative-urls.test.ts
 
 # PowerShell scripts are linted with pwsh.
 **/*.ps1: test/ps1-lint.test.ts
-tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts
+tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts
 .github/workflows/tests.yml: test/ci-runner-choice.test.ts
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
 tools/land.sh: test/ci-runner-choice.test.ts

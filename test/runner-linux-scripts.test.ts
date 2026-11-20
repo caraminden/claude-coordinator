@@ -92,7 +92,8 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
     assert.match(readFileSync(join(dir, '.env'), 'utf8'), new RegExp(`^HOME=${dir}/home$`, 'm'), 'a home of its own');
     assert.equal(statSync(dir).mode & 0o777, 0o700, 'other schemes\' users can\'t read it');
     // The registration token only in config.sh's environment: never an argument, and no machine token beside it.
-    assert.ok(logged().includes(`as ${USER} HOME=${dir}/home token=${REG} machine=none: ./config.sh --unattended --url https://github.com/caraminden/theory-of-crafting --name ${name} --labels theory-of-crafting-ci-linux --work _work\n`), logged());
+    assert.ok(logged().includes(`as ${USER} HOME=${dir}/home token=${REG} machine=none: ./config.sh --unattended --url https://github.com/caraminden/theory-of-crafting --name ${name} --labels theory-of-crafting-ci-linux${suffix ? ',theory-of-crafting-ci-linux-side' : ''} --work _work\n`), logged());
+    // #1240: the second runner also takes the side label, so flake proofs and the nightly leave the first free for ships.
     const unit = readFileSync(unitOf(suffix), 'utf8');
     assert.match(unit, /^# citadel-repo=caraminden\/theory-of-crafting\n/);
     assert.match(unit, new RegExp(`^ExecStart=/bin/bash ${dir}/bin/runsvc.sh\nUser=${USER}\nWorkingDirectory=${dir}\n`, 'm'));

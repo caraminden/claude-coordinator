@@ -226,7 +226,7 @@ function waitingBlock(s, now, ui) {
 }
 
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui)];
+  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
 /** The page: `projectId` is the scheme it opened from, selected first. */
@@ -265,9 +265,9 @@ export function ciPage(projectId, startTab = 'overview') {
     const hidden = schemes.filter((x) => x !== s && stateOf(x, now) === 'ready');
     list.classList.toggle('greens-open', greensOpen);
     // What turns the chip yellow or red besides a scheme's own problems: a desktop in trouble. Its words are the chip tooltip's.
-    const why = data.pcs.filter(trouble).map((pc) => h('button', { type: 'button', class: 'ci-li ci-why', 'data-tone': pc.verdict.kind === 'over' ? 'warn' : 'danger', title: pc.verdict.text,
+    const why = data.pcs.filter(trouble).map((pc) => h('button', { type: 'button', class: 'ci-li ci-why', 'data-tone': 'warn', title: pc.verdict.text,
       onclick: () => { picked = `pc:${pc.host}`; draw(); } },
-    h('span', { class: `dot ${pc.verdict.kind === 'over' ? 'fix' : 'down'}` }), h('span', { class: 'ci-li-name' }, troubleLine(pc)),
+    h('span', { class: 'dot fix' }), h('span', { class: 'ci-li-name' }, troubleLine(pc)),
     h('span', { class: 'ci-li-state ci-why-text' }, pc.verdict.text)));
     // The desktops at the list's bottom: a toned word each, the load view in the right pane (Josh, 2026-11-19).
     const pcRows = data.pcs.length ? [h('div', { class: 'ci-list-head' }, 'Desktops'), ...data.pcs.map((pc) => {

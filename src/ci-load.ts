@@ -321,6 +321,7 @@ export class CiLoad {
   private pending: { machine: number; at: number; data: string }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private flusher: ReturnType<typeof setInterval> | null = null;
+  private first: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
 
   constructor(store: Store, deps: CiLoadDeps) {
@@ -332,7 +333,8 @@ export class CiLoad {
     this.timer ??= setInterval(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), 5 * MIN);
     this.timer.unref?.();
     // A deploy restarts the server several times a day: waiting a full 5 minutes for the first look let the held verdict go stale (#1085).
-    setTimeout(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), FIRST_TICK_MS).unref?.();
+    this.first ??= setTimeout(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), FIRST_TICK_MS);
+    this.first.unref?.();
     this.flusher ??= setInterval(() => this.flush(), FLUSH_MS);
     this.flusher.unref?.();
   }
@@ -340,7 +342,8 @@ export class CiLoad {
   stop() {
     if (this.timer) clearInterval(this.timer);
     if (this.flusher) clearInterval(this.flusher);
-    this.timer = this.flusher = null;
+    if (this.first) clearTimeout(this.first);
+    this.timer = this.flusher = this.first = null;
     this.flush();
   }
 

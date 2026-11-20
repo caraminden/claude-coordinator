@@ -5,14 +5,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
-import { connect } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { isOpenPath } from '../src/apps.ts';
 import { Auth } from '../src/auth.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
-import { agentToken, bootServer, freePort, PASSWORD, SECRET, until, type Booted } from './helpers.ts';
+import { agentToken, bootServer, PASSWORD, SECRET, until, type Booted } from './helpers.ts';
 
 let srv: Booted;
 let pub = '';
@@ -76,8 +76,9 @@ const ends = async (reader: ReadableStreamDefaultReader<Uint8Array>, ms: number)
 const citadelHeaders = (h: IncomingHttpHeaders) => Object.keys(h).filter((k) => k.startsWith('x-citadel-') && k !== 'x-citadel-identity');
 
 before(async () => {
-  stubPort = await freePort();
-  await new Promise<void>((r) => stub.listen(stubPort, '127.0.0.1', r));
+  // Bind port 0 and read it back: a port picked first and bound after can go to a parallel suite in between.
+  await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r));
+  stubPort = (stub.address() as AddressInfo).port;
   srv = await bootServer({ env: { STATIC_BACKFILL_MS: '300', STATIC_BACKFILL_EVERY_MS: '300' } });
   const made = await srv.call('/api/contraptions', { name: 'stub', title: 'Stub & Co', port: stubPort, open_paths: ['/link'] });
   assert.equal(made.status, 201, JSON.stringify(made.data));

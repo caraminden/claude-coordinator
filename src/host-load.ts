@@ -4,9 +4,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { median, readHeavy, type HeavyJob } from './waits.ts';
+import { MAX_CPU_PRESSURE } from './pressure.ts';
 
 /** citadel-heavy's defaults (its header): pressure at or above 50% holds a free slot, for at most 5 minutes. */
-export const MAX_PRESSURE = 50;
+export const MAX_PRESSURE = MAX_CPU_PRESSURE;
 export const LOAD_WAIT_S = 300;
 const WEEK_MS = 7 * 24 * 3600_000;
 

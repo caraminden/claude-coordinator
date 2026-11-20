@@ -85,6 +85,7 @@ import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
+import { pressure } from './src/pressure.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
@@ -548,8 +549,12 @@ if (!BOOT_CHECK && !PREVIEW) {
   let lastLook = 0;
   setInterval(() => {
     if (!kitSync.active() && Date.now() - lastLook < 10 * 60_000) return;
-    lastLook = Date.now();
-    void safely('kit sync', () => kitSync.poll());
+    // A running round goes on; only the idle template look waits while the box is starved (#1301).
+    void (async () => {
+      if (!kitSync.active() && !(await pressure.gate('kit-sync template look'))) return;
+      lastLook = Date.now();
+      await safely('kit sync', () => kitSync.poll());
+    })();
   }, 20_000).unref();
 }
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running() + kitSyncJobs.running() + hostToolInstalls();
@@ -696,6 +701,8 @@ if (!BOOT_CHECK && !PREVIEW) {
   }
   // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
   const sweepBuild = () => void safely('build output sweep', async () => {
+    // Daily, so a skipped pass tries again in a minute; the gate lets it through after 10 minutes of skips.
+    if (!(await pressure.gate('worktree sweep'))) { setTimeout(sweepBuild, 60_000).unref(); return; }
     await runner.sweepBuildOutput();
     await runner.sweepWorktrees();
     // The shared Gradle build cache (#1153) under its cap.
@@ -724,6 +731,7 @@ if (!BOOT_CHECK) {
 // Taskmaster of Later ideas waiting over two weeks (never a wake). Not in previews or dev copies: their Taskmasters aren't real.
 if (!BOOT_CHECK && !PREVIEW) {
   const ideasPass = () => void safely('ideas ledger', async () => {
+    if (!(await pressure.gate('ideas pass'))) return;
     for (const p of store.listProjects()) {
       await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
       const tm = store.getOverlord(p.id);
@@ -740,10 +748,10 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
-if (!BOOT_CHECK) setInterval(() => void safely('memory', () => memoryIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+if (!BOOT_CHECK) setInterval(() => void safely('memory', async () => { if (await pressure.gate('memory index')) await memoryIndexer.run(); }), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 // Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
 const minionIndexer = new MinionIndexer(store, DATA_DIR);
-if (!BOOT_CHECK) setInterval(() => void safely('minion index', () => minionIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+if (!BOOT_CHECK) setInterval(() => void safely('minion index', async () => { if (await pressure.gate('minion index')) await minionIndexer.run(); }), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 
 // ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 
@@ -1382,7 +1390,7 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
-if (!BOOT_CHECK) setInterval(() => void artifactSweep.tick().catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();
+if (!BOOT_CHECK) setInterval(() => void pressure.gate('artifact sweep').then((go) => go && artifactSweep.tick()).catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.
 const ciLoad = new CiLoad(store, {

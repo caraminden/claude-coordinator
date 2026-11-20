@@ -10,6 +10,7 @@ import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
+import { pressure } from './pressure.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
@@ -167,6 +168,9 @@ export interface InvestigateTile { target: string; tile: string; title: string; 
 /** Who reads the page: canSee is the store's for their session; admin sees apps with no home scheme too. */
 export interface Viewer { canSee: (projectId: number) => boolean; admin: boolean; key: string }
 
+/** One hour of the host chart: its time, memory used %, disk used %, highest load, highest CPU and memory pressure % (null without PSI, #1301). */
+export type HostPoint = [number, number, number, number, number | null, number | null];
+
 export class StatusPage {
   private built = new Map<string, { at: number; data: Promise<StatusData> }>();
   private units: { at: number; rows: UnitState[] } | null = null;
@@ -188,9 +192,10 @@ export class StatusPage {
         const s = await statfs(dir);
         return { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
       }))(this.deps.dataDir);
+      const psi = await pressure.read();
       const s: HostSample = {
         at: this.now(), mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
-        disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(),
+        disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
       };
       this.deps.store.addHostSample(s);
       return s;
@@ -365,16 +370,20 @@ export class StatusPage {
     // Memory and disk: the hourly worst (least free), and the newest reading.
     const samples = store.hostSamples(since);
     const hourly = new Map<number, HostSample>();
+    const psiMax = new Map<number, [number | null, number | null]>(); // the hour's highest CPU and memory pressure (#1301)
+    const hi = (a: number | null, b: number | null | undefined) => (b == null ? a : a == null ? b : Math.max(a, b));
     for (const s of samples) {
       const h = Math.floor(s.at / 3_600_000) * 3_600_000;
       const prev = hourly.get(h);
+      const pm = psiMax.get(h) ?? [null, null];
+      psiMax.set(h, [hi(pm[0], s.cpu_psi), hi(pm[1], s.mem_psi)]);
       if (!prev || s.mem_avail / s.mem_total < prev.mem_avail / prev.mem_total) hourly.set(h, { ...s, disk_free: Math.min(s.disk_free, prev?.disk_free ?? Infinity), load1: Math.max(s.load1, prev?.load1 ?? 0) });
       else {
         prev.disk_free = Math.min(prev.disk_free, s.disk_free);
         prev.load1 = Math.max(prev.load1, s.load1);
       }
     }
-    const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10] as [number, number, number, number]);
+    const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10, ...(psiMax.get(h) ?? [null, null])] as HostPoint);
     const latest = samples.at(-1) ?? null;
     // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
     const cores = this.deps.cores ?? availableParallelism();
@@ -544,7 +553,7 @@ export interface CitadelStatus {
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
   stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
-  host: { series: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
+  host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };

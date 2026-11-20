@@ -258,6 +258,35 @@ test('a scheme someone hid sends them no pushes, and Unhide brings them back (#2
   store.db.close();
 });
 
+test('a minimized scheme sends its person no pushes, except a card addressed to them by name (#1243)', async () => {
+  const store = new Store(join(root, 'minimized.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const p = store.createProject('Obsidian', null, josh.id);
+  store.addMember(p.id, cara.id);
+  const t = store.createTicket({ project_id: p.id, title: 'Ready', permission_mode: 'default', created_by: 'Josh', kind: 'ticket' });
+  for (const name of ['Cara', 'Josh']) {
+    const b = browser(`https://push.example/${name}`);
+    store.savePushSubscription(name, b.endpoint, b.p256dh, b.auth);
+  }
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  const who = async (trigger: PushTrigger) => {
+    sent.length = 0;
+    await pusher.notify(t, trigger);
+    return sent.map((url) => url.split('/').pop()).sort();
+  };
+  const plain: PushTrigger = { kind: 'state', state: 'blocked', note: 'stuck' };
+  store.setProjectMinimized(cara.id, p.id, true);
+  assert.deepEqual(await who(plain), ['Josh'], 'Cara minimized it: she hears nothing, Josh still does');
+  const addressed = { kind: 'mention', by: 'Josh', text: 'hi', eventId: 1, to: 'Cara' } as PushTrigger;
+  assert.deepEqual(await who(addressed), ['Cara'], 'a mention to her by name still reaches her');
+  store.setProjectMinimized(cara.id, p.id, false);
+  assert.deepEqual(await who(plain), ['Cara', 'Josh']);
+  store.db.close();
+});
+
 test('admin reach sends no pushes: only a scheme\'s owner and members hear about it (#674)', async () => {
   // Cara, 2026-11-14, on #674's card: pushes follow real membership, "Members only".
   const store = new Store(join(root, 'members-only.db'));

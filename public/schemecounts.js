@@ -50,7 +50,7 @@ export function schemePill(p) {
  * `projects` as api/projects sends them; the open scheme's `fresh` is this page's own (`seen`, as inbox.js holds it).
  */
 export const wantsBadge = (projects, openId, seen) =>
-  (projects || []).some((p) => !p.hidden && schemePill(p.id === openId && seen?.projectId === p.id ? { ...p, fresh: seen.fresh } : p).fresh);
+  (projects || []).some((p) => !p.hidden && !p.minimized && schemePill(p.id === openId && seen?.projectId === p.id ? { ...p, fresh: seen.fresh } : p).fresh);
 
 /**
  * Set or clear the app badge to match `want`, only when it changed since the last call (`state.on`), and only where

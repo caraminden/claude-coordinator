@@ -127,3 +127,9 @@ test('app badge: calls the API only on a change, and nothing without it (#980)',
   assert.deepEqual(calls, ['set', 'clear']);
   assert.equal(syncBadge(true, { on: null }, {} as any), false);
 });
+
+test('a minimized scheme never lights the icon badge (#1243)', () => {
+  const p = { id: 1, inbox: 1, fresh: true };
+  assert.equal(wantsBadge([p], null, null), true);
+  assert.equal(wantsBadge([{ ...p, minimized: true }], null, null), false);
+});

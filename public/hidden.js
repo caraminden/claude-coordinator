@@ -21,7 +21,8 @@ let statusChipEl = null; // the Status chip beside it (#1123)
 
 // Your schemes: ones you own or were added to and haven't hidden. Admin reach (the flag, or the Citadel scheme) opens the
 // rest too, but they sit apart under Other schemes, never mixed into yours (#674). A list from before #674 has no flag: yours.
-const onShelf = (p) => !p.hidden && p.member !== false;
+// Minimized ones (#1243) sit after them, quiet, outside the drag.
+const onShelf = (p) => !p.hidden && !p.minimized && p.member !== false;
 
 export const isHidden = (projectId) => !!view?.projects?.find((p) => p.id === projectId)?.hidden;
 
@@ -38,6 +39,21 @@ export function setHidden(p, hidden) {
     undo: () => !!p.hidden === hidden && show(!hidden), // unless something else changed it since
     label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
   }).then(() => refreshSchemes(), () => {}); // a failure already said so in its toast
+}
+
+/** Minimize or restore a scheme for you (#1243): it drops to the bottom of the shelf at once; the server's answer redraws it. */
+export function setMinimized(p, minimized) {
+  const show = (on) => {
+    for (const x of new Set([p, view?.projects?.find((q) => q.id === p.id)])) if (x) x.minimized = on;
+    redrawHidden();
+  };
+  optimistic({
+    sets: `minimized:${p.id}`,
+    apply: () => show(minimized),
+    send: () => api(`api/projects/${p.id}/minimized`, { method: 'PUT', body: { minimized } }),
+    undo: () => !!p.minimized === minimized && show(!minimized),
+    label: `${minimized ? 'minimize' : 'restore'} ${p.name}`,
+  }).then(() => refreshSchemes(), () => {});
 }
 
 /** A hide changed for someone (this tab or another of theirs): only theirs redraws. */
@@ -69,10 +85,11 @@ function redrawHidden() {
   renderSchemesShelf();
   renderHiddenNote();
   document.getElementById('hide-scheme')?.replaceWith(hideButton(view.project));
+  document.getElementById('minimize-scheme')?.replaceWith(minimizeButton(view.project));
 }
 
 // quiet: no count or spinner, for the ones you hid and the ones you aren't in.
-const row = (p, button = null, quiet = p.hidden) => h('div', { class: 'scheme-row' },
+const row = (p, button = null, quiet = p.hidden || p.minimized) => h('div', { class: 'scheme-row' },
   h('a', { class: `nav-item${p.id === view.projectId && !view.home ? ' active' : ''}`, href: schemeSwitchHash(location.hash, p.id, !!account?.admin), title: p.name,
     // The hash at the click, not at the draw: the page may have changed since the shelf was drawn.
     onclick: (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); location.hash = schemeSwitchHash(location.hash, p.id, !!account?.admin); } },
@@ -123,7 +140,8 @@ export function renderSchemesShelf() {
     onDrop: reorderSchemes,
   });
   const shown = view.projects.filter(onShelf);
-  const others = view.projects.filter((p) => !p.hidden && !onShelf(p));
+  const others = view.projects.filter((p) => !p.hidden && p.member === false);
+  const minimized = view.projects.filter((p) => !p.hidden && p.minimized && p.member !== false);
   const hidden = view.projects.filter((p) => p.hidden);
   // Opened by itself while you're in one of them, so the open scheme's row shows.
   const elsewhere = others.length ? h('details', { class: 'hidden-schemes other-schemes', open: othersOpen || others.some((p) => p.id === view.projectId) },
@@ -134,6 +152,10 @@ export function renderSchemesShelf() {
     h('summary', {}, `Hidden (${hidden.length})`),
     hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide')))) : null;
   folded?.addEventListener('toggle', () => (hiddenOpen = folded.open));
+  // Minimized (#1243): still listed, after + New scheme, no count and no release lines; not in the drag, so its row is a div of its own.
+  const tucked = minimized.length ? h('div', { class: 'minimized-schemes' },
+    h('h4', { class: 'minimized-head', title: 'Schemes you minimized: no count, and not on Home' }, 'Minimized'),
+    minimized.map((p) => row(p))) : null;
   // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
@@ -147,6 +169,7 @@ export function renderSchemesShelf() {
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),
+    ...(tucked ? [tucked] : []),
     ...(elsewhere ? [elsewhere] : []),
     ...(folded ? [folded] : []));
 }
@@ -158,6 +181,13 @@ export function renderHiddenNote() {
   el.hidden = !isHidden(view.projectId);
   el.replaceChildren(...(el.hidden ? [] : ['Hidden from your lists', ' · ',
     h('button', { type: 'button', class: 'link', onclick: () => setHidden(view.project, false) }, 'Unhide')]));
+}
+
+/** Minimize or Restore for the open scheme, on the Members tab beside Hide (#1243). */
+export function minimizeButton(p) {
+  const on = !!view?.projects?.find((q) => q.id === p.id)?.minimized;
+  return h('button', { type: 'button', id: 'minimize-scheme', class: 'secondary small', onclick: () => setMinimized(p, !on) },
+    on ? `Restore ${p.name}` : `Minimize ${p.name} for me`);
 }
 
 /** Hide or Unhide for the open scheme, on the Members tab. */

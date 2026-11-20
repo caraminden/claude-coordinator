@@ -32,3 +32,13 @@ test('freePort picks outside the range the kernel hands to listen(0) and outgoin
     await new Promise((r) => srv.close(r));
   }
 });
+
+test('freePort never picks a port fetch refuses (10080, a Fetch spec "bad port")', async (t) => {
+  // The first pick lands on 10080: a preview there answered nothing for 30 s, as fetch never asked it.
+  const picks = [80.5 / 22_768, 0.5];
+  t.mock.method(Math, 'random', () => picks.shift() ?? 0.5);
+  const port = await freePort();
+  assert.notEqual(port, 10_080);
+  assert.equal(picks.length, 0, 'it picked again');
+  await assert.rejects(fetch('http://127.0.0.1:10080/'), (err: any) => err.cause?.message === 'bad port', 'fetch still refuses 10080');
+});

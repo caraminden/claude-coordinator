@@ -39,6 +39,8 @@ export function listeningPort(proc: ChildProcess, ms = 20_000): Promise<number> 
 export async function freePort(): Promise<number> {
   for (;;) {
     const port = 10_000 + Math.floor(Math.random() * 22_768);
+    // fetch refuses the Fetch spec's "bad ports" outright; 10080 is the only one in this range (a preview there never booted).
+    if (port === 10_080) continue;
     const srv = createServer();
     const err = await new Promise<NodeJS.ErrnoException | null>((r) => {
       srv.once('error', r);

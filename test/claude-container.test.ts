@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,9 +83,15 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}}' }));
     process.exit(1);
   }
-  console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.42 } } } }));
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
+  const finish = () => {
+    console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.42 } } } }));
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+    process.exit(0);
+  };
+  // 'hold <file>': runs until that file appears, as a long turn does.
+  const hold = /hold (\S+)/.exec(input)?.[1];
+  if (hold) setInterval(() => existsSync(hold) && finish(), 20);
+  else finish();
 });
 `,
 );
@@ -114,6 +120,7 @@ function newTicket() {
 }
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const status = (id: number) => store.getTicket(id)!.status;
+const errors = (id: number) => store.listEvents(id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text as string);
 
 test("a linked person's turn runs in their container, on their login, and keeps its usage apart", async () => {
   const id = newTicket();
@@ -264,6 +271,51 @@ test('a container turn whose heartbeat stops counts as gone, whatever its pid sa
   assert.equal(wrapperAlive(dir), true);
   utimesSync(join(dir, 'beat'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
   assert.equal(wrapperAlive(dir), false);
+});
+
+// #1255: a container at its MemoryHigh stalls every process in it, the wrapper's heartbeat too, for a minute or more.
+// The runner took the stale heartbeat for a dead turn and deleted the folder (pin/tripwire.ts with it) under a claude that ran on.
+test('a container turn frozen past its heartbeat keeps running and keeps its pin folder while its wrapper lives', async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  const release = join(root, 'release-frozen');
+  r.send(id, 'Josh', `hold ${release}`);
+  const turn = () => store.getSetting<{ dir?: string }>(`turn:${id}`)?.dir;
+  await until('the wrapper has said its pid', () => !!turn() && existsSync(join(turn()!, 'pid.json')));
+  const dir = turn()!;
+  const { wrapper } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
+  process.kill(wrapper, 'SIGSTOP');
+  try {
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(join(dir, 'beat'), old, old);
+    assert.equal(wrapperAlive(dir), true, 'its wrapper process is there, only stalled');
+    // pollMs 10: the gone check runs every 20 ticks, so this spans several.
+    await new Promise((res) => setTimeout(res, 800));
+    assert.equal(status(id), 'running');
+    assert.ok(existsSync(join(dir, 'pin', 'tripwire.ts')), 'the pin folder stays under a running turn');
+    assert.ok(!errors(id).some((e) => /killed before it finished/.test(e)));
+  } finally {
+    process.kill(wrapper, 'SIGCONT');
+  }
+  writeFileSync(release, '');
+  await until('the turn ends', () => status(id) !== 'running');
+  assert.ok(!existsSync(dir), 'its folder goes once it has ended');
+});
+
+test('a container turn whose wrapper process is gone and whose heartbeat stopped counts as gone', async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.send(id, 'Josh', `hold ${join(root, 'never')}`);
+  const turn = () => store.getSetting<{ dir?: string }>(`turn:${id}`)?.dir;
+  await until('the wrapper has said its pid', () => !!turn() && existsSync(join(turn()!, 'pid.json')));
+  const dir = turn()!;
+  const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
+  process.kill(claude, 'SIGKILL');
+  process.kill(wrapper, 'SIGKILL');
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(join(dir, 'beat'), old, old);
+  await until('the turn is cut off', () => status(id) !== 'running');
+  assert.ok(errors(id).some((e) => /killed before it finished/.test(e)));
 });
 
 test('podman run arguments: keep-id, host network, a :U volume, binds at their own path, the spec label', () => {
@@ -541,13 +593,20 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
   };
   turn('8-1', 60_000);
   turn('8-2', 0);
-  runner(inContainer).recover();
+  // Frozen with its container at MemoryHigh (#1255): a stale heartbeat, but its wrapper process is still there.
+  turn('8-3', 60_000);
+  const frozen = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-3', 'pin', 'turn-wrapper.ts'), join(person, '8-3')], { stdio: 'ignore' });
+  try {
+    runner(inContainer).recover();
+  } finally {
+    frozen.kill('SIGKILL');
+  }
   assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
   assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
+  assert.ok(existsSync(join(person, '8-3')), 'a stalled one stays');
   assert.ok(existsSync(person), "the person's folder stays mounted");
 });
 
-const errors = (id: number) => store.listEvents(id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text as string);
 
 test('a podman exec that never returns fails the turn after its time limit, not never (C6)', async () => {
   const id = newTicket();

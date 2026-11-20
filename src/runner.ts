@@ -277,20 +277,25 @@ export { accountUsageKey, usageKey };
 /** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
 const START_GRACE_MS = 60_000;
 
-/** A container turn's wrapper beat (src/turn-wrapper.ts) longer ago than this is gone. */
+/** A container turn's wrapper beat (src/turn-wrapper.ts) longer ago than this is stale: checked against /proc then. */
 const BEAT_STALE_MS = 30_000;
 
 /**
  * A turn's wrapper still runs: its pid is alive and is that turn's wrapper, not a reused pid. In a
- * container (the `container` file) its pids are the container's, so its heartbeat says instead.
+ * container (the `container` file) its pids are the container's, so its heartbeat says instead; a stale
+ * one is only gone once no process here runs that turn's wrapper (wrapperInProc).
  */
 export function wrapperAlive(dir: string): boolean | null {
   if (existsSync(join(dir, 'container'))) {
+    let fresh: boolean;
     try {
-      return Date.now() - statSync(join(dir, 'beat')).mtimeMs < BEAT_STALE_MS;
+      fresh = Date.now() - statSync(join(dir, 'beat')).mtimeMs < BEAT_STALE_MS;
     } catch {
       return null;
     }
+    // A container at its MemoryHigh stalls every process in it, heartbeats too, for a minute or more: a stale beat
+    // alone once deleted live turns' folders, pin/tripwire.ts with them, under claudes that ran on (#1255).
+    return fresh || wrapperInProc(dir);
   }
   let pid: number;
   try {
@@ -303,6 +308,31 @@ export function wrapperAlive(dir: string): boolean | null {
   } catch {
     return existsSync('/proc/self') ? false : alive(pid);
   }
+}
+
+/**
+ * Whether a process this server can see runs `dir`'s wrapper (turn-launch's `<node> <pin>/turn-wrapper.ts <dir>`). A rootless
+ * container's processes are in the host's /proc under host pids, so a container turn's wrapper shows here while it lives,
+ * stalled or not; once its container or exec dies it doesn't. Only for a stale heartbeat: it reads every process's cmdline.
+ */
+export function wrapperInProc(dir: string): boolean {
+  let pids: string[];
+  try {
+    pids = readdirSync('/proc').filter((n) => /^\d+$/.test(n));
+  } catch {
+    return false; // no /proc: the heartbeat's word stands
+  }
+  for (const pid of pids) {
+    let argv: string[];
+    try {
+      argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+    } catch {
+      continue; // ended meanwhile
+    }
+    if (argv.at(-1) === '') argv.pop();
+    if (argv.at(-1) === dir && argv.some((a) => a.endsWith('/turn-wrapper.ts'))) return true;
+  }
+  return false;
 }
 
 /** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.ts). */
@@ -1403,7 +1433,10 @@ export class Runner {
         return (/^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir]).filter((d) => /^\d+-\d+$/.test(basename(d)));
       });
       // Gone for sure: its wrapper's pid is dead, or it never wrote one in the time a start takes. Not knowing isn't enough (#259).
-      const gone = (dir: string) => wrapperAlive(dir) === false || (wrapperAlive(dir) === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);
+      const gone = (dir: string) => {
+        const alive = wrapperAlive(dir); // once: a stale heartbeat reads all of /proc
+        return alive === false || (alive === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);
+      };
       for (const dir of dirs) if (!followed.has(dir) && gone(dir)) rmSync(dir, { recursive: true, force: true });
     } catch {
       // No turns yet.

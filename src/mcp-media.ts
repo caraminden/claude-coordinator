@@ -1,8 +1,6 @@
 // The generative media tools (#717, #733), split out of mcp.ts: their descriptions, schemas and the Codex image call.
 import { spawn } from 'node:child_process';
 
-/** Images and sound through the person's own OpenRouter key (#717, src/openrouter.ts): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
-export const MEDIA = process.env.COORDINATOR_MEDIA === '1';
 export const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
 export const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein, or recraft/recraft-v4.1-vector when out ends in .svg. For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
 export const MEDIA_OUT = 'Where to write it, inside your worktree or a shared folder (relative paths start in your worktree). With n over 1 the files are numbered: art-1.png, art-2.png';
@@ -75,8 +73,7 @@ export const MEDIA_TOOL_LIST = [
   },
 ];
 
-/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): listed for every minion, refused on a turn whose person has no Codex login it can reach (#878). */
-export const CODEX_IMAGES = process.env.COORDINATOR_CODEX_IMAGES === '1';
+/** A PNG through Codex's built-in image_gen on the person's own ChatGPT login (#733): listed for every minion, refused on a turn whose person has no Codex login it can reach (#878, mcp.ts). */
 export const CODEX_IMAGE_TOOL = {
   name: 'generate_image_codex',
   description: `${NOT_DEFAULT} Then: make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn runs for, with no per-image charge. For a raster image this is the generative tool to use; SVG and sound go to OpenRouter's generate_image and generate_audio, and so does a PNG when this one refuses because a Codex limit is near (it reads their 5-hour and weekly limits first and refuses at 80% of either, leaving the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes the .png and returns its absolute path: link it as ![caption](/abs/path). Takes a minute or two. One take first; more only when asked or when it misses.`,
@@ -93,15 +90,15 @@ export const CODEX_IMAGE_TOOL = {
   },
 };
 
-/** generate_image_codex: one --image-gen run of citadel-codex-review (src/codex-review.ts), which reaches the person's Codex as their reviews do. */
-export async function codexImage(args: any): Promise<string> {
+/** generate_image_codex: one --image-gen run of citadel-codex-review (src/codex-review.ts), which reaches the person's Codex as their reviews do, in the calling turn's env and folder. */
+export async function codexImage(args: any, env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
   if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required');
   if (typeof args.out !== 'string' || !args.out) throw new Error('out is required: a .png path');
   const refs = args.refs ?? [];
   if (!Array.isArray(refs) || refs.some((r: unknown) => typeof r !== 'string' || !r)) throw new Error('refs must be a list of image paths');
   const argv = ['--image-gen', '--timeout', '600', '--out', args.out, ...(args.transparent === true ? ['--transparent'] : []), ...(args.overwrite === true ? ['--overwrite'] : []), ...refs.flatMap((r: string) => ['--image', r])];
   const r = await new Promise<{ code: number | null; out: string; err: string }>((done) => {
-    const child = spawn('citadel-codex-review', argv, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('citadel-codex-review', argv, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (b) => (out += b));

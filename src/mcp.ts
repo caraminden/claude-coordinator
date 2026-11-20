@@ -7,44 +7,70 @@ import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
-import { CODEX_IMAGE_TOOL, CODEX_IMAGES, codexImage, MEDIA, MEDIA_TOOL_LIST } from './mcp-media.ts';
+import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
+import { callEnv, callCwd } from './pool-context.ts';
 import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 
-const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
-const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
-const PROJECT = Number(process.env.COORDINATOR_PROJECT);
-// 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
-const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator';
-const TICKET = Number(process.env.COORDINATOR_TICKET);
-// Set for minions: Claude Code asks the approve tool before tripwire asks and approval-rule calls.
-const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
-// A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
-const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
-/** This turn runs in its person's Claude container (#213), where tools/land.sh can't: any scheme's (#574). */
-const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
-// Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
-const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
-// The contraptions whose home is this scheme (#266): it may deploy them.
-const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
-// The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
-const MACHINES = (process.env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean);
-const JOB_MACHINES = (process.env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean);
-/** A minion in the seam trial's fresh group (#1129): offered its own fresh_session. */
-const SEAM_TRIAL = process.env.COORDINATOR_SEAM_TRIAL === '1';
+/**
+ * A turn's settings, from its environment: the process's own for a turn's own helper, the calling turn's in the shared
+ * tool server (#1259, src/mcp-pool.ts). Read per call through C(), so one process can serve many turns.
+ */
+function config(env: NodeJS.ProcessEnv) {
+  return {
+    API: env.COORDINATOR_API ?? 'http://127.0.0.1:8573',
+    TOKEN: env.COORDINATOR_TOKEN ?? '',
+    PROJECT: Number(env.COORDINATOR_PROJECT),
+    // 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
+    ROLE: env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator',
+    TICKET: Number(env.COORDINATOR_TICKET),
+    // Set for minions: Claude Code asks the approve tool before tripwire asks and approval-rule calls.
+    APPROVALS: env.COORDINATOR_APPROVALS === '1',
+    // A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
+    DEPLOYS: env.COORDINATOR_DEPLOYS === '1',
+    /** This turn runs in its person's Claude container (#213), where tools/land.sh can't: any scheme's (#574). */
+    IN_CONTAINER: env.COORDINATOR_CONTAINER === '1',
+    // Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
+    APP_INSTRUCTIONS: env.COORDINATOR_APP_INSTRUCTIONS === '1',
+    // The contraptions whose home is this scheme (#266): it may deploy them.
+    HOME_CONTRAPTIONS: (env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean),
+    // The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
+    MACHINES: (env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean),
+    JOB_MACHINES: (env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean),
+    /** A minion in the seam trial's fresh group (#1129): offered its own fresh_session. */
+    SEAM_TRIAL: env.COORDINATOR_SEAM_TRIAL === '1',
+    /** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
+    MSG: msgFromEnv(env.COORDINATOR_MSG),
+    // propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.
+    HOST_TOOLS_LIST: env.COORDINATOR_HOST_TOOLS,
+    /** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
+    MEMORY: env.COORDINATOR_MEMORY === '1',
+    SHARED_DIR: env.COORDINATOR_SHARED_DIR?.replace(/\/+$/, ''),
+    APP_TURNS_RUN: env.COORDINATOR_APP_TURNS_RUN === '1',
+    /** Images and sound through the person's own OpenRouter key (#717): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
+    MEDIA: env.COORDINATOR_MEDIA === '1',
+    /** generate_image_codex (#733): refused on a turn whose person has no Codex login it can reach (#878). */
+    CODEX_IMAGES: env.COORDINATOR_CODEX_IMAGES === '1',
+  };
+}
+const configs = new WeakMap<object, ReturnType<typeof config>>();
+function C() {
+  const env = callEnv();
+  let c = configs.get(env);
+  if (!c) configs.set(env, (c = config(env)));
+  return c;
+}
 const MAX_TEXT = 4000;
-/** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
-const MSG = msgFromEnv(process.env.COORDINATOR_MSG);
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
-const COLD = (who: string) => coldToolText(MSG, who);
+const COLD = (who: string) => coldToolText(C().MSG, who);
 import { NEEDS, NEED_LINES } from './needs.ts';
 import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
 import { pacificStamp } from './pacific.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
-const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over ' + MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
+const URGENT = () => ({ type: 'boolean', description: 'true: wake a cold recipient (idle over ' + C().MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' });
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
-const HELD = heldToolText(MSG, 'the minion and the Taskmaster');
+const HELD = () => heldToolText(C().MSG, 'the minion and the Taskmaster');
 
 const WAKE_DESCRIPTION =
   `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
@@ -185,7 +211,7 @@ const WHEN_CI_PASSES = {
     'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a ship card, "ready to ship" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme ships with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
 };
 
-const ASK_QUESTION = {
+const ASK_QUESTION = () => ({
   name: 'ask_question',
   description:
     'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). A plain card asked while your earlier plain card of this turn is still unanswered joins it (up to 8 questions in all), so one turn shows one card with one Send. When to ask and how to word a card: the Citadel-wide card rule (Asking and picking); a lone go may be a reply button instead. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A command people run goes in the question (or an option description) as a fenced block tagged with where it runs (```powershell, ```powershell-admin, ```wsl, ```fish, ```bash, ```cmd): the card draws it with the same header and Copy button as a reply, and the same no-placeholder rule holds. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
@@ -249,7 +275,7 @@ const ASK_QUESTION = {
       when_ci_passes: WHEN_CI_PASSES,
     },
   },
-};
+});
 
 const SETTLE_QUESTION = {
   name: 'settle_question',
@@ -276,12 +302,10 @@ const PROPOSE_PLAN = {
   },
 };
 
-// propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.
-const HOST_TOOLS_LIST = process.env.COORDINATOR_HOST_TOOLS;
-const PROPOSE_HOST_TOOL = {
+const PROPOSE_HOST_TOOL = () => ({
   name: 'propose_host_tool',
   description:
-    `Propose installing a command-line tool on the server every turn runs on (yours too, in a container, which can't install one), as a card in this chat showing the exact install command. Only a member of the ${APP_NAME} scheme can approve it: approve installs it with mise (an Arch package is installed by a person, as the server has no root) and ships its line in the server's host tools list, which a rebuild installs from; reject installs nothing. Either comes as a message. Pin one exact version and say in why what it's for.${HOST_TOOLS_LIST ? ` What the server has already: ${HOST_TOOLS_LIST}.` : ''} A newer proposal for the same package replaces an open one. Link every mention of the card, as with propose_plan.`,
+    `Propose installing a command-line tool on the server every turn runs on (yours too, in a container, which can't install one), as a card in this chat showing the exact install command. Only a member of the ${APP_NAME} scheme can approve it: approve installs it with mise (an Arch package is installed by a person, as the server has no root) and ships its line in the server's host tools list, which a rebuild installs from; reject installs nothing. Either comes as a message. Pin one exact version and say in why what it's for.${C().HOST_TOOLS_LIST ? ` What the server has already: ${C().HOST_TOOLS_LIST}.` : ''} A newer proposal for the same package replaces an open one. Link every mention of the card, as with propose_plan.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -292,7 +316,7 @@ const PROPOSE_HOST_TOOL = {
     },
     required: ['source', 'package', 'version', 'why'],
   },
-};
+});
 
 const PROPOSE_MACHINE_NOTES = {
   name: 'propose_machine_notes',
@@ -309,7 +333,7 @@ const PROPOSE_MACHINE_NOTES = {
   },
 };
 
-const PROPOSE_MEMORY = {
+const PROPOSE_MEMORY = () => ({
   name: 'propose_memory',
   description:
     "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (a member ticks each one by hand), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
@@ -333,7 +357,7 @@ const PROPOSE_MEMORY = {
     },
     required: ['changes'],
   },
-};
+});
 
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
@@ -354,14 +378,14 @@ const EDIT_INSTRUCTIONS = {
   },
 };
 
-const QUEUE_JOB = {
+const QUEUE_JOB = () => ({
   name: 'queue_job',
   description:
     "Queue a container job on a person's machine (#857), usually for its GPU. A kind is the recipe: an image pinned by digest, a command, which of the owner's named folders it reads (mounted read-only at /private/<name>), GPU, network, resumable, and a top limit; inputs (files from your worktree or shared folders) land read-only in /in, and what it writes to /out uploads to the scheme's shared folder as jobs/<id>/ (2 GB per job). A new recipe puts a go card to the machine's owner in this chat; one they always allow queues at once. Jobs run in the machine's job hours (Pacific nights by default), one at a time; when \"now\" asks the owner to start it outside them and always takes a card. You are woken when it ends or is refused: end your turn meanwhile.",
   inputSchema: {
     type: 'object',
     properties: {
-      machine: { type: 'string', enum: JOB_MACHINES, description: 'The machine' },
+      machine: { type: 'string', enum: C().JOB_MACHINES, description: 'The machine' },
       kind: {
         type: 'object',
         description: 'The recipe; any change to it but its name needs a new go',
@@ -384,7 +408,7 @@ const QUEUE_JOB = {
     },
     required: ['machine', 'kind'],
   },
-};
+});
 
 const JOB_STATUS = {
   name: 'job_status',
@@ -524,7 +548,7 @@ const LIVE_FACTS = {
   inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
 };
 
-const TOOLS = [
+const TOOLS = () => ([
   LIST_TICKETS,
   LIVE_FACTS,
   SHIP_RISK,
@@ -580,13 +604,13 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over ' + MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + MSG.holdH + ' hours), unless it is urgent. After ' + MSG.loopLimit + ' messages either way with one minion in ' + MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over ' + C().MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + C().MSG.holdH + ' hours), unless it is urgent. After ' + C().MSG.loopLimit + ' messages either way with one minion in ' + C().MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
         text: { type: 'string', maxLength: 10000, description: 'The message, at most 10,000 characters (`message` is accepted too)' },
-        urgent: URGENT,
+        urgent: URGENT(),
         unpark: { type: 'boolean', description: 'For a parked minion: true unparks it and this message wakes it, with everything held for it (a minion chained on start_after starts now, its brief first). Only when people want it running now; without it the message waits for its unpark or wake.' },
         start_now: { type: 'boolean', description: 'Old name for unpark.' },
       },
@@ -596,7 +620,7 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. An ask (any need but fyi) comes as a form: saw (what you saw, with the error or link), checked (what you checked on your own side first: \"nothing\" is refused), wanted and by (by when); it is laid out the same way every time. A fyi or an answer stays free text. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + MSG.loopLimit + " messages either way between you in " + MSG.loopMin + " minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. An ask (any need but fyi) comes as a form: saw (what you saw, with the error or link), checked (what you checked on your own side first: \"nothing\" is refused), wanted and by (by when); it is laid out the same way every time. A fyi or an answer stays free text. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + C().MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + C().MSG.loopLimit + " messages either way between you in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -609,7 +633,7 @@ const TOOLS = [
         by: { type: 'string', description: 'An ask requires it: by when ("today", "before #N ships", "no rush")' },
         need: NEED,
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent). A need of fyi is always held mail' },
-        urgent: URGENT,
+        urgent: URGENT(),
         file: { type: 'string', description: 'A file in your scheme\'s shared folder (absolute, or relative to that folder), at most 2 MB. Copied into the other scheme\'s shared folder under inbox/, where its Taskmaster and minions can read it; the message tells it the path' },
       },
       required: ['scheme', 'need'],
@@ -735,7 +759,7 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   // A Taskmaster's ask_question also asks for everyone (#921).
-  { ...ASK_QUESTION, inputSchema: { ...ASK_QUESTION.inputSchema, properties: { ...ASK_QUESTION.inputSchema.properties, for_everyone: {
+  { ...ASK_QUESTION(), inputSchema: { ...ASK_QUESTION().inputSchema, properties: { ...ASK_QUESTION().inputSchema.properties, for_everyone: {
     type: 'boolean',
     description: "true: a question for the whole scheme, not just your person (the pipeline lane, a Citadel-wide rule, a build). The card goes to the Overlord's chat, which every member sees, and the first answer settles it for everyone; the answer still comes back to you, and you act on it. Questions only: no to, doc, notice, secret or when_ci_passes. Ignored before the scheme has per-person Taskmasters.",
   } } } },
@@ -890,7 +914,7 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { person: { type: 'string', description: "The person's name or login, as in `assigned`" } }, required: ['person'] },
   },
   ...ARTIFACT_TOOLS,
-];
+]);
 
 const APP_INSTRUCTION_TOOLS = [
   {
@@ -1001,17 +1025,17 @@ const CONTRAPTION_TOOLS = [
 ];
 
 /** Publishing a home contraption's Android release into its feed (#663): a scheme that has home contraptions. */
-const PUBLISH_RELEASE = {
+const PUBLISH_RELEASE = () => ({
   name: 'publish_release',
-  description: `Publish a contraption's Android release, as the Deploy button on its card on the Releases page does, on the ${APP_NAME} server (so it works from a container turn too). It takes the newest signed release APK newer than the published build (from the CI store, or the run's GitHub artifact), checks it is signed with the same key as the published APK (refused if not: phones won't update across keys), copies it into the contraption's android/ feed and points latest.json at it, so installed phones see the update. With no such APK yet but a version bumped on main, it starts the release workflow instead; call it again once that run has signed. Who published which build from which run is kept and told to the scheme's Taskmaster.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
+  description: `Publish a contraption's Android release, as the Deploy button on its card on the Releases page does, on the ${APP_NAME} server (so it works from a container turn too). It takes the newest signed release APK newer than the published build (from the CI store, or the run's GitHub artifact), checks it is signed with the same key as the published APK (refused if not: phones won't update across keys), copies it into the contraption's android/ feed and points latest.json at it, so installed phones see the update. With no such APK yet but a version bumped on main, it starts the release workflow instead; call it again once that run has signed. Who published which build from which run is kept and told to the scheme's Taskmaster.${C().HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${C().HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
   inputSchema: {
     type: 'object',
     properties: {
-      contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+      contraption: { type: 'string', ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
     },
     required: ['contraption'],
   },
-};
+});
 
 /** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
 const PUBLISH_DESKTOP = {
@@ -1033,31 +1057,31 @@ const PUBLISH_DESKTOP = {
 };
 
 /** A home contraption's Android release key, made on the server once a member approves (#837). */
-const MAKE_RELEASE_KEY = {
+const MAKE_RELEASE_KEY = () => ({
   name: 'make_release_key',
-  description: `Ask for a contraption's Android release key: posts a card in this chat that any member of this scheme approves, which makes the key on the ${APP_NAME} server (a keystore and a random password in ~/.config/citadel-android, readable only by ${APP_NAME}) and starts its first APK build. Call it when you're told a Capacitor app has no release key yet. Neither the key nor its password ever comes back to you or goes in a chat or a repo. A key is never replaced, so it is refused for an app that has one. Members can also press Make release key on the app's card on the Releases page. Link every mention of the card, as with propose_plan.${HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
+  description: `Ask for a contraption's Android release key: posts a card in this chat that any member of this scheme approves, which makes the key on the ${APP_NAME} server (a keystore and a random password in ~/.config/citadel-android, readable only by ${APP_NAME}) and starts its first APK build. Call it when you're told a Capacitor app has no release key yet. Neither the key nor its password ever comes back to you or goes in a chat or a repo. A key is never replaced, so it is refused for an app that has one. Members can also press Make release key on the app's card on the Releases page. Link every mention of the card, as with propose_plan.${C().HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${C().HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
   inputSchema: {
     type: 'object',
     properties: {
-      contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+      contraption: { type: 'string', ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
     },
     required: ['contraption'],
   },
-};
+});
 
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
-const DEPLOY_CONTRAPTION = {
+const DEPLOY_CONTRAPTION = () => ({
   name: 'deploy_contraption',
-  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: its folder is a link to one of two checkouts beside it, and a deploy fetches the branch into the other one (refused if either has local changes, or the live one has commits the branch doesn't), runs the build steps in its citadel-app.json there (niced, with a time limit) while the old build keeps running, then points the folder at it, rewrites its units and restarts it, and checks its health. A failed build changes nothing and restarts nothing. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If the new build doesn't come up healthy, it points back at the old checkout and restarts that, with no rebuild. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}. A land handed off with hand_off_land deploys them already: call this only to redeploy outside a land.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
+  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: its folder is a link to one of two checkouts beside it, and a deploy fetches the branch into the other one (refused if either has local changes, or the live one has commits the branch doesn't), runs the build steps in its citadel-app.json there (niced, with a time limit) while the old build keeps running, then points the folder at it, rewrites its units and restarts it, and checks its health. A failed build changes nothing and restarts nothing. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If the new build doesn't come up healthy, it points back at the old checkout and restarts that, with no rebuild. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${C().HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${C().HOME_CONTRAPTIONS.join(', ')}. A land handed off with hand_off_land deploys them already: call this only to redeploy outside a land.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
   inputSchema: {
     type: 'object',
     properties: {
-      name: { type: 'string', ...(HOME_CONTRAPTIONS.length && !APP_INSTRUCTIONS ? { enum: HOME_CONTRAPTIONS } : {}) },
+      name: { type: 'string', ...(C().HOME_CONTRAPTIONS.length && !C().APP_INSTRUCTIONS ? { enum: C().HOME_CONTRAPTIONS } : {}) },
       follow: { type: 'boolean', description: 'true: start nothing, just wait for the deploy already running (after this tool said it was still running).' },
     },
     required: ['name'],
   },
-};
+});
 
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
@@ -1162,18 +1186,18 @@ const CONTRAPTION_READ = {
 };
 
 /** The scheme's contraption turn audit (#844), for its Taskmaster: what each app's model calls were sent and answered. */
-const CONTRAPTION_TURNS = {
+const CONTRAPTION_TURNS = () => ({
   name: 'contraption_turns',
-  description: `Read this scheme's contraption turn audit: every model call its apps (${HOME_CONTRAPTIONS.join(', ')}) made in the last 14 days, newest first, with whom it was for, the model, whether it ran blind, the system text, prompt and output, and the app's verdict (passed, or fell back to its rule text, with its reason). Use it to check an app's prompts and replies, or why it fell back. Without turn it lists up to 30 turns with each text cut short; with turn it returns that one whole. The payloads hold players' own words: read them here, and never copy them into a file, a commit, a handoff or another scheme.`,
+  description: `Read this scheme's contraption turn audit: every model call its apps (${C().HOME_CONTRAPTIONS.join(', ')}) made in the last 14 days, newest first, with whom it was for, the model, whether it ran blind, the system text, prompt and output, and the app's verdict (passed, or fell back to its rule text, with its reason). Use it to check an app's prompts and replies, or why it fell back. Without turn it lists up to 30 turns with each text cut short; with turn it returns that one whole. The payloads hold players' own words: read them here, and never copy them into a file, a commit, a handoff or another scheme.`,
   inputSchema: {
     type: 'object',
     properties: {
-      app: { type: 'string', description: 'Only this app\'s turns.', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
+      app: { type: 'string', description: 'Only this app\'s turns.', ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
       before: { type: 'integer', description: 'Turns older than this turn id: the next page.' },
       turn: { type: 'integer', description: 'One turn by id, with its texts whole.' },
     },
   },
-};
+});
 const AUDIT_CUT = 400;
 function turnText(t: any, whole: boolean): string {
   const at = pacificStamp(t.at);
@@ -1183,8 +1207,6 @@ function turnText(t: any, whole: boolean): string {
   return [head.filter(Boolean).join(' · '), ...(whole ? [text('System', t.system)] : []), text('Prompt', t.prompt), text('Output', t.output), ...(t.images ? [`${t.images} image(s) sent, not kept`] : [])].join('\n');
 }
 
-/** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
-const MEMORY = process.env.COORDINATOR_MEMORY === '1';
 const SEARCH_MEMORY = {
   name: 'search_memory',
   description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. For what people decided (who, when, their words, and whether it was reversed), use search_decisions. These chunks are leads to check (read_ticket, search_decisions), not facts: the newest word wins, and a chunk can be out of date.",
@@ -1247,7 +1269,7 @@ const IDEAS = {
 async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number; owner: string | null }[]> {
   const q = new URLSearchParams({ q: `${title}\n${message}`.slice(0, 1000), scope: 'minions', limit: '3' });
   // One try, not call()'s two minutes of retries: a down embedding service mustn't hold up a new minion.
-  const res = await fetch(`${API}/api/projects/${PROJECT}/memory?${q}`, { headers: { Authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  const res = await fetch(`${C().API}/api/projects/${C().PROJECT}/memory?${q}`, { headers: { Authorization: `Bearer ${C().TOKEN}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
   if (!res?.ok) return [];
   const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
   return (hits ?? []).filter((h) => h.twin);
@@ -1264,9 +1286,9 @@ async function call(method: string, path: string, body?: object): Promise<any> {
     // mid-way, or answered by the proxy, may have run, so only reads are.
     let retry = false;
     try {
-      res = await fetch(API + path, {
+      res = await fetch(C().API + path, {
         method,
-        headers: { Authorization: `Bearer ${TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { Authorization: `Bearer ${C().TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
       retry = method === 'GET' && (res.status === 502 || res.status === 503);
@@ -1364,20 +1386,20 @@ function transcript(events: any[]): string[] {
 }
 
 /** Tickets are numbered per project; the API addresses them by their global id. */
-async function id(args: any, scheme = PROJECT): Promise<number> {
+async function id(args: any, scheme = C().PROJECT): Promise<number> {
   const n = Number(args.ticket_id);
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
   const { tickets } = await call('GET', `/api/projects/${scheme}?number=${n}`); // one minion's view, not the whole scheme's (#609)
   const ticket = tickets.find((t: any) => t.number === n);
-  if (!ticket) throw new Error(`There is no minion #${n} in ${scheme === PROJECT ? 'this' : 'that'} scheme`);
+  if (!ticket) throw new Error(`There is no minion #${n} in ${scheme === C().PROJECT ? 'this' : 'that'} scheme`);
   return ticket.id;
 }
 
 /** The scheme list_tickets or read_ticket reads: this one, or for the Citadel scheme's Taskmaster another (#656). */
 function schemeOf(args: any): number {
-  if (args.scheme == null) return PROJECT;
+  if (args.scheme == null) return C().PROJECT;
   const n = Number(args.scheme);
-  if (!APP_INSTRUCTIONS) throw new Error(`Only the ${APP_NAME} scheme's Taskmaster reads other schemes' minions: ask that scheme's Taskmaster with message_taskmaster`);
+  if (!C().APP_INSTRUCTIONS) throw new Error(`Only the ${APP_NAME} scheme's Taskmaster reads other schemes' minions: ask that scheme's Taskmaster with message_taskmaster`);
   if (!Number.isInteger(n) || n <= 0) throw new Error('scheme must be a scheme number, as your instructions list them');
   return n;
 }
@@ -1460,16 +1482,16 @@ const SEAM_FRESH = {
   },
 };
 
-const THREAD_TOOLS = [
+const THREAD_TOOLS = () => ([
   LIVE_FACTS,
   SHIP_RISK,
   {
     name: 'set_thread_status',
     description:
       "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask; the end of a turn's state and note go in your final reply's status line instead.",
-    inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
+    inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(C().DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
-  ASK_QUESTION,
+  ASK_QUESTION(),
   SETTLE_QUESTION,
   STRIKE_TEXT,
   PROPOSE_PLAN,
@@ -1512,20 +1534,20 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + MSG.holdH + " hours), unless it is urgent. After " + MSG.loopLimit + " messages either way in " + MSG.loopMin + " minutes, the next is held until a person continues.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + C().MSG.holdH + " hours), unless it is urgent. After " + C().MSG.loopLimit + " messages either way in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT(), when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over " + MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + MSG.loopLimit + " messages either way between two minions in " + MSG.loopMin + " minutes, the next is held until a person continues.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + C().MSG.loopLimit + " messages either way between two minions in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your chat, so give file paths in full. At most 10,000 characters (`message` is accepted too)' },
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
-        urgent: URGENT,
+        urgent: URGENT(),
         unpark: { type: 'boolean', description: "For a minion parked waiting on you (your work, your word): true unparks it and this message wakes it now, so don't ask the Taskmaster. A chain a person put on hold is refused: only their Unpark or the Taskmaster starts it." },
       },
       required: ['ticket_id', 'text'],
@@ -1588,7 +1610,7 @@ const THREAD_TOOLS = [
   {
     name: 'hand_off_land',
     description:
-      `Hand shipping to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the ship\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${HOME_CONTRAPTIONS.length ? ` A ship to main first deploys each of ${HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as shipping (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
+      `Hand shipping to the server and end your turn (#706): the server runs tools/land.sh in your worktree, the same as running it yourself, and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once the change is tested and self-reviewed (a low-risk change the self-review skill qualifies by its file list hands off first and keeps its turn open for the review: see \"Alongside the ship\" there). Commit everything first: uncommitted changes are refused at once, and so is a branch that would conflict with what it lands on, naming the files (#770). On a clean land the server posts the shipped line (commit, your summary and risk label, live or not)${C().DEPLOYS ? ' and dismisses this minion, or sets pending-deploy when it waits for the restart' : ' and dismisses this minion'}.${C().HOME_CONTRAPTIONS.length ? ` A ship to main first deploys each of ${C().HOME_CONTRAPTIONS.join(', ')} that runs main and waits for it (#712): the shipped line says whether it went live, and a deploy that fails wakes you with its log. So never call deploy_contraption or ask the Taskmaster to redeploy what the shipped line reports; pass deploy: false when the change has nothing to serve.` : ''} With stay_open: true none of that dismisses you (use it only when your brief has more pieces for this minion). If it fails (a conflict, also while it waits in line once main moves, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: the server shows this minion as shipping (state outside, the note naming the phase: in line, tests, CI, deploying) until the land ends, then sets its end state. Same arguments as tools/land.sh's forms.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1600,20 +1622,20 @@ const THREAD_TOOLS = [
         stay_open: { type: 'boolean', description: 'true: a clean land still deploys and posts the shipped line, but this minion is not dismissed: it stays open in state ready for the next piece (with waiting_on: woken once live instead). Only when your brief has more pieces to do in this minion; leave it out otherwise (the default dismisses you on land). A failed land is unchanged' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, when you have after-land steps or a wait, e.g. "Cara testing on her phone": the server never parks you; once the land is live (after the restart, if it needs one) it wakes you with the shipped line, once. Then run your after-land steps and set your state: null or try for a person, wake_when_live and parked for another minion\'s land' },
         ...LAND_PROPS,
-        ...(HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
+        ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: `false: don't deploy ${C().HOME_CONTRAPTIONS.join(', ')} after the land, for a change with nothing to serve (a PC-only build, say). Default true` } } : {}),
       },
       required: ['summary'],
     },
   },
-  ...(IN_CONTAINER
+  ...(C().IN_CONTAINER
     ? [{
       name: 'land',
       description:
-        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't. To land and end your turn, use hand_off_land; this one is for when you need land.sh's output in this turn. Commit everything first. ${DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }. A call made while your last landing still runs waits on that one, whatever its arguments.`,
+        `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't. To land and end your turn, use hand_off_land; this one is for when you need land.sh's output in this turn. Commit everything first. ${C().DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }. A call made while your last landing still runs waits on that one, whatever its arguments.`,
       inputSchema: { type: 'object', properties: LAND_PROPS },
     }]
     : []),
-  ...(DEPLOYS
+  ...(C().DEPLOYS
     ? [{
       name: 'start_preview',
       description:
@@ -1624,14 +1646,14 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
+      `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${C().DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Shipped abc1234; live after the restart"' } },
     },
   },
   ...ARTIFACT_TOOLS,
-];
+]);
 
 // Claude Code's permission-prompt tool (--permission-prompt-tool): not one for Claude to call itself.
 const APPROVE = {
@@ -1654,12 +1676,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function approve(args: any): Promise<string> {
   let decision: any;
   try {
-    const { id, refused } = await call('POST', `/api/tickets/${TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    const { id, refused } = await call('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
     if (refused) return JSON.stringify({ behavior: 'deny', message: refused });
     // Each request waits up to half a minute on the server; keep asking until the card is settled.
     for (let failures = 0; !decision || decision.state === 'pending';) {
       try {
-        decision = await call('GET', `/api/tickets/${TICKET}/approvals?id=${encodeURIComponent(id)}`);
+        decision = await call('GET', `/api/tickets/${C().TICKET}/approvals?id=${encodeURIComponent(id)}`);
         failures = 0;
       } catch (err) {
         if (++failures >= 5) throw err;
@@ -1686,7 +1708,7 @@ async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<str
   const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim().slice(0, 300)) : [];
   let found: any[];
   // Like a Settings save, a check that fails never blocks the save: it says so instead.
-  try { ({ found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
+  try { ({ found } = await call('POST', `/api/projects/${C().PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
   if (!found.length) return '';
   if (args.repeats_ok === true && judged.length >= found.length) return `\nSaved past ${found.length} flagged place${found.length > 1 ? 's' : ''} on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
   const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
@@ -1710,7 +1732,7 @@ function wholeText(args: any): string {
  * first turn (#481): refuse it. A path in a sentence that asks for it to be written or created passes.
  */
 function sharedFilesExist(text: unknown, then: string): void {
-  const shared = process.env.COORDINATOR_SHARED_DIR?.replace(/\/+$/, '');
+  const shared = C().SHARED_DIR;
   if (!shared || typeof text !== 'string') return;
   const paths = new RegExp(`${shared.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/[^\\s\`'"()<>\\[\\]]+`, 'g');
   for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
@@ -1737,22 +1759,22 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'list_tickets': {
       const at = schemeOf(args);
       const { tickets, scheme, errors } = await call('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
-      const head = at === PROJECT ? [] : [otherScheme(scheme)];
+      const head = at === C().PROJECT ? [] : [otherScheme(scheme)];
       // The morning count (#835): yesterday's contraption errors and the shared-folder file that lists them.
       if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a: any) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
-      const claims = at === PROJECT ? (await call('GET', `/api/projects/${at}/claims`)).claims : [];
+      const claims = at === C().PROJECT ? (await call('GET', `/api/projects/${at}/claims`)).claims : [];
       return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
     }
     case 'claim': {
-      const r = await call('POST', `/api/projects/${PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null });
+      const r = await call('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null });
       return `Claimed: ${claimLine(r.claim)}`;
     }
     case 'release': {
-      const r = await call('DELETE', `/api/projects/${PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
+      const r = await call('DELETE', `/api/projects/${C().PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
       return r.released ? `Released: ${claimLine(r.released)}` : `Nobody held ${args.name}.`;
     }
     case 'list_claims': {
-      const { claims } = await call('GET', `/api/projects/${PROJECT}/claims`);
+      const { claims } = await call('GET', `/api/projects/${C().PROJECT}/claims`);
       return claims.length ? claims.map(claimLine).join('\n') : 'No claims: every duty is free.';
     }
     case 'read_ticket': {
@@ -1761,7 +1783,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
       // The whole history (?after=0), not a chat page: the skipped count needs every entry.
       const [{ ticket, project }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
-      const head = at === PROJECT ? [] : [otherScheme(project.name)];
+      const head = at === C().PROJECT ? [] : [otherScheme(project.name)];
       if (args.live === true) return [...head, ticketLine(ticket), ...liveState(ticket, events)].join('\n');
       const lines = transcript(events);
       const skipped = Math.max(lines.length - last, 0);
@@ -1775,7 +1797,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (untyped) properties.type = 'other';
       // A chained minion's brief waits for its leader, which may be the one writing the file.
       if (args.start_after == null) sharedFilesExist(args.message, 'Start this minion');
-      const twins = MEMORY && args.not_duplicate !== true ? await openTwins(String(args.title ?? ''), String(args.message ?? '')) : [];
+      const twins = C().MEMORY && args.not_duplicate !== true ? await openTwins(String(args.title ?? ''), String(args.message ?? '')) : [];
       if (twins.length) {
         return [
           'Not created: these open minions read like the same work (closeness by meaning, 1 is the same):',
@@ -1783,7 +1805,7 @@ async function runTool(name: string, args: any): Promise<string> {
           'If one is, message it instead (message_ticket). If not, call create_ticket again with not_duplicate: true.',
         ].join('\n');
       }
-      const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
+      const t = await call('POST', `/api/projects/${C().PROJECT}/tickets`, {
         title: args.title,
         properties,
         message: args.message,
@@ -1803,47 +1825,47 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'read_person_instructions': {
       if (typeof args.person !== 'string' || !args.person.trim()) throw new Error('person is required: their name or login.');
-      const r = await call('GET', `/api/projects/${PROJECT}/people/${encodeURIComponent(args.person.trim())}/instructions`);
+      const r = await call('GET', `/api/projects/${C().PROJECT}/people/${encodeURIComponent(args.person.trim())}/instructions`);
       if (!r.everywhere && !r.scheme) return `${r.name} has no instructions of their own.`;
       return [r.everywhere && `${r.name}'s instructions for everywhere:\n\n${r.everywhere}`, r.scheme && `${r.name}'s instructions for this scheme (after the ones for everywhere):\n\n${r.scheme}`].filter(Boolean).join('\n\n');
     }
     case 'list_properties': {
-      const { keys } = await call('GET', `/api/projects/${PROJECT}/properties`);
+      const { keys } = await call('GET', `/api/projects/${C().PROJECT}/properties`);
       return registryText(keys);
     }
     case 'set_properties': {
       if (!args.properties || typeof args.properties !== 'object' || Array.isArray(args.properties) || !Object.keys(args.properties).length) {
         throw new Error('properties is required: an object of key: value (null clears a key). Nothing was changed.');
       }
-      const target = ROLE === 'thread' ? TICKET : await id(args);
+      const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
       const r = await call('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
       return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}`);
     }
     case 'register_property_values': {
-      const r = await call('POST', `/api/projects/${PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
+      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
       const parts = [r.added.length ? `Added ${r.added.map((v: string) => `${args.key}: ${v}`).join(', ')}` : '', r.updated.length ? `updated ${r.updated.join(', ')}` : ''].filter(Boolean).join('; ');
       return registryReply(r, `${parts || 'No change'}.${r.unreviewed?.length ? ` ${r.unreviewed.join(', ')} ${r.unreviewed.length === 1 ? 'is' : 'are'} live but unreviewed: tell people in your reply what you added, so they can approve or correct it.` : ''}`);
     }
     case 'register_property_key': {
-      const r = await call('POST', `/api/projects/${PROJECT}/properties/keys`, args);
+      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/keys`, args);
       return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Orders → Properties. Tell people in your reply.`);
     }
     case 'review_property': {
-      const r = await call('POST', `/api/projects/${PROJECT}/properties/review`, args);
+      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/review`, args);
       return `Done: ${r.action} ${r.key}${r.value ? `: ${r.value}` : ''}.`;
     }
     case 'propose_property': {
-      const r = await call('POST', `/api/projects/${PROJECT}/properties/proposals`, args);
+      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/proposals`, args);
       return registryReply(r, 'Proposed. The Taskmaster has been told; it stays unusable until approved.');
     }
     case 'get_project_instructions': {
-      const { project } = await call('GET', `/api/projects/${PROJECT}`);
+      const { project } = await call('GET', `/api/projects/${C().PROJECT}`);
       if (!project.instructions) return 'This scheme has no instructions yet.';
       const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
       return `Scheme instructions${by}:\n\n${project.instructions}`;
     }
     case 'get_project_settings': {
-      const { project } = await call('GET', `/api/projects/${PROJECT}`);
+      const { project } = await call('GET', `/api/projects/${C().PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
       return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nShipping: ship_path ${project.ship_path}; a person's go from: ${project.go_from}; try it first: ${project.try_first}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }
@@ -1870,7 +1892,7 @@ async function runTool(name: string, args: any): Promise<string> {
         if (args.replace_repo === true) body.replace_repo = true;
       }
       if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, ship_path, go_from, try_first, onboarding, onboarding_mode, name, repo_url or a mix');
-      const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
+      const project = await call('PATCH', `/api/projects/${C().PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
       return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, shipping ${project.ship_path} with a go from ${project.go_from} and try first ${project.try_first}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
@@ -1891,12 +1913,12 @@ async function runTool(name: string, args: any): Promise<string> {
       return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
     }
     case 'make_app': {
-      const m = await call('POST', `/api/projects/${PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
+      const m = await call('POST', `/api/projects/${C().PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
       return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
     }
     case 'set_app_person': {
       if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
-      const r = await call('PUT', `/api/projects/${PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      const r = await call('PUT', `/api/projects/${C().PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'On' : 'Off'} for ${args.login}. ${r.name} is on for: ${r.people.join(', ') || 'no one'}.`;
     }
     case 'register_contraption': {
@@ -1914,42 +1936,42 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'review_set': {
       if (args.add) {
-        const e = await call('POST', `/api/projects/${PROJECT}/reviews`, { slug: args.slug, extends: args.extends, when: args.when, body: args.body, ...reviewFields(args) });
+        const e = await call('POST', `/api/projects/${C().PROJECT}/reviews`, { slug: args.slug, extends: args.extends, when: args.when, body: args.body, ...reviewFields(args) });
         return `Added ${e.slug} (on trial): ${e.when}.`;
       }
       if (!args.slug) {
-        const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
+        const { entries } = await call('GET', `/api/projects/${C().PROJECT}/reviews`);
         return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.file ? `, agent_file ${e.file}` : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
       }
       const slug = encodeURIComponent(String(args.slug));
       if (args.run !== undefined) {
-        const r = await call('POST', `/api/projects/${PROJECT}/reviews/${slug}/runs`, { round: args.run?.round, verdict: args.run?.verdict });
+        const r = await call('POST', `/api/projects/${C().PROJECT}/reviews/${slug}/runs`, { round: args.run?.round, verdict: args.run?.verdict });
         return `Recorded round ${r.round} of ${args.slug}: ${r.verdict}.`;
       }
       if (args.refuted !== undefined) {
         if (args.slug !== 'pre-ship-review') throw new Error('refuted goes with slug pre-ship-review: the lessons are for its reviewer');
-        const r = await call('POST', `/api/projects/${PROJECT}/reviews/pre-ship-review/refutes`, { refuted: args.refuted });
+        const r = await call('POST', `/api/projects/${C().PROJECT}/reviews/pre-ship-review/refutes`, { refuted: args.refuted });
         return `Recorded ${args.refuted.length} refuted finding${args.refuted.length === 1 ? '' : 's'}. Kinds counting (3 makes a lesson the reviewer reads):\n${countedText(r.counted)}`;
       }
       if (args.calibration !== undefined) {
-        const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
+        const e = await call('PATCH', `/api/projects/${C().PROJECT}/reviews/${slug}`, { calibration: args.calibration });
         return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
       }
       if (args.extends !== undefined) throw new Error('extends is only for add: true; a save cannot change what an entry builds on');
       const extra = reviewFields(args);
       if (args.body === undefined && args.enabled === undefined && args.trial === undefined && !Object.keys(extra).length) {
-        const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
+        const { entries } = await call('GET', `/api/projects/${C().PROJECT}/reviews`);
         const e = entries.find((x: any) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
         if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}${e.lessons ? `\n\nRefuted kinds counting (3 makes a lesson the reviewer reads; record with refuted, reusing a kind's words when it is the same mistake):\n${countedText(e.lessons)}` : ''}`;
         if (e.file) return `${e.slug}, version ${e.version}, agent_file ${e.file} (${e.enabled ? 'on' : 'off'} here): ${e.agent ? `${e.what ?? ''} Its text is the file's:\n\n${e.agent.text}\n----` : 'Its file is gone from the repo.'} This scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
         return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
       }
-      const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial, ...extra });
+      const e = await call('PATCH', `/api/projects/${C().PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial, ...extra });
       return `Saved ${e.slug} as version ${e.version}.`;
     }
     case 'record_verdict': {
-      const v = await call('POST', `/api/projects/${PROJECT}/reviews/${encodeURIComponent(String(args.slug))}/verdicts`, { person: args.person, words: args.words });
+      const v = await call('POST', `/api/projects/${C().PROJECT}/reviews/${encodeURIComponent(String(args.slug))}/verdicts`, { person: args.person, words: args.words });
       return `Recorded on ${args.slug}: ${v.person}, "${v.words}". Its later runs read it.`;
     }
     case 'mandate_item': {
@@ -1961,7 +1983,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
     case 'mark_image': {
-      const r = await call('POST', `/api/tickets/${TICKET}/mark-image`, args);
+      const r = await call('POST', `/api/tickets/${C().TICKET}/mark-image`, args);
       return `Put this line in your reply as it is; the chat draws the marks over the picture (${r.w}x${r.h}):\n${r.markdown}`;
     }
     case 'generate_image':
@@ -1969,51 +1991,51 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'generate_audio':
     case 'generate_speech': {
       // Offered to every minion so the tool list doesn't follow the sender (#878); refused here when this turn's person has no key.
-      if (!MEDIA) throw new Error("Not on this turn: the person it runs for hasn't connected OpenRouter on their account page. Make it with code instead, or ask them to connect it.");
-      const r = await call('POST', `/api/tickets/${TICKET}/openrouter`, { tool: name, args });
+      if (!C().MEDIA) throw new Error("Not on this turn: the person it runs for hasn't connected OpenRouter on their account page. Make it with code instead, or ask them to connect it.");
+      const r = await call('POST', `/api/tickets/${C().TICKET}/openrouter`, { tool: name, args });
       if (r.model === 'azure-speech') return `Wrote ${r.paths.join(', ')} with Azure Speech for about $${Number(r.cost_usd).toFixed(4)} (booked to the scheme: $${Number(r.month_usd).toFixed(2)} outside spend this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? ', over it' : ''}`}).`;
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
     case 'generate_image_codex':
-      if (!CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
-      return codexImage(args);
+      if (!C().CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
+      return codexImage(args, callEnv(), callCwd());
     case 'ship_risk':
-      return (await call('GET', `/api/tickets/${TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
+      return (await call('GET', `/api/tickets/${C().TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
     case 'usage_split':
       return usageSplitText(await call('GET', '/api/costs/mine'));
     case 'log_learned': {
-      const r = await call('POST', `/api/tickets/${TICKET}/learned`, { learned: args.learned });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/learned`, { learned: args.learned });
       return r.lines ? `Logged ${r.lines.split('\n').length} line${r.lines.includes('\n') ? 's' : ''} (lesson #${r.id}, ${r.files} file${r.files === 1 ? '' : 's'} touched) in the scheme's ship lessons queue.` : `Logged "nothing" (lesson #${r.id}): it still counts as this ship's answer.`;
     }
     case 'ship_lessons': {
       if (args.take !== undefined) {
         if (typeof args.note !== 'string' || !args.note.trim()) throw new Error('take goes with note: what became of these lines');
-        const { taken } = await call('POST', `/api/projects/${PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
+        const { taken } = await call('POST', `/api/projects/${C().PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
         return `Marked ${taken.length} taken${taken.length ? `: #${taken.join(', #')}` : ''}${taken.length < args.take.length ? ' (the rest were already taken or not this scheme\'s)' : ''}.`;
       }
       const q = new URLSearchParams({ ...(args.days ? { days: String(args.days) } : {}), ...(args.taken ? { taken: '1' } : {}) });
-      const r = await call('GET', `/api/projects/${PROJECT}/ship-lessons?${q}`);
+      const r = await call('GET', `/api/projects/${C().PROJECT}/ship-lessons?${q}`);
       const head = `This week: ${r.week.ships} ship${r.week.ships === 1 ? '' : 's'} answered, ${r.week.withLines} with lines. Last ${r.days} days: ${r.window.ships} answered, ${r.window.withLines} with lines.`;
       const rows = r.lessons.map((l: any) => `lesson ${l.id} · #${l.number ?? '?'} · ${new Date(l.at).toISOString().slice(0, 10)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
       return [head, ...(rows.length ? rows : [`No ${args.taken ? '' : 'open '}lines in that window.`])].join('\n');
     }
     case 'report_spend': {
-      const r = await call('POST', `/api/tickets/${TICKET}/spend`, args);
+      const r = await call('POST', `/api/tickets/${C().TICKET}/spend`, args);
       return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;
     }
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
-      return memoryText((await call('GET', `/api/projects/${PROJECT}/memory?${q}`)).hits);
+      return memoryText((await call('GET', `/api/projects/${C().PROJECT}/memory?${q}`)).hits);
     }
     case 'search_decisions': {
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', scope: ['all', 'scheme', 'citadel'].includes(args.scope) ? args.scope : 'all' });
-      const r = await call('GET', `/api/projects/${PROJECT}/decisions?${q}`);
+      const r = await call('GET', `/api/projects/${C().PROJECT}/decisions?${q}`);
       return decisionsText(r, Math.min(Math.max(Number(args.limit) || 10, 1), 50));
     }
     case 'search_minions': {
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', ...(args.since ? { since: String(args.since) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
-      return pastMinionsText((await call('GET', `/api/projects/${PROJECT}/past-minions?${q}`)).hits);
+      return pastMinionsText((await call('GET', `/api/projects/${C().PROJECT}/past-minions?${q}`)).hits);
     }
     case 'ideas': {
       if (args.id != null) {
@@ -2021,12 +2043,12 @@ async function runTool(name: string, args: any): Promise<string> {
         if (args.set_status !== undefined) body.status = args.set_status;
         if (args.minion !== undefined) body.ticket = args.minion === null || args.minion === 'auto' ? args.minion : Number(String(args.minion).replace(/^#/, ''));
         if (!Object.keys(body).length) return 'Give set_status and/or minion with id.';
-        const r = await call('POST', `/api/projects/${PROJECT}/ideas/${Number(args.id)}`, body);
+        const r = await call('POST', `/api/projects/${C().PROJECT}/ideas/${Number(args.id)}`, body);
         return `Row ${r.idea.id} is now ${r.idea.status}${r.idea.status_manual ? ' (set by hand)' : ''}${r.idea.number ? `, built by #${r.idea.number}` : ''}.`;
       }
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '' });
       if (typeof args.status === 'string') q.set('status', args.status);
-      const r = await call('GET', `/api/projects/${PROJECT}/ideas?${q}`);
+      const r = await call('GET', `/api/projects/${C().PROJECT}/ideas?${q}`);
       return ideasText(r, Math.min(Math.max(Number(args.limit) || 30, 1), 200));
     }
     case 'contraption_turns': {
@@ -2035,7 +2057,7 @@ async function runTool(name: string, args: any): Promise<string> {
       // One turn: the page just above it, so its first row is the turn if it is this scheme's.
       if (args.turn) q.set('before', String(Number(args.turn) + 1));
       else if (args.before) q.set('before', String(Number(args.before)));
-      const r = await call('GET', `/api/projects/${PROJECT}/contraption-turns?${q}`);
+      const r = await call('GET', `/api/projects/${C().PROJECT}/contraption-turns?${q}`);
       if (args.turn) {
         const t = r.turns[0];
         return t?.id === Number(args.turn) ? turnText(t, true) : `No turn ${args.turn} in this scheme's audit (kept ${r.keep_days} days).`;
@@ -2049,13 +2071,13 @@ async function runTool(name: string, args: any): Promise<string> {
       return readText(args.app, args.command, r);
     }
     case 'make_release_key': {
-      const { href } = await call('POST', `/api/tickets/${TICKET}/release-key`, { contraption: args.contraption });
+      const { href } = await call('POST', `/api/tickets/${C().TICKET}/release-key`, { contraption: args.contraption });
       return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'publish_desktop':
-      return (await call('POST', `/api/projects/${PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
+      return (await call('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
     case 'publish_release':
-      return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
+      return (await call('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
@@ -2079,7 +2101,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
       const unchecked = await repeatsFirst('scheme', args);
-      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
+      const project = await call('PATCH', `/api/projects/${C().PROJECT}`, { instructions: wholeText(args) });
       return (project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.') + unchecked;
     }
     case 'message_ticket': {
@@ -2089,13 +2111,13 @@ async function runTool(name: string, args: any): Promise<string> {
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
       if (t.held === 'parked') return `Held for #${t.number}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken (its deploy wait or chained start). Do not resend it; message_ticket with unpark wakes it now.\n${ticketLine(t)}`;
-      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+      return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
       const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, saw: args.saw, checked: args.checked, wanted: args.wanted, by: args.by, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
-      if (r.held) return `${heldToolText(MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
+      if (r.held) return `${heldToolText(C().MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
       const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : (args.wake === false || args.need === 'fyi') && !r.woke ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
@@ -2106,48 +2128,48 @@ async function runTool(name: string, args: any): Promise<string> {
       const direct = args.to ? { to: args.to } : {};
       if (args.doc != null && args.questions == null) {
         const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
-        const { id: questionId, href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { doc: args.doc, ...direct, ...ci });
+        const { id: questionId, href, armed } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { doc: args.doc, ...direct, ...ci });
         if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
         return `The choices card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; it opens the page. Its link is ${href}: link every mention of it, in this reply and later ones, e.g. [the card below](${href}), and link the card rather than the page when you point people at the choices. End your turn now with a short reply; the picks will come as a message from whoever presses Send on the page.`;
       }
       if (args.secret != null && args.questions == null) {
-        const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { secret: args.secret, ...direct });
+        const { id: questionId, href } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { secret: args.secret, ...direct });
         return `The secret card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; its link is ${href}: link every mention of it, e.g. [the card below](${href}). End your turn now with a short reply. Once someone saves it, you get a message with the name it was saved as (never the value), and your next turn has it in $CITADEL_SECRET_<NAME>.`;
       }
       if (args.to && args.questions == null) {
-        const { href, armed } = await call('POST', `/api/tickets/${TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
+        const { href, armed } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
         if (armed) return `${armed} Nothing comes back from it, so keep working.`;
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
       const everyone = args.for_everyone === true ? { for_everyone: true } : {};
-      const { id: questionId, href, armed, merged } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
+      const { id: questionId, href, armed, merged } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
       if (merged) return `Your earlier question card of this turn was still unanswered, so these questions joined it: people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href})). End your turn now with a short reply; the answers will come as the next message.`;
       return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'settle_question': {
-      const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
+      const { settled } = await call('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
       return settled.length ? `Settled ${settled.join(', ')}: shown as answered in the chat.` : 'No question card was open.';
     }
     case 'strike_text':
-      await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
+      await call('POST', `/api/tickets/${C().TICKET}/strike`, { text: args.text, reason: args.reason });
       return 'Struck through in the chat, with your reason in a note.';
     case 'ci_files': {
       const q = new URLSearchParams();
       for (const k of ['workflow', 'kind', 'target', 'name', 'run', 'commit']) if (args[k] !== undefined && args[k] !== '') q.set(k, String(args[k]));
-      const { files, usage } = await call('GET', `/api/projects/${PROJECT}/ci-files?${q}`);
+      const { files, usage } = await call('GET', `/api/projects/${C().PROJECT}/ci-files?${q}`);
       if (!files.length) return 'No file in the CI store matches.';
       const line = (f: any) => `${f.kind} ${f.name} (${f.size.toLocaleString('en')} bytes) from ${f.workflow} run ${f.run_id}${f.run_attempt > 1 ? ` attempt ${f.run_attempt}` : ''}, commit ${f.sha.slice(0, 8)}${f.target ? `, target ${f.target}` : ''}${f.published_to ? `, published to ${f.published_to}` : ''}, uploaded ${new Date(f.created_at).toISOString()}\n  path: ${f.path}\n  url: ${f.url}`;
       if (args.latest === true) return line(files[0]);
       return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
     }
     case 'ci_runners': {
-      const started = await call('POST', `/api/projects/${PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
+      const started = await call('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
       let job = started;
       for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {
-        const now = await call('GET', `/api/projects/${PROJECT}/ci-runners?wait=50`);
+        const now = await call('GET', `/api/projects/${C().PROJECT}/ci-runners?wait=50`);
         // The server restarted mid-job: the agent carries on, and its answer has nowhere to go.
         if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PC now.`;
         job = now.job;
@@ -2157,12 +2179,12 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
     }
     case 'list_machines': {
-      const { machines } = await call('GET', `/api/projects/${PROJECT}/machines`);
+      const { machines } = await call('GET', `/api/projects/${C().PROJECT}/machines`);
       return (machines.length ? machines.map(machineText) : ['No machines this scheme can see.']).join('\n\n');
     }
     case 'check_machine': {
       if (typeof args.name !== 'string' || !/^[a-z0-9-]{1,30}$/i.test(args.name)) throw new Error('name is required: the machine name, as list_machines shows it');
-      const { machine, results } = await call('POST', `/api/projects/${PROJECT}/machines/${args.name.toLowerCase()}/check`);
+      const { machine, results } = await call('POST', `/api/projects/${C().PROJECT}/machines/${args.name.toLowerCase()}/check`);
       if (!machine.online) return `${machine.name}: FAIL, offline (last seen ${ago(machine.last_seen_at)}). Its agent isn't connected: on that computer, check machine-agent.mjs is running and its token is current.`;
       if (!results.length) return `${machine.name}: online, but it offers nothing a turn would get (${machine.managed ? 'nothing it found is ticked on the Machines page' : machine.servers.includes('ws') ? 'workspace tools are switched off and it lends no MCP server' : 'no MCP server and no workspace tools'}).`;
       const pass = results.every((r: any) => r.ok);
@@ -2175,11 +2197,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
     case 'queue_job': {
-      const j = await call('POST', `/api/tickets/${TICKET}/jobs`, { machine: args.machine, kind: args.kind, inputs: args.inputs, limit_min: args.limit_min, when: args.when, reason: args.reason });
+      const j = await call('POST', `/api/tickets/${C().TICKET}/jobs`, { machine: args.machine, kind: args.kind, inputs: args.inputs, limit_min: args.limit_min, when: args.when, reason: args.reason });
       return `Job #${j.id} is ${j.state === 'needs-go' ? `waiting on ${j.machine}'s owner's go: the card is in this chat` : `queued (${j.waits ?? 'starting'})`}. You are woken when it ends or is refused; end your turn when nothing else needs doing.`;
     }
     case 'job_status': {
-      const { jobs } = await call('GET', `/api/tickets/${TICKET}/jobs`);
+      const { jobs } = await call('GET', `/api/tickets/${C().TICKET}/jobs`);
       const pick = args.id === undefined ? jobs : jobs.filter((j: any) => j.id === args.id);
       if (!pick.length) return args.id === undefined ? 'This minion has queued no jobs.' : `No job #${args.id} of this minion's.`;
       const min = (s: number) => `${Math.round(s / 60)} min`;
@@ -2191,42 +2213,42 @@ async function runTool(name: string, args: any): Promise<string> {
       ].join('\n')).join('\n');
     }
     case 'stop_job': {
-      const j = await call('POST', `/api/tickets/${TICKET}/jobs/${Number(args.id)}/stop`, {});
+      const j = await call('POST', `/api/tickets/${C().TICKET}/jobs/${Number(args.id)}/stop`, {});
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
     case 'edit_instructions': {
-      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
       if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
     case 'propose_machine_notes': {
-      if (!MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
-      const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
+      if (!C().MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(C().MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${C().MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
+      const { href, owner } = await call('POST', `/api/tickets/${C().TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'propose_host_tool': {
-      const { href } = await call('POST', `/api/tickets/${TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
+      const { href } = await call('POST', `/api/tickets/${C().TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
       return `The host tool card is in the chat; its link is ${href}. Link every mention of it, e.g. [the host tool card below](${href}). Only a member of the ${APP_NAME} scheme can approve it, and the answer comes as a message, then another once it's installed. Keep working on what doesn't depend on it.`;
     }
     case 'propose_memory': {
-      const { href, counts } = await call('POST', `/api/tickets/${TICKET}/memory-proposal`, { changes: args.changes });
+      const { href, counts } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal`, { changes: args.changes });
       return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member decides each change on the Memory page, and the answer comes as a message. End your turn now, in state ready, and close yourself with close_self once the answer comes.`;
     }
     case 'propose_plan': {
-      const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
+      const { href } = await call('POST', `/api/tickets/${C().TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'set_thread_status':
       needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
     {
-      const t = await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args));
+      const t = await call('PATCH', `/api/tickets/${C().TICKET}`, labelFields(args));
       const cancelled = t.close_cancelled ? `close_self is cancelled: ${t.close_cancelled}, so this minion stays open after this turn. If nothing is left for people, set another state and call close_self again. ` : '';
       return `Updated. ${cancelled}${ticketLine(t)}`;
     }
     case 'message_coordinator': {
-      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
       if (r.armed) return `${r.armed} End your turn with state outside.`;
-      if (r.held) return `${HELD} Finish your turn.`;
+      if (r.held) return `${HELD()} Finish your turn.`;
       if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';
       return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';
     }
@@ -2234,9 +2256,9 @@ async function runTool(name: string, args: any): Promise<string> {
       const n = Number(args.ticket_id);
       if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
       sharedFilesExist(args.text ?? args.message, 'Send this');
-      const r = await call('POST', `/api/tickets/${TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
-      if (r.held === true) return `${heldToolText(MSG, `you and #${r.number}`)} Finish your turn.`;
+      if (r.held === true) return `${heldToolText(C().MSG, `you and #${r.number}`)} Finish your turn.`;
       if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it is parked on you, resend with unpark: true.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
@@ -2244,23 +2266,23 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'live_facts': {
       // A minion reads a minion of its own scheme through its own path; a Taskmaster by the minion's id (another scheme's for Citadel's).
-      if (ROLE === 'thread') {
+      if (C().ROLE === 'thread') {
         const n = Number(args.ticket_id);
         if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-        return (await call('GET', `/api/tickets/${TICKET}/facts?number=${n}`)).text;
+        return (await call('GET', `/api/tickets/${C().TICKET}/facts?number=${n}`)).text;
       }
       const at = schemeOf(args);
       const { text, facts } = await call('GET', `/api/tickets/${await id(args, at)}/facts`);
-      return at === PROJECT ? text : `${otherScheme(facts.scheme)}\n${text}`;
+      return at === C().PROJECT ? text : `${otherScheme(facts.scheme)}\n${text}`;
     }
     case 'read_minion': {
       const n = Number(args.ticket_id);
       if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-      const r = await call('GET', `/api/tickets/${TICKET}/peer?number=${n}&last=${Number(args.last) || 10}`);
+      const r = await call('GET', `/api/tickets/${C().TICKET}/peer?number=${n}&last=${Number(args.last) || 10}`);
       return [ticketLine(r.ticket), r.skipped ? `(${r.skipped} earlier entries omitted)` : '', ...transcript(r.events)].filter(Boolean).join('\n\n');
     }
     case 'start_preview': {
-      const { url } = await call('POST', `/api/tickets/${TICKET}/preview`, {});
+      const { url } = await call('POST', `/api/tickets/${C().TICKET}/preview`, {});
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
     }
     case 'host_check': {
@@ -2272,19 +2294,19 @@ async function runTool(name: string, args: any): Promise<string> {
       const body: Record<string, unknown> = {};
       for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
-      await call('POST', `/api/tickets/${TICKET}/land/handoff`, body);
-      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state (the server shows you as landing until it ends): the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
+      await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
+      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (C().HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${C().HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state (the server shows you as landing until it ends): the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).
       const body: Record<string, unknown> = {};
       for (const k of ['into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
-      let r = await call('POST', `/api/tickets/${TICKET}/land`, body);
+      let r = await call('POST', `/api/tickets/${C().TICKET}/land`, body);
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         try {
-          r = await call('GET', `/api/tickets/${TICKET}/land`);
+          r = await call('GET', `/api/tickets/${C().TICKET}/land`);
         } catch (err: any) {
           // A landing's folder outlives restarts (src/land.ts); this is a server from before that, or one whose folder went.
           if (!/No landing has started|Nothing has started shipping/.test(err.message)) throw err;
@@ -2296,7 +2318,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'close_self': {
       let closed: any;
       try {
-        closed = await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
+        closed = await call('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null });
       } catch (err: any) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(err.message)) {
@@ -2307,33 +2329,33 @@ async function runTool(name: string, args: any): Promise<string> {
       return closeSelfResult(!!closed?.cleared);
     }
     case 'wake_when_live': {
-      const target = ROLE === 'thread' ? TICKET : await id(args);
+      const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
       const r = await call('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });
       const what = r.commit ? `\`${r.commit.slice(0, 7)}\`` : 'the next deploy';
       if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
-      return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
+      return `Waiting for ${what}: ${APP_NAME} sends ${C().ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${C().ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
     }
     case 'relay_when_live': {
-      const r = await call('POST', `/api/tickets/${TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
       const lines = r.relays.map((o: any) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
       if (r.cancelled) return `Cancelled relay #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
       if (r.id) return r.queued ? `Queued as #${r.id}${r.ids?.length > 1 ? ` (relays #${r.ids.join(', #')}, one per recipient)` : ''}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
       return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
     }
     case 'wake_at': {
-      const r = await call('POST', `/api/tickets/${TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
       const lines = r.wakes.map((w: any) => `#${w.id} ${w.when}: ${w.note}`);
       if (r.set) return `Wake set for ${r.set.when}: ${APP_NAME} sends you the note then.\n${lines.join('\n')}`;
       if (r.cancelled) return `Cancelled #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
       return lines.length ? `Pending wakes:\n${lines.join('\n')}` : 'No wakes pending.';
     }
     case 'wake_when_runners_back': {
-      const r = await call('POST', `/api/tickets/${TICKET}/wake-runners`, { reason: args.reason });
+      const r = await call('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
       return `Waiting for a runner labelled ${r.label} or ${r.label}-linux to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
     }
     case 'list_artifacts': {
-      const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${PROJECT}/artifacts?titles`), call('GET', `/api/projects/${PROJECT}/shared?titles`)]);
+      const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);
       const all = [...artifacts, ...shared];
       const shown = all.filter((a: any) => !args.pinned_only || a.pinned_at);
       return shown.length ? shown.map(artifactLine).join('\n') : args.pinned_only ? 'Nothing pinned.' : 'No artifacts in this scheme yet.';
@@ -2341,26 +2363,26 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'pin_artifact':
     case 'unpin_artifact': {
       const pinned = name === 'pin_artifact';
-      const r = await call('POST', `/api/projects/${PROJECT}/artifacts/pin`, { artifact: args.artifact ?? null, path: args.path ?? null, requested_by: args.requested_by, pinned });
+      const r = await call('POST', `/api/projects/${C().PROJECT}/artifacts/pin`, { artifact: args.artifact ?? null, path: args.path ?? null, requested_by: args.requested_by, pinned });
       if (r.removed) return 'Unpinned. Its file was gone, so it is off the Artifacts panel now.';
       if (r.already) return `Already pinned, so left as it was. ${artifactLine(r.artifact)}`;
       return `${pinned ? 'Pinned' : 'Unpinned'}. ${artifactLine(r.artifact)}`;
     }
     case 'artifact_data': {
-      const r = await call('POST', `/api/projects/${PROJECT}/artifact-data`, { artifact: args.artifact ?? null, path: args.path ?? null, entries: args.entries ?? null });
+      const r = await call('POST', `/api/projects/${C().PROJECT}/artifact-data`, { artifact: args.artifact ?? null, path: args.path ?? null, entries: args.entries ?? null });
       const head = `${r.file}: ${r.entries.length} key${r.entries.length === 1 ? '' : 's'}${args.entries ? ' after your write' : ''}.`;
       return [head, ...r.entries.map((e: any) => `${e.key} = ${JSON.stringify(e.value)} (${e.by}, ${new Date(e.at).toISOString().slice(0, 16)}Z)`)].join('\n');
     }
     case 'list_schedules': {
-      const { schedules } = await call('GET', `/api/projects/${PROJECT}/schedules`);
+      const { schedules } = await call('GET', `/api/projects/${C().PROJECT}/schedules`);
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category });
+      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'schedule_audit': {
-      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { template: args.template, notes: args.notes });
+      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { template: args.template, notes: args.notes });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'update_schedule': {
@@ -2376,8 +2398,8 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':
-      await call('POST', `/api/tickets/${TICKET}/fresh-session`, { summary: args.summary, ...(ROLE === 'thread' ? { carry_on: args.carry_on !== false } : {}) });
-      return ROLE === 'thread' && args.carry_on !== false
+      await call('POST', `/api/tickets/${C().TICKET}/fresh-session`, { summary: args.summary, ...(C().ROLE === 'thread' ? { carry_on: args.carry_on !== false } : {}) });
+      return C().ROLE === 'thread' && args.carry_on !== false
         ? 'Handoff saved: your session resets when this turn ends, and your next turn starts from it by itself. Reply in one line and end the turn.'
         : 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
     case 'stop_ticket': {
@@ -2429,7 +2451,7 @@ export const ALWAYS_LOAD = {
   taskmaster: ['create_ticket', 'read_ticket', 'message_ticket', 'list_tickets'],
 };
 const withAlwaysLoad = (tools: any[]) => {
-  const names = ALWAYS_LOAD[ROLE === 'thread' ? 'thread' : 'taskmaster'];
+  const names = ALWAYS_LOAD[C().ROLE === 'thread' ? 'thread' : 'taskmaster'];
   return tools.map((t) => (names.includes(t.name) ? { ...t, _meta: { ...t._meta, 'anthropic/alwaysLoad': true } } : t));
 };
 
@@ -2438,24 +2460,22 @@ function toolList() {
 }
 
 function toolListAll() {
-  const host = IN_CONTAINER ? [HOST_CHECK] : [];
-  const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
-  const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
-  const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, ...(SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  const host = C().IN_CONTAINER ? [HOST_CHECK] : [];
+  const deploy = [...(C().APP_INSTRUCTIONS || C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION()] : []), ...(C().HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : [])];
+  const memory = [...(C().MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
+  const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
+  if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
 }
 
-function reply(msg: object) {
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
-}
-
-async function handle(req: any) {
+/** One JSON-RPC request's answer, or null for a notification: a turn's own helper writes it to stdout, the shared tool server (src/mcp-pool.ts) sends it over HTTP. */
+export async function handle(req: any): Promise<object | null> {
   const { id: rid, method, params } = req;
-  if (rid === undefined) return; // notification
+  if (rid === undefined) return null; // notification
+  const reply = (msg: object) => ({ jsonrpc: '2.0', ...msg });
   try {
     if (method === 'initialize') {
-      reply({
+      return reply({
         id: rid,
         result: {
           protocolVersion: params?.protocolVersion ?? '2025-06-18',
@@ -2464,32 +2484,36 @@ async function handle(req: any) {
         },
       });
     } else if (method === 'tools/list') {
-      reply({ id: rid, result: { tools: toolList() } });
+      return reply({ id: rid, result: { tools: toolList() } });
     } else if (method === 'tools/call') {
       try {
         const text = await runTool(params?.name, params?.arguments ?? {});
-        reply({ id: rid, result: { content: [{ type: 'text', text }] } });
+        return reply({ id: rid, result: { content: [{ type: 'text', text }] } });
       } catch (err: any) {
-        reply({ id: rid, result: { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true } });
+        return reply({ id: rid, result: { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true } });
       }
     } else if (method === 'ping') {
-      reply({ id: rid, result: {} });
+      return reply({ id: rid, result: {} });
     } else {
-      reply({ id: rid, error: { code: -32601, message: `Method not found: ${method}` } });
+      return reply({ id: rid, error: { code: -32601, message: `Method not found: ${method}` } });
     }
   } catch (err: any) {
-    reply({ id: rid, error: { code: -32603, message: err.message } });
+    return reply({ id: rid, error: { code: -32603, message: err.message } });
   }
 }
 
-createInterface({ input: process.stdin }).on('line', (line) => {
-  if (!line.trim()) return;
-  let req;
-  try {
-    req = JSON.parse(line);
-  } catch {
-    reply({ id: null, error: { code: -32700, message: 'Parse error' } });
-    return;
-  }
-  handle(req);
-});
+// A turn's own helper (stdio, newline-delimited JSON-RPC); the shared tool server imports this file instead.
+if (import.meta.main) {
+  const write = (msg: object | null) => msg && process.stdout.write(JSON.stringify(msg) + '\n');
+  createInterface({ input: process.stdin }).on('line', (line) => {
+    if (!line.trim()) return;
+    let req;
+    try {
+      req = JSON.parse(line);
+    } catch {
+      write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      return;
+    }
+    handle(req).then(write);
+  });
+}

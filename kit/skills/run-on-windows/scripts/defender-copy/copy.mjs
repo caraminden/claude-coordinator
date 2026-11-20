@@ -1,7 +1,8 @@
 // Copies text inside a browser window at one address, the way a person does (select, then Ctrl+C), for check.ps1 (#1186).
-// Usage: node copy.mjs <port> <text>. The window was started with --remote-debugging-port=<port>; this finds its page,
+// Usage: node copy.mjs <port> <text, base64>. The window was started with --remote-debugging-port=<port>; this finds its page,
 // puts <text> in a textarea, selects it and sends a real Ctrl+C key press through the debugging protocol.
-const [port, text] = process.argv.slice(2);
+const [port, b64] = process.argv.slice(2);
+const text = Buffer.from(b64, 'base64').toString('utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let page;

@@ -1,4 +1,4 @@
-// A scheme's Claude Code memory notes (the Scheme → Memory page): a MEMORY.md index plus one file per fact, under a
+// A scheme's Claude Code memory notes (the Orders → Memory page): a MEMORY.md index plus one file per fact, under a
 // Claude login's config dir at projects/<slugged repo path>/memory/. Every later session loads them, so a person can
 // read, edit and delete them here. Not src/memory.ts, which is search by meaning over chats.
 import { createHash, randomBytes } from 'node:crypto';
@@ -34,6 +34,8 @@ export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): Me
 
 export interface MemoryNote {
   file: string; name: string; description: string; type: string; text: string; bytes: number; modified: number;
+  /** Whether MEMORY.md links it: only the index loads at a start, so a note it leaves out is never found. */
+  inIndex: boolean;
   /** Why it may be stale: `closed` minion numbers it names, and dates that have passed or are close. */
   flags: { closed: number[]; datesPast: string[]; datesSoon: string[] };
 }
@@ -84,7 +86,7 @@ export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, no
     let st; let text;
     try { if (!plain(path)) continue; st = lstatSync(path); text = readFileSync(path, 'utf8'); } catch { continue; }
     const fm = frontmatter(text);
-    notes.push({ file, name: fm.name || file.replace(/\.md$/, ''), description: fm.description, type: fm.type, text, bytes: st.size, modified: st.mtimeMs, flags: staleFlags(text, isClosed, now) });
+    notes.push({ file, name: fm.name || file.replace(/\.md$/, ''), description: fm.description, type: fm.type, text, bytes: st.size, modified: st.mtimeMs, inIndex: index.includes(`](${file})`), flags: staleFlags(text, isClosed, now) });
   }
   const at = (n: MemoryNote) => { const i = index.indexOf(`](${n.file})`); return i < 0 ? Infinity : i; };
   notes.sort((a, b) => at(a) - at(b) || b.modified - a.modified);
@@ -110,6 +112,24 @@ function writeAtomic(path: string, text: string) {
 export function saveNote(dir: string, file: string, text: string) {
   if (!plain(join(dir, file))) throw new Error('No such note');
   writeAtomic(join(dir, file), text);
+}
+
+/** Add a note's line to MEMORY.md (made if missing), as `- [name](file) — description`. False when the index already links it. */
+export function indexNote(dir: string, file: string): boolean {
+  const path = join(dir, file);
+  if (!plain(path)) throw new Error('No such note');
+  const indexPath = join(dir, 'MEMORY.md');
+  if (existsSync(indexPath) && !plain(indexPath)) throw new Error('MEMORY.md is not a plain file');
+  const index = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '';
+  if (index.includes(`](${file})`)) return false;
+  const fm = frontmatter(readFileSync(path, 'utf8'));
+  const name = (fm.name || file.replace(/\.md$/, '')).replace(/[[\]\n]/g, ' ');
+  const line = `- [${name}](${file})${fm.description ? ` — ${fm.description.replace(/\n/g, ' ')}` : ''}`;
+  const next = `${index}${index && !index.endsWith('\n') ? '\n' : ''}${line}\n`;
+  // Claude Code loads only MEMORY.md's first 200 lines / 25 KB; a line past that would look listed but never load.
+  if (next.split('\n').length - 1 > 200 || Buffer.byteLength(next) > 25 * 1024) throw Object.assign(new Error('MEMORY.md is full: tidy it before adding more'), { status: 409 });
+  writeAtomic(indexPath, next);
+  return true;
 }
 
 /** Delete a note and its MEMORY.md line(s): the file first, then the index rewritten without the lines that link it (a stray index line is a smaller harm than a note the index forgot). */

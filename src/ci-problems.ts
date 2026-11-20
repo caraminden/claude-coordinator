@@ -29,6 +29,12 @@ export interface Problem {
   shared?: string;
   /** The fix minion on it, once one names the run (#992). */
   fixMinion?: { number: number; closed: boolean };
+  /** A red with no fix minion yet (#1078): when it starts ringing, and whether it already does. */
+  noFix?: { ringsAt: number; late: boolean };
+  /** The re-run that tests the fix minion's fix (#1078, from #1074's mark): the commit, its run once GitHub lists it, and where it stands. */
+  rerun?: { sha: string; url?: string; state: 'running' | 'failed' | 'manual' };
+  /** The fix minion as the list shows it (#1078), read live by the route for the page; never kept. */
+  fixTicket?: Record<string, unknown>;
   /** Where a person goes for it (#992): the fix minion's chat, else the Taskmaster's, at the wake. Set by `snapshot`, never kept. */
   link?: ProblemLink;
 }
@@ -217,7 +223,12 @@ export interface Fix {
  */
 export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
   const x = redProblemOf(file, branch, mark, newest, fix, now, slug);
-  return x && fix ? { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null } } : x;
+  if (!x) return x;
+  if (!fix) { const ringsAt = (mark.told ?? now) + RED_FIX_MS; return { ...x, noFix: { ringsAt, late: now >= ringsAt } }; }
+  const re = mark.rerun;
+  const rerun = fix.closedAt == null && re?.ticket != null
+    ? { sha: short(re.sha), url: re.run && slug ? runUrl(slug, { id: re.run } as Run) : undefined, state: re.failed ? 'failed' as const : re.hosted || re.error ? 'manual' as const : 'running' as const } : undefined;
+  return { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null }, ...(rerun && { rerun }) };
 }
 export function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
   if (newest.conclusion !== 'failure') return null;

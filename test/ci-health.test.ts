@@ -132,6 +132,12 @@ test('a red on main is a quiet item while its fix is on the way, and rings when 
   assert.equal(late.quiet, false, 'an hour with no fix minion rings');
   assert.match(late.title, /: no fix minion started$/);
 
+  assert.deepEqual(waiting.noFix, { ringsAt: NOW + 30 * MIN, late: false }, 'no fix minion yet says when it rings (#1078)');
+  assert.equal(late.noFix?.late, true);
+  const rerunning = redProblem('desktop.yml', 'main', { ...mark, rerun: { ticket: 971, sha: 'a1b2c3d9999', tip: 'x', at: NOW, run: 77, dispatched: true } }, red, { number: 971, closedAt: null }, NOW, 'o/r')!;
+  assert.deepEqual(rerunning.rerun, { sha: 'a1b2c3d', url: 'https://github.com/o/r/actions/runs/77', state: 'running' });
+  assert.equal(rerunning.noFix, undefined);
+
   const started = redProblem('desktop.yml', 'main', mark, red, { number: 971, closedAt: null }, NOW + 2 * HOUR)!;
   assert.equal(started.quiet, true);
   assert.equal(started.title, 'CI: desktop.yml failed on main (run 44370680700, at windows › Test): fix minion #971 started');

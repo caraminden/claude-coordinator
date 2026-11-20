@@ -294,9 +294,9 @@ async function loadProperties() {
   return view?.projectId === projectId ? reg : null;
 }
 
-/** The overview's Settings link and the Settings page's Properties tab: how many property proposals wait for a person's review. */
+/** The panel's Orders tab and the Orders menu's Properties row: how many property proposals wait for a person's review. */
 export async function renderSettingsCount() {
-  const counts = () => [...document.querySelectorAll('#settings-count, .settings-tabs .props-count, .settings-home .props-count')];
+  const counts = () => [...document.querySelectorAll('.panel-tabs .props-count, .orders-pane .props-count, .settings-home .props-count')];
   if (!counts().length) return;
   const reg = await loadProperties().catch(() => null);
   if (!reg) return;

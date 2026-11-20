@@ -178,8 +178,12 @@ export function renderSidebar() {
   let closedGroup = '';
   if (closed.length) {
     // Closed threads stay out of the way but can still be opened and reopened.
-    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Dismissed'), closed.map((t) => threadRow(t)));
-    closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
+    // Their rows are built only while the list is open (#1077): a big scheme has a thousand, and every minion update redraws.
+    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Dismissed'), view.showClosed ? closed.map((t) => threadRow(t)) : []);
+    closedGroup.addEventListener('toggle', () => {
+      view.showClosed = closedGroup.open;
+      if (closedGroup.open && !closedGroup.querySelector('.thread-row')) closedGroup.append(...closed.map((t) => threadRow(t)));
+    });
   }
   el.replaceChildren(
     pinnedGroup, ...sections, closedGroup,
@@ -191,9 +195,21 @@ export function renderSidebar() {
 
 /** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
 export function revealActiveRow() {
-  const row = document.querySelector('#threads .thread-row.active');
-  const box = row?.closest('.sidebar');
+  const box = document.getElementById('threads')?.closest('.sidebar');
   if (!box?.open) return;
+  let row = box.querySelector('#threads .thread-row.active');
+  // A dismissed minion's row isn't built while its list is shut (renderSidebar): open the list for the one you're on.
+  if (!row && !view.showClosed && view.tickets?.get(view.id)?.status === 'closed') {
+    view.showClosed = true;
+    renderSidebar();
+    row = box.querySelector('#threads .thread-row.active');
+    // The property filter hides it: the list stays shut.
+    if (!row) {
+      view.showClosed = false;
+      renderSidebar();
+    }
+  }
+  if (!row) return;
   const dismissed = row.closest('details.g-closed');
   if (dismissed && !dismissed.open) dismissed.open = true;
   const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();

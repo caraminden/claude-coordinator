@@ -127,7 +127,7 @@ export function tellStale(app: App, project: Project, list: DecisionList) {
     const where = d.reversed!.stale.map((p) => `${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}`).join(', ');
     return `- ${d.rule}${d.quote ? `: "${d.quote}"` : ''} (${d.who}, ${d.date}) was reversed by ${now}. Still written in: ${where}.`;
   });
-  app.runner.leaveMail(tm.id, 'Decisions', `(nothing to do unless you choose to) A newer decision reversed ${fresh.length === 1 ? 'one' : fresh.length} that ${fresh.length === 1 ? 'is' : 'are'} still written elsewhere in this scheme. Offer the members a card to clean up the old copies, or start a chore minion for it; the Decisions page (Scheme → Decisions) has a Clean up button too.\n${lines.join('\n')}`);
+  app.runner.leaveMail(tm.id, 'Decisions', `(nothing to do unless you choose to) A newer decision reversed ${fresh.length === 1 ? 'one' : fresh.length} that ${fresh.length === 1 ? 'is' : 'are'} still written elsewhere in this scheme. Offer the members a card to clean up the old copies, or start a chore minion for it; the Decisions page (Orders → Decisions) has a Clean up button too.\n${lines.join('\n')}`);
 }
 
 /** After an instructions save: re-read in the background, so a reversal it made reaches the Taskmaster. */

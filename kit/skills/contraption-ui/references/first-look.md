@@ -207,3 +207,35 @@ h1, h2, h3, .cui-topbar-title { font-family: "Fraunces", var(--citadel-font); }
 Load a face from your own app (never a CDN), with a fallback to `--citadel-font`. Body text, sizes
 and spacing stay Citadel's. The token names are pinned by the contract; their values were always
 yours to set.
+
+## 11. Summary first
+
+Each part is a card (rule 2) whose head is a `<summary>`: the closed head answers the part's
+question with a chip and a number, and the body is the evidence.
+
+```html
+<details class="card part">
+  <summary class="card-head"><span class="icon-tile" aria-hidden="true">▤</span><h2>Orders</h2>
+    <span class="cui-chip" data-tone="warn">3 late</span> <span class="muted">41 this week</span></summary>
+  <div class="card-body"><!-- the table, the list, the settings --></div>
+</details>
+```
+
+```css
+.part > summary { cursor: pointer; list-style: none; min-height: var(--citadel-control-h); }
+.part > summary::-webkit-details-marker { display: none; }
+.part:not([open]) > summary { border-bottom: 0; border-radius: var(--citadel-radius); }
+.part > summary:focus-visible { outline: var(--citadel-focus-ring); outline-offset: var(--citadel-focus-offset); }
+```
+
+Every part starts closed. A view that redraws keeps what a person opened.
+
+## 12. Long lists start short
+
+```html
+<ul class="rows"><!-- the first five, worst or newest first --></ul>
+<button class="cui-btn" type="button" aria-expanded="false">Show all 23 orders</button>
+```
+
+Its click redraws the list whole, sets `aria-expanded="true"`, renames it "Show the first 5 only"
+and puts focus back on it. Six or fewer items show whole: never hide just one.

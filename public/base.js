@@ -162,17 +162,20 @@ export function ago(ms) {
  */
 export function dismissedWhen(ms) {
   if (!ms) return null;
-  const o = { timeZone: 'America/Los_Angeles' };
-  const day = (t) => new Date(t).toLocaleDateString('en-CA', o);
+  const day = (t) => DAY.format(t);
   const year = (t) => day(t).slice(0, 4);
-  const d = new Date(ms);
   return {
-    short: day(ms) === day(Date.now())
-      ? d.toLocaleTimeString('en-US', { ...o, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-      : d.toLocaleDateString('en-US', { ...o, month: 'short', day: 'numeric', ...(year(ms) !== year(Date.now()) ? { year: 'numeric' } : {}) }),
-    full: d.toLocaleString('en-US', { ...o, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+    short: day(ms) === day(Date.now()) ? TIME.format(ms) : (year(ms) !== year(Date.now()) ? DATE_YEAR : DATE).format(ms),
+    full: FULL.format(ms),
   };
 }
+// Made once: a formatter built per call (toLocaleString) cost a quarter second per redraw of a thousand dismissed rows (#1077).
+const PT = { timeZone: 'America/Los_Angeles' };
+const DAY = new Intl.DateTimeFormat('en-CA', PT);
+const TIME = new Intl.DateTimeFormat('en-US', { ...PT, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+const DATE = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric' });
+const DATE_YEAR = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric', year: 'numeric' });
+const FULL = new Intl.DateTimeFormat('en-US', { ...PT, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 
 // ---------- files threads show ----------
 

@@ -7,6 +7,7 @@ import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
+import { hueRow, meter, pips, statTiles, toneChip } from './look.js';
 import { elsewhereRows, pickers } from './minion-rules.js';
 import { HOME_SCHEME } from './schemes.js';
 import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping.js';
@@ -196,18 +197,17 @@ const count = (n) => n.toLocaleString('en');
  * Call update() whenever the text may have changed.
  */
 function instructionAids(textarea, cap) {
-  const bar = h('span', { class: 'aids-fill' });
-  const meterText = h('span', { class: 'muted small' });
-  const meter = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' }, h('span', { class: 'aids-bar' }, bar), meterText);
+  const gauge = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' });
   const list = h('ol', { class: 'aids-outline' });
-  const box = h('div', { class: 'aids-box' }, meter, h('details', {}, h('summary', {}, 'Outline of ## sections'), list));
+  const box = h('div', { class: 'aids-box' }, gauge, h('details', {}, h('summary', {}, 'Outline of ## sections'), list));
   const update = () => {
     const text = textarea.value;
     const n = text.trim().length;
-    bar.style.width = `${Math.min(100, (n / cap) * 100)}%`;
-    bar.className = `aids-fill${n > cap ? ' over' : n > cap * 0.8 ? ' warn' : ''}`;
-    meter.setAttribute('aria-valuenow', n);
-    meterText.textContent = `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%). Every turn reads all of it.`;
+    // Size is cost: ok under 80% of the cap, warn near it, danger over it (the meter and the chip share the hue).
+    const [tone, hue, word] = n > cap ? ['danger', 'danger', 'Over the limit'] : n > cap * 0.8 ? ['warn', 'waiting', 'Near the limit'] : ['ok', 'done', 'Fits'];
+    gauge.setAttribute('aria-valuenow', n);
+    gauge.dataset.hue = hue;
+    gauge.replaceChildren(toneChip(tone, word), meter(n / cap, `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%)`), h('span', { class: 'muted small' }, 'Every turn reads all of it.'));
     const marks = [...text.matchAll(/^##[ \t]+(.+)$/gm)];
     list.replaceChildren(...(marks.length ? marks.map((m, i) => {
       const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
@@ -230,8 +230,8 @@ function repoSetupCard() {
   const long = (t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
   const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
   api(`api/projects/${p.id}/repo-setup`).then((r) => {
-    const parts = [];
-    if (!r.facts) parts.push(h('p', {}, 'No Project facts: the kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
+    const parts = [statTiles([r.facts ? r.facts.length : 0, 'project facts', r.facts ? 'done' : 'waiting'], [r.rules.length, 'rules', 'running'], [r.skills.length, 'own skills', 'teal'])];
+    if (!r.facts) parts.push(h('p', {}, toneChip('warn', 'No Project facts'), ' The kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
     else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
     parts.push(h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
       r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}`
@@ -321,8 +321,8 @@ export function renderGithubStrip() {
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
   // Settings sits beside the scheme it belongs to (Josh, 2026-11-13); made once so a rename keeps its count.
-  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Instructions, approvals, properties and machines for this scheme' },
-    'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true }));
+  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Members, your account, machines and usage; the scheme\'s instructions and rules are in Orders, beside Minions' },
+    'Settings');
   const show = () => {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
@@ -373,14 +373,24 @@ export function projectTitle(project) {
 
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
-// The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue, every page with an
+// The side menu (#995, Cara picked "Side menu, rows that open"): groups, each its own hue, every page with an
 // icon and a one-line summary for the phone's list (#1018). On a phone the menu hides: Settings opens on that list
 // (settingsHome), and each page's bar has a back link to it and the page's own name (Cara picked "A list of pages,
 // each opens full screen").
+// Orders (#1071, Josh 2026-11-19: "Lets go with Orders"; picked "Minions | Orders tabs on the panel"): what minions read
+// and how work runs moved out of Settings to a tab beside Minions (ordersMenu). Settings keeps you and the admin pages.
+// 'schedules' has no page: its row opens the panel's schedules list.
+export const ORDERS_GROUPS = [
+  ['What minions read', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
+    ['skills', 'Skills', 'spark', 'What minions know how to do, and when'], ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'],
+    ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"]]],
+  ['How work runs', 'teal', [['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['schedules', 'Schedules', 'rows', 'Minions that start on a timer']]],
+];
+const ORDERS_PAGES = new Set(ORDERS_GROUPS.flatMap(([, , items]) => items.map(([kind]) => kind)));
+/** True for a page that lives in Orders, not Settings. */
+export const isOrdersPage = (kind) => ORDERS_PAGES.has(kind);
 const SETTINGS_GROUPS = [
-  ['Scheme', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'], ['skills', 'Skills', 'spark', 'What minions know how to do, and when'],
-    ['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['members', 'Members', 'users', 'Who works in this scheme'],
-    ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'], ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"]]],
+  ['Scheme', 'running', [['members', 'Members', 'users', 'Who works in this scheme'], ['orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
     ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend']]],
   ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
@@ -388,7 +398,18 @@ const SETTINGS_GROUPS = [
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
 const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
 
+/** Opens the panel's schedules list (Schedules has no page of its own). */
+function openSchedules(e) {
+  e?.preventDefault();
+  const btn = document.querySelector('.sidebar .schedules-btn');
+  if (btn && btn.getAttribute('aria-pressed') !== 'true') btn.click();
+  const side = btn?.closest('.sidebar');
+  if (side) side.open = true;
+}
+
 export function settingsTabs() {
+  // An Orders page keeps the (hidden) menu so it shares the settings pages' layout; its menu is the panel's Orders tab.
+  if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
   const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
     settingsGroups().map(([label, hue, items]) =>
       h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label),
@@ -398,23 +419,38 @@ export function settingsTabs() {
   return nav;
 }
 
-/** A settings page's title: "Settings" beside the desktop menu; on a phone a back link to the list and the page's name. */
-export function settingsTitle() {
-  const page = SETTINGS_GROUPS.flatMap(([, , items]) => items).find(([kind]) => kind === view.main);
-  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/settings`, title: 'All settings' }, icon('back'), 'Settings'),
-    h('h2', {}, h('span', { class: 'settings-title-wide' }, 'Settings'), h('span', { class: 'settings-title-narrow' }, page?.[1] ?? 'Settings'))];
+/** The Minions panel's Orders tab (#1071): its pages in two groups; each opens in the main pane. */
+export function ordersMenu() {
+  return h('nav', { class: 'orders-pane', 'aria-label': 'Orders' }, ORDERS_GROUPS.map(([label, hue, items]) =>
+    h('div', { class: 'orders-group', 'data-hue': hue }, h('span', { class: 'orders-group-label' }, label),
+      items.map(([kind, text, ic, sum]) =>
+        h('a', { class: view.main === kind ? 'active' : '', href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`, title: sum,
+          'aria-current': view.main === kind ? 'page' : null, onclick: kind === 'schedules' ? openSchedules : null },
+          icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
 }
 
-/** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. */
-export function settingsHome() {
+/** A settings or Orders page's title: its area beside the desktop menu; on a phone a back link to the list and the page's name. */
+export function settingsTitle() {
+  const orders = isOrdersPage(view.main);
+  const page = (orders ? ORDERS_GROUPS : SETTINGS_GROUPS).flatMap(([, , items]) => items).find(([kind]) => kind === view.main);
+  const area = orders ? 'Orders' : 'Settings';
+  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
+    // An Orders page has no menu beside it, so its own name heads it on a desktop too.
+    h('h2', {}, h('span', { class: 'settings-title-wide' }, orders ? page?.[1] ?? area : area), h('span', { class: 'settings-title-narrow' }, page?.[1] ?? area))];
+}
+
+/** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. Orders' list is the same shape. */
+export function settingsHome(orders = false) {
+  const title = orders ? 'Orders' : 'Settings';
   return h('section', { class: 'artifacts-main settings-home' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+      h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
-    h('nav', { 'aria-label': 'Settings' }, settingsGroups().flatMap(([label, hue, items]) => [
+    h('nav', { 'aria-label': title }, (orders ? ORDERS_GROUPS : settingsGroups()).flatMap(([label, hue, items]) => [
       h('h3', { class: 'settings-section', 'data-hue': hue }, label),
       h('div', { class: 'settings-rows' }, items.map(([kind, text, ic, sum]) =>
-        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
+        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`,
+          onclick: kind === 'schedules' ? (e) => { openSchedules(e); document.querySelector('.citadel-drawer-handle.right')?.click(); } : null },
           h('span', { class: 'settings-tile' }, icon(ic)),
           h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
           h('span', { class: 'settings-row-chev' }, icon('forward')))))])));
@@ -500,15 +536,19 @@ function saveProject(p, mine, body, label, shown) {
  * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
  * line, which its page keeps up to date.
  */
-export function settingsRow({ icon: ic, hue, title, summary = '', open = false }, ...body) {
+export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key }, ...body) {
   const sum = h('span', { class: 'settings-row-sum' }, summary);
-  const row = h('details', { class: 'settings-row', 'data-hue': hue, open },
+  // `key`: a page that redraws (the CI page, every few seconds) keeps a row open that a person opened (#1068).
+  const row = h('details', { class: 'settings-row', 'data-hue': hue, open: key && openRows.has(key) ? openRows.get(key) : open,
+    ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
     h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)),
       h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum),
       h('span', { class: 'settings-row-chev' }, icon('forward'))),
     h('div', { class: 'settings-row-body' }, ...body));
   return [row, sum];
 }
+
+const openRows = new Map(); // a keyed row's open state, by key
 
 /** A group of rows under an uppercase heading. */
 export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];
@@ -559,7 +599,8 @@ function rulesReviewBanner() {
   const p = view.project;
   const box = h('section', { class: 'rules-review', 'data-rules-review': '', 'aria-label': 'Check the rules after setup' });
   const ok = h('button', { type: 'button' }, 'Looks right');
-  const list = h('ul', {});
+  const list = h('div', { class: 'hue-rows' });
+  const summary = h('div', { class: 'row' });
   const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
   const draw = () => {
     box.hidden = !view.project.rules_review;
@@ -573,10 +614,12 @@ function rulesReviewBanner() {
       ['Default effort', q.default_effort || "Claude Code's default", q.default_effort === 'high'],
       ['Plugin folders', `${lines(q.plugin_dirs)} folder${lines(q.plugin_dirs) === 1 ? '' : 's'}`, lines(q.plugin_dirs) === 0],
     ];
-    list.replaceChildren(...rows.map(([what, value, dflt]) => h('li', {}, h('span', { class: 'rr-what' }, what), h('span', { class: 'rr-value' }, value), h('span', { class: `rr-tag${dflt ? '' : ' set'}` }, dflt ? 'starting value' : 'changed'))));
+    const changed = rows.filter((r) => !r[2]).length;
+    summary.replaceChildren(toneChip(changed ? 'ok' : 'warn', changed ? `${changed} of ${rows.length} changed` : 'All starting values'), pips(changed, rows.length));
+    list.replaceChildren(...rows.map(([what, value, dflt]) => hueRow({ hue: dflt ? 'muted' : 'done', meta: toneChip(dflt ? 'neutral' : 'ok', dflt ? 'starting value' : 'changed') }, h('b', {}, what), ' ', value)));
   };
   box.append(
-    h('h3', {}, 'Setup is done: check these rules'),
+    h('h3', {}, 'Setup is done: check these rules'), summary,
     h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. "Starting value" is what a new scheme begins with. "Looks right" clears this for every member.'),
     list, h('div', { class: 'row' }, ok));
   box.addEventListener('settings-refresh', draw);

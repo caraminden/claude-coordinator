@@ -1,12 +1,34 @@
 /* The minions panel: the list's sections and rows, search, filters and saved views, the Needs-you strip, schedules. */
 .sidebar.show-schedules > :not(summary, .schedules-pane) { display: none; }
+/* Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): two tabs in the panel's header; Orders swaps the
+   list for its pages, each opening in the main pane. The schedules list, when open, wins over both. */
+.sidebar > summary .panel-tabs { display: inline-flex; align-items: center; flex: 1; min-width: 0; gap: 0.15rem; }
+.sidebar > summary .panel-tab { display: inline-flex; align-items: center; gap: 0.35rem; min-height: calc(var(--control-h) - 0.5rem); padding: 0 0.6rem; border: 1px solid transparent;
+  border-radius: var(--radius-pill); background: none; color: var(--muted); font: inherit; font-weight: 650; cursor: pointer; transition: background var(--motion), color var(--motion); }
+.sidebar > summary .panel-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sidebar > summary .panel-tab[aria-selected='true'] { color: var(--ink); background: var(--panel); border-color: var(--line); }
+.sidebar > summary .panel-tab .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.8em; line-height: 1.4; }
+.sidebar > summary .panel-tab .count[hidden] { display: none; }
+/* Collapsed to its slim tab, the header is one label again: Orders hides and Minions lets the click open the panel. */
+.sidebar:not([open]) > summary .orders-tab { display: none; }
+.sidebar:not([open]) > summary .panel-tab { pointer-events: none; padding: 0; margin: 0; border: 0; background: none; color: inherit; }
+.sidebar.show-orders:not(.show-schedules) > :not(summary, .orders-pane) { display: none; }
+.sidebar:not(.show-orders) > .orders-pane, .sidebar.show-schedules > .orders-pane { display: none; }
+.orders-pane { display: flex; flex-direction: column; gap: 0.1rem; }
+.orders-group { display: flex; flex-direction: column; gap: 0.1rem; }
+.orders-group-label { padding: 0.9rem 0.55rem 0.3rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--h); }
+.orders-group:first-child .orders-group-label { padding-top: 0.2rem; }
+.orders-pane a { display: flex; align-items: center; gap: 0.55rem; min-height: var(--control-h); box-sizing: border-box; padding: 0 0.55rem; border-radius: var(--radius-sm);
+  color: var(--ink); text-decoration: none; transition: background var(--motion); }
+.orders-pane a .icon { flex: none; width: 1rem; height: 1rem; color: var(--h); }
+.orders-pane a .label { flex: 1; min-width: 0; }
+.orders-pane a:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--h) 8%, transparent); }
+.orders-pane a.active { background: color-mix(in srgb, var(--h) 15%, var(--panel)); box-shadow: inset 3px 0 0 var(--h); font-weight: 600; }
+.orders-pane a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
+.orders-pane a .count[hidden] { display: none; }
 :is(.shelf, .sidebar) > summary .schedules-btn[aria-pressed='true'] { color: var(--accent); }
 .schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
-.schedule { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; display: grid; gap: 0.2rem; }
-.schedule.paused > :not(.schedule-actions, :first-child) { opacity: 0.65; }
-.schedule .row { gap: 0.5rem; }
-.schedule .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.schedule .error { margin: 0.2rem 0 0; }
+.schedule-row .error { margin: 0.2rem 0 0; }
 .schedule-actions { gap: 0.4rem; margin-top: 0.3rem; }
 /* The activity gate and Run once (#745): one wrapping line of text with its controls inline, not the form layout. */
 .schedule-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.75rem; margin-top: 0.3rem; color: var(--muted); }
@@ -27,7 +49,7 @@
 
 /* Threads list, after Delve's Custom view: sections by kind of work, one compact row per thread
    (number + short ask, state, then a terse note), stripes restarting in each section. */
-.thread-group { margin-top: 0.8rem; }
+.thread-group { margin-top: 0.8rem; --gc: var(--muted); }
 .thread-group > h3, .thread-group > summary { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; padding-left: 0.4rem; border-left: 3px solid currentColor; }
 /* A build branch's counts (src/builds.ts): on their own line under the build's name, in sentence case. */
 .thread-group > h3 .build-counts { display: block; font-weight: normal; text-transform: none; letter-spacing: normal; }
@@ -35,26 +57,42 @@
 .thread-group > summary::-webkit-details-marker { display: none; }
 .thread-group > summary::after { content: ' ▸'; }
 .thread-group[open] > summary::after { content: ' ▾'; }
-.g-build > h3 { color: hsl(205 65% 45%); }
+.g-build { --gc: hsl(205 65% 45%); }
+.g-build > h3 { color: var(--gc); }
 .g-build > h3 .muted { text-transform: none; font-weight: normal; }
-.g-feature > h3 { color: hsl(265 55% 55%); }
-.g-bug > h3 { color: hsl(0 60% 52%); }
-.g-design > h3 { color: hsl(330 55% 55%); }
-.g-art > h3 { color: hsl(15 65% 50%); }
-.g-research > h3 { color: hsl(220 30% 45%); }
-.g-chore > h3 { color: hsl(180 55% 36%); }
-.g-other > h3 { color: hsl(30 35% 48%); }
-.g-ideation > h3 { color: hsl(45 75% 42%); }
-.g-promoted > h3 { color: hsl(150 50% 34%); }
-.g-parked > h3 { color: var(--muted); }
+.g-feature { --gc: hsl(265 55% 55%); }
+.g-feature > h3 { color: var(--gc); }
+.g-bug { --gc: hsl(0 60% 52%); }
+.g-bug > h3 { color: var(--gc); }
+.g-design { --gc: hsl(330 55% 55%); }
+.g-design > h3 { color: var(--gc); }
+.g-art { --gc: hsl(15 65% 50%); }
+.g-art > h3 { color: var(--gc); }
+.g-research { --gc: hsl(220 30% 45%); }
+.g-research > h3 { color: var(--gc); }
+.g-chore { --gc: hsl(180 55% 36%); }
+.g-chore > h3 { color: var(--gc); }
+.g-other { --gc: hsl(30 35% 48%); }
+.g-other > h3 { color: var(--gc); }
+.g-ideation { --gc: hsl(45 75% 42%); }
+.g-ideation > h3 { color: var(--gc); }
+.g-promoted { --gc: hsl(150 50% 34%); }
+.g-promoted > h3 { color: var(--gc); }
+.g-parked { --gc: var(--muted); }
+.g-parked > h3 { color: var(--gc); }
 /* The Deploying group's cyan: no other state, role or chip in this list uses it (#1048). Local here, not in style.css, which every app gets. */
 .sidebar { --deploy: #0e7490; }
 @media (prefers-color-scheme: dark) { .sidebar { --deploy: #22d3ee; } }
-.g-waiting > h3 { color: var(--held); }
-.g-deploying > h3 { color: var(--deploy); }
-.g-pinned > h3 { color: var(--accent); }
+.g-waiting { --gc: var(--held); }
+.g-waiting > h3 { color: var(--gc); }
+.g-deploying { --gc: var(--deploy); }
+.g-deploying > h3 { color: var(--gc); }
+.g-pinned { --gc: var(--accent); }
+.g-pinned > h3 { color: var(--gc); }
 .thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto auto auto; column-gap: 0; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
-.thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
+/* Every group's rows (Josh, 2026-11-19, picked "Hairlines + faint stripe" on #1075's mock, and "the fainter colors from A"): a hairline under each row and a faint stripe on every second one, both in the group's own colour (--gc). */
+.thread-group .thread-row { border-radius: 0; border-bottom-color: color-mix(in srgb, var(--gc) 30%, transparent); }
+.thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--gc) 8%, transparent); }
 .thread-row:hover { border-color: var(--line); }
 .thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 /* The Taskmaster's row sits on a violet ground (Josh, 2026-11-13; kept when its chat went plain, Cara, 2026-11-14:
@@ -132,11 +170,8 @@
 .thread-row.s-closed .name { color: var(--muted); }
 /* Deploying rows are in flight, not finished (Josh, 2026-11-19: "deploying minions shouldnt be greyed out, in fact that should
    probably have a colored background"): full brightness whatever their state, on a soft cyan tint (Josh, 2026-11-19: purple is the Taskmaster's, "swap that to something that isnt already used"). */
-.g-deploying .thread-row, .g-deploying .thread-row:nth-of-type(even) { opacity: 1; background: color-mix(in srgb, var(--deploy) 12%, var(--panel)); }
-/* The even-row zebra stripe (0,3,0) outranked the tint (0,2,0), so every second Deploying row went grey: the second selector matches it, and comes later. */
+.g-deploying .thread-row { opacity: 1; }
 .g-deploying .thread-row.s-closed .name { color: var(--ink); }
-.g-deploying .thread-row:hover { background: color-mix(in srgb, var(--deploy) 18%, var(--panel)); }
-.g-deploying .thread-row.active, .g-deploying .thread-group .thread-row.active { background: color-mix(in srgb, var(--deploy) 24%, var(--panel)); }
 /* The minion's cost so far shares the note's line, at its right end. */
 .thread-row .cost { grid-row: 2; grid-column: 2 / -1; padding-left: 0.4rem; text-align: right; font-size: 0.75em; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .thread-row:has(> .cost) .note { grid-column: 1 / 2; }
@@ -229,9 +264,15 @@
 .schedule-toggle-body { width: 100%; }
 .schedule-brief { margin: 0; max-height: 14rem; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.5rem; }
 .schedule-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
-.schedule-audits { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; display: grid; gap: 0.25rem; }
-.schedule-audits ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; }
-.schedule-audits button { padding: 0.15rem 0.5rem; margin-left: 0.3rem; }
-.schedule .tnum { font-variant-numeric: tabular-nums; }
-.schedules-pane, .schedule-list > li, .schedule-audits { min-width: 0; box-sizing: border-box; }
-.schedule-runs li, .schedule-audits li { overflow-wrap: anywhere; }
+.schedules-pane, .schedule-audits { min-width: 0; box-sizing: border-box; }
+.schedule-runs li { overflow-wrap: anywhere; }
+/* Schedules in Citadel's look (#1068): one row that opens per schedule. */
+.schedules-pane .settings-row-body { padding-left: 0.75rem; }
+.schedules-pane .schedule-list .settings-section { margin-top: 0.9rem; }
+.schedule-row.paused > summary .settings-tile { opacity: 0.7; }
+.schedule-facts .hue-row-lead { min-width: 4rem; font-size: 0.85em; font-weight: 600; color: var(--muted); }
+.schedule-facts .hue-row-text { font-size: 0.92em; }
+.schedule-row .schedule-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.schedule-row .tnum { font-variant-numeric: tabular-nums; }
+.schedule-audits .hue-row { flex-wrap: wrap; }
+.schedule-row .stat-tiles { grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr)); }

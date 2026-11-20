@@ -494,6 +494,23 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'busy-scheme': {
+    about: 'a scheme as big as Citadel\'s own (#1077): a long Taskmaster chat, 20 open minions with 5 running, and 1,060 dismissed ones, for tools/typing-lag.ts',
+    seed(c) {
+      const tm = taskmaster(c);
+      const w = chat(c, tm, 400);
+      for (let i = 1; i <= 100; i++) {
+        w.asked(`Round ${i}: where do the minions stand, and what should start next?`);
+        w.init();
+        w.said([`## Round ${i}`, '', `- #${i} is **ready**: tested, risk low.`, `- #${i + 1} is waiting on a pick.`, '', 'Next: start a minion for the rail settings once #12 is live.'].join('\n'));
+        w.done(`Round ${i} summarised.`);
+      }
+      const states = [{ state: 'ready', note: 'tested, risk low' }, { state: 'parked', note: 'waiting on another minion' }, { state: 'outside', note: 'CI running' }, {}];
+      for (let i = 1; i <= 20; i++) minion(c, `Busy minion ${i}`, i <= 5 ? { status: 'running', last_activity: 'Running commands' } : states[i % 4], i % 3 ? 'feature' : 'bug');
+      for (let i = 1; i <= 1060; i++) minion(c, `Dismissed minion ${i}: a change that shipped a while ago`, { status: 'closed', ...(i % 10 ? {} : { state: 'ready', note: `shipped, note ${i}` }) }, i % 3 ? 'feature' : 'bug');
+      return `#/p/${c.project.id}`;
+    },
+  },
   'taskmaster-split': {
     about: 'a scheme split into per-person Taskmasters (#919, #920): yours, Josh\'s and the Overlord, each with a chat, an Overlord alert and a card for everyone; to see his side, sign Josh in with an invite link: the copy\'s password signs in admins only',
     seed(c) {
@@ -740,11 +757,11 @@ mock.boards('#takes', { boards: [
       const idea = minion(c, 'Ideas for onboarding', {}, 'ideation');
       turn(idea, [skill('docs-and-mocks'), skill('subagents'), grunt('Explore'), grunt('Explore'), end], false);
       turn(taskmaster(c), [skill('subagents'), grunt('Explore'), end], false);
-      return `#/p/${c.project.id}/skills (Settings → Skills in "${c.project.name}")`;
+      return `#/p/${c.project.id}/skills (Orders → Skills in "${c.project.name}")`;
     },
   },
   memory: {
-    about: "Settings → Memory (#1058): the Seeded scheme with a repo folder and six Claude Code memory notes in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index",
+    about: "Orders → Memory (#1058, #1071): the Seeded scheme with a repo folder and six Claude Code memory notes of four kinds in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index that leaves two out",
     seed(c) {
       const repo = join(c.dataDir, 'seeded-repo');
       mkdirSync(repo, { recursive: true });
@@ -754,21 +771,22 @@ mock.boards('#takes', { boards: [
       const dir = join(c.dataDir, 'claude', 'projects', projectSlug(repo), 'memory');
       mkdirSync(dir, { recursive: true });
       const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
-      const notes: [string, string, string, string][] = [
-        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.'],
-        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".'],
-        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`],
-        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`],
-        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`],
-        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.'],
+      // [file, name, description, body, kind, listed in MEMORY.md]
+      const notes: [string, string, string, string, string, boolean][] = [
+        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.', 'feedback', true],
+        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".', 'feedback', false],
+        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`, 'project', true],
+        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`, 'project', true],
+        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`, 'user', true],
+        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.', 'reference', false],
       ];
-      for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
-      writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
-      return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
+      for (const [file, name, description, body, kind] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${kind}\n---\n\n${body}\n`);
+      writeFileSync(join(dir, 'MEMORY.md'), notes.filter((n) => n[5]).map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
+      return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}")`;
     },
   },
   decisions: {
-    about: "Settings → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    about: "Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
     seed(c) {
       SCENARIOS.memory.seed(c);
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
@@ -793,7 +811,7 @@ mock.boards('#takes', { boards: [
       const ship = land.replace(/^Land, not merge \([^\n]*/, 'Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020\'s card, picked `Ship` over keeping "land"; for `fold` she picked "Retire it": "fold was just for major builds"). A change going onto main is "shipping".');
       c.store.setAppInstructions(land, c.who);
       c.store.setAppInstructions(ship, 'Taskmaster');
-      return `#/p/${c.project.id}/decisions (Settings → Decisions in "${c.project.name}")`;
+      return `#/p/${c.project.id}/decisions (Orders → Decisions in "${c.project.name}")`;
     },
   },
   ci: {
@@ -859,14 +877,18 @@ mock.boards('#takes', { boards: [
         runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
       }) })));
       // #992: the red has a fix minion; the stuck one links to the Taskmaster's wake entry.
-      const fix = minion(c, 'Fix the red drift run 9090', {}, 'bug');
+      // #1078: three reds: a fix minion at work (with its re-run), one closed with the red still open, and none yet.
+      const fix = minion(c, 'Fix the red drift run 9090', { status: 'running', last_activity: 'Finding the cause… · 2 of 4 done', note: 'the drift check reads a stale fixture' }, 'bug');
+      const gone = minion(c, 'Main red: lint.yml run 9091', { status: 'closed', note: 'fixed the lint rule' }, 'bug');
       const heard = c.store.addEvent(taskmaster(c).id, 'user_message', { author: 'Citadel', text: 'Seeded: CI: 1 job on self-hosted, seeded-ci has waited for a runner. Start a fix minion now.' });
       c.store.setSetting('ci-health:wake-at', { [`${c.project.id}:stuck:self-hosted,seeded-ci`]: { project: c.project.id, entry: heard.id } });
       c.store.setSetting(`ci-health:${c.project.id}`, {
         offline: {}, sent: {},
         problems: [
           { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service' },
-          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false } },
+          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false }, rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' } },
+          { key: 'red:lint.yml', title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed', why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold', fix: `reopen #${gone.number} or start another fix minion naming run 9095`, fixMinion: { number: gone.number!, closed: true } },
+          { key: 'red:nightly.yml', title: 'CI, Seeded: nightly.yml is red on main (run 9096).', why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago', fix: 'the Taskmaster starts a fix minion naming run 9096', quiet: true, noFix: { ringsAt: now + 48 * 60_000, late: false } },
         ],
       });
       return `#/p/${c.project.id}/ci`;

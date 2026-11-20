@@ -1,4 +1,4 @@
-// Scheme → Decisions (#1064): every dated, quoted decision, parsed live from where it is written (src/decisions.ts).
+// Orders → Decisions (#1064): every dated, quoted decision, parsed live from where it is written (src/decisions.ts).
 // Read-only: each row links to its source, where editing stays. A reversed decision links to the one that replaced it,
 // and lists the copies still saying the old one, with a button that starts a minion to clean them up.
 import { api, h, icon, view } from './base.js';
@@ -25,7 +25,7 @@ const sourceName = (d) => [...new Set(d.places.map((p) => (p.kind === 'adr' ? p.
 export function cleanupBrief(d, by) {
   const now = by ? `${by.rule}${by.quote ? `: "${by.quote}"` : ''} (${by.who}, ${by.date})` : d.reversed.byText;
   const where = d.reversed.stale.map((p) => `- ${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}${p.href ? ` (${p.href})` : ''}`).join('\n');
-  return `A newer decision reversed an older one, but the older one is still written in this scheme. Bring these copies in line with the newer decision, quoting it with its date, or remove the old text where it no longer applies. Change only what the reversal touches.\n\nOld: ${d.rule}${d.quote ? `: "${d.quote}"` : ''} (${d.who}, ${d.date})\nNow: ${now}\n\nStill written in:\n${where}\n\nThe Decisions page (Scheme → Decisions) shows both; it re-reads the sources, so the copies leave its list once fixed.`;
+  return `A newer decision reversed an older one, but the older one is still written in this scheme. Bring these copies in line with the newer decision, quoting it with its date, or remove the old text where it no longer applies. Change only what the reversal touches.\n\nOld: ${d.rule}${d.quote ? `: "${d.quote}"` : ''} (${d.who}, ${d.date})\nNow: ${now}\n\nStill written in:\n${where}\n\nThe Decisions page (Orders → Decisions) shows both; it re-reads the sources, so the copies leave its list once fixed.`;
 }
 
 export function decisionsPage() {

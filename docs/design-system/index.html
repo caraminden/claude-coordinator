@@ -443,6 +443,26 @@ window.COLOURS = [
   </section>
 
   <section>
+    <h2>Citadel's look</h2>
+    <p>How Citadel's own pages open (#1068, Josh picked <q>Rows that open</q>, 2026-11-19): every part of a page is a row that opens, its closed line a toned chip and the one or two numbers that matter, and the detail inside: stat tiles, then items, then a line of prose. Colour carries structure: each row's tile in its group's hue, a scheme in its own hue on every page, items as rows with a bar in their hue, a compared value as a bar beside its number. Long lists show five and a "Show all"; an empty state is a card. Apps follow <code>citadel:contraption-ui</code>'s First look instead.</p>
+    <img src="media/citadel-look.png" alt="Host load on the CI page at phone width: three rows that open, Heavy slots and Waits this week opened, with stat tiles, slot rows in each scheme's hue and bars for the longest waits" width="390">
+    <div class="mk-table-wrap"><table class="mk-table">
+      <thead><tr><th>Part (<code>public/look.js</code>, beside <code>settingsRow</code>)</th><th>Use it for</th></tr></thead>
+      <tbody>
+        <tr><td><code>settingsRow({ key, icon, hue, title, summary })</code></td><td>Each part of a page; <code>key</code> keeps it open across a page's redraws. Its opened head takes a tint of its hue.</td></tr>
+        <tr><td><code>toneChip(tone, text)</code></td><td>A status: ok, warn, danger, info, violet, neutral.</td></tr>
+        <tr><td><code>statTiles([value, label, hue], …)</code></td><td>The numbers an opened row starts with.</td></tr>
+        <tr><td><code>schemeTag</code>, <code>schemeHue</code></td><td>A scheme (or its app) in the scheme's own hue, the same on every page.</td></tr>
+        <tr><td><code>hueRow({ hue | cat, lead, meta, free })</code></td><td>An item with a bar in its hue; <code>free</code> draws it dashed.</td></tr>
+        <tr><td><code>meter(frac, words)</code>, <code>pips(on, of)</code></td><td>A value compared across rows; slots or steps in use.</td></tr>
+        <tr><td><code>showFirst({ key, items, n, noun, wrap })</code></td><td>A list over about six: the first five and "Show all".</td></tr>
+        <tr><td><code>emptyCard(title, line, { mark, hue })</code></td><td>An empty state: what it is and what would fill it, green when empty is good.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="doc-why">The rules: <code>.claude/rules/citadel-look.md</code> (loads with any file in <code>public/</code>). The styles: <code>settings.css</code>, "Citadel's look". The page to copy: <code>public/ci-host.js</code>. A review checks it with the rubric's First look lines, <code>docs/rubrics/ui-screenshots.md</code>.</p>
+  </section>
+
+  <section>
     <h2>Colours</h2>
     <p class="doc-why">The 15 Citadel already serves, unchanged, plus <b>one new</b>: <code>--citadel-on-accent</code>. Each swatch shows light (left) and dark (right). <span class="mk-lives">Lives in: <code>public/style.css:1-34</code> → <code>/apps/_citadel/theme.css</code> via <code>src/theme.ts</code>.</span></p>
     <div class="mk-swatches" id="swatches"></div>
@@ -1073,6 +1093,7 @@ row.innerHTML =
       <li><time>2026-11-08</time> · Cara, in Theory of Crafting, on rejecting speculations: <q>you should be able to click reject and not stop the ability to interact with the app ... assume things will work instantly, but recover later if there was an issue</q> (rule 23; <code>optimistic()</code> and the toast's action, #388)</li>
       <li><time>2026-11-12</time> · Cara, on the #630 review pages: the bar <q>B · Segmented track</q>, the list <q>Can we just make it the segmented track like the bar?</q>, times named under it (<q>I like 1</q>), and <q>We should standardize the release, minion list and chat segmented tracks to all use the same logic</q> (<code>segTrack</code>)</li>
       <li><time>2026-11-11</time> · Josh, on the #492 review page (walls of text and weak hierarchy): <q>C · One status chip on every row: Picked</q>, <q>C · Help moves to where it applies: Picked</q>, <q>C · 114 px: two rows, state merged into progress: Picked</q></li>
+      <li><time>2026-11-19</time> · Josh, asking for <q>some more color and structure</q> page after page, on the #1068 choices page: <q>C · Rows that open</q>, <q>This, but with some of the nice styling from A, and with better padding below the header once expanded</q> (Citadel's look, <code>look.js</code>)</li>
     </ol>
   </section>
 </main>

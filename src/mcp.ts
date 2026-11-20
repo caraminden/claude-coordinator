@@ -709,7 +709,7 @@ const TOOLS = [
   {
     name: 'register_property_key',
     description:
-      "Propose a new key for this scheme (or, from the Citadel scheme only, a global key with global: true). New keys wait for a person to approve them in Settings → Properties, so ask people first; while setup or a tune-up is open, keys and values the approved plan card names go in approved. Keys are camelCase.",
+      "Propose a new key for this scheme (or, from the Citadel scheme only, a global key with global: true). New keys wait for a person to approve them in Orders → Properties, so ask people first; while setup or a tune-up is open, keys and values the approved plan card names go in approved. Keys are camelCase.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1059,7 +1059,7 @@ const SEARCH_MEMORY = {
 /** The Decisions page's entries (#1064): every dated, quoted decision, parsed live from where it is written. */
 const SEARCH_DECISIONS = {
   name: 'search_decisions',
-  description: "Search what people decided: every dated, quoted decision written in the Citadel-wide and scheme instructions, the repo's CLAUDE.md, rules and ADRs, the kit and the scheme's memory notes, the same entries as the Scheme → Decisions page. Each gives who, when, their words, the rule it backs, where it is written and whether a later decision reversed it (and which copies still say the old one). Use it before asking people something they may already have decided, and to quote a decision with its date. Leave query empty for the newest.",
+  description: "Search what people decided: every dated, quoted decision written in the Citadel-wide and scheme instructions, the repo's CLAUDE.md, rules and ADRs, the kit and the scheme's memory notes, the same entries as the Orders → Decisions page. Each gives who, when, their words, the rule it backs, where it is written and whether a later decision reversed it (and which copies still say the old one). Use it before asking people something they may already have decided, and to quote a decision with its date. Leave query empty for the newest.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1849,7 +1849,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'register_property_key': {
       const r = await call('POST', `/api/projects/${PROJECT}/properties/keys`, args);
-      return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Settings → Properties. Tell people in your reply.`);
+      return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Orders → Properties. Tell people in your reply.`);
     }
     case 'review_property': {
       const r = await call('POST', `/api/projects/${PROJECT}/properties/review`, args);

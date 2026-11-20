@@ -95,6 +95,15 @@ export function jumpParts(hash) {
 }
 
 /**
+ * A "show me where" address (#1122): any page's address plus `?show=<part>`, a name from src/show-parts.ts that sits on
+ * an element as data-part. Gives { hash, name } (the page's plain address and the part), or null.
+ */
+export function showParts(hash) {
+  const m = /^(#\/[^?]*)\?show=([a-z0-9-]{1,40})$/.exec(hash ?? '');
+  return m ? { hash: m[1] === '#/' ? '#/' : m[1].replace(/\/$/, ''), name: m[2] } : null;
+}
+
+/**
  * The in-app route ("#/p/2/t/11") a link points at, if it stays in this app: a bare "#/…" route,
  * or an absolute URL on this page (same origin and path) whose hash is a route. Null otherwise,
  * so links elsewhere keep opening in a new tab.

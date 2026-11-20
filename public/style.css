@@ -331,6 +331,11 @@ body.navigating #app .split > :last-child, body.navigating #app > :not(.split) {
 body.navigating::after { content: ''; pointer-events: none; position: fixed; z-index: 60; top: calc(40vh - 14px); left: calc(50% - 14px); width: 28px; height: 28px; box-sizing: border-box; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, var(--bg)); border-top-color: var(--accent); background: var(--bg); box-shadow: 0 0 0 4px var(--bg); animation: nav-busy-in 0s 0.3s both, scheme-spin 0.8s linear infinite; }
 @keyframes nav-busy-in { from { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { body.navigating::after { animation: nav-busy-in 0s 0.3s both; } }
+/* "Show me where" (#1122, show-part.js): the part a ?show= link names, outlined for three seconds; a steady outline with reduced motion. */
+.part-show { --show-off: 3px; outline: 3px solid var(--accent); outline-offset: var(--show-off); animation: part-pulse 1s ease-in-out 3; }
+.part-show.part-show-in { --show-off: -7px; } /* a box that clips (a settings row in its rows box): drawn inside */
+@keyframes part-pulse { 50% { outline-color: color-mix(in srgb, var(--accent) 25%, transparent); outline-offset: calc(var(--show-off) + 4px); } }
+@media (prefers-reduced-motion: reduce) { .part-show { animation: none; } }
 .route-error { max-width: 40rem; margin: 2rem auto; }
 .route-error > p { margin: 0.25rem 0; }
 

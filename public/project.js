@@ -2,6 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciPage } from './ci.js';
+import { statusPage } from './status.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, isOrdersPage, myInstructionsEditor, notificationsPage, ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { machinesPage } from './settings-machines.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
@@ -57,7 +58,7 @@ export async function showTicket(ticketId) {
 }
 
 /** A tab in the Minions panel's header; it switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
-const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, 'data-part': name === 'orders' ? 'orders-tab' : name === 'minions' ? 'minions-tab' : null, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
 
 /** Per scheme, the last chat hash and the last Orders hash you were on, so a tab click goes back to where you were. */
 const lastHash = new Map();
@@ -124,6 +125,7 @@ function renderCrumbs(main) {
       : main.kind === 'reviews' ? [projectLink, ' / ', settingsLink, ' / ', 'Reviewers and critics']
       : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
+      : main.kind === 'status' ? [projectLink, ' / ', 'Status']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
@@ -240,7 +242,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     threadSearchBox(projectId),
     h('div', { id: 'saved-views', class: 'saved-views' }),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
-    h('div', { id: 'threads' }),
+    h('div', { id: 'threads', 'data-part': 'minion-list' }),
     // Orders → Schedules lists the schedules in the panel in place of the Orders menu (#1083); a row opens its page.
     main.kind === 'schedules' ? schedulesPane(projectId, main.schedule) : '',
     ordersMenu());
@@ -280,6 +282,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'reviews' ? reviewsPage()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
     : main.kind === 'ci' ? ciPage(projectId, main.tab)
+    : main.kind === 'status' ? statusPage(projectId)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

@@ -40,6 +40,17 @@ export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 export type TicketKind = 'ticket' | 'coordinator';
 
 /** A row of the releases table (#625); changes and stages are JSON. */
+/** One reading of perigee's memory, disk (the data folder's) and load, and the server's own resident memory, in bytes (#1123). */
+export interface HostSample {
+  at: number;
+  mem_total: number;
+  mem_avail: number;
+  disk_total: number;
+  disk_free: number;
+  load1: number;
+  rss: number;
+}
+
 export interface ReleaseRow {
   id: number;
   project_id: number;
@@ -1207,6 +1218,16 @@ CREATE TABLE IF NOT EXISTS health_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
+-- perigee's own memory, disk and load every 5 minutes (#1123), for the Status page's week of history. Kept HOST_SAMPLE_KEEP_MS.
+CREATE TABLE IF NOT EXISTS host_samples (
+  at INTEGER PRIMARY KEY,
+  mem_total INTEGER NOT NULL,
+  mem_avail INTEGER NOT NULL,
+  disk_total INTEGER NOT NULL,
+  disk_free INTEGER NOT NULL,
+  load1 REAL NOT NULL,
+  rss INTEGER NOT NULL
+);
 -- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
 CREATE TABLE IF NOT EXISTS flake_events (
   id INTEGER PRIMARY KEY,
@@ -1460,11 +1481,14 @@ export const SCHEMA_HISTORY = [
   [81, 'review_entries, review_versions, review_runs, review_verdicts; repo rubric files imported once (#1051, #1054)'],
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
+  [84, 'host_samples (#1123)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
-/** How long health_events rows are kept (#724): the longest check compares a day before a deploy with the day after. */
-export const HEALTH_KEEP_MS = 3 * 24 * 60 * 60_000;
+/** How long health_events rows are kept: the longest deploy check compares a day before with the day after (#724), and the Status page shows a week of stalls and restarts (#1123). */
+export const HEALTH_KEEP_MS = 8 * 24 * 60 * 60_000;
+/** How long host_samples rows are kept (#1123): the Status page's week plus a day. */
+export const HOST_SAMPLE_KEEP_MS = 8 * 24 * 60 * 60_000;
 /** How long flake_events rows are kept (#1063): the tab counts 14 days, and the brief quotes older failures. */
 export const FLAKE_KEEP_MS = 90 * 24 * 60 * 60_000;
 /** The most health_events rows kept, oldest dropped first, so a page that throws in a loop can't grow the database. */
@@ -3471,12 +3495,54 @@ export class Store {
       .all(since, until, payer) as unknown as SpendRowRaw[];
   }
 
+  /** Health readings of these kinds since `since`, oldest first (#1123, the Status page). */
+  healthEventsSince(kinds: string[], since: number): { kind: string; at: number; commit_sha: string | null; detail: string }[] {
+    return this.db.prepare(`SELECT kind, at, commit_sha, detail FROM health_events WHERE kind IN (${kinds.map(() => '?').join(', ')}) AND at >= ? ORDER BY at`)
+      .all(...kinds, since) as unknown as { kind: string; at: number; commit_sha: string | null; detail: string }[];
+  }
+
+  /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
+  addHostSample(s: HostSample) {
+    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss);
+    this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
+  }
+
+  hostSamples(since: number): HostSample[] {
+    return this.db.prepare('SELECT * FROM host_samples WHERE at >= ? ORDER BY at').all(since) as unknown as HostSample[];
+  }
+
+  /** A scheme's releases of one target started or live since `since`, oldest first (#1123). */
+  releasesSince(projectId: number, target: string, since: number): ReleaseRow[] {
+    return this.db.prepare('SELECT * FROM releases WHERE project_id = ? AND target = ? AND coalesce(live_at, started_at) >= ? ORDER BY id')
+      .all(projectId, target, since) as unknown as ReleaseRow[];
+  }
+
+  /** An app's deploys started since `since`, oldest first (#1123). */
+  appDeploysSince(name: string, since: number): { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[] {
+    return this.db.prepare('SELECT started_at, finished_at, outcome, to_sha, by FROM contraption_deploys WHERE name = ? AND started_at >= ? ORDER BY started_at, id')
+      .all(name, since) as unknown as { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[];
+  }
+
+  /** An app's error counts per Pacific day, kind and key from `fromDay` on (#1123). */
+  appErrorsSince(contraptionId: number, fromDay: string): { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[] {
+    return this.db.prepare('SELECT day, kind, key, count, sample, last_at FROM contraption_errors WHERE contraption_id = ? AND day >= ? ORDER BY day, count DESC')
+      .all(contraptionId, fromDay) as unknown as { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[];
+  }
+
+  /** An app's agent turns started since `since`: when, whose, and its tokens (#1123). */
+  appTurnsSince(contraptionId: number, since: number): { started_at: number; person: string; outcome: string | null; tokens: number }[] {
+    return this.db.prepare(`SELECT t.started_at, u.name AS person, t.outcome, coalesce(t.input_tokens, 0) + coalesce(t.output_tokens, 0) + coalesce(t.cache_read_tokens, 0) + coalesce(t.cache_write_tokens, 0) AS tokens
+      FROM contraption_turns t JOIN users u ON u.id = t.user_id WHERE t.contraption_id = ? AND t.started_at >= ? ORDER BY t.started_at`).all(contraptionId, since) as unknown as { started_at: number; person: string; outcome: string | null; tokens: number }[];
+  }
+
   /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
   addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
-      this.db.prepare('DELETE FROM health_events WHERE id <= ?').run(Number(id) - HEALTH_MAX_ROWS);
+      // Boots are few and the Status page's week of restarts needs them: only the time keep drops them.
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind != 'boot'").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

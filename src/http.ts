@@ -41,6 +41,7 @@ import type { UltraReviews } from './ultrareview.ts';
 import type { SideAsks } from './side-ask.ts';
 import type { Chain, LiveWaiters, TimedWakes } from './wake.ts';
 import type { ClientErrors, DeployWatch } from './deploy-watch.ts';
+import type { StatusPage } from './status-page.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
 export class HttpError extends Error {
@@ -259,6 +260,8 @@ export interface App {
   heavyDir?: string;
   /** The CI page's snapshot (#968); absent in tests that don't need it. */
   ciHealth?: Pick<CiHealth, 'snapshot'>;
+  /** The Status page's data and perigee's memory and disk sampler (#1123); absent in tests that don't need it. */
+  status?: StatusPage;
   /** Big uploads in chunks, for the shared folder and contraptions (src/chunked-uploads.ts, #832). */
   chunked: ChunkedUploads;
   /** CI output the schemes' runners upload, kept per scheme and swept by rule (src/ci-store.ts, #658). */

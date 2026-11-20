@@ -108,6 +108,10 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   pinnedCopy('replay.ts');
   const REPLAY_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-replay');
   if (existsSync(REPLAY_BIN)) cpSync(REPLAY_BIN, join(MCP_DIR, 'bin', 'citadel-replay'));
+  // citadel-where (#1122): "show me where" links; its shim runs the pinned show-parts.ts beside it.
+  pinnedCopy('show-parts.ts');
+  const WHERE_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-where');
+  if (existsSync(WHERE_BIN)) cpSync(WHERE_BIN, join(MCP_DIR, 'bin', 'citadel-where'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
@@ -299,6 +303,8 @@ const READ_ONLY_COMMANDS = [
     'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh pr status', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
     // #621: more reads a Taskmaster reached for. Not sed or file: a writing flag bundled anywhere (-nsi, -bC) passes any rule.
     'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
+    // #1122: looks up a part of Citadel's UI and prints its link; reads nothing but its own list.
+    'citadel-where',
   ].map((c) => `Bash(${c}:*)`),
   ...['-s', '-sS', '-s -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:8573/api/health)`)),
 ];

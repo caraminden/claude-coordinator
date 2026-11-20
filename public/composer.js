@@ -146,7 +146,7 @@ export function composer(chatId, ticket) {
       alertNote(`Side question not asked: ${ex.message}`);
     });
   };
-  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', title: 'Ask on the side: a read-only copy of this minion answers, and nothing reaches its session (or start a message with /btw)',
+  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', 'data-part': 'ask-on-the-side', title: 'Ask on the side: a read-only copy of this minion answers, and nothing reaches its session (or start a message with /btw)',
     onclick: () => {
       const text = box.value.trim().replace(/^\/btw\s+/, '');
       if (text) return askSide(text);
@@ -229,6 +229,7 @@ export function composer(chatId, ticket) {
   row.className = 'row';
   textarea.className = '';
   textarea.rows = 2;
+  textarea.dataset.part = 'message-box'; // "show me where" names (#1122, src/show-parts.ts)
   textarea.setAttribute('data-draft', '');
   const menu = h('div', { class: 'send-menu', role: 'menu', hidden: true },
     h('button', { type: 'button', class: 'secondary', role: 'menuitem', onclick: () => {
@@ -240,7 +241,7 @@ export function composer(chatId, ticket) {
         after = false;
       }
     } }, 'Send after this turn'));
-  const moreBtn = h('button', { type: 'button', class: 'more', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+  const moreBtn = h('button', { type: 'button', class: 'more', 'data-part': 'more-ways-to-send', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
     onclick: () => (menu.hidden ? openMenu() : closeMenu()) }, '▾');
   const openMenu = () => {
     menu.hidden = false;
@@ -271,7 +272,7 @@ export function composer(chatId, ticket) {
   textarea.after(picker);
   if (minion) textarea.before(sideStrip);
   row.replaceChildren(
-    h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
+    h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'attach', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
       h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
     h('span', { class: 'spacer' }),
     modelPicker(chatId), sideBtn || '', sendGroup);
@@ -763,8 +764,8 @@ function modelPicker(chatId) {
     const value = field === 'workflow' ? e.target.value === 'on' : e.target.value || null;
     setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : value ?? 'the default');
   };
-  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
-  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
+  const model = h('select', { class: 'picker', id: 'model-picker', 'data-part': 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
+  const effort = h('select', { class: 'picker', id: 'effort-picker', 'data-part': 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
   // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
     h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));

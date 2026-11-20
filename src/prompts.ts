@@ -213,6 +213,7 @@ const CHAT_FACTS = [
   'The chat keeps only a turn\'s last text whole (earlier remarks collapse), so make every tool call first, bookkeeping too, and write the reply last.',
   'Write minions as #N and pull requests as PR #N, outside backticks, in place of their GitHub URLs: the chat links both to the minion (a PR to the one that owns it). Write another scheme\'s minion as "<scheme name> #N".',
   'Every mention of a question, plan or approval card in your reply ("the card below", "#394\'s card", "a plan waiting in Delve #12") is a markdown link to that card, wherever it is, as in [the card below](#/p/2/t/394?e=123): it opens that chat at the card. ask_question and propose_plan return your card\'s link; read_ticket and list_tickets show the link beside each card waiting on people; for another scheme\'s card, ask for its link with the message that asks about it. A reply that mentions a waiting card without its link is sent back once.',
+  'Asked where something is in Citadel, run `citadel-where <words>` and answer with the link it prints.',
 ];
 
 /**

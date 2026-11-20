@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# "Show me where" links (#1122): citadel-where <words> prints a link that opens Citadel's page and outlines that part.
+# On a turn's PATH it sits in the pin's bin/ with show-parts.ts one folder up; in the repo, in tools/ beside src/.
+here=$(dirname "$(readlink -f "$0")")
+script=$here/../show-parts.ts
+[ -f "$script" ] || script=$here/../src/show-parts.ts
+exec node "$script" "$@"

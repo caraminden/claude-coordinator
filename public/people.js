@@ -94,7 +94,7 @@ export function membersPage() {
     head('Members', settingsHelp('Only the people here see this scheme, its minions and its files.', 'Anyone in it adds minions, chats, and changes its members and settings.')),
     h('h3', { class: 'settings-section' }, `In ${p.name}`), list, addRow,
     h('h3', { class: 'settings-section' }, 'Just for you'),
-    h('div', { class: 'settings-rows' }, settingsRow({ icon: 'eye', hue: 'muted', title: 'Hide this scheme', summary: 'Out of your lists, badges and notifications' },
+    h('div', { class: 'settings-rows' }, settingsRow({ part: 'hide-scheme', icon: 'eye', hue: 'muted', title: 'Hide this scheme', summary: 'Out of your lists, badges and notifications' },
       settingsHelp('Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications.', 'You stay in it, and its link still opens it.'),
       hideButton(p))[0]),
     account?.admin && settingsHelp('To add someone new to Citadel, invite them under People first.'));
@@ -208,7 +208,7 @@ export function peoplePage() {
   return page(
     head('People', settingsHelp('Everyone who can sign in to Citadel.', 'Each person sees only the schemes they own or were added to, and can make schemes of their own.')),
     refused,
-    h('div', { class: 'settings-rows' }, settingsRow({ icon: 'plugplus', hue: 'done', title: 'Invite someone', summary: 'Name and login; you send them the link' }, form)[0]),
+    h('div', { class: 'settings-rows' }, settingsRow({ part: 'invite-someone', icon: 'plugplus', hue: 'done', title: 'Invite someone', summary: 'Name and login; you send them the link' }, form)[0]),
     link,
     h('h3', { class: 'settings-section' }, 'Everyone'), list,
     settingsHelp('Each person\'s messages start turns on their own Claude plan, which they link in Your account.',
@@ -219,8 +219,8 @@ export function peoplePage() {
  * One account card as a row that opens (#995): the card's own heading moves into the row's title, its status chip into
  * the summary, kept in step as the card redraws itself.
  */
-function accountRow(ic, hue, title, card, fallback = '') {
-  const [row, sum] = settingsRow({ icon: ic, hue, title }, card);
+function accountRow(ic, hue, title, card, fallback = '', { part } = {}) {
+  const [row, sum] = settingsRow({ part, icon: ic, hue, title }, card);
   const sync = () => {
     const chip = card.querySelector(':scope > h3 .link-chip');
     // A card whose load failed holds only its error: say so while the row is closed.
@@ -259,16 +259,16 @@ export function accountPage() {
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
     h('div', { class: 'settings-rows' },
-      accountRow('spark', 'accent', 'Claude', claudeCard()),
+      accountRow('spark', 'accent', 'Claude', claudeCard(), '', { part: 'claude-login' }),
       accountRow('key', 'running', 'Codex', codexCard()),
-      accountRow('branch', 'ink', 'GitHub', githubCard()),
+      accountRow('branch', 'ink', 'GitHub', githubCard(), '', { part: 'github-login' }),
       accountRow('globe', 'held', 'OpenRouter', openrouterCard()),
-      accountRow('vault', 'done', 'Secrets', secretsCard(), 'Passwords and keys for minions and apps'),
+      accountRow('vault', 'done', 'Secrets', secretsCard(), 'Passwords and keys for minions and apps', { part: 'secrets' }),
       accountRow('check', 'teal', 'App chats for replay tests', replayCard(), 'Whether apps may keep your first few turns'),
       // Only on a Windows desktop (firefoxControls is null elsewhere).
       firefoxCard && accountRow('globe', 'ink', 'Open links in Firefox', firefoxCard, 'This device'),
       // Last, and closed until asked for (Cara picked "Password behind a button").
-      settingsRow({ icon: 'lock', hue: 'muted', title: 'Password', summary: 'Change the password you sign in with' }, form)[0]));
+      settingsRow({ part: 'password', icon: 'lock', hue: 'muted', title: 'Password', summary: 'Change the password you sign in with' }, form)[0]));
 }
 
 /** Kept app chats (#836): a person's way to keep their app chats out of replay tests. */

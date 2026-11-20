@@ -87,6 +87,7 @@ export function notificationsPage() {
   const onRow = row('bell', 'accent', 'Notify me on this device', 'This device only',
     toggle(on, 'Notify me on this device', 'Questions for you, failed turns, and your minions that are ready or blocked'), hint,
     settingsHelp('Questions for you, failed turns, and your minions that are ready or blocked, as a notification on this browser or app. Other devices are set up on their own.'));
+  onRow.dataset.part = 'notify-this-device';
   const pinnedRow = row('pin', 'held', 'Only my pinned minions', 'This device only',
     toggle(pinned, 'Only my pinned minions', 'On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster'),
     settingsHelp('On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster.'));
@@ -476,7 +477,7 @@ function fastModeRow(p) {
   // the setting. If #1017's Nov 26 decision turns it on for Citadel, change this line to `const locked = false;` (or delete it).
   const locked = p.id === HOME_SCHEME;
   const on = h('input', { type: 'checkbox', id: 'land-mode', checked: !locked && p.land_mode === 'fast', disabled: locked });
-  const [row, sum] = settingsRow({ icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
+  const [row, sum] = settingsRow({ part: 'fast-mode', icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
     h('label', { class: 'toggle', title: locked ? 'Off for Citadel itself' : 'Ship now, test behind' }, on, 'Ship now, test behind'),
     locked && h('p', { class: 'muted small settings-help' }, 'Off for Citadel itself: every scheme runs on it. Cara picked "Later" (Nov 18); it\'s decided around Nov 26 from the other schemes\' numbers.'),
     settingsHelp('Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
@@ -527,10 +528,11 @@ function saveProject(p, mine, body, label, shown) {
  * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
  * line, which its page keeps up to date.
  */
-export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key }, ...body) {
+export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key, part }, ...body) {
   const sum = h('span', { class: 'settings-row-sum' }, summary);
   // `key`: a page that redraws (the CI page, every few seconds) keeps a row open that a person opened (#1068).
-  const row = h('details', { class: 'settings-row', 'data-hue': hue, open: key && openRows.has(key) ? openRows.get(key) : open,
+  // `part`: its name for "show me where" links (#1122, src/show-parts.ts).
+  const row = h('details', { class: 'settings-row', 'data-hue': hue, 'data-part': part ?? null, open: key && openRows.has(key) ? openRows.get(key) : open,
     ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
     h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)),
       h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum),
@@ -692,7 +694,7 @@ export function myInstructionsEditor() {
   const drafts = {};
   let scope = 'everywhere';
   const textarea = h('textarea', {
-    id: 'my-instructions-text', class: 'instructions-text settings-anchor', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
+    id: 'my-instructions-text', 'data-part': 'my-instructions', class: 'instructions-text settings-anchor', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
     placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before shipping, the model and effort they start on…',
   });
   const counter = h('span', { class: 'muted counter' });
@@ -840,7 +842,7 @@ function renderAppInstructionsHead() {
 /** Main panel: edit the instructions every scheme shares. */
 export function appInstructionsEditor() {
   const textarea = h('textarea', {
-    id: 'app-instructions-text', class: 'instructions-text', spellcheck: 'false', disabled: true,
+    id: 'app-instructions-text', 'data-part': 'citadel-wide-instructions', class: 'instructions-text', spellcheck: 'false', disabled: true,
     placeholder: 'How people like to work in every scheme: tone, when to ask, how to hand work off…',
   });
   const counter = h('span', { class: 'muted counter' });
@@ -959,7 +961,7 @@ function githubOwnerField() {
 export function instructionsEditor() {
   const p = view.project;
   const textarea = h('textarea', {
-    id: 'instructions-text', class: 'instructions-text settings-anchor', spellcheck: 'false',
+    id: 'instructions-text', 'data-part': 'scheme-instructions', class: 'instructions-text settings-anchor', spellcheck: 'false',
     placeholder: 'What the scheme is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
   });
   textarea.value = p.instructions ?? '';

@@ -12,6 +12,7 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   const home = `#/p/${id}`;
   if (!m) return home;
   const [, page, rest] = m;
+  if (page === 'status') return `${home}/status`;
   if (page === 'ci') return /^(overview|history|runs|runners)$/.test(rest ?? '') ? `${home}/ci/${rest}` : `${home}/ci`;
   // Releases open on the scheme you switch to; only Citadel's opens on All.
   if (page === 'releases') return `${home}/releases/${Number(id) === 2 ? 'all' : id}`;

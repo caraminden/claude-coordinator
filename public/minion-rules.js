@@ -108,7 +108,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     area.addEventListener('input', sync);
     saveBtn.onclick = () => save({ [key]: text([...ticked(lines(stored()[key])).flatMap((a) => a.rules), ...lines(area.value)]) }, 'save approval rules');
     discardBtn.onclick = () => { area.value = handRules(stored()[key]).join('\n'); sync(); };
-    return live({ icon: 'shield', hue: 'waiting', title: 'Needs approval' },
+    return live({ part: 'needs-approval', icon: 'shield', hue: 'waiting', title: 'Needs approval' },
       settingsHelp('Tool calls that wait for Approve or Deny in the minion\'s chat.', 'Tick an action to be asked before a minion does it; everything else runs without asking.'),
       (mount) => {
         const rules = lines(stored()[key]);
@@ -134,7 +134,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
 
   const plugins = () => {
     const hand = handLine('tools/mods/my-plugin', (dir) => save(setPluginMode(stored(), dir.replace(/\/+$/, '').replace(/^\.\//, ''), 'picked'), 'add a plugin folder'));
-    return live({ icon: 'plug', hue: 'held', title: 'Plugins' },
+    return live({ part: 'plugins', icon: 'plug', hue: 'held', title: 'Plugins' },
     settingsHelp('Plugin folders found in this scheme\'s repo.', 'Picked loads one only for minions that pick it (the Plugins picker beside Send); Every minion loads it on every turn. Only an admin changes these.'),
     (mount) => {
       const s = stored(), admin = !!account?.admin;
@@ -156,7 +156,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const listGroups = () => {
     let key = '';
     const hand = handLine('area: balance', (line) => { const groups = listGroupsOf(stored()); save({ list_groups: JSON.stringify([...groups.filter((g) => g !== line), line]) }, `add the group ${line}`); });
-    return live({ icon: 'rows', hue: 'teal', title: 'List groups' },
+    return live({ part: 'list-groups', icon: 'rows', hue: 'teal', title: 'List groups' },
       settingsHelp('Minions outside a build that carry one of these get their own group at the top of the minions list.', 'A minion that matches two sits in the first.'),
       (mount) => {
         const registry = data.registry;
@@ -184,7 +184,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
 
   const ci = () => {
     const hand = handLine('nightly.yml', (file) => { const f = file.replace(/^\.?\/?\.github\/workflows\//, ''); save(setCi({ ...stored(), ci_watch: text([...lines(stored().ci_watch), f]) }, f, true), 'watch a workflow'); });
-    return live({ icon: 'belloff', hue: 'running', title: 'CI alerts' },
+    return live({ part: 'ci-alerts', icon: 'belloff', hue: 'running', title: 'CI alerts' },
     settingsHelp('This scheme\'s workflows, from the CI page. On wakes the Taskmaster when one goes red on the default branch; Off keeps it quiet (the CI page still shows it).',
       'A red run starts a fix and says when it is green again. A minion that dispatched a run on its own branch still hears its result.'),
     (mount) => {
@@ -206,7 +206,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     });
   };
 
-  const effort = () => live({ icon: 'spark', hue: 'running', title: 'Default effort' },
+  const effort = () => live({ part: 'default-effort', icon: 'spark', hue: 'running', title: 'Default effort' },
     settingsHelp('How hard minions think when they have no effort of their own.', 'Claude default leaves it to Claude Code. The Taskmaster is not affected.'),
     (mount) => {
       const cur = stored().default_effort ?? '';
@@ -252,7 +252,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
       const cur = shotList(stored().shot_widths);
       if (!cur.includes(+w)) save({ shot_widths: [...cur, +w].sort((a, b) => b - a).join(',') }, `shoot at ${w}`);
     }, 'Custom width');
-    return live({ icon: 'monitor', hue: 'teal', title: 'Screenshots' },
+    return live({ part: 'screenshots', icon: 'monitor', hue: 'teal', title: 'Screenshots' },
       settingsHelp('The widths and themes a minion shoots a UI change at, and whether its ready note needs them.',
         'tools/ui-shot.ts uses these when a minion passes no --widths or --themes, and the minion\'s prompt states them. Keep at least one of each.'),
       (mount) => {
@@ -284,7 +284,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     'pr-auto': 'The minion opens a pull request and turns on auto-merge, so it ships once CI is green.',
     'pr-person': 'The minion opens a pull request and waits: merging it needs a person\'s Approve, so every change needs a go and "Merge a pull request" is ticked under Approvals.',
   };
-  const ship = () => live({ icon: 'branch', hue: 'accent', title: 'How a change ships' },
+  const ship = () => live({ part: 'how-changes-ship', icon: 'branch', hue: 'accent', title: 'How a change ships' },
     settingsHelp('What a minion does with a finished, self-reviewed change.', 'Minions get the steps for the path picked in their prompt; these settings win over any shipping paragraph in the scheme instructions.'),
     (mount) => {
       const cur = stored().ship_path ?? 'citadel';
@@ -292,7 +292,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         h('p', { class: 'muted small settings-help' }, SHIP_HELP[cur]));
       return label(SHIP_PATHS, cur);
     });
-  const go = () => live({ icon: 'users', hue: 'accent', title: 'A person\'s go' },
+  const go = () => live({ part: 'persons-go', icon: 'users', hue: 'accent', title: 'A person\'s go' },
     settingsHelp('Self-review labels each change low, medium or high. From this label up, the minion asks with a card and waits for a member\'s go.', 'On a pull-request path, Every change ticks "Merge a pull request" under Approvals; High or Medium leaves it off and the minion asks by label instead.'),
     (mount) => {
       const s = stored(), cur = s.go_from ?? 'high', person = s.ship_path === 'pr-person';
@@ -300,7 +300,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         person ? h('p', { class: 'muted small settings-help' }, 'A person merges every pull request here, so every change waits for a go.') : '');
       return label(GO_FROM, cur);
     });
-  const tryFirst = () => live({ icon: 'eye', hue: 'accent', title: 'Try it first' },
+  const tryFirst = () => live({ part: 'try-it-first', icon: 'eye', hue: 'accent', title: 'Try it first' },
     settingsHelp('Whether a change waits for someone to try it before it ships.', 'A minion waiting for a try posts a preview link (or screenshots where the scheme has no previews), sets its state to Try and ships on a member\'s go. UI changes are ones touching the front-end files the scheme\'s CLAUDE.md lists.'),
     (mount) => {
       const cur = stored().try_first ?? 'never';

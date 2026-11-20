@@ -183,7 +183,7 @@ test('#621: file, sandboxed sed, more gh reads and plain fetches in the repo run
   const repo = `${data}/projects/2/repo`;
   const wt = `${data}/projects/2/tickets/141`;
   for (const c of ['gh repo view caraminden/peek-auras --json visibility',
-    'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', `git -C ${repo} fetch`, `git -C ${repo} fetch origin`, `git -C ${repo} fetch --prune`, `git -C ${wt} log -1`]) assert.ok(bashAllowed(c), c);
+    'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', 'citadel-where fast mode', 'citadel-where --minion 12 model', `git -C ${repo} fetch`, `git -C ${repo} fetch origin`, `git -C ${repo} fetch --prune`, `git -C ${wt} log -1`]) assert.ok(bashAllowed(c), c);
   for (const c of [`sed -n 1,20p ${data}/x`, `sed --sandbox -i s/a/b/ ${data}/x`, `sed --sandbox -ni s/a/b/p ${data}/x`, `sed --sandbox --in-place s/a/b/ ${data}/x`,
     `sed --sandbox -n 1,20p ${data}/x`, `sed --sandbox -nsi s/a/b/p ${data}/x`, `file ${data}/x`, `file -bC -m ${data}/magic`, `file -C -m ${data}/magic`, `git -C ${repo} fetch origin main:main`, `git -C ${repo} fetch --upload-pack=sh origin`, `git -C ${repo} fetch origin +main:main`,
     `git -C ${live} fetch`, 'gh repo view a/b --web', 'gh release download v1 -R a/b',

@@ -16,6 +16,7 @@ import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
+import { StatusPage, recordBoot } from './src/status-page.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -1312,9 +1313,19 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   send(res, 200, headers, body);
 }
 
+// The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
+const status = new StatusPage({
+  store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
+  ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
+  unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
+});
+if (!BOOT_CHECK && !PREVIEW) {
+  recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT);
+  status.start();
+}
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, status, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

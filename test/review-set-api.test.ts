@@ -255,3 +255,60 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   assert.equal((await call(`${url}/look/verdicts/${v.data.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual((await call(url)).data.entries.find((e: any) => e.slug === 'look').verdicts, []);
 });
+
+// Build 4 gap (Delve #127), in a scheme that isn't Citadel: the Taskmaster's tool sets kind, model, effort, on_fail and
+// context, a critic's on_fail can name a teacher entry, and the kit has creative and teacher starters.
+test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, effort, on_fail and context", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tidepool' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Draw a crab', properties: { type: 'art' } } });
+  const url = `/api/projects/${p.id}/reviews`;
+  const tool = async (as: number, args: Record<string, unknown>) => {
+    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as), COORDINATOR_ROLE: 'thread' },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    try {
+      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
+      const { result } = await reply;
+      return { error: !!result.isError, text: result.content[0].text as string };
+    } finally {
+      child.kill();
+    }
+  };
+  const tm = page.coordinator.id;
+  const one = async (slug: string) => (await call(url)).data.entries.find((e: any) => e.slug === slug);
+  const starters = (await call(url)).data.starters.map((s: any) => s.slug);
+  assert.ok(starters.includes('creative') && starters.includes('teacher'), starters.join());
+
+  // A teacher from the kit starter is a teacher without being told; a critic from the creative starter.
+  assert.equal((await tool(tm, { add: true, extends: 'teacher', slug: 'art-professor' })).text.slice(0, 22), 'Added art-professor (o');
+  assert.equal((await one('art-professor')).kind, 'teacher');
+  assert.equal((await tool(tm, { add: true, extends: 'creative', slug: 'art', when: 'creative: new art', kind: 'critic', model: 'opus', effort: 'high' })).error, false);
+  const added = (await one('art'));
+  assert.deepEqual([added.model, added.effort, added.kind], ['opus', 'high', 'critic']);
+
+  // A save sets the rest and is a version in History; a bad value is the store's own refusal.
+  const guides = [{ label: 'Taste', href: 'docs/design/art-style/taste.md' }, { label: 'Techniques', href: 'docs/design/art-style/techniques.md' }];
+  const saved = await tool(tm, { slug: 'art', model: 'sonnet', effort: 'medium', on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], context: { guides }, note: 'Teacher after 2' });
+  assert.equal(saved.text, 'Saved art as version 2.', saved.text);
+  const art = (await one('art'));
+  assert.deepEqual([art.model, art.effort, art.on_fail, art.context.guides], ['sonnet', 'medium', [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], guides]);
+  assert.match(art.text, /\non_fail: art-professor after 2 fails, person after 3 fails\n/);
+  assert.match(art.text, /- Guide: \[Taste\]\(docs\/design\/art-style\/taste\.md\)/);
+  assert.match((await one('art-professor')).text, /^---\nname: art-professor\nkind: teacher\n/);
+  assert.equal((await call(`${url}/art/versions`)).data.versions[0].note, 'Teacher after 2');
+  for (const bad of [{ model: 'gpt' }, { kind: 'wizard' }, { on_fail: [{ after: 2, to: 'no-such' }] }, { on_fail: [{ after: 3, to: 'person' }, { after: 2, to: 'professor' }] }, { context: { guides: [{ label: 'x' }] } }]) {
+    assert.equal((await tool(tm, { slug: 'art', ...bad })).error, true, JSON.stringify(bad));
+  }
+  assert.equal((await one('art')).version, 2, 'a refused save leaves no version');
+  assert.deepEqual((await tool(tm, { slug: 'art', on_fail: [] })).error, false);
+  assert.equal((await one('art')).on_fail, null);
+
+  // A minion keeps to body, calibrations and runs.
+  for (const f of [{ model: 'haiku' }, { kind: 'teacher' }, { on_fail: [{ after: 2, to: 'professor' }] }, { context: { guides } }]) {
+    assert.equal((await tool(minion.id, { slug: 'art', ...f })).error, true, JSON.stringify(f));
+  }
+  assert.equal((await one('art')).model, 'sonnet');
+});

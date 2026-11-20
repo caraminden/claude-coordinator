@@ -226,7 +226,7 @@ const quote = (v: string) => (/: |^[\s"'[{>|*&!%@`#-]|:$|\s$/.test(v) ? JSON.str
 
 /** The keys the columns own, as they appear in a rubric file's frontmatter. */
 const LIFTED = ['name', 'extends', 'when', 'model', 'effort'];
-const OWNED = /^(name|extends|when|model|effort|trial)\s*:/;
+const OWNED = /^(name|kind|extends|when|model|effort|trial)\s*:/;
 
 /**
  * A whole rubric file's text to the fields it sets and the body that stays: frontmatter keys the columns own move into
@@ -268,8 +268,10 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
   const own = e.body.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const head = [
     `name: ${e.slug}`,
+    // A teacher is read by citadel:critique's hand-off (step 5), not run on a `when:`: the file says so.
+    e.kind === 'teacher' ? 'kind: teacher' : '',
     e.extends ? `extends: citadel:critique/rubrics/${e.extends}` : '',
-    `when: ${quote(whenText(e.triggers) || 'ask')}`,
+    `when: ${quote(whenText(e.triggers) || (e.kind === 'teacher' ? 'only when a critic hands off to it' : 'ask'))}`,
     e.model ? `model: ${e.model}` : '',
     e.effort ? `effort: ${e.effort}` : '',
     // On trial (Q12) it only advises, whatever its own gate says.
@@ -777,7 +779,8 @@ export function reviewSetLine(dir: string, on: number, entries: ReviewEntry[] = 
  * or more entries on, or a panel, need saying; one entry on its own runs as before.
  */
 export function orderLine(entries: ReviewEntry[]): string {
-  const on = entries.filter((e) => e.enabled && !isKit(e));
+  // A teacher runs only when a critic hands off to it: it has no place in a column's order.
+  const on = entries.filter((e) => e.enabled && !isKit(e) && e.kind !== 'teacher');
   const cols: string[] = [];
   for (const stage of STAGES) {
     const col = on.filter((e) => e.stage === stage);

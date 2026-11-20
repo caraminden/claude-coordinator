@@ -943,9 +943,12 @@ const DEPLOY_CONTRAPTION = {
 
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
+/** The fields of a review entry the Taskmaster sets besides its text: only those passed, so a save never blanks the rest (the store checks them). */
+export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['kind', 'name', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
+
 const REVIEW_SET = {
   name: 'review_set',
-  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial. After each round you run of an entry (a critic, a reviewer, a referee), pass slug and run with the round and its verdict: the page's dots and pass rate come from these, and a blocking entry's last fail or ask on you holds your ship until a later round passes.",
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster can also set an entry's kind (critic, reviewer, checker, referee, teacher, audit), name, model, effort, panel, on_fail (hand-offs: [{after: 2, to: art-professor}, {after: 3, to: person}]; `to` is professor, person or another entry's slug; an empty list clears them) and context ({guides: [{label, href}], paths, verdicts, requester}, whole: it replaces the old one), on add or on a save, with the same checks as the page; each save is a version in History. A teacher entry holds a scheme's own rules for fixes: a critic whose on_fail names it hands a stubborn fail to citadel:professor with that entry's text (kind teacher, extends the kit's teacher starter). A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial. After each round you run of an entry (a critic, a reviewer, a referee), pass slug and run with the round and its verdict: the page's dots and pass rate come from these, and a blocking entry's last fail or ask on you holds your ship until a later round passes.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -959,6 +962,19 @@ const REVIEW_SET = {
         type: 'object', description: "A calibration run's counts, sent on their own: hits out of notes (the person's notes the critic caught), false_alarms out of controls (work they passed that it failed), and the model it ran on",
         properties: { hits: { type: 'integer' }, notes: { type: 'integer' }, false_alarms: { type: 'integer' }, controls: { type: 'integer' }, model: { type: 'string' } },
         required: ['hits', 'notes', 'false_alarms', 'controls'],
+      },
+      kind: { type: 'string', enum: ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'], description: 'Taskmaster only: what the entry is. A teacher is handed a critic\'s stubborn fails by on_fail' },
+      name: { type: 'string', description: 'Taskmaster only: the name the page shows, 1 to 80 characters' },
+      model: { type: ['string', 'null'], description: 'Taskmaster only: opus, sonnet or haiku; empty for the format\'s default' },
+      effort: { type: ['string', 'null'], description: 'Taskmaster only: low, medium or high; empty for the format\'s default' },
+      panel: { type: ['string', 'null'], description: 'Taskmaster only: a panel name (up to 40 characters); empty for none' },
+      on_fail: {
+        type: ['array', 'null'], description: 'Taskmaster only: hand-offs after failed rounds, up to 4, rising: [{after: 2, to: "art-teacher"}, {after: 3, to: "person"}]. `to` is professor, person, or the slug of another entry in this scheme. [] clears them',
+        items: { type: 'object', properties: { after: { type: 'integer' }, to: { type: 'string' } }, required: ['after', 'to'] },
+      },
+      context: {
+        type: 'object', description: 'Taskmaster only: what the critic reads beside its rubric, whole (it replaces the old one): guides [{label, href}] (links to docs), paths (repo paths), verdicts and requester (true or false)',
+        properties: { guides: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, href: { type: 'string' } }, required: ['label', 'href'] } }, paths: { type: 'array', items: { type: 'string' } }, verdicts: { type: 'boolean' }, requester: { type: 'boolean' } },
       },
       add: { type: 'boolean', description: 'Taskmaster only: add a new entry (with extends, or a new slug)' },
       extends: { type: 'string', description: 'With add: the kit starter it builds on, e.g. ui-screenshots' },
@@ -1928,7 +1944,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'review_set': {
       if (args.add) {
-        const e = await call('POST', `/api/projects/${PROJECT}/reviews`, { slug: args.slug, extends: args.extends, when: args.when, body: args.body });
+        const e = await call('POST', `/api/projects/${PROJECT}/reviews`, { slug: args.slug, extends: args.extends, when: args.when, body: args.body, ...reviewFields(args) });
         return `Added ${e.slug} (on trial): ${e.when}.`;
       }
       if (!args.slug) {
@@ -1944,14 +1960,15 @@ async function runTool(name: string, args: any): Promise<string> {
         const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
         return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
       }
-      if (args.body === undefined && args.enabled === undefined && args.trial === undefined) {
+      const extra = reviewFields(args);
+      if (args.body === undefined && args.enabled === undefined && args.trial === undefined && !Object.keys(extra).length) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
         const e = entries.find((x: any) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
         if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
         return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
       }
-      const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial });
+      const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { body: args.body, version: args.version, note: args.note, enabled: args.enabled, trial: args.trial, ...extra });
       return `Saved ${e.slug} as version ${e.version}.`;
     }
     case 'record_verdict': {

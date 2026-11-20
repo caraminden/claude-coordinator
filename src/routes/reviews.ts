@@ -123,6 +123,9 @@ export const reviewRoutes: Route[] = [
       const f = fieldsFrom(body);
       const starter = f.extends ? loadStarters().find((s) => s.slug === f.extends) : null;
       if (f.extends && !starter) throw new HttpError(400, `The kit has no starter named ${f.extends}`);
+      // A starter that names its kind (the teacher) sets it unless the request does.
+      const starterKind = starter?.text.match(/^kind:\s*(\w+)\s*$/m)?.[1];
+      if (starterKind && f.kind === undefined) f.kind = starterKind;
       const slug = f.slug ?? starter?.slug;
       if (!slug) throw new HttpError(400, 'Give it a slug, the name its file goes by (kebab-case, like ui-screenshots)');
       let triggers = f.triggers;

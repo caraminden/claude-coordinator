@@ -44,6 +44,7 @@ moved into the set once (Build 4) and leave the repos; a Rubrics line is obsolet
 | `trial` | no | `true` | Set by Citadel on a new entry (Q12, Build 4): it runs as `gate: advisory` whatever its `gate` says, until a calibration passes (more than half the notes hit, no false alarms on controls) or a person marks it good. |
 | `panel` | no | a name | Set on the page: the rubrics of a column with the same panel judge the same items at once, and the panel's referee (kind referee) merges their verdicts (SKILL.md, "Order, panels and hand-offs"). |
 | `on_fail` | no | `<to> after <n> fails, ...` | Set on the page: where an item goes after that many failed rounds: `professor`, `person`, or another entry's slug. Default for a critic: `professor after 2 fails, person after 3`. |
+| `kind` | no | `teacher` | Written by Citadel for an entry of kind teacher (the kit's `teacher` starter): it judges nothing and has no `when:`; a critic's `on_fail` names it and `citadel:critique` step 5 gives it to `citadel:professor` as the scheme's rules for fixes. |
 | `calibrated` | no | `<date>, <model>: <hits>/<flagged> hits, <false>/<controls> false alarms` | The last blind trial's result ([`calibrate.md`](calibrate.md)). |
 
 Unknown keys are ignored. Values are read by an agent, but keep the frontmatter valid YAML: one line

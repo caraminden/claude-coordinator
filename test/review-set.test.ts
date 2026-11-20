@@ -409,3 +409,19 @@ test("the describe agent may change a scheme entry's gate, panel and hand-offs, 
   const moved = readProposals(JSON.stringify({ note: 'ok', edits: [{ slug: 'ui', settings: { position: 7 } }] }), set.list(3)).proposals[0];
   assert.deepEqual([moved.settings, moved.settings_before], [{ position: 7 }, { position: set.get(3, 'ui')!.position }], 'and its run order');
 });
+
+test('a critic hands a second fail to its teacher entry: the file keeps the step, the teacher says kind and has no column', () => {
+  const { set } = fresh();
+  set.create(9, { slug: 'art-teacher', name: 'Art teacher', kind: 'teacher', body: '# Fixes\n\nChange the generator, never the PNG.', triggers: {}, stage: 'work' }, 'Cara');
+  set.create(9, { slug: 'art', name: 'Art', kind: 'critic', triggers: { creative: 'new art' }, stage: 'work', on_fail: [{ after: 2, to: 'art-teacher' }, { after: 3, to: 'person' }] }, 'Cara');
+  const dir = join(root, 'teacher-set');
+  assert.equal(renderSet(set.list(9), dir), 2);
+  assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: art-teacher after 2 fails, person after 3 fails\n/);
+  const t = readFileSync(join(dir, 'art-teacher.md'), 'utf8');
+  assert.match(t, /^---\nname: art-teacher\nkind: teacher\nwhen: only when a critic hands off to it\n/);
+  assert.equal(orderLine(set.list(9)), '', 'a teacher is in no column order');
+  // Switched off, the step drops out instead of sending the critic nowhere.
+  set.save(9, 'art-teacher', { enabled: false }, 'Cara', 'off');
+  renderSet(set.list(9), dir);
+  assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: person after 3 fails\n/);
+});

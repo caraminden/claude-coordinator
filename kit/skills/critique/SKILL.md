@@ -91,8 +91,9 @@ running every rubric at once:
   that merged verdict is the one step 4 acts on. A panel costs one model call per judge plus one.
   A panel with no referee: each judge's verdict stands on its own.
 - **Hand-offs** (`on_fail:`): after that many failed rounds an item goes to the step it names:
-  `professor` (step 5), `person` (an ask card, as step 6 ends), or another entry's slug, whose
-  rubric judges the item's next round in its place. With no `on_fail:`, a critic hands off as
+  `professor` (step 5), `person` (an ask card, as step 6 ends), a **teacher** entry's slug (its
+  file says `kind: teacher`: step 5, with that entry's text as the scheme's rules for fixes), or
+  another entry's slug, whose rubric judges the item's next round in its place. With no `on_fail:`, a critic hands off as
   `professor after 2 fails, person after 3`: step 5 and `max_rounds`. An `on_fail:` replaces
   steps 5 and 6's own triggers: the professor comes in only where it names `professor`, and a
   `person` step is the last round (with none, `max_rounds` still is).
@@ -124,7 +125,10 @@ its second round. A plain blocker on a first fail is yours to fix.
    write it in `critic.md` with the fix, and skip the professor for that round. The skip holds only if the
    next round passes. A fail on that round calls the professor, with your named cause as one more
    thing it checks.
-2. **Brief it:** "Follow `<kit>/agents/professor.md`." with the cause quoted, per item the brief,
+2. **Brief it:** "Follow `<kit>/agents/professor.md`." When the rubric's `on_fail:` step that fired
+   names a teacher entry, add "Teacher rubric: `<path of its file in the review set>`": the
+   professor reads it before the fix and keeps to what it allows. A teacher on trial still teaches
+   (it only advises). With the cause quoted, per item the brief,
    every critic report so far and your line on what changed between them, the latest artifacts and
    checks' output, the source paths that made it, the rubric, its `playbook:` and `<kit>`. At most 3
    items a call; when the next round is the last, say so.

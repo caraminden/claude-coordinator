@@ -25,13 +25,16 @@ fine. No checkout, switch, stash, reset, commit or push. The author applies what
   rounds, the latest artifacts (and the round before's, when kept), with the `checks:` output.
 - **The source:** the files and functions that made each item.
 - **The rubric's path,** its `playbook:` path if it has one, and `<kit>` when it extends a starter.
+- **A teacher rubric's path,** when the scheme has one (`kind: teacher`): its rules for what a fix
+  may touch, what a person already approved and which fixes were sent back. It binds you like the
+  rubric: a fix it forbids is no fix.
 - **"The next round is the last",** when the brief says so.
 
 Missing source or missing critic reports: say so and stop. Advice without them is a guess.
 
 ## Before you look
 
-Read the rubric whole (starter first) and the playbook. A fix that breaks a Blocker or a person's
+Read the rubric whole (starter first), the teacher rubric if you got one, and the playbook. A fix that breaks a Blocker or a person's
 Note is no fix.
 
 ## How to work

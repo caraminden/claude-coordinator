@@ -84,8 +84,8 @@ test("a scheme's own registered rule is checked on its saves, outside its home s
     assert.match(lunch[0].why, /one home is the Lunch section/);
     // In its own home section, the same words are the rule itself.
     assert.deepEqual(check('## Lunch\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.'), []);
-    // A Citadel-wide save repeating it is still a repeat: its home is the scheme's.
-    assert.equal(check('## Lunch\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.', 'citadel').length, 1);
+    // A scheme's list is read on saves of that scheme's own text only, not of the Citadel-wide text.
+    assert.deepEqual(check('## Food\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.', 'citadel'), []);
 
     // A repo home: its phrases, and a run of words from the home file itself; the bad entries are skipped, not thrown.
     const art = check('## Art\n\nDraw it in the dusk palette with a deep plum outline.\n\nRemember every sprite uses the sixteen colour dusk palette, outlined in deep plum, with no pure black.');

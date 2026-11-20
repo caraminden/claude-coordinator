@@ -54,8 +54,8 @@ export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scop
   const rest = lines.map((l, i) => (touched.has(sectionStart(lines, i + 1)) ? '' : l)).join('\n');
   const other = scope === 'citadel' ? project.instructions ?? '' : store.appInstructions().text;
   const sources = settingsSources({ root: ROOT, citadelUrl: store.getProject(GLOBAL_OWNER)?.repo_url ?? null, pid: project.id, repo: project.repo_dir, repoUrl: project.repo_url, scope, text: rest, other });
-  // The shared rules, then the scheme's own (#1211), read fresh on every save.
-  return overlapsFor(news, sources, inSettingsHome(scope, text), [...RULE_HOMES, ...schemeRules(project.repo_dir)]);
+  // The shared rules, and on a save of a scheme's own text its own (#1211), read fresh each time.
+  return overlapsFor(news, sources, inSettingsHome(scope, text), scope === 'scheme' ? [...RULE_HOMES, ...schemeRules(project.repo_dir)] : RULE_HOMES);
 }
 
 /** The line of the heading a 1-based line sits under (0 above the first heading). */

@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, pacificDay, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -247,7 +247,7 @@ function closedKey(t) {
 function fillClosed(closed) {
   const rows = [];
   if (view.showClosed) {
-    const day = pacificDay();
+    const day = todayPacific();
     const share = weekShare(1);
     if (closedUsage !== usage || closedDay !== day || closedShare !== share) closedRows.clear();
     closedShare = share;

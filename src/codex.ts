@@ -193,7 +193,7 @@ export function codexResetAt(u: CodexUsage | null | undefined): number | null {
 export function saveGenerated(item: any, to: string, overwrite = true): void {
   if (typeof item?.savedPath === 'string' && existsSync(item.savedPath)) return copyFileSync(item.savedPath, to, overwrite ? 0 : constants.COPYFILE_EXCL);
   if (typeof item?.result === 'string' && item.result) return writeFileSync(to, Buffer.from(item.result, 'base64'), { flag: overwrite ? 'w' : 'wx' });
-  const at = item?.failure?.resetsAt ? ` until ${new Date(item.failure.resetsAt * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}` : '';
+  const at = item?.failure?.resetsAt ? ` until ${new Date(item.failure.resetsAt * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}` : ''; // pacific-ok: codex.ts is pinned alone into a turn folder, so it imports no other src file
   if (item?.failure?.type === 'usageLimitExceeded') throw new Error(`Codex's image generation limit is used up${at}`);
   // An item with only a fileId (Codex's attachment store) has no bytes here to copy.
   throw new Error(item?.status === 'completed' ? 'Codex gave no image file' : `image generation ${item?.status ?? 'failed'}`);

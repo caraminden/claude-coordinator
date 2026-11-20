@@ -3,7 +3,7 @@
 // mockups/desktop-gpu-jobs/gpu-jobs-views-takes.html): the card follows the bottom of the chat, its log shows
 // nothing until opened, and the Machines page lists jobs as compact rows that open into the card, with a progress
 // bar on the running one. The server's routes are in src/routes/jobs.ts; live views come as `machine_job` events.
-import { account, api, formatSize, h, sharedHref } from './base.js';
+import { account, api, formatSize, h, sharedHref, pacificClock, pacificStamp, pacificZone, pacificMinutes } from './base.js';
 import { optimistic } from './ui/optimistic.js';
 
 /** The newest view of each job this page has seen. */
@@ -28,11 +28,11 @@ const isOwner = (v) => !!account && v.decider_id != null && account.id === v.dec
 export function pacific(ms) {
   if (!ms) return '';
   if (Math.abs(Date.now() - ms) > 12 * 3600e3) return pacificDay(ms);
-  return new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  return pacificClock(ms);
 }
 /** A day and time, for a job list row: "Nov 16, 11:00 PM PST". */
 export function pacificDay(ms) {
-  return ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '';
+  return ms ? pacificStamp(ms) : '';
 }
 export function duration(s) {
   s = Math.max(0, Math.round(s ?? 0));
@@ -312,11 +312,6 @@ export async function loadTicketJobs(ticketId) {
 
 /** Each machine's section, kept across the machine list's redraws so open rows and a typed time survive them. */
 const sections = new Map();
-/** Pacific minutes since midnight now, for "Jobs may run until <time>". */
-function pacificMinutes(ms) {
-  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
-  return Number(p.find((x) => x.type === 'hour').value) * 60 + Number(p.find((x) => x.type === 'minute').value);
-}
 /** The next time the Pacific clock reads hh:mm. shortcut: off by an hour across a DST change, which lands at 2 AM. */
 export function nextPacific(hhmm, now = Date.now()) {
   const want = Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
@@ -375,7 +370,7 @@ function newSection(machineId) {
     const typing = document.activeElement;
     if (typing?.type === 'time' && settingsEl.contains(typing) && !force) return;
     const set = st.settings;
-    const zone = new Date().toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'short' }).split(' ').pop();
+    const zone = pacificZone();
     const time = (key) => {
       const input = h('input', { type: 'time', value: set[key], 'aria-label': key === 'start' ? 'Job hours start' : 'Job hours end' });
       input.onchange = () => input.value && input.value !== st.settings[key] && patch({ [key]: input.value }, 'change its job hours');

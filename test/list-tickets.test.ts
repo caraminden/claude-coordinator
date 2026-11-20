@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
-import { pacificDay } from '../src/contraption-errors.ts';
+import { pacificDay } from '../src/pacific.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';

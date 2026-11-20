@@ -5,6 +5,16 @@ export const ZONE = 'America/Los_Angeles';
 /** `ms` as "Nov 14, 06:30 PST" (24-hour). */
 export const pacific = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 
+/** `ms` as its Pacific day, "2026-11-16" (en-CA). */
+const DAY = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }); // made once: inbox calls it per row
+export const pacificDay = (ms: number) => DAY.format(ms);
+
+/** `ms` as "Nov 14, 6:30 AM PST" (12-hour): the stamp in text people read. */
+export const pacificStamp = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+/** `ms` as "Nov 14, 2026, 6:30 AM PST": the stamp with its year, for a reset far off. */
+export const pacificStampYear = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
 /** `ms` as "Tue 18 Nov, 09:00 PST": the weekday variant, for times a person sets or is told ahead. */
 export function pacificWeekday(ms: number): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(ms).map((x) => [x.type, x.value]));

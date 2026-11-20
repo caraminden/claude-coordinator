@@ -8,7 +8,7 @@ import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
-import { pacificDay } from './contraption-errors.ts';
+import { pacificDay } from './pacific.ts';
 import { join } from 'node:path';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';

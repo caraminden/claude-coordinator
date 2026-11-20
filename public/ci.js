@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-import { ago, api, h, view } from './base.js';
+import { ago, api, h, view, pacificStamp } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -16,8 +16,7 @@ import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
 
 const REFRESH_MS = 30_000;
-const LA = { timeZone: 'America/Los_Angeles', timeZoneName: 'short' };
-const when = (t) => new Date(t).toLocaleString('en-US', { ...LA, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const when = pacificStamp;
 const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
 
 /** A scheme's state: down (something rings), fix (quiet items), ready (all clear), asleep (no read for 20 min). */

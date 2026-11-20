@@ -11,6 +11,7 @@ import { memoryFolders, type MemoryLogin } from './memory-files.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import type { App } from './http.ts';
 import type { Project } from './db.ts';
+import { pacificDay } from './pacific.ts';
 
 /** The server's own checkout, whose kit/ every scheme loads. */
 const ROOT = join(import.meta.dirname, '..');
@@ -82,7 +83,7 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     }
   }
   // A pick someone wrote a note on is a decision too (#1150, Josh 2026-11-20: "Two pages; noted picks feed it").
-  const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const day = pacificDay;
   for (const r of pid === GLOBAL_OWNER ? [] : store.ideas.list(pid)) {
     if (!r.words || !r.decided_by || !r.decided_at) continue;
     const text = `- ${r.title}: ${r.pick_label ?? r.pick ?? r.status} (${r.decided_by}, ${day(r.decided_at)}: "${r.words.replace(/"/g, "'")}")`;

@@ -1,13 +1,12 @@
 // The CI page's Test health tab (#1063, Josh 2026-11-19: "Add a button to start a minion to fix up flaky tests"): fast mode's state and
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
-import { ago, api, h } from './base.js';
+import { ago, api, h, pacificStamp } from './base.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 import { openDialog } from './ui/dialog.js';
 
-const LA = { timeZone: 'America/Los_Angeles', timeZoneName: 'short' };
-const when = (t) => new Date(t).toLocaleString('en-US', { ...LA, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const when = pacificStamp;
 // state -> [tone, closed word, hue, why]
 const FAST = {
   running: ['info', 'Running', 'running', 'The full check is running on main now.'],

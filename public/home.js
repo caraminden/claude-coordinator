@@ -8,7 +8,7 @@
 // It's drawn at once from the last answer this browser had, then refreshed behind. Rows keep their place for the
 // whole visit: an answered one is ticked off where it was, and one that arrives joins the bottom of its scheme with
 // a "new" tag (no reflow without input).
-import { HOME_LINE, api, h, isCoordinator, jumpHref, me, threadHref, view } from './base.js';
+import { HOME_LINE, api, h, isCoordinator, jumpHref, me, threadHref, view, pacificWeekdayClock } from './base.js';
 import { usage } from './core.js';
 import { mentionMap } from './inbox.js';
 import { emptyCard, schemeHue, schemeTag, statTiles, toneChip } from './look.js';
@@ -220,7 +220,7 @@ function dayLabel(day) {
 
 /** A time as people read it (Pacific, as the rest of Citadel shows it), e.g. "Tue 2:10 PM". */
 function when(at) {
-  return new Date(at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  return pacificWeekdayClock(at);
 }
 
 /** After your answer: once the list has no card left on that chat, open the next row's chat as shown (below it, else the first). */

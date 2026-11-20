@@ -3,7 +3,7 @@
 // ship's stages for a click-through waterfall. Read from `releases` and `contraption_deploys`; shown on the Status page.
 // The nudge: the day a target's p90 passes SLOW_P90_S its scheme's Taskmaster hears, once per day per target.
 import type { Store } from './db.ts';
-import { pacificDay } from './contraption-errors.ts';
+import { pacificDay } from './pacific.ts';
 
 export const SLOW_P90_S = 10 * 60;
 /** Kept per target and day, slowest first: the waterfall's rows. */

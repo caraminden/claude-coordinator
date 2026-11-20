@@ -8,6 +8,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { pacificDay } from './pacific.ts';
 
 export const STATUSES = ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'] as const;
 export type IdeaStatus = (typeof STATUSES)[number];
@@ -487,7 +488,7 @@ export class Ideas {
     const rows = this.staleLater(projectId, now);
     if (!rows.length) return null;
     this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(now));
-    const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const day = pacificDay;
     const lines = rows.slice(0, 30).map((r) => `- ${r.title || r.card}${r.source_number ? ` (from #${r.source_number})` : ''}: Later since ${day(r.decided_at ?? r.created_at)}${r.decided_by ? `, ${r.decided_by}` : ''}${r.words ? `: "${r.words}"` : ''}`);
     return `(nothing to do unless you choose to) ${rows.length === 1 ? 'One idea has' : `${rows.length} ideas have`} sat at Later for over two weeks. Offer them to the members on a card when there's room (start, keep waiting, or skip); the Ideas page (Orders → Ideas) lists them on top.\n${lines.join('\n')}${rows.length > 30 ? `\n…and ${rows.length - 30} more on the page.` : ''}`;
   }

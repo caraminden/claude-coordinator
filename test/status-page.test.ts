@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
-import { pacificDay } from '../src/contraption-errors.ts';
+import { pacificDay } from '../src/pacific.ts';
 import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
 import { APP_ERRORS_WARN, StatusPage, rateTone, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
 

@@ -7,7 +7,7 @@
 // last runs as dots with its first-round pass rate, and the verdicts minions recorded (read-only; Edit by hand removes).
 // At a glance (#1094, Josh's picks 2026-11-19): a headline you read, ghost cards for folders nobody watches, the lenses
 // as one row, the scheme's own repo files in a group, and an Every scheme tab with a row per scheme.
-import { ago, api, h, icon, view } from './base.js';
+import { ago, api, h, icon, view, pacificStamp } from './base.js';
 import { meter, schemeTag, toneChip } from './look.js';
 import { collapseRuns, diffLines } from './plan-diff.js';
 import { optimistic } from './ui/optimistic.js';
@@ -16,7 +16,7 @@ import { toast } from './ui/status.js';
 
 const COLUMNS = [['work', 'While working'], ['ship', 'Before ship'], ['ask', 'On ask'], ['schedule', 'On a schedule']];
 const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
-const pacific = (ms) => new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+const pacific = pacificStamp;
 
 let pageEl = null;
 let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen }

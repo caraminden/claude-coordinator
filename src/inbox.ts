@@ -5,7 +5,7 @@ import { inOrder } from '../public/reorder.js';
 import { openMentions } from './mentions.ts';
 import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
-import { ZONE } from './pacific.ts';
+import { pacificDay } from './pacific.ts';
 
 export interface InboxItem {
   /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'quiet' for a running turn gone quiet (#906), 'loop' for messages the loop guard holds for a person's Continue (#1067), 'mention' for a message that @mentions them (#1149), or 'replies' for one offering one-tap replies in another state. */
@@ -152,8 +152,6 @@ export interface HomeView {
 export const HOME_DAYS = 14;
 
 /** `ms` as its Pacific day, "2026-11-20". */
-const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE });
-const pacificDay = (ms: number) => dayFormat.format(ms);
 
 /** How long Home's 14-day buckets are kept: they are the same for every person, and the page refetches on each burst of news. */
 export const HOME_BUCKETS_MS = 60_000;

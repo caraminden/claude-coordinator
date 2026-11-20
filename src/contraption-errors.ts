@@ -7,7 +7,7 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContraptionErrorRow, ContraptionRow, Store } from './db.ts';
-import { pacific, ZONE } from './pacific.ts';
+import { pacific, pacificDay, ZONE } from './pacific.ts';
 import { redact } from './timer-alerts.ts';
 
 const POLL_MS = 10 * 60_000;
@@ -34,8 +34,6 @@ export interface DigestDeps {
   now?: () => number;
 }
 
-/** `ms` as its Pacific day, 2026-11-16. */
-export const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: ZONE });
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
 /** The first non-empty line, without Claude's <tool_use_error> wrapper. */

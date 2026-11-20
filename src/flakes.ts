@@ -3,6 +3,7 @@
 // flake_events row, and the CI page's Test health tab counts them and offers a minion to fix one.
 
 import { execFile } from 'node:child_process';
+import { pacificStamp } from './pacific.ts';
 
 /** When `file`'s newest commit on main was made (ms), or null when git can't say. A sighting from before it was of the old file (#1219). */
 export function fileChangedAt(repoDir: string, file: string): Promise<number | null> {
@@ -61,7 +62,7 @@ export function cleanRuns(steps: { name?: string; conclusion?: string | null }[]
 
 /** What the "Start a minion" button sends as a new minion's first message. */
 export function flakeBrief(file: string, count: number, details: { at: number; detail: string }[]): { title: string; message: string } {
-  const when = (t: number) => new Date(t).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const when = pacificStamp;
   const outputs = details.length ? details.map((d) => `${when(d.at)}:\n\`\`\`\n${d.detail}\n\`\`\``).join('\n\n') : '(no failing output was kept for it)';
   return {
     title: `Flaky test: ${file}`,

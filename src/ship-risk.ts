@@ -2,6 +2,7 @@
 // LandHandoffs posts on a ship (src/land.ts), so this parses that fixed format. Only that format counts: ready notes and
 // run-backs say "high" too.
 import type { Store } from './db.ts';
+import { ZONE } from './pacific.ts';
 
 export type Risk = 'low' | 'medium' | 'high';
 export interface ShipNote { kind: 'shipped' | 'merged'; risk: Risk; go: boolean; pushFailed: boolean }
@@ -19,7 +20,7 @@ export function parseShipNote(text: string): ShipNote | null {
   return { kind: m[1] === 'Merged' ? 'merged' : 'shipped', risk: m[2] as Risk, go: m[3] === ':' && / Go: [^]*?\.( |$)/.test(text), pushFailed };
 }
 
-const PT = 'America/Los_Angeles';
+const PT = ZONE;
 /** The Pacific Monday ('2026-11-16') of the week a moment falls in. */
 export function pacificWeek(ms: number): string {
   const day = new Date(ms).toLocaleDateString('en-CA', { timeZone: PT });

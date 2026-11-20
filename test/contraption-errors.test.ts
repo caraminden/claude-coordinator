@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { errorKey, ErrorDigest, isErrorLine, pacificDay, sampleLine, type JournalEntry } from '../src/contraption-errors.ts';
+import { errorKey, ErrorDigest, isErrorLine, sampleLine, type JournalEntry } from '../src/contraption-errors.ts';
+import { pacificDay } from '../src/pacific.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 

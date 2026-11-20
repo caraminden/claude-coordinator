@@ -1,6 +1,6 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
-import { isCoordinator, me, STATES, view } from './base.js';
+import { isCoordinator, me, STATES, view, pacificClock, pacificWeekdayClock } from './base.js';
 import { waitFam, waitShows, waitWords } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
@@ -151,7 +151,7 @@ function limitState(t, waited, usage, now) {
 
 /** "11:24 AM PST", with the day once it's over 20 hours ago: every clock time people read is Pacific. */
 export function pacific(ms, now = Date.now()) {
-  return new Date(ms).toLocaleTimeString('en-US', { ...(now - ms > 20 * 3_600_000 && { weekday: 'short' }), hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles', timeZoneName: 'short' });
+  return (now - ms > 20 * 3_600_000 ? pacificWeekdayClock : pacificClock)(ms);
 }
 
 /** "under a minute", "14m", "1h 5m", "2d 3h": a span in the popover's words. */

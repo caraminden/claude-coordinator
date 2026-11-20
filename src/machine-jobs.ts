@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, MachineJob, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
+import { ZONE } from './pacific.ts';
 
 export const JOB_STATES = ['needs-go', 'queued', 'starting', 'running', 'paused', 'uploading', 'done', 'failed', 'stopped', 'refused'] as const;
 export type JobState = (typeof JOB_STATES)[number];
@@ -42,7 +43,6 @@ const LIMIT_GRACE_S = 120;
 /** A report gap longer than this isn't counted as running time (the agent was offline or stalled). */
 const MAX_REPORT_GAP_S = 30;
 const LOG_TAIL = 4096;
-const ZONE = 'America/Los_Angeles';
 
 /** A job kind: the recipe a go is for. */
 export interface JobKind {

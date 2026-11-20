@@ -2,13 +2,13 @@
 // this scheme's Taskmaster and minions keep, read and written in place (src/memory-files.ts). Not search over chats.
 // Only MEMORY.md loads at a start (its first 200 lines or 25 KB); notes are read when needed, so a note the index
 // doesn't list, or one whose recheck date passed, is what "needs tidying" means here. A closed minion it names is history.
-import { api, h, icon, view } from './base.js';
+import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsSection, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 import { emptyCard, meter, showFirst, statTiles, toneChip } from './look.js';
 
 const kb = (b) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`);
-const day = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+const day = pacificDate;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** Claude Code's load limits for MEMORY.md (code.claude.com/docs/en/memory). */
 const INDEX_LINES = 200;

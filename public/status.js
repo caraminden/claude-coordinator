@@ -3,14 +3,13 @@
 // tiles on the right, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
 // CI's opens it, its dot the worst verdict it shows.
-import { ago, api, h, view } from './base.js';
+import { ago, api, h, view, pacificStamp, pacificIso, pacificClockBare } from './base.js';
 import { toneChip } from './look.js';
 import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
 
 const REFRESH_MS = 30_000;
-const LA = { timeZone: 'America/Los_Angeles' };
-const when = (t) => new Date(t).toLocaleString('en-US', { ...LA, timeZoneName: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const when = pacificStamp;
 const dayLabel = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
 const DOT = { ok: 'ready', warn: 'fix', bad: 'down' };
 const CHIP = { ok: 'ok', warn: 'warn', bad: 'danger' };
@@ -133,7 +132,7 @@ export function shipChart(t, days, redraw) {
 
 /** That day's ships, slowest first (at most 8), each a bar of its steps; the rest of its time, the steps don't name, is grey. */
 function shipWaterfall(t, day) {
-  const todays = t.ships.filter((s) => new Date(s.at).toLocaleDateString('en-CA', LA) === day).sort((a, b) => b.took - a.took);
+  const todays = t.ships.filter((s) => pacificIso(s.at) === day).sort((a, b) => b.took - a.took);
   const shown = todays.slice(0, 8);
   const order = [...new Set(todays.flatMap((s) => Object.keys(s.stages)))].sort((a, b) => (STAGE_ORDER.indexOf(a) + 1 || 99) - (STAGE_ORDER.indexOf(b) + 1 || 99));
   const step = (name) => Math.min(order.indexOf(name) + 1, 6);
@@ -143,7 +142,7 @@ function shipWaterfall(t, day) {
     const segs = [...order.filter((k) => s.stages[k]).map((k) => [k, s.stages[k], step(k)]), ...(s.took - named > 1 ? [['other', s.took - named, 0]] : [])];
     const bar = h('div', { class: 'st-wbar', role: 'img', 'aria-label': `${secs(s.took)}: ${segs.map(([k, v]) => `${k} ${secs(v)}`).join(', ')}` },
       ...segs.map(([k, v, i]) => { const el = h('i', { class: 'st-seg', 'data-step': i, title: `${k}: ${secs(v)}` }); el.style.setProperty('width', `${(v / top) * 100}%`); return el; }));
-    return h('li', { class: s.took > SLOW_S ? 'slow' : '' }, h('span', { class: 'muted' }, new Date(s.at).toLocaleTimeString('en-US', { ...LA, hour: 'numeric', minute: '2-digit' })), bar, h('b', {}, secs(s.took)));
+    return h('li', { class: s.took > SLOW_S ? 'slow' : '' }, h('span', { class: 'muted' }, pacificClockBare(s.at)), bar, h('b', {}, secs(s.took)));
   };
   return h('div', { class: 'st-water' },
     h('div', { class: 'st-water-head' }, h('b', {}, dayLabel(day)), h('span', { class: 'muted' }, todays.length ? `${plural(todays.length, 'ship')}, slowest first` : 'No ships that day')),

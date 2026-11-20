@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
-import { pacificDay } from './contraption-errors.ts';
+import { pacificDay } from './pacific.ts';
 import { landPhase } from './land.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { identity } from './scheme-repo.ts';

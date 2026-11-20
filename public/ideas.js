@@ -1,7 +1,7 @@
 // Orders → Ideas (#1150): the scheme's ideas ledger. Every idea a choices page showed with a Later option, and every
 // handoff in the shared folder, as one row: its pick in the picker's words, its handoff and the minion that built it.
 // Rows fill themselves (src/ideas.ts); a person can fix a status or a minion link by hand, and that sticks.
-import { api, h, icon, view } from './base.js';
+import { api, h, icon, view, pacificDate } from './base.js';
 import { emptyCard, toneChip } from './look.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { toast } from './ui/status.js';
@@ -9,7 +9,7 @@ import { toast } from './ui/status.js';
 const STATUSES = ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'];
 const HUE = { proposed: 'accent', picked: 'running', later: 'waiting', skipped: 'held', started: 'teal', built: 'done', declined: 'held' };
 const TONE = { proposed: 'neutral', picked: 'info', later: 'warn', skipped: 'neutral', started: 'violet', built: 'ok', declined: 'danger' };
-const day = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+const day = pacificDate;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 let status = '';
 const openRows = new Set();

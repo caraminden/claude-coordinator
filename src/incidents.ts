@@ -15,7 +15,7 @@ import { promisify } from 'node:util';
 import type { Store } from './db.ts';
 import type { GhGet } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
-import { pacific } from './pacific.ts';
+import { ZONE, pacific } from './pacific.ts';
 
 const run = promisify(execFile);
 const MIN = 60_000;
@@ -332,7 +332,7 @@ export function render(incident: Open, from: number, to: number, g: Gathered, db
 
 /** The file's name: incident-<Pacific day and time it began>.md. */
 export function fileName(from: number): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(from).map((x) => [x.type, x.value]));
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(from).map((x) => [x.type, x.value]));
   return `incident-${p.year}-${p.month}-${p.day}-${p.hour}${p.minute}.md`;
 }
 

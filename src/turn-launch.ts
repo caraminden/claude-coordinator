@@ -16,6 +16,7 @@ import { SCHEME_REFS_MATCHER } from './scheme-refs.ts';
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { advisedModel } from '../public/model-table.js';
+import { ZONE } from './pacific.ts';
 
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
@@ -234,7 +235,7 @@ const ENV_NAMES = new Set([
 ]);
 // LC_* is the locale; CLAUDE_* and ANTHROPIC_* configure Claude Code itself (its config dir, its login).
 const ENV_PREFIXES = ['LC_', 'CLAUDE_', 'ANTHROPIC_'];
-export const TURN_TZ = 'America/Los_Angeles';
+export const TURN_TZ = ZONE;
 export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(from)) {

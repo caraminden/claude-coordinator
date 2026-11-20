@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectSlug } from './sessions.ts';
+import { pacificDay } from './pacific.ts';
 
 /** One login's memory folder for a scheme. `label` names the login, never an email. */
 export interface MemoryFolder { label: string; dir: string; /** Stable across logins coming and going: what a write names. */ id: string; /** The folder under a config dir, which is how claude_state rows name its files. */ rel: string }
@@ -55,7 +56,6 @@ export function frontmatter(text: string): { name: string; description: string; 
 export const plain = (path: string): boolean => { try { return lstatSync(path).isFile(); } catch { return false; } };
 
 const DAY = 86_400_000;
-const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 /** Minions a note names (#N) and dates that passed or fall in the next 3 days (Pacific), when written after a "recheck/after/until/before/due" word. */
 export function staleFlags(text: string, isClosed: (n: number) => boolean, now = Date.now()): MemoryNote['flags'] {
   const today = pacificDay(now);

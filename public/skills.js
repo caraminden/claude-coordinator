@@ -4,7 +4,7 @@
 // any member can turn one off for the scheme, after one confirm that says what it loses ("a scheme should be able to do
 // whatever it wants"). "New skill" starts a minion with a brief the person edits first; a kit skill only for the
 // Citadel scheme's members, and their Start is the go.
-import { ago, api, h, icon, threadHref, view, me } from './base.js';
+import { ago, api, h, icon, threadHref, view, me, pacificStamp } from './base.js';
 import { gloss } from './help-words.js';
 import { emptyCard, hueRow, meter, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
 import { settingsTabs, settingsTitle } from './settings.js';
@@ -168,7 +168,7 @@ function row(item, max) {
   return el;
 }
 
-const pacific = (ms) => new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+const pacific = pacificStamp;
 
 /** The opened row: what a session sees, three tabs (where it ran, why not more, tune), and the off switch. */
 function fill(item, body) {

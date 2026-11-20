@@ -13,7 +13,7 @@ import { readAgentFiles } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { inviteHash } from '../src/auth.ts';
-import { pacificDay } from '../src/contraption-errors.ts';
+import { pacificDay } from '../src/pacific.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';

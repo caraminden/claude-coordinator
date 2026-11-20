@@ -4,7 +4,7 @@
 // under their own DATA_DIR/backups/<day>/ (the #828 convention, before 04:00 PST).
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { pacificDay } from './contraption-errors.ts';
+import { pacificDay } from './pacific.ts';
 
 const HOUR = 3_600_000;
 /** A database backup older than this missed a night (the job runs every 24 h). */

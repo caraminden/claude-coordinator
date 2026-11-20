@@ -19,7 +19,7 @@ import { githubRepo } from './github.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
-import { pacificWeekday } from './pacific.ts';
+import { ZONE, pacificWeekday } from './pacific.ts';
 
 const run = promisify(execFile);
 /** A PR lookup's answer: tests' stand-ins answer at once. */
@@ -656,7 +656,7 @@ export function parseWakeTime(text: string): number {
   if (m[7]) return m[7].toUpperCase() === 'Z' ? local : local - (m[7][0] === '-' ? -1 : 1) * (Number(m[7].slice(1, 3)) * 60 + Number(m[7].slice(-2))) * 60_000;
   // Pacific: guess the zone's offset at that instant, then correct once (the guess can sit across a DST change).
   const offset = (t: number) => {
-    const z = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' }).formatToParts(t).find((x) => x.type === 'timeZoneName')!.value; // "GMT-08:00"
+    const z = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, timeZoneName: 'longOffset' }).formatToParts(t).find((x) => x.type === 'timeZoneName')!.value; // "GMT-08:00"
     const [, sign, hh, mm] = /GMT([+-])(\d\d):(\d\d)/.exec(z)!;
     return (sign === '-' ? -1 : 1) * (Number(hh) * 60 + Number(mm)) * 60_000;
   };

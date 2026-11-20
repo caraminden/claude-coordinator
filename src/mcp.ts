@@ -37,6 +37,7 @@ const MSG = msgFromEnv(process.env.COORDINATOR_MSG);
 const COLD = (who: string) => coldToolText(MSG, who);
 import { NEEDS, NEED_LINES } from './needs.ts';
 import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
+import { pacificDay, pacificStamp } from './pacific.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
 const URGENT = { type: 'boolean', description: 'true: wake a cold recipient (idle over ' + MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
@@ -664,7 +665,7 @@ const TOOLS = [
   {
     name: 'schedule_minion',
     description:
-      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, under Orders → Schedules. With min_minions set, a due slot is skipped at no cost (no minion, no note) unless that many minions were made since the last real run, so the cron says how often it may check and the gate says whether it's worth a run. A one-off (a dated cron such as a read-back) sets once, or its date comes round again next year.",
+      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, under Orders → Schedules. With min_minions set, a due slot is skipped at no cost (no minion, no note) unless that many minions were made since the last real run, so the cron says how often it may check and the gate says whether it's worth a run. A one-off (a dated cron such as a read-back) sets once, or its date comes round again next year.", // pacific-ok: prose in the tool description
     inputSchema: {
       type: 'object',
       properties: {
@@ -1175,7 +1176,7 @@ const CONTRAPTION_TURNS = {
 };
 const AUDIT_CUT = 400;
 function turnText(t: any, whole: boolean): string {
-  const at = new Date(t.at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const at = pacificStamp(t.at);
   const verdict = t.verdict === 'pass' ? 'passed' : t.verdict === 'fallback' ? 'fell back' : 'no verdict';
   const head = [`Turn ${t.id}`, t.contraption, `for ${t.person ?? 'someone removed'}`, at, t.model, t.blind && 'blind', t.outcome && t.outcome !== 'end' && t.outcome, verdict + (t.verdict_reason ? `: ${t.verdict_reason}` : '')];
   const text = (label: string, v: string) => `${label}: ${whole || v.length <= AUDIT_CUT ? v : `${v.slice(0, AUDIT_CUT)}… (${v.length} characters: turn ${t.id} for all)`}`;
@@ -1401,7 +1402,7 @@ function memoryText(hits: any[]): string {
 /** search_minions' answer: a header line per minion or handoff, then its matching text and the files it wrote. */
 function pastMinionsText(hits: any[]): string {
   if (!hits.length) return 'No closed minion or handoff matches. Fewer words, or another word for it, may find one.';
-  const day = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const day = pacificDay;
   return hits.map((h) => {
     if (h.kind === 'handoff') return `Handoff ${h.name} · changed ${day(h.mtime)}\n${h.snippet}`;
     const files = h.files ? h.files.split('\n') : [];
@@ -1411,7 +1412,7 @@ function pastMinionsText(hits: any[]): string {
 
 /** The ideas tool's answer: a count line, then one line per row. */
 function ideasText(r: { ideas: any[]; counts: Record<string, number>; total: number; waiting: number[] }, limit: number): string {
-  const day = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) : '');
+  const day = (ms: number | null) => (ms ? pacificDay(ms) : '');
   const head = `${r.total} ideas: ${Object.entries(r.counts).filter(([, n]) => n).map(([s, n]) => `${n} ${s}`).join(', ') || 'none yet'}. Showing ${Math.min(limit, r.ideas.length)} of ${r.ideas.length}.${r.waiting.length ? ` ${r.waiting.length} at Later over two weeks.` : ''}`;
   const rows = r.ideas.slice(0, limit).map((i) => [
     `- [${i.id}] ${i.title || i.card} · ${i.status}${i.status_manual ? ' (by hand)' : ''}`,

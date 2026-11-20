@@ -1,12 +1,12 @@
 // Orders → Decisions (#1064): every dated, quoted decision, parsed live from where it is written (src/decisions.ts).
 // Read-only: each row links to its source, where editing stays. A reversed decision links to the one that replaced it,
 // and lists the copies still saying the old one, with a button that starts a minion to clean them up.
-import { api, h, icon, view } from './base.js';
+import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { toast } from './ui/status.js';
 
 const SCOPES = [['scheme', 'This scheme'], ['citadel', 'Citadel-wide'], ['all', 'All']];
-const day = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+const day = pacificDate;
 const external = (href) => /^https?:/.test(href);
 let scope = 'scheme';
 const openRows = new Set();

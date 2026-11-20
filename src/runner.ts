@@ -56,7 +56,7 @@ import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chat
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
-import { clockTime, parseResetTime } from './pacific.ts';
+import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -1081,7 +1081,7 @@ export class Runner {
   private dailyCleanupNote(projectId: number, now: number, log: { removed: string[]; kept: string[]; bytes: number }) {
     const coordinator = this.store.getOverlord(projectId);
     if (!coordinator) return;
-    const day = new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const day = pacificDay(now);
     const key = `worktree-cleanup-note:${projectId}`;
     const saved = this.store.getSetting<{ day: string; event: number; removed: string[]; kept: string[]; bytes: number }>(key);
     const total = saved && saved.day === day ? saved : { day, event: 0, removed: [], kept: [], bytes: 0 };

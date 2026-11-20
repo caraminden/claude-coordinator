@@ -253,11 +253,32 @@ export function dismissedWhen(ms) {
 const PT = { timeZone: 'America/Los_Angeles' };
 const DAY = new Intl.DateTimeFormat('en-CA', PT);
 /** Today's Pacific date: a dismissed row's stamp changes words when it changes. */
-export const pacificDay = () => DAY.format(Date.now());
+export const todayPacific = () => DAY.format(Date.now());
 const TIME = new Intl.DateTimeFormat('en-US', { ...PT, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 const DATE = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric' });
 const DATE_YEAR = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric', year: 'numeric' });
 const FULL = new Intl.DateTimeFormat('en-US', { ...PT, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+// The one home of Pacific formats on the front end (test/one-pacific.test.ts keeps it that way). Each variant keeps the look its page had.
+/** `ms` as its Pacific day, "2026-11-16". */
+export const pacificIso = (ms) => DAY.format(ms);
+/** `ms` as "Nov 16" (a "YYYY-MM-DD" string is read as noon UTC, so it keeps its own day). */
+export const pacificDate = (ms) => (typeof ms === 'string' ? new Date(`${ms}T12:00:00Z`) : new Date(ms)).toLocaleDateString('en-US', { ...PT, month: 'short', day: 'numeric' });
+/** `ms` as "Nov 16, 11:00 PM PST". */
+export const pacificStamp = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+/** `ms` as "11:00 PM PST". */
+export const pacificClock = (ms) => new Date(ms).toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+/** `ms` as "11:00 PM", the zone left off for a list whose header names it. */
+export const pacificClockBare = (ms) => new Date(ms).toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' });
+/** `ms` as "Mon, 11:30 PM PST". */
+export const pacificWeekdayClock = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+/** The zone's short name right now, "PST" or "PDT". */
+export const pacificZone = () => new Date().toLocaleTimeString('en-US', { ...PT, timeZoneName: 'short' }).split(' ').pop();
+/** Pacific minutes since midnight at `ms`. */
+export function pacificMinutes(ms) {
+  const p = new Intl.DateTimeFormat('en-US', { ...PT, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
+  return Number(p.find((x) => x.type === 'hour').value) * 60 + Number(p.find((x) => x.type === 'minute').value);
+}
 
 // ---------- files threads show ----------
 

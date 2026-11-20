@@ -9,6 +9,8 @@
 // (the page's own EventSource handler takes them, so every redraw they cause is the real one). It prints the
 // worst input delay (key pressed to its handler starting), the worst key-to-paint time, and the long tasks
 // (over 50 ms of main thread) with their total. --throttle slows the CPU as a phone's is (4 is a mid phone).
+// At phone widths the key-to-paint figure is not to be trusted: headless Chromium under touch emulation reports
+// one ~10 s entry with no load at all, while frames keep coming every 17 ms; input delay and long tasks hold.
 // --dismissed-open opens the Dismissed list first, so every redraw builds its rows too. --max-delay exits 1 when the worst input delay passes it. --profile saves a CPU profile for DevTools.
 import { writeFileSync } from 'node:fs';
 import { open } from './ui-shot.ts';

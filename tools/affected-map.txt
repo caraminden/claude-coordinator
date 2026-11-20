@@ -30,6 +30,7 @@ public/**: test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-p
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
 src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
+test/ui-contract.json: test/ui-contract.test.ts
 src/previews.ts: test/relative-urls.test.ts
 
 # PowerShell scripts are linted with pwsh.

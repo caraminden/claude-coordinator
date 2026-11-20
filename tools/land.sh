@@ -14,6 +14,8 @@
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).
+#    Then runs the guard tests on the rebased commit (#1240: guards() below), so a break only the branch and main
+#    together make is refused in a second or two, before a CI run is spent on it.
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
 #    (.github/workflows/tests.yml) and this waits for that run; when CI can't answer it says CI FALLBACK and runs
 #    the suite here (tools/run-tests.sh). See "The gate" below. The run here is not in a citadel-heavy slot: the
@@ -56,7 +58,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started). A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started). A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it), and a `guard` line per landing the guard tests refused after its rebase (#1240: the files, its seconds). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -633,6 +635,28 @@ preflight() {
 }
 # A light land deploys without the boot check, so a refusing deploy doesn't hold it up.
 [ "$mode" = into ] || [ "$mode" = full ] || [ "$lane" = light ] || preflight
+
+# The guard tests, on the rebased commit before a CI run is spent (#1240). Each checks the repo's files against what
+# main already holds (a schema number, the prompts' budget, dated one-until rules, the UI contract), so a branch that
+# was clean alone can break one only together with main: the smoke check, on the branch as it was, can't see that, and
+# on 2026-11-20 these four were most of CI's real reds. A second or two. Only the ones the repo has; a feeder's merge
+# into a build (--into) skips them as it skips CI, and its build's own land runs them.
+guards() {
+  local t0=$SECONDS out rc=0 tests=() f
+  for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts; do [ ! -f "$f" ] || tests+=("$f"); done
+  [ -x tools/citadel-test ] && [ ${#tests[@]} -gt 0 ] || return 0
+  land_mark guards guards
+  out=$(CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&-) || rc=$?
+  case $rc in
+    0) say "guard tests passed on $short in $((SECONDS - t0)) s" ;;
+    2 | 124 | 137) say "the guard tests couldn't run or ran past ${LAND_GUARD_TIMEOUT:-120} s (exit $rc), so they don't decide: CI runs them" ;;
+    *)
+      grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: guard: /' >&2
+      retro_log "guard · $label · $(sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$out" | sort -u | paste -sd, -) · $((SECONDS - t0))s"
+      refuse "guard tests failed on $short, the branch rebased onto ${build:-main} (output above), so no CI run was spent and $untouched; $branch keeps the rebased work. Run citadel-test on that file, fix it, commit, then run this again" ;;
+  esac
+}
+[ "$mode" = into ] || [ "$lane" = light ] || guards
 
 # The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
 merge_into() {

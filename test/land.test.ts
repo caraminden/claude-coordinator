@@ -658,6 +658,57 @@ test('a conflict still refuses the same when there is no shared dir or it cannot
 // The smoke check (#1012): before the line, so its refusals never wait in it. Its tests run through the branch's own
 // tools/citadel-test, a stand-in here that notes each run's arguments on a line ("alone" for a failed file's rerun
 // without the always-tests) and answers as told.
+// #1240: the guard tests run on the rebased commit, before a CI run is spent. A stand-in citadel-test fails when
+// GUARD_EXIT is set, and logs what it was asked to run.
+function guardSetup() {
+  const r = setup();
+  const c = ci(r);
+  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+echo "\${CITADEL_TEST_ALWAYS:-} $*" >>"$GUARD_ARGS"
+[ -z "\${GUARD_EXIT:-}" ] || { echo "✖ test/schema-compat.test.ts:40 › each schema number is used once"; echo "  SCHEMA_HISTORY 212 is taken twice"; echo "full output: /somewhere/citadel-test.log"; exit "$GUARD_EXIT"; }
+`);
+  chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
+  // Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
+  for (const g of ['schema-compat', 'ui-contract']) writeFileSync(join(r.source, 'test', `${g}.test.ts`), '');
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'guard tools');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const args = join(r.dir, 'guard-args');
+  const shared = join(r.dir, 'shared');
+  const run = (extra: Record<string, string> = {}) => c.run({ GUARD_ARGS: args, COORDINATOR_SHARED_DIR: shared, LAND_SMOKE: '0', FAKE_CI: 'green', ...extra });
+  const ran = () => (existsSync(args) ? readFileSync(args, 'utf8').trim() : '');
+  return { ...r, c, run, ran, shared };
+}
+
+test('a guard test that fails on the rebased branch refuses before any push to land/*, with its own message, and no CI run is spent (#1240)', () => {
+  const r = guardSetup();
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run({ GUARD_EXIT: '1' });
+  assert.equal(res.status, 1);
+  assert.equal(r.ran(), '/dev/null --timeout 120 test/schema-compat.test.ts test/ui-contract.test.ts', 'only the guards the repo has, without the always-tests');
+  assert.match(res.stderr, /land: guard: ✖ test\/schema-compat\.test\.ts:40 › each schema number is used once\nland: guard:   SCHEMA_HISTORY 212 is taken twice\n/);
+  assert.match(res.stderr, /guard tests failed on \w+, the branch rebased onto main \(output above\), so no CI run was spent and main is untouched/);
+  assert.doesNotMatch(res.stderr, /full output|waiting for CI|CI FALLBACK/);
+  assert.equal(r.c.calls(), '', 'GitHub never asked, nothing pushed');
+  assert.equal(r.c.refs(), '');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.match(landLog(r.shared), /· guard · ticket\/1-x · test\/schema-compat\.test\.ts · \d+s$/m);
+  assert.match(landLog(r.shared), /· timing · ticket\/1-x · .* · refused at guards$/m);
+});
+
+test('guard tests that pass, or cannot decide, let the land go on to CI (#1240)', () => {
+  let r = guardSetup();
+  let res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /guard tests passed on \w+ in \d+ s\n(.*\n)*.*waiting for CI/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  r = guardSetup();
+  res = r.run({ GUARD_EXIT: '124' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /the guard tests couldn't run or ran past 120 s \(exit 124\), so they don't decide: CI runs them/);
+});
+
 function smokeSetup() {
   const r = setup();
   writeFileSync(join(r.source, 'tools', 'always-tests.txt'), '# repo-wide\n\ntest/always.test.ts\n');

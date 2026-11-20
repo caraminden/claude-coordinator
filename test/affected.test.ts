@@ -59,6 +59,18 @@ test("Citadel's map: its tests exist, its globs match something, and every repo-
   }
 });
 
+// #1240: land.sh runs these four on the rebased branch before CI (its guards()), so a minion's `citadel-test --affected`
+// must pick each for the paths that can break it, or the first a minion hears of one is a refused ship.
+test('the guard tests land.sh runs before CI are picked for every path that can break them', () => {
+  const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
+  const picked = (path: string) => lines([path]).run.map((r) => r.test);
+  for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts']) assert.ok(always.includes(t), `${t} runs on every citadel-test run`);
+  for (const path of ['test/anything.test.ts', 'test/land-fixture.ts']) assert.ok(picked(path).includes('test/one-until.test.ts'), path);
+  for (const path of ['public/app.js', 'public/ui/chat.js', 'public/style.css', 'src/theme.ts', 'test/ui-contract.json']) assert.ok(picked(path).includes('test/ui-contract.test.ts'), path);
+  const sh = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
+  for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts', 'test/one-until.test.ts', 'test/ui-contract.test.ts']) assert.ok(sh.includes(t), `land.sh's guards run ${t}`);
+});
+
 test('the command prints which rule picked each test', () => {
   const r = spawnSync('node', ['tools/affected.ts', '--paths', 'src/db.ts', 'NOTES.txt'], { cwd: repo, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);

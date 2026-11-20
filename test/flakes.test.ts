@@ -151,7 +151,7 @@ test('three sightings from before the file\'s newest commit start no minion; thr
   const project = st.createProject('F', null);
   const now = Date.now();
   for (const h of [30, 20, 10]) st.addFlakeEvents(project.id, null, null, now - h * 3_600_000, [{ file: 'test/old.test.ts', source: 'in CI', detail: '' }]);
-  let changed: number | null = now - 5 * 3_600_000; // the file was fixed after all three
+  const changed: number | null = now - 5 * 3_600_000; // the file was fixed after all three
   const started: string[] = [];
   const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [], changedAt: async () => changed,
     start: async (_p, b) => { started.push(b.title); return { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }; } });

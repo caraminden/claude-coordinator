@@ -86,7 +86,7 @@ export function redTrigger(jobs: RedJob[], after: number, now: number): Trigger 
   }
   if (runs.size < RED_COUNT) return null;
   const times = [...runs.values()];
-  return { from: Math.min(...times), last: Math.max(...times), why: `a burst of red CI runs (${runs.size} in ${RED_WINDOW_MS / MIN} min)` };
+  return { from: Math.min(...times), last: Math.max(...times), why: `a burst of red CI runs (${RED_COUNT} or more failed within ${RED_WINDOW_MS / MIN} min)` };
 }
 
 /** One landing in the ship line, as src/waits.ts reads it. */

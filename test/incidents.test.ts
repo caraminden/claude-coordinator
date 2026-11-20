@@ -68,6 +68,7 @@ test('a two-hour storm of red runs makes one timeline and one ask, written once 
   assert.ok(timeline.indexOf('· Deploy ·') < timeline.indexOf('· Journal ·') && timeline.indexOf('· Journal ·') < timeline.indexOf('· CI · tests failed'), 'the timeline is in time order');
   assert.match(text, /- CI runs: 37 runs, 36 failed/);
   assert.match(s.told[0], /^Incident from Nov 17, 01:44 PST to Nov 17, 03:50 PST: a burst of red CI runs/);
+  assert.equal(s.told[0].split('a burst of red CI runs').length, 2, 'one storm gives one reason, not one per new count');
   assert.match(s.told[0], /\/shared\/reports\/incident-2026-11-17-0144\.md/);
   assert.match(s.told[0], /start a research minion/);
   // The storm's reds still in ci-health's window don't reopen it.
@@ -167,7 +168,7 @@ test('redTrigger: five failed runs in half an hour, counted once each, after the
   const four = [j(1, 1), j(2, 2), j(3, 3), j(4, 4), j(4, 4), j(5, 5, 'success'), j(6, 6, 'cancelled')];
   assert.equal(redTrigger(four, 0, T0 + 10 * MIN), null);
   const five = [...four, j(7, 9)];
-  assert.deepEqual(redTrigger(five, 0, T0 + 10 * MIN), { from: T0 + MIN, last: T0 + 9 * MIN, why: 'a burst of red CI runs (5 in 30 min)' });
+  assert.deepEqual(redTrigger(five, 0, T0 + 10 * MIN), { from: T0 + MIN, last: T0 + 9 * MIN, why: 'a burst of red CI runs (5 or more failed within 30 min)' });
   assert.equal(redTrigger(five, T0 + 2 * MIN, T0 + 10 * MIN), null, 'reds an earlier incident covered');
   assert.equal(redTrigger(five, 0, T0 + 40 * MIN), null, 'outside the half hour');
 });

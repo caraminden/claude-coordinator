@@ -382,27 +382,39 @@ fi
 . "$tools/deploy-queue.sh"
 # A rider's side of the ship train (#1166). The landing at the front writes <state>/train/<this ticket>, one line:
 #   riding <front's branch>                     it is testing a train with this ship on it
-#   moving <train commit> <front> <tip it took>  main holds the train and its deploy runs: the branch moves to its
-#                                                train commit now, so the release row the deploy writes lists it
+#   moving <train commit> <front> <tip it took> <front's pid and start>   main holds the train and its deploy runs: the
+#                                                branch moves to its train commit now, so the release row lists it
 #   back <train commit> <tip it took> <front>    the train went without it, or didn't ship: back to waiting, as it was
 #   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped
 #   refused <front> <the red CI run>            the bisect found it the first ship that turned the train red; the
 #                                                failure's last lines follow
-# No file: on no train. <held>: this holds the lock now, so a riding or moving is what a front that was killed left.
+# No file: on no train. <held>: this holds the lock now, so a riding is what a front that was killed left, and so is a
+# moving whose front is gone. A moving whose front still runs is its restart being judged, after deploy.sh let go of
+# the line (#566): this hands the line on and waits for the verdict outside it, and gets back in line if it is back.
 # On landed or refused this ends the landing, as its own ship would have.
 train_dir=$state/train riding=''
 [ "$mode" != land ] || [ "${LAND_TRAIN:-1}" = 0 ] || QUEUE_TRAIN=train # the ticket's 6th line (tools/deploy-queue.sh)
 train_verdict() {
-  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e lines=() at
+  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
   if [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || [ ! -s "$f" ]; then
     [ -z "$riding" ] || { riding=''; queue_phase waiting; say "back in line on its own: the ship train went without $branch"; }
     return 0
   fi
   read -r v a b c d e <"$f" || true
   at=$(git rev-parse HEAD)
-  if [ -n "${1:-}" ]; then # what a front killed mid-train left
+  if [ -n "${1:-}" ]; then
     [ "$v" != riding ] || { rm -f "$f"; riding=''; return 0; }
-    [ "$v" != moving ] || { v=back e=$b b=$c c=$e; }
+    if [ "$v" = moving ] && [ -n "$d" ] && [ "$(queue_proc "$d")" = "$d $e" ]; then
+      [ "$at" != "$c" ] || git reset -q --keep "$a" || true
+      queue_done
+      flock -u 9
+      requeue=1
+      say "waiting outside the line for the restart of $b's ship train to be judged"
+      while read -r v a b c d e 2>/dev/null <"$f" && [ "$v" = moving ] && [ "$(queue_proc "$d")" = "$d $e" ]; do sleep 1; done
+      read -r v a b c d e 2>/dev/null <"$f" || v=''
+      at=$(git rev-parse HEAD)
+    fi
+    [ "$v" != moving ] || { v=back x=$b b=$c c=$x; }
   fi
   case $v in
     riding)
@@ -417,6 +429,7 @@ train_verdict() {
       riding=''
       say "back in line on its own: ${c:-the front}'s ship train went without $branch"
       queue_phase waiting
+      [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
       return 0 ;;
     landed)
       rm -f "$f"
@@ -442,7 +455,9 @@ train_verdict() {
       queue_done
       land_timing 1 || true
       refuse "tests failed in CI on $a's ship train ($b), and its bisect found $branch the first ship that turned it red, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
-    *) rm -f "$f" ;;
+    *)
+      rm -f "$f"
+      [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; } ;;
   esac
 }
 # One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges into a build take a minute,
@@ -894,8 +909,10 @@ train_drop() {
     read -r v x c <"$train_dir/${train_n[$i]}" 2>/dev/null || continue
     case $v in
       riding) rm -f "$train_dir/${train_n[$i]}" ;;
-      moving) # killed after main moved: landed if the deploy got its commit live or its restart queued
-        if grep -qE '^(queued|live) ' "$times" 2>/dev/null; then train_landed "$i"; else train_say "$i" "back ${train_tip[$i]} ${train_was[$i]} $branch"; fi ;;
+      moving) # ended after main moved: landed if main still holds it and the deploy got it live or its restart queued
+        if git -C "$SOURCE" merge-base --is-ancestor "${train_tip[$i]}" main 2>/dev/null && grep -qE '^(queued|live) ' "$times" 2>/dev/null; then
+          train_landed "$i"
+        else train_say "$i" "back ${train_tip[$i]} ${train_was[$i]} $branch"; fi ;;
     esac
   done
   train_tip=("${train_tip[@]:0:${1:-0}}") train_br=("${train_br[@]:0:${1:-0}}") train_n=("${train_n[@]:0:${1:-0}}") train_was=("${train_was[@]:0:${1:-0}}")
@@ -928,9 +945,11 @@ train_build() {
   local QUEUE_OLD=() QUEUE_ORDER_BY=''
   queue_order "$q"
   mkdir -p -m 700 "$train_dir"
+  find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read
   while read -r x t <&4; do # not on stdin, which git and perl below may read
     [ ${#train_n[@]} -lt "$max" ] || break
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
+    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [ "$x" = moving ] && continue # still on the train before this one
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
     [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
     b=${l[2]:-}
@@ -1154,7 +1173,8 @@ say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 if [ ${#train_n[@]} -gt 0 ]; then
   # Each rider moves its own branch (its worktree is its own) within a poll of the line, before the deploy writes the
   # release row, which finds each ship by its branch's tip (src/releases.ts landedIn).
-  for ((i = 0; i < ${#train_n[@]}; i++)); do train_say "$i" "moving ${train_tip[$i]} $branch ${train_was[$i]}"; done
+  me=$(queue_proc $$)
+  for ((i = 0; i < ${#train_n[@]}; i++)); do train_say "$i" "moving ${train_tip[$i]} $branch ${train_was[$i]} $me"; done
   for ((w = 0; w < 20; w++)); do
     late=''
     for ((i = 0; i < ${#train_n[@]}; i++)); do

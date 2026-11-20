@@ -174,3 +174,35 @@ test('with <state>/train-off, every ship lands on its own', async () => {
   assert.equal(l.deployed().length, 4);
   l.done();
 });
+
+// deploy.sh lets go of the line once its restart is queued, while the restart is still judged (#566), so a rider can get
+// the lock before its front has a verdict to give.
+async function restart(rolledBack: boolean) {
+  const l = await line([{}, rolledBack ? { env: { FAKE_ROLLED_BACK: '1' } } : {}, {}, {}], (dir) => ({ FAKE_RESTART_GATE: join(dir, 'restarted') }));
+  const all = l.go();
+  await until('ships 3 and 4 wait outside the line', () => [2, 3].every((i) => /waiting outside the line for the restart of ticket\/2-x's ship train/.test(l.out[i])));
+  writeFileSync(join(l.r.dir, 'restarted'), '');
+  return { l, done: await all };
+}
+
+test("a rider that gets the lock while its train's restart is judged waits outside the line, and ships with it", async () => {
+  const { l, done } = await restart(false);
+  assert.equal(done[1].status, 0, done[1].stderr);
+  shipped(l, done[2], 3, 2, 3);
+  shipped(l, done[3], 4, 2, 3);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4']);
+  assert.equal(l.deployed().length, 2, "ship 1's deploy and the train's");
+  l.done();
+});
+
+test("a train whose restart is rolled back: its riders go back in line and land on their own", async () => {
+  const { l, done } = await restart(true);
+  assert.equal(done[1].status, 1, done[1].stderr);
+  for (const i of [3, 4]) {
+    assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+    assert.match(done[i - 1].stderr, /back in line on its own: ticket\/2-x's ship train went without/);
+    assert.doesNotMatch(done[i - 1].stderr, /shipped in ticket\/2-x's ship train/);
+  }
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4']);
+  l.done();
+});

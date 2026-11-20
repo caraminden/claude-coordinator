@@ -288,7 +288,8 @@
     "COORDINATOR_MEMORY": "1",
     "GH_TOKEN": "gh-1",
     "GIT_AUTHOR_NAME": "Cara",
-    "COORDINATOR_MACHINES": "perigee-godot,caras-laptop"
+    "COORDINATOR_MACHINES": "perigee-godot,caras-laptop",
+    "CITADEL_HEAVY_MACHINES": "caras-laptop=8"
    }
   },
   "settings": {

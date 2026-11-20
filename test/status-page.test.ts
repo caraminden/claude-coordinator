@@ -419,7 +419,7 @@ test('Investigate (#1273): a Citadel tile goes to Citadel, its reason carries it
 });
 
 test('host samples keep the CPU and memory pressure (#1301), null when there was none', () => {
-  const { store } = setup('citadel');
+  const { store } = setup('psi-samples');
   const base = { mem_total: 1, mem_avail: 1, disk_total: 1, disk_free: 1, load1: 0, rss: 1 };
   store.addHostSample({ ...base, at: 1000, cpu_psi: 63, mem_psi: 4 });
   store.addHostSample({ ...base, at: 2000 });

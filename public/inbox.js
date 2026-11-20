@@ -194,7 +194,8 @@ export function renderInbox() {
   // The list stays in place across redraws (renderSidebar redraws on every minion update), keeping its scroll (#668)
   // only the toggle and the rows are new.
   list ??= h('div', { class: 'inbox-rows' });
-  list.replaceChildren(...[...rows.values()].map(inboxRow));
+  // Shut, the rows aren't in the page: they're built when it opens (the toggle redraws).
+  list.replaceChildren(...(open ? [...rows.values()].map(inboxRow) : []));
   if (strip.firstChild) strip.firstChild.replaceWith(toggle);
   else strip.append(toggle);
   if (open && list.parentNode !== strip) strip.append(list);

@@ -10,7 +10,7 @@ import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { composerHint, heldLine, TRACKING } from './heldmsg.js';
 import { renderHeldCard } from './heldcard.js';
-import { rowState, SHIP, workingBy, workingLabel } from './threadstate.js';
+import { rowState, SHIP, standsLines, workingBy, workingLabel } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { jobCard, jobMovedNote } from './jobs.js';
@@ -565,8 +565,10 @@ export function renderTicketHead() {
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
     coord && view.merged?.mode === 'mine' ? tmBanner() : '',
     phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
+    phone ? standsStrip(t, true) : '',
     sub,
-    phone ? '' : view.progressEl);
+    phone ? '' : view.progressEl,
+    phone ? '' : standsStrip(t, false));
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
   syncHeldBrief();
@@ -578,6 +580,46 @@ export function renderTicketHead() {
 
 /** The chat whose ⋯ menu is open on a phone: the head redraws often, so it is kept here. */
 let menuFor = null;
+
+/** The chat whose "where it stands" strip is opened to its three lines on a phone (kept as menuFor is). */
+let standsFor = null;
+
+/**
+ * Where it stands (#1130): three lines on top of a minion's chat, its goal, where it is now and whose move it is, from
+ * threadstate.js standsLines. None on a Taskmaster's chat (Josh, 2026-11-19: "No strip there"). Every line is one
+ * line, cut short with its whole text on hover, so the strip keeps its height and the chat under it never moves when
+ * the state changes. On a phone it is one line, the goal, that opens to three on a tap, and it goes while you read
+ * back up the chat (Josh: "Pinned on desktop only"; standsAway below).
+ */
+function standsStrip(t, phone) {
+  if (isCoordinator(t)) return '';
+  const lines = standsLines(t, usage);
+  const open = !phone || standsFor === t.id;
+  const line = (key, name, l) => h('div', { class: `stands-line f-${l.fam}`, 'data-line': key },
+    h('span', { class: 'stands-key' }, name),
+    l.href ? h('a', { class: 'stands-text', href: l.href, title: l.title || l.text }, l.text, ' →') : h('span', { class: 'stands-text', title: l.title || l.text }, l.text));
+  const toggle = phone ? h('button', { type: 'button', class: 'stands-toggle', 'aria-expanded': String(open), 'aria-label': open ? 'Show one line' : 'Show where it stands', onclick: () => {
+    standsFor = open ? null : t.id;
+    renderTicketHead();
+  } }, open ? '▴' : '▾') : '';
+  return h('div', { class: `stands${phone ? ' phone' : ''}${open ? ' open' : ''}`, 'data-part': 'where-it-stands' },
+    line('goal', 'Goal', lines.goal),
+    open ? line('now', 'Now', lines.now) : '',
+    open ? line('move', 'Your move', lines.move) : '',
+    toggle);
+}
+
+/**
+ * On a phone the strip goes once you scroll up through the chat yourself, and comes back at the bottom; the gap between
+ * the two keeps its own height change from flipping it back and forth.
+ */
+document.addEventListener('scroll', () => {
+  const chat = document.getElementById('ticket-head')?.closest('.chat');
+  if (!chat || !narrow.matches) return;
+  const left = document.documentElement.scrollHeight - (window.scrollY + window.innerHeight);
+  const away = left > 240 && !!view?.scrolledByYou ? true : left < 40 ? false : chat.classList.contains('stands-away');
+  chat.classList.toggle('stands-away', away);
+}, { passive: true });
 
 
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */

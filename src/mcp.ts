@@ -67,6 +67,8 @@ const stateSchema = (deploys: boolean) => ({
   description: `Where the turn leaves things, for the minions list: ready (a person has to act: ship, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
 });
 const STATE = stateSchema(true);
+/** A minion's goal (#1130): the line on top of its chat that says what it is for. */
+const GOAL = { type: ['string', 'null'], maxLength: 140, description: 'Its goal in one line of plain words, at most 140 characters, as the person who asked would put it, e.g. "Left-align the card buttons; the centred ones look off". It heads the minion\'s chat; null clears it back to the title.' };
 const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "shipped, live after restart". No names or prefixes.' };
 
 const REPLIES = {
@@ -486,6 +488,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
+        goal: { ...GOAL, type: 'string', description: 'What the person asked for, summed up in one line of plain words (at most 140 characters), e.g. "Left-align the card buttons; the centred ones look off". It heads the minion\'s chat, so whoever opens it sees what it is for.' },
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
@@ -547,7 +550,7 @@ const TOOLS = [
     description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a parked minion unparks it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
+      properties: { ticket_id: TICKET_ID, title: TITLE, goal: GOAL, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
       required: ['ticket_id'],
     },
   },
@@ -1486,7 +1489,7 @@ const otherScheme = (name: string) => `Scheme ${name}: these are its minions, no
 /** The label fields a call sets; ones left out stay as they are. */
 function labelFields(args: any) {
   const out: Record<string, unknown> = {};
-  for (const k of ['title', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
+  for (const k of ['title', 'goal', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
@@ -1534,8 +1537,8 @@ const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
     description:
-      "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask, and for a change mid-turn; the end of a turn's state and note go in your final reply's status line instead.",
-    inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
+      "Label this minion for the scheme's minions list: its short title, its goal (the line on top of its chat), build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask, with a goal if it has none yet or the work has changed; the end of a turn's state and note go in your final reply's status line instead.",
+    inputSchema: { type: 'object', properties: { title: TITLE, goal: GOAL, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
@@ -1826,6 +1829,7 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
+        goal: args.goal ?? null,
         properties,
         message: args.message,
         start_after: args.start_after ?? null,
@@ -2086,7 +2090,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
+      needOne(args, ['title', 'goal', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
@@ -2194,7 +2198,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
     }
     case 'set_thread_status':
-      needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
+      needOne(args, ['title', 'goal', 'state', 'note', 'replies', 'build'], 'set_thread_status');
     {
       const t = await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args));
       const cancelled = t.close_cancelled ? `close_self is cancelled: ${t.close_cancelled}, so this minion stays open after this turn. If nothing is left for people, set another state and call close_self again. ` : '';

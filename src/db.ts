@@ -304,6 +304,8 @@ export interface Ticket {
   last_effort: string | null;
   /** Why it runs on its model and effort (#1061), a line like "bug → Sonnet 5.5 medium"; null for a minion from before. */
   picked_because: string | null;
+  /** Its goal in one line of plain words (#1130), for the top of its chat; null: its title stands in. */
+  goal: string | null;
   /** 1: its turns may call Claude Code's Workflow tool (#359), off by default as it costs ~2k tokens a call. */
   workflow: number;
   /** Its picks from the scheme's optional plugin folders (#361), one per line; '' for none. */
@@ -596,6 +598,8 @@ export interface ContraptionTurnRow {
 }
 
 /** People's own note on a minion (#146): who last wrote it and when. Never shown to agents. */
+/** A minion's goal line (#1130): one line at the top of its chat, so short. */
+export const GOAL_MAX = 140;
 export const PERSON_NOTE_MAX = 200; // public/thread.js keeps the same limit on its input
 export interface PersonNote {
   text: string;
@@ -1324,6 +1328,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
   ['tickets', 'picked_because', 'ALTER TABLE tickets ADD COLUMN picked_because TEXT'],
+  ['tickets', 'goal', 'ALTER TABLE tickets ADD COLUMN goal TEXT'],
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
   ['tickets', 'workflow', 'ALTER TABLE tickets ADD COLUMN workflow INTEGER NOT NULL DEFAULT 0'],
   ['tickets', 'plugin_dirs', "ALTER TABLE tickets ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
@@ -1482,6 +1487,7 @@ export const SCHEMA_HISTORY = [
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
   [84, 'host_samples (#1123)'],
+  [85, 'tickets.goal (#1130)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2528,7 +2534,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because' | 'goal'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

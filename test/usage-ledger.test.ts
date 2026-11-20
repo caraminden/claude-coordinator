@@ -1,5 +1,6 @@
 // The usage ledger (#1306): counts by day, kind and name; distinct people; counting never fails a request or a turn.
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,4 +72,13 @@ test('the list puts nothing-in-30-days first: never used, then oldest, then the 
   assert.deepEqual(list.map((i) => [i.name, i.idle]), [['never-ran', true], ['old', true], ['busy', false]]);
   assert.equal(list[0].never, true);
   assert.equal(pacificDay(DAY), '2026-11-20');
+});
+
+test('a flood of distinct names is capped between flushes', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE usage_counts (day TEXT, kind TEXT, name TEXT, people INTEGER, n INTEGER, PRIMARY KEY (day, kind, name))');
+  const l = new UsageLedger(db);
+  for (let i = 0; i < 5000; i++) l.used('page', `x${i}`);
+  l.flush();
+  assert.ok((db.prepare('SELECT COUNT(*) AS c FROM usage_counts').get() as { c: number }).c <= 2000);
 });

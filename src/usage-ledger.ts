@@ -12,6 +12,8 @@ export type UsageKind = (typeof KINDS)[number];
 export const UNUSED_MS = 30 * 24 * 60 * 60_000;
 /** Names are cut here, and only these characters survive, so a name can't carry content. */
 const MAX_NAME = 80;
+/** Distinct names held between flushes, so a flood of made-up names can't grow memory. */
+const MAX_PENDING = 2000;
 
 /** A name as the ledger keeps it: only these characters, cut short, so a name can't carry content. */
 export const usageName = (name: string) => name.replace(/[^\w:./@ -]/g, '').slice(0, MAX_NAME);
@@ -42,7 +44,10 @@ export class UsageLedger {
       if (day !== this.seenDay) { this.seen.clear(); this.seenDay = day; }
       const key = `${day}\0${kind}\0${clean}`;
       let p = this.pending.get(key);
-      if (!p) this.pending.set(key, (p = { day, kind, name: clean, n: 0, people: new Set() }));
+      if (!p) {
+        if (this.pending.size >= MAX_PENDING) return; // shortcut: new names are dropped past the cap until the next flush
+        this.pending.set(key, (p = { day, kind, name: clean, n: 0, people: new Set() }));
+      }
       p.n++;
       if (person != null) {
         const who = String(person);

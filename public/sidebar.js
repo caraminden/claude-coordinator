@@ -195,15 +195,16 @@ export function renderSidebar() {
 
 /** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
 export function revealActiveRow() {
-  let row = document.querySelector('#threads .thread-row.active');
+  const box = document.getElementById('threads')?.closest('.sidebar');
+  if (!box?.open) return;
+  let row = box.querySelector('#threads .thread-row.active');
   // A dismissed minion's row isn't built while its list is shut (renderSidebar): open the list for the one you're on.
   if (!row && !view.showClosed && view.tickets?.get(view.id)?.status === 'closed') {
     view.showClosed = true;
     renderSidebar();
-    row = document.querySelector('#threads .thread-row.active');
+    row = box.querySelector('#threads .thread-row.active');
   }
-  const box = row?.closest('.sidebar');
-  if (!box?.open) return;
+  if (!row) return;
   const dismissed = row.closest('details.g-closed');
   if (dismissed && !dismissed.open) dismissed.open = true;
   const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();

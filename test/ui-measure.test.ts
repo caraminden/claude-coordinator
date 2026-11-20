@@ -163,7 +163,7 @@ test('a shot settles first: a spinner is frozen on its first frame and the point
       const page = await openPage(browser.send, base + '/busy', 390, { headers: [], cookies: [], settle: 50 });
       try {
         await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 385, y: 835 }); // hover the fixed button
-        shots.push(readFileSync(await shot(page, join(tmpdir(), `uim-busy-${process.pid}-${i}.png`))).toString('base64'));
+        shots.push(readFileSync(await shot(page, join(tmpdir(), `uim-busy-${process.pid}-${i}.png`, { pointer: true })).toString('base64'));
         assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent === null && getComputedStyle(document.getElementById('fade')).opacity`), '1');
       } finally { await page.close(); }
     }

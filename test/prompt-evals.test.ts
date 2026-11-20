@@ -117,3 +117,13 @@ test('snapshot() cuts the two instruction sections out of a turn\'s system promp
   assert.deepEqual(snapshot(text), { app: '## Who\nCara runs it.\n', scheme: '## Names\nOld names stay.\n' });
   assert.ok(readFileSync(join(dir, 'fixture/citadel-wide.md'), 'utf8').includes('## Who and tone'));
 });
+
+test('ablate() empties parts, removes lines and cuts tools to their first sentence, and refuses a drop that matches nothing (#1277)', async () => {
+  const { ablate } = await import('../tools/prompt-evals/render.ts');
+  const parts = { system: { base: ['keep me', 'drop me too'], files: ['f1', 'f2'] }, turn: { files: ['t1'], pr: ['p'] } };
+  const tools = [{ name: 'ask_question', description: 'Ask people a card. It has many more words. And more.' }, { name: 'other', description: 'Stays. Whole.' }];
+  ablate(parts, tools, { parts: ['files'], lines: ['drop me'], tools: ['ask_question'] });
+  assert.deepEqual(parts, { system: { base: ['keep me'], files: [] }, turn: { files: [], pr: ['p'] } });
+  assert.deepEqual(tools.map((t) => t.description), ['Ask people a card.', 'Stays. Whole.']);
+  for (const bad of [{ parts: ['nope'] }, { lines: ['not there'] }, { tools: ['nope'] }]) assert.throws(() => ablate(parts, tools, bad), /drop: no/);
+});

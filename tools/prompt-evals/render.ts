@@ -12,7 +12,28 @@ export type Spec = {
   appText: string;        // the Citadel-wide instructions
   schemeText: string;     // the scheme's own
   dirs: { files: string; shared: string; tickets: string; cwd: string };
+  // Ablation (#1277): prompt parts to empty, lines to remove (any entry containing the text), tools cut to their first sentence.
+  drop?: { parts?: string[]; lines?: string[]; tools?: string[] };
 };
+
+/** Takes `drop` out of a rendering. A part, line or tool that matches nothing throws: a stale drop would test nothing. */
+export function ablate(parts: Record<'system' | 'turn', Record<string, string[]>>, tools: { name: string; description?: string }[], drop: NonNullable<Spec['drop']>) {
+  const all = { ...parts.system, ...parts.turn };
+  for (const k of drop.parts ?? []) {
+    if (!all[k]?.length) throw new Error(`drop: no prompt part "${k}" with text`);
+    for (const side of [parts.system, parts.turn]) if (side[k]) side[k] = [];
+  }
+  for (const needle of drop.lines ?? []) {
+    let hit = 0;
+    for (const side of [parts.system, parts.turn]) for (const k of Object.keys(side)) side[k] = side[k].filter((l) => !(l.includes(needle) && ++hit));
+    if (!hit) throw new Error(`drop: no prompt line contains "${needle}"`);
+  }
+  for (const name of drop.tools ?? []) {
+    const t = tools.find((x) => x.name === name);
+    if (!t?.description) throw new Error(`drop: no tool "${name}" with a description`);
+    t.description = t.description.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? t.description;
+  }
+}
 
 // The Citadel scheme's settings as they were on 2026-11-19 (projects row 2); instructions come from the spec.
 const PROJECT = {
@@ -52,9 +73,13 @@ export async function render(dir: string, s: Spec): Promise<{ system: string; tu
   const args = [project, ticket, s.dirs.files, s.dirs.shared, s.dirs.tickets, null, [], true, s.appText];
   const text = (p: Record<string, string[]>) => Object.values(p).flat().join('\n');
   // Before the turn note split off (#878), systemPrompt() returned the whole prompt as one string.
-  if (!m.promptParts) return { system: m.systemPrompt(...args), turn: '', tools: await tools(dir, s.role) };
-  const parts = m.promptParts(...args);
-  return { system: text(parts.system), turn: text(parts.turn), tools: await tools(dir, s.role) };
+  if (!m.promptParts) {
+    if (s.drop) throw new Error('drop needs a version with promptParts (#878 or later)');
+    return { system: m.systemPrompt(...args), turn: '', tools: await tools(dir, s.role) };
+  }
+  const parts = m.promptParts(...args), list = await tools(dir, s.role) as { name: string; description?: string }[];
+  if (s.drop) ablate(parts, list, s.drop);
+  return { system: text(parts.system), turn: text(parts.turn), tools: list };
 }
 
 if (import.meta.main) {

@@ -120,7 +120,7 @@ export function load<T>(dir: string, check: (x: any, file: string) => string[]):
 
 // ---- Running ----
 
-type Side = { label: string; name: string; dir: string; model: string; effort: string; app: string; scheme: string };
+type Side = { label: string; name: string; dir: string; model: string; effort: string; app: string; scheme: string; drop?: object };
 type Run = { ok: boolean; error?: string; failed: string[]; cost: number; judge?: string; file: string };
 
 const git = (...a: string[]) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -181,7 +181,7 @@ function workspace(c: Case, side: Side, work: string): string {
 }
 
 function render(side: Side, role: Case['role'], ticket: Case['ticket'], dirs: object): { system: string; turn: string; tools: object[] } {
-  const spec = { role, number: ticket.number, title: ticket.title, appText: side.app, schemeText: side.scheme, dirs };
+  const spec = { role, number: ticket.number, title: ticket.title, appText: side.app, schemeText: side.scheme, dirs, drop: side.drop };
   return JSON.parse(execFileSync(process.execPath, [join(HERE, 'render.ts'), side.dir, JSON.stringify(spec)], { encoding: 'utf8', maxBuffer: 64 << 20 }));
 }
 
@@ -351,6 +351,7 @@ const HELP = `Prompt evals (#1117): rerun frozen corrections against a prompt ve
     --model, --effort    the tier to test (default opus, high)
     --base-model, --base-effort   the base's tier (a tier question: same prompt, two tiers)
     --app <file>, --scheme <file>  the Citadel-wide / scheme instructions (default fixture/; the base keeps fixture/)
+    --drop <file>        take text out of the tested side only: {"parts":[...],"lines":[...],"tools":[...]} (README, Ablation)
     --case <re>          only cases whose id matches
     --runs <n> (3)  --jobs <n> (3)  --budget <usd per run> (2)  --no-judge  --out <file>  --keep
   tools/prompt-eval briefs [--brief <re>] [--model m] [--effort e] [--ref r] [--runs 1] [--jobs 2] [--budget 10]
@@ -421,6 +422,7 @@ async function main(argv: string[]) {
     if (cmd !== 'run') throw new Error(`unknown command ${cmd}; --help`);
     const n = num('--runs', 3), budget = num('--budget', 2);
     const now = side('now', arg('--ref'), model, effort, arg('--app') && readFileSync(arg('--app')!, 'utf8'), arg('--scheme') && readFileSync(arg('--scheme')!, 'utf8'));
+    if (arg('--drop')) now.drop = JSON.parse(readFileSync(arg('--drop')!, 'utf8'));
     const tier = arg('--base-model') || arg('--base-effort');
     const sides = arg('--base') || tier ? [now, side('base', arg('--base') ?? arg('--ref'), arg('--base-model') ?? model, arg('--base-effort') ?? effort)] : [now];
     const list = cases().filter((c) => !only || re(only).test(c.id));

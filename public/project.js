@@ -3,34 +3,44 @@ import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, sch
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciPage } from './ci.js';
 import { statusPage } from './status.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, isOrdersPage, myInstructionsEditor, notificationsPage, ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
-import { machinesPage } from './settings-machines.js';
+import * as settings from './settings.js';
+import { ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
+import * as settingsMachines from './settings-machines.js';
+import { isOrdersPage, pageRow } from './settings-pages.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { startPick } from './pick.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
 import { chatSection, chatView, mountChat, renderTicketHead, tmViewMode } from './thread.js';
 import { mergedView } from './mine.js';
-import { preparePropFilter, propertiesPage, renderSettingsCount } from './properties.js';
+import * as properties from './properties.js';
+import { preparePropFilter, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
-import { usagePage } from './where.js';
-import { skillsPage } from './skills.js';
+import * as where from './where.js';
+import * as skills from './skills.js';
 import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { replaceHash } from './navstack.js';
-import { memoryPage } from './memory.js';
-import { decisionsPage } from './decisions.js';
-import { ideasPage } from './ideas.js';
-import { accountPage, membersPage, peoplePage } from './people.js';
-import { contraptionsPage } from './contraptions.js';
-import { unitsPage } from './units.js';
+import * as memory from './memory.js';
+import * as decisions from './decisions.js';
+import * as ideas from './ideas.js';
+import * as people from './people.js';
+import * as contraptions from './contraptions.js';
+import * as units from './units.js';
 import { releasesPage, setReleasesPage } from './releases.js';
-import { reviewsPage } from './reviews.js';
-import { helpPage } from './help.js';
+import * as reviews from './reviews.js';
+import * as help from './help.js';
 import { gloss } from './help-words.js';
 import { toast } from './ui/status.js';
 import { homeOverview, homePanel, refreshHome, startVisit } from './home.js';
+
+// The page modules the table of pages (settings-pages.js) names, by file name. A row's `page` is an export of its `module`.
+const PAGE_MODULES = { 'settings.js': settings, 'settings-machines.js': settingsMachines, 'skills.js': skills, 'where.js': where, 'memory.js': memory,
+  'decisions.js': decisions, 'ideas.js': ideas, 'people.js': people, 'contraptions.js': contraptions, 'units.js': units, 'reviews.js': reviews,
+  'help.js': help, 'properties.js': properties };
+/** The function that draws a Settings or Orders page, from its row. */
+const pageFn = (kind) => PAGE_MODULES[pageRow(kind).module][pageRow(kind).page];
 
 /**
  * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
@@ -123,27 +133,9 @@ function renderCrumbs(main) {
       : main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'settings' ? [projectLink, ' / ', 'Settings']
       : main.kind === 'orders' ? [projectLink, ' / ', 'Orders']
-      : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
-      : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
-      : main.kind === 'my-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'My instructions']
-      : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Minion rules']
-      : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
-      : main.kind === 'memory' ? [projectLink, ' / ', settingsLink, ' / ', 'Memory']
-      : main.kind === 'decisions' ? [projectLink, ' / ', settingsLink, ' / ', 'Decisions']
-      : main.kind === 'ideas' ? [projectLink, ' / ', settingsLink, ' / ', 'Ideas']
-      : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
-      : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
-      : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
-      : main.kind === 'units' ? [projectLink, ' / ', settingsLink, ' / ', 'Units']
-      : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
-      : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
-      : main.kind === 'notifications' ? [projectLink, ' / ', settingsLink, ' / ', 'Notifications']
-      : main.kind === 'help' ? [projectLink, ' / ', settingsLink, ' / ', 'How Citadel works']
-      : main.kind === 'usage' ? [projectLink, ' / ', settingsLink, ' / ', 'Usage']
-      : main.kind === 'skills' ? [projectLink, ' / ', settingsLink, ' / ', 'Skills']
+      : pageRow(main.kind) && !pageRow(main.kind).own ? [projectLink, ' / ', settingsLink, ' / ', pageRow(main.kind).crumb ?? pageRow(main.kind).label]
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
-      : main.kind === 'reviews' ? [projectLink, ' / ', settingsLink, ' / ', 'Reviewers and critics']
       : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
       : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
       : main.kind === 'status' ? [projectLink, ' / ', 'Status']
@@ -298,26 +290,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'settings' ? settingsHome()
     : main.kind === 'orders' ? settingsHome(true)
-    : main.kind === 'instructions' ? instructionsEditor()
-    : main.kind === 'app-instructions' ? appInstructionsEditor()
-    : main.kind === 'my-instructions' ? myInstructionsEditor()
-    : main.kind === 'approvals' ? approvalsEditor()
-    : main.kind === 'properties' ? propertiesPage()
-    : main.kind === 'memory' ? memoryPage()
-    : main.kind === 'decisions' ? decisionsPage()
-    : main.kind === 'ideas' ? ideasPage()
-    : main.kind === 'members' ? membersPage()
-    : main.kind === 'people' ? peoplePage()
-    : main.kind === 'contraptions' ? contraptionsPage()
-    : main.kind === 'units' ? unitsPage()
-    : main.kind === 'account' ? accountPage()
-    : main.kind === 'machines' ? machinesPage()
-    : main.kind === 'notifications' ? notificationsPage()
-    : main.kind === 'help' ? helpPage()
-    : main.kind === 'usage' ? usagePage()
-    : main.kind === 'skills' ? skillsPage()
+    : pageRow(main.kind) && !pageRow(main.kind).own ? pageFn(main.kind)()
     : main.kind === 'releases' ? releasesPage()
-    : main.kind === 'reviews' ? reviewsPage()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
     : main.kind === 'ci' ? ciPage(projectId, main.tab, main.all)
     : main.kind === 'status' ? statusPage(projectId, main.all)

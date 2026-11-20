@@ -3,6 +3,7 @@
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { renderCost } from './cost.js';
@@ -37,6 +38,8 @@ import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
 
+/** Every Settings and Orders page's route, built from the one table of pages (settings-pages.js). */
+const PAGE_ROUTE = new RegExp(`^#/p/(\\d+)/(${plainKinds().join('|')})$`);
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
@@ -991,14 +994,8 @@ async function route() {
     // Settings and Orders open on their list of pages on a phone (#1018); on a desktop Settings opens on Members beside
     // its menu, and Orders on Instructions with the panel's Orders tab showing (#1071).
     else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|orders)$/))) await showProject(Number(m[1]), matchMedia('(max-width: 800px)').matches ? { kind: m[2] } : m[2] === 'settings' ? { kind: 'members' } : { kind: 'instructions', orders: true });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/my-instructions$/))) await showProject(Number(m[1]), { kind: 'my-instructions' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
+    else if ((m = hash.match(PAGE_ROUTE))) await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|memory|decisions|ideas|people|contraptions|units|account|usage|notifications|skills|reviews|help)$/))) await showProject(Number(m[1]), { kind: m[2] });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showProject(Number(m[1]), { kind: 'status', all: !!m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health|all))?$/))) await showProject(Number(m[1]), { kind: 'ci', tab: m[2] === 'all' ? undefined : m[2], all: m[2] === 'all' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });

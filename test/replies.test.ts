@@ -80,17 +80,3 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   // That message started a turn; let it end before after() deletes the folder it runs in.
   await until('the message\'s turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
 });
-
-test('a goal is set at create, changed and checked by PATCH, and null clears it back to the title (#1130)', async () => {
-  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Goals' } });
-  const made = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Card buttons', message: 'hi', goal: 'Left-align the\n card buttons' } });
-  assert.equal(made.status, 201, JSON.stringify(made.data));
-  const t = made.data;
-  assert.equal(t.goal, 'Left-align the card buttons', 'one line, its whitespace folded');
-  const patch = (goal: unknown) => call(`/api/tickets/${t.id}`, { method: 'PATCH', body: { goal } });
-  assert.equal((await patch('x'.repeat(141))).status, 400, 'at most 140 characters');
-  assert.equal((await patch(false)).status, 400, 'a string or null, not false');
-  assert.equal((await patch('Left-align them; centred looks off')).data.goal, 'Left-align them; centred looks off');
-  assert.equal((await patch(null)).data.goal, null);
-  await until('the first turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
-});

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount, setView } from '../public/base.js';
-import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, standsLines, workingBy } from '../public/threadstate.js';
+import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -429,7 +429,6 @@ test('rowState: a mention of you is yours until you open its chat; a card of you
     setView({ seen: {} });
     assert.deepEqual(pill({ id: 7, state: 'ready' }), [0, 'you', '@ 1h']);
     assert.equal(rowState(t({ id: 7, state: 'parked' }), null, NOW).label, 'Cara mentioned you');
-    assert.equal(standsLines(t({ id: 7, state: 'ready' }), null, NOW).move.text, "Read Cara's message: it mentions you");
     assert.deepEqual(pill({ id: 8, state: 'ready' }), [LOOK, 'done', 'ready 5m'], 'another minion is as it was');
     assert.equal(rowState(t({ id: 7, pending_card_at: NOW - MIN, open_cards: [{ kind: 'question', to: 'Josh' }] }), null, NOW).label, 'Answer needed');
     setView({ seen: { 7: NOW - MIN } });
@@ -450,50 +449,4 @@ test('pacific and span: clock times are Pacific with the day once old; spans rea
   assert.equal(pacific(NOW, NOW), '4:00 AM PST');
   assert.equal(pacific(NOW - 30 * HOUR, NOW), 'Sun, 10:00 PM PST');
   assert.deepEqual([span(20_000), span(14 * MIN), span(65 * MIN), span(2 * HOUR), span(51 * HOUR)], ['under a minute', '14m', '1h 5m', '2h', '2d 3h']);
-});
-
-test('standsLines: goal, now and your move for each kind of minion; the card waiting on you is a link (#1130)', () => {
-  const card = (over) => ({ kind: 'question', what: 'question', href: '#/p/2/t/9?e=5', label: 'Tabs or a list?', ...over });
-  setAccount({ name: 'Josh' });
-  try {
-    const lines = (over) => {
-      const l = standsLines(t({ title: 'Left-align cards', ...over }), null, NOW);
-      return [l.goal.text, l.now.text, l.now.fam, l.move.text, l.move.fam, l.move.href ?? null];
-    };
-    // The goal stands in for the asker's words; without one, the title.
-    assert.equal(standsLines(t({ title: 'Left-align cards', goal: 'Left-align the card buttons' }), null, NOW).goal.text, 'Left-align the card buttons');
-    assert.equal(standsLines(t({ title: 'Left-align cards' }), null, NOW).goal.text, 'Left-align cards');
-    const rows = [
-      [{ status: 'running', steps: { done: 2, total: 5 } }, ['Left-align cards', 'This Minion is working · 2 of 5 steps done', 'work', 'Nothing: it is working', 'idle', null]],
-      [{ pending_card_at: NOW - 12 * MIN, open_cards: [card()] }, ['Left-align cards', 'Answer needed', 'you', 'Answer the question card · waiting 12m', 'you', '#/p/2/t/9?e=5']],
-      [{ pending_card_at: NOW - 12 * MIN, open_cards: [card({ to: 'Cara' })] }, ['Left-align cards', 'Waiting on Cara', 'wait', 'Nothing: waiting on Cara', 'idle', null]],
-      [{ state: 'parked', note: 'on hold for the reviewers page' }, ['Left-align cards', 'Parked · on hold for the reviewers page', 'idle', 'Nothing: it is parked; Unpark wakes it', 'idle', null]],
-      [{ state: 'parked', wakes_on: '#1089 is live', parked_for: null }, ['Left-align cards', 'Waiting: #1089 is live', 'wait', 'Nothing: it wakes by itself', 'idle', null]],
-      [{ status: 'closed', ship: { stage: 'live' } }, ['Left-align cards', 'Shipped and live', 'done', 'Nothing: it is dismissed', 'idle', null]],
-      [{ status: 'closed', ship: { stage: 'build' }, build: 5 }, ['Left-align cards', 'Merged into Build 5; live when the build ships', 'work', 'Nothing: it is dismissed', 'idle', null]],
-      [{ state: 'ready' }, ['Left-align cards', 'Ready to ship', 'done', 'Look it over: it is ready to ship', 'done', null]],
-      [{ state: 'complete', note: 'read: the report' }, ['Left-align cards', 'Done, read it: read: the report', 'done', 'Read it; it closes once you have seen it', 'done', null]],
-      [{ status: 'error' }, ['Left-align cards', 'Stuck: the last turn failed', 'broken', 'Read why its last turn failed, then send a message to carry on', 'broken', null]],
-      [{}, ['Left-align cards', 'Idle', 'idle', 'Nothing is asked: send a message to carry on', 'idle', null]],
-      [{ replies: ['Ship it'] }, ['Left-align cards', 'Answer needed: it offered replies', 'you', 'Answer: pick a reply over the message box, or write one', 'you', null]],
-    ];
-    for (const [over, want] of rows) assert.deepEqual(lines(over), want, JSON.stringify(over));
-    // An approval links to its card.
-    const appr = standsLines(t({ approvals: 1, status: 'running', open_cards: [card({ kind: 'approval', href: '#a' })] }), null, NOW);
-    assert.deepEqual([appr.move.text, appr.move.href], ['Approve or deny its approval card', '#a']);
-    // Two of yours: the oldest, with how many more.
-    assert.equal(standsLines(t({ pending_card_at: NOW - MIN, open_cards: [card(), card({ what: 'plan', kind: 'plan' })] }), null, NOW).move.text, 'Answer the question card (+1 more) · waiting 1m');
-    // Cara's card is the older one: the wait it says isn't yours, so no age.
-    assert.equal(standsLines(t({ pending_card_at: NOW - HOUR, open_cards: [card({ to: 'Cara' }), card()] }), null, NOW).move.text, 'Answer the question card');
-    // A card to you on a parked minion is still your move, as Needs you counts it.
-    const parkedCard = standsLines(t({ state: 'parked', open_cards: [card({ to: 'Josh' })] }), null, NOW).move;
-    assert.deepEqual([parkedCard.fam, parkedCard.href], ['you', '#/p/2/t/9?e=5']);
-    // A spend alert leads, linked, as on the list row.
-    const spend = standsLines(t({ status: 'running', spend_alert: { usd: 20, href: '#s', event: 4 } }), null, NOW).move;
-    assert.deepEqual([spend.text, spend.fam, spend.href], ['Answer its spend alert: it passed $20', 'broken', '#s']);
-    // Working with no plan: what it last did.
-    assert.equal(standsLines(t({ status: 'running', last_activity: 'Running tests… 2/4' }), null, NOW).now.text, 'This Minion is working · Running tests… 2/4');
-  } finally {
-    setAccount(null);
-  }
 });

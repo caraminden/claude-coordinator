@@ -12,7 +12,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GOAL_MAX, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
@@ -1126,8 +1126,6 @@ export const projectRoutes: Route[] = [
       // Without a title (the New thread form sends none) start from the message's opening words;
       // the thread renames itself once it knows what the work is.
       const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
-      // Its goal in a line (#1130), shown on top of its chat; the minion may set or sharpen it later.
-      const goal = body.goal != null && body.goal !== '' ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
       // Insert first so concurrent creates get distinct ids, then build the working dir.
       // Every start names its model and effort (#698): the Taskmaster picks them from its table, a person's start with none gets the table's pick for its type below.
       if (caller && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('create_ticket'));
@@ -1195,7 +1193,7 @@ export const projectRoutes: Route[] = [
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.addPick(id, model, effort, pickBy, because);
-      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(goal ? { goal } : {}), ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.

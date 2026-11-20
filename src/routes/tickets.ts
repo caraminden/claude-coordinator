@@ -20,7 +20,7 @@ import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { offSkills } from '../skills.ts';
-import { buildOwnerKey, EFFORTS, GOAL_MAX, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
@@ -64,7 +64,7 @@ import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
- * Set a minion's label fields from a PATCH body or a reply's status trailer (#711): any of title, goal, state, note, replies,
+ * Set a minion's label fields from a PATCH body or a reply's status trailer (#711): any of title, state, note, replies,
  * build, model, effort, workflow and plugin_dirs, with their checks (a bad one throws HttpError). `name` is who set
  * them and `caller` the agent's ticket, if an agent did. Returns why a pending close_self was cancelled, if it was.
  */
@@ -72,7 +72,7 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   const { id } = ticket;
   const { store, runner } = app;
   // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
-  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'picked_because' | 'goal'>> = {};
+  const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'picked_because'>> = {};
   if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
   if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
   if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
@@ -80,7 +80,6 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
   if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
   if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
-  if (body.goal !== undefined) fields.goal = body.goal !== null && body.goal !== '' ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
   if (body.build !== undefined) fields.build = buildNumber(body.build);
   if (body.replies !== undefined) fields.replies = replyList(body.replies);
   // Complete always says what's left (#547; Josh, 2026-11-11): its note comes with it, and stays while it holds.

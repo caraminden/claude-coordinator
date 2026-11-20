@@ -228,13 +228,3 @@ test('a brief naming a shared file that does not exist yet is refused; one askin
   assert.ok(!ok.isError, ok.text);
   assert.ok(!(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `Create ${missing} with the plan.` }, env)).isError);
 });
-
-test('a goal goes through create_ticket, update_ticket and set_thread_status, each on its own (#1130)', async () => {
-  const made = await tool(TM, 'coordinator', 'create_ticket', { title: 'Card buttons', goal: 'Left-align the card buttons', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', message: 'Left-align the card buttons.' });
-  assert.ok(!made.isError, made.text);
-  assert.equal(store.listTickets(Citadel.id).find((t) => t.title === 'Card buttons')?.goal, 'Left-align the card buttons');
-  assert.ok(!(await tool(Minion, 'thread', 'set_thread_status', { goal: 'Sharpened by the minion' })).isError);
-  assert.equal(store.getTicket(Minion.id)!.goal, 'Sharpened by the minion');
-  assert.ok(!(await tool(TM, 'coordinator', 'update_ticket', { ticket_id: Minion.number, goal: 'Fixed by the Taskmaster' })).isError);
-  assert.equal(store.getTicket(Minion.id)!.goal, 'Fixed by the Taskmaster');
-});

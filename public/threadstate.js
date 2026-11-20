@@ -121,7 +121,7 @@ function baseState(t, usage, now) {
     const who = cardFor(cards[0], t);
     return { rank: 2, fam: 'wait', cell: `${who} ${age}`, label: `Waiting on ${who}`, since: t.pending_card_at };
   }
-  // Ready to ship, ready to try and done, read it: for a person to look at, not an answer owed, so not amber and not in
+  // Pending review, ready to try and done, read it: for a person to look at, not an answer owed, so not amber and not in
   // Needs you (#1121; Josh, 2026-11-19: "Answers only", ready "Its own green state"). LOOK sorts them after the answers.
   if (t.state === 'ready') return { rank: LOOK, fam: 'done', cell: waited('ready'), label: state.label };
   // Complete carries what's left (nothing, or what to read) in its note, so the label says it at a glance (#547).
@@ -294,71 +294,4 @@ function shortAgo(ms, now) {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
-}
-
-/** Where a closed minion's change went, in the strip's words (t.ship, src/branch.ts); null when it shipped nothing. */
-function shippedWords(t) {
-  const stage = t.ship?.stage;
-  if (stage === 'live') return 'Shipped and live';
-  if (stage === 'build') return `Merged into ${t.build ? `Build ${t.build}` : 'its build'}; live when the build ships`;
-  if (stage === 'main' || stage === 'deploying') return 'Shipped; on its way live';
-  if (stage === 'failed') return 'Shipped, but its deploy failed';
-  return null;
-}
-
-/**
- * The "where it stands" strip on top of a minion's chat (#1130; Josh picked it from #1091's ideas, 2026-11-19): its goal
- * (`t.goal`, a line the Taskmaster or the minion wrote, else its title; Josh, 2026-11-19: "Just summarize the goal of the
- * minion"), where it is now (rowState's label, #1121's names, with the wait or note that says why) and whose move it is
- * (the card waiting on you as a link, else "Nothing: …"). All from the minion as the stream sent it: no fetch, no model.
- * Each line is { text, fam, href?, title? }; fam colours it as the row's chip.
- */
-export function standsLines(t, usage, now = Date.now()) {
-  const st = rowState(t, usage, now);
-  const w = t.status !== 'closed' && !st.quiet && waitShows(t.wait) ? t.wait : null;
-  const shipped = t.status === 'closed' && !t.release ? shippedWords(t) : null;
-  const extra = w ? waitWords(w) : st.rank === 1 && t.steps ? `${t.steps.done} of ${t.steps.total} steps done` : st.rank === 1 && t.last_activity ? t.last_activity : t.note && st.rank !== 1 && !st.label.includes(t.note) ? t.note : '';
-  const nowText = shipped ?? [st.label, extra].filter(Boolean).join(' · ');
-  return {
-    goal: { text: t.goal || t.title, fam: 'none', title: t.goal ? '' : 'No goal written yet: its title stands in' },
-    now: { text: nowText, fam: shipped ? SHIP[t.ship.stage].fam : st.fam },
-    move: yourMove(t, st, now),
-  };
-}
-
-/** The strip's "Your move" line: what is on you, linked to the card when there is one, else whose wait it is (#1121's names). */
-function yourMove(t, st, now) {
-  const nothing = (why) => ({ text: `Nothing: ${why}`, fam: 'idle' });
-  const yours = cardsYours(t);
-  // pending_card_at is the oldest open card's: say how long only when that one is yours.
-  const waiting = t.pending_card_at && yours.length === (t.open_cards ?? []).length ? ` · waiting ${span(now - t.pending_card_at)}` : '';
-  // A running turn's spend alert leads the list row's badge (#723), so it leads here too.
-  if (t.spend_alert && t.status !== 'closed') return { text: `Answer its spend alert: it passed $${t.spend_alert.usd}`, fam: 'broken', href: t.spend_alert.href };
-  if (t.approvals && st.rank === 0) {
-    const card = (t.open_cards ?? []).find((c) => c.kind === 'approval');
-    return { text: 'Approve or deny its approval card', fam: 'you', href: card?.href };
-  }
-  // A card addressed to you is your move whatever else it is doing (parked, working), as Needs you counts it.
-  if (yours.length) {
-    const card = yours[0];
-    const more = yours.length > 1 ? ` (+${yours.length - 1} more)` : '';
-    return { text: `Answer the ${cardWord(card)} card${more}${waiting}`, fam: 'you', href: card.href, title: card.label };
-  }
-  if (st.mention) return { text: `Read ${st.mention.by}'s message: it mentions you`, fam: 'you' };
-  if (st.rank === 0 && st.fam === 'you') return { text: 'Answer: pick a reply over the message box, or write one', fam: 'you' };
-  if (st.fam === 'broken' && t.status === 'error') return { text: 'Read why its last turn failed, then send a message to carry on', fam: 'broken' };
-  if (st.quiet) return nothing('it is working, though quiet for a while');
-  if (st.rank === 1) return nothing(st.server ? 'the server is shipping it' : 'it is working');
-  if (st.rank === LOOK) {
-    if (t.state === 'ready') return { text: 'Look it over: it is ready to ship', fam: 'done' };
-    if (t.state === 'try') return { text: 'Try it, then say how it went', fam: 'work' };
-    return { text: 'Read it; it closes once you have seen it', fam: 'done' };
-  }
-  // A card or a go that is someone else's (rowState's "Waiting on <name>").
-  if (st.label.startsWith('Waiting on ')) return nothing(`waiting on ${st.label.slice('Waiting on '.length)}`);
-  if (t.status === 'closed') return nothing(t.release || t.ship?.stage === 'main' || t.ship?.stage === 'deploying' ? 'it goes live by itself' : 'it is dismissed');
-  if (t.state === 'parked') return nothing(t.wakes_on ? 'it wakes by itself' : 'it is parked; Unpark wakes it');
-  if (t.state === 'blocked') return nothing('it is blocked on something outside the minion');
-  if (st.rank === 2) return nothing('it carries on by itself');
-  return { text: 'Nothing is asked: send a message to carry on', fam: 'idle' };
 }

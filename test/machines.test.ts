@@ -245,7 +245,7 @@ test('a machine set up before ticks starts from what it lent when its agent firs
   await until('it to go offline', async () => !(await find()).online);
   // Reinstalled with the new line: the same server and folders are ticked, so minions get what they got.
   startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: dir });
-  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && m; });
+  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && !m.lend.before_ticks && m; });
   assert.deepEqual(after.lend, { server: 'godot-ai', workspaces: ['w'], gpu_off: true }, 'its ticks start from what it lent, and GPU jobs stay off');
   assert.equal((await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; })).reason, before.reason);
   // A folder added later starts unticked.

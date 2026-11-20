@@ -98,6 +98,7 @@ const EFFORT = {
   enum: EFFORT_IDS,
   description: "The effort for the minion's turns, as in its composer. Required: the effort the model table pairs with your model for this kind of work. xhigh only after a Fable run failed twice or a person asks; never max.",
 };
+const PICK_REASON = { type: 'string', maxLength: 200, description: 'Why this model and effort for this job, in your own words, one line (at most 200 characters), e.g. "known-shape fix with a clear repro". It shows on the minion as "Picked because" and is kept with the model and effort.' };
 // update_ticket can still put a minion back on Claude Code's default (Opus 5.5 at high) with null.
 const MODEL_CHANGE = { type: ['string', 'null'], enum: [...MODEL_IDS, null], description: `The model for the minion's next turns, as in its composer; null for Claude Code's default (Opus 5.5 at high). ${ADVISOR_TRIAL}` };
 const EFFORT_CHANGE = { type: ['string', 'null'], enum: [...EFFORT_IDS, null], description: "The effort for the minion's next turns, as in its composer; null for the scheme's default effort." };
@@ -509,6 +510,7 @@ const TOOLS = [
         build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and ships the build with one go card. Needs build.' },
         model: MODEL,
         effort: EFFORT,
+        reason: PICK_REASON,
         workflow: WORKFLOW,
         plugin_folders: PLUGIN_FOLDERS,
         not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, and you checked they are not' },
@@ -555,7 +557,7 @@ const TOOLS = [
     description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a parked minion unparks it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, reason: PICK_REASON, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
       required: ['ticket_id'],
     },
   },
@@ -1844,6 +1846,7 @@ async function runTool(name: string, args: any): Promise<string> {
         build_owner: args.build_owner === true || undefined,
         model: args.model ?? null,
         effort: args.effort ?? null,
+        pick_reason: args.reason,
         workflow: args.workflow ?? null,
         plugin_dirs: args.plugin_folders,
       });
@@ -2096,7 +2099,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_ticket':
       needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
       if (args.doc != null && args.questions == null) {

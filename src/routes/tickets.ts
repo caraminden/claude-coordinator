@@ -87,7 +87,8 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (Object.keys(fields).length) {
     // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
     if ('model' in fields || 'effort' in fields) {
-      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort);
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because);
     }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -392,7 +393,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { res, ticket, app } = ctx;
       const { store } = app;
-      return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+      return json(res, 200, { ticket, picks: store.picksOf(ticket.id), project: store.getProject(ticket.project_id) });
     },
   },
   {

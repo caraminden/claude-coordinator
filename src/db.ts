@@ -860,6 +860,18 @@ CREATE TABLE IF NOT EXISTS turn_models (
   PRIMARY KEY (turn_id, model)
 );
 -- Each Grunt a turn started (#948), read from the session's subagents/ folder at the turn's end.
+-- Every model and effort a minion started on or was moved to (#1061, A4): who picked it and why, so a scorecard can count
+-- which reasons held up. No foreign key on ticket_id, like brief_starts, so an older release's deleteTicket still works.
+CREATE TABLE IF NOT EXISTS ticket_picks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  model TEXT,
+  effort TEXT,
+  by TEXT NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ticket_picks_ticket ON ticket_picks(ticket_id, id);
 CREATE TABLE IF NOT EXISTS turn_grunts (
   agent_id TEXT PRIMARY KEY,
   turn_id INTEGER NOT NULL REFERENCES turns(id),
@@ -1463,6 +1475,7 @@ export const SCHEMA_HISTORY = [
   [82, 'schedules.category, backfilled from template and name (#1083)'],
   [83, 'review_runs.source (#1095)'],
   [84, 'events_errors index (#1178)'],
+  [85, 'ticket_picks (#1061)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -2477,6 +2490,14 @@ export class Store {
     return caller.kind === 'coordinator' && caller.project_id === GLOBAL_OWNER && this.isAdmin(this.getUser(this.turnAsker(caller.id) ?? -1));
   }
 
+  /** Record a model and effort pick with its reason (#1061): at a minion's start, and at every change after. */
+  addPick(ticketId: number, model: string | null, effort: string | null, by: string, reason: string, at = Date.now()) {
+    this.db.prepare('INSERT INTO ticket_picks (ticket_id, at, model, effort, by, reason) VALUES (?, ?, ?, ?, ?, ?)').run(ticketId, at, model, effort, by, reason);
+  }
+  /** A minion's picks, oldest first. */
+  picksOf(ticketId: number) {
+    return this.db.prepare('SELECT at, model, effort, by, reason FROM ticket_picks WHERE ticket_id = ? ORDER BY id').all(ticketId) as { at: number; model: string | null; effort: string | null; by: string; reason: string }[];
+  }
   deleteTicket(id: number) {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));
@@ -2491,6 +2512,7 @@ export class Store {
     this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turn_grunts WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM ticket_picks WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);

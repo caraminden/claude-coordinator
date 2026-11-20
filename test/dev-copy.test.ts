@@ -100,7 +100,7 @@ test('env hands a script the copy\'s URL, cookie and pid; seed adds a state to a
 
   const bad = run(['seed', 'nonsense']);
   assert.equal(bad.status, 2);
-  assert.match(bad.stderr, /no scenario nonsense; seed takes one or more of: question-card/);
+  assert.match(bad.stderr, /no scenario nonsense; seed takes one or more of: .*question-card/);
   run(['stop']);
 });
 
@@ -121,10 +121,15 @@ test('every seed scenario applies to a fresh store, twice over', async () => {
   mkdirSync(dir);
   const s = new Store(join(dir, 'coordinator.db'));
   const robin = s.createUser({ name: 'Robin', login: 'robin', admin: true, server_login: true });
+  // The status seed points Seeded at this checkout; no seed may commit or write into it (review-set did, Build 5).
+  const checkout = () => ['rev-parse HEAD', 'status --porcelain'].map((a) => spawnSync('git', a.split(' '), { encoding: 'utf8' }).stdout).join();
+  const before = checkout();
+  // A route in Seeded, or the bare #/ for a person in no scheme (welcome-no-scheme, #1151).
   for (let i = 0; i < 2; i++) {
     const ctx = seedScheme(s, dir, 'robin');
-    for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(sc.seed(ctx), new RegExp(`^#/p/${ctx.project.id}(/t/\\d+)?`), name);
+    for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(sc.seed(ctx), new RegExp(`^#/(p/${ctx.project.id}(/t/\\d+)?|$)`), name);
   }
+  assert.equal(checkout(), before, 'seeding left the checkout it runs in untouched');
   // Seeded is reused, and so are the schemes scenario's own (#649): seeding twice makes no second of any.
   const names = s.listProjects().map((p: any) => p.name);
   assert.equal(names.filter((n: string) => n === 'Seeded').length, 1, 'one Seeded scheme, reused');

@@ -37,7 +37,7 @@ A description is tested by what it fires on, among the other descriptions it com
 5. **Rewriting** a description from the results: set aside about 8 prompts before tuning and check the rewrite on them only at the end, so the description isn't fitted to the prompts it was tuned on.
 6. Keep the set as `trigger-eval.tsv` in the skill's folder (`id`, expected skill or `none`, `a|b` when either is right, prompt) so the next edit re-runs it. One set can cover two neighbours: `diagnosing-bugs/trigger-eval.tsv` covers `bug-fixing` too.
 
-Upstream's optimisation scripts loop `claude -p` per prompt; we take the method, not the scripts.
+7. **A kit skill's description** also gets the live rerun before it ships: `tools/skill-trigger-eval --base main --runs 3` in the Citadel repo. It runs about 45 real asks from every scheme, each as a Sonnet turn with the kit loaded, against the kit on main and on your branch, and lists the cases that flipped. A flip on a skill you didn't touch is a seam you moved: fix it or name it. A real ask that misfired in a turn goes into `tools/skill-evals/cases.json`.
 
 ## Import checklist
 

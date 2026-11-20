@@ -101,15 +101,17 @@ export const frame = (c: Case) => `You are a coding agent working in the git rep
   + 'or from the coordinating agent that briefs you. Start on it.';
 
 function runCase(kitDir: string, c: Case, model: string): Promise<string> {
+  // An empty folder per run: what sits in the working folder sways the pick (a scratch folder full of files cut critique from 5/5 to 0/4).
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-eval-case-'));
   return new Promise((done) => {
     const p = spawn('claude', ['-p', '--model', model, '--plugin-dir', kitDir, '--tools', 'Skill', '--max-turns', '1',
       '--output-format', 'stream-json', '--verbose', '--setting-sources', '', '--no-session-persistence',
       '--append-system-prompt', frame(c), c.text],
-    { cwd: tmpdir(), stdio: ['ignore', 'pipe', 'ignore'] });
+    { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
     const t = setTimeout(() => p.kill(), 120_000);
-    p.on('close', () => { clearTimeout(t); done(firstSkill(out)); });
+    p.on('close', () => { clearTimeout(t); rmSync(cwd, { recursive: true, force: true }); done(firstSkill(out)); });
   });
 }
 

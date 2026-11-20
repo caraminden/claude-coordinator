@@ -14,7 +14,7 @@ import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
 import { startPick } from './pick.js';
-import { chatCommandList, matchCommands, menuQuery, parseCommand } from './slash-commands.js';
+import { chatCommandList, matchCommands, mentionQuery, menuQuery, parseCommand } from './slash-commands.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
 // ---------- drafts ----------
@@ -547,12 +547,6 @@ function slashMenu(form, textarea, list) {
       textarea.focus();
     },
   };
-}
-
-/** The "@word" being typed before the caret, or null: "@" at the start or after a space or opening mark (#1149). */
-export function mentionQuery(value, caret) {
-  const m = /(?:^|[\s(\[{"'“‘])@([\p{L}\p{N}_.-]{0,40})$/u.exec(value.slice(0, caret));
-  return m ? m[1] : null;
 }
 
 /**

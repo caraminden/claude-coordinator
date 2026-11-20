@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { commandsKey, Runner } from '../src/runner.ts';
 import { chatCommands, describe } from '../src/slash-commands.ts';
-import { chatCommandList, matchCommands, menuQuery, parseCommand } from '../public/slash-commands.js';
+import { chatCommandList, matchCommands, mentionQuery, menuQuery, parseCommand } from '../public/slash-commands.js';
 
 const root = mkdtempSync(join(tmpdir(), 'slash-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -82,4 +82,14 @@ test("the list: Citadel's own for the chat's kind lead, matched by name, by the 
   assert.deepEqual(matchCommands(minion, 'gri').map((c) => c.name), ['citadel:grilling']);
   assert.deepEqual(matchCommands(minion, 'act').map((c) => c.name), ['compact']);
   assert.equal(matchCommands(minion, '').length, minion.length);
+});
+
+test('mentionQuery: the "@word" before the caret opens the member picker, but not inside an email address (#1149)', () => {
+  const q = (s) => mentionQuery(s, s.length);
+  assert.equal(q('@'), '');
+  assert.equal(q('hey @Ca'), 'Ca');
+  assert.equal(q('(@jo'), 'jo');
+  assert.equal(q('mail josh@exa'), null);
+  assert.equal(q('@Cara can you'), null); // a space ends it
+  assert.equal(mentionQuery('@Ca and more', 3), 'Ca'); // only what's before the caret
 });

@@ -106,8 +106,8 @@ export class FastMode {
   private again = false;
   /** Each scheme's failure as last said: a failure that repeats is said once, not every 30 s. */
   private said = new Map<number, string>();
-  /** Each scheme's resets: a pass that awaited git across one doesn't write its old state back. */
-  private resets = new Map<number, number>();
+  /** The schemes reset since their pass began: that pass tells nobody and doesn't write its old state back. */
+  private resetMidPass = new Set<number>();
   private readonly d: FastModeDeps;
   private readonly now: () => number;
   private readonly git: (cwd: string, ...args: string[]) => Promise<string>;
@@ -148,7 +148,7 @@ export class FastMode {
    * going (fast, off and fast again) is kept so its job isn't started twice, but its result is dropped: it may have been
    * a pinning run that checked only a few ids. */
   reset(projectId: number) {
-    this.resets.set(projectId, (this.resets.get(projectId) ?? 0) + 1);
+    this.resetMidPass.add(projectId);
     const { running } = this.state(projectId);
     this.d.set(key(projectId), { reds: [], landed: {}, ...(running ? { running: { ...running, stale: true } } : {}) });
   }
@@ -191,12 +191,12 @@ export class FastMode {
   private async step(projectId: number, repo: string) {
     const s = this.state(projectId);
     const jobDir = join(this.d.dir(projectId), 'job');
-    const gen = this.resets.get(projectId);
+    this.resetMidPass.delete(projectId);
     // land() writes `landed` while this awaits git: save with the newest map, not the one read here. A reset meanwhile
     // wins: only the run this pass leaves going is kept, its result dropped, so its job isn't started twice.
     const save = () => {
       const { running: _, ...now } = this.state(projectId);
-      if (this.resets.get(projectId) !== gen) return this.d.set(key(projectId), { ...now, ...(s.running ? { running: { ...s.running, stale: true } } : {}) });
+      if (this.resetMidPass.has(projectId)) return this.d.set(key(projectId), { ...now, ...(s.running ? { running: { ...s.running, stale: true } } : {}) });
       this.d.set(key(projectId), { ...s, landed: now.landed });
     };
     if (s.running) {
@@ -258,9 +258,10 @@ export class FastMode {
         pin.ids = pin.ids.filter((id) => !hit.includes(id));
         await this.open(projectId, repo, s, sha, hit, output, undefined, pin.at);
       }
-      // No verdict, or red only on a failure it couldn't name: the ids left neither passed nor failed on this commit,
-      // so it is run again once, then the pin stops rather than blame a later commit's minion.
-      if (pin.ids.length && (r.verdict === 'none' || (r.verdict === 'red' && r.ids.some((id) => UNNAMED.includes(id) && !hit.includes(id))))) {
+      // No verdict, or red on a failure it couldn't name (which may have kept the rest from running): the ids left
+      // neither passed nor failed on this commit, so they are run again once, then the pin stops rather than blame a
+      // later commit's minion.
+      if (pin.ids.length && (r.verdict === 'none' || (r.verdict === 'red' && r.ids.some((id) => UNNAMED.includes(id))))) {
         if (!pin.retried) {
           pin.retried = true;
           return;
@@ -315,6 +316,7 @@ export class FastMode {
       const n = Number(/#(\d+)/.exec(await this.git(repo, 'log', '-1', '--format=%s', sha).catch(() => ''))?.[1]);
       ticket = n ? this.d.ticketOf(projectId, n) : null;
     }
+    if (this.resetMidPass.has(projectId)) return; // reset while this looked: its ledger is gone, so nobody is told
     const n = ticket != null ? this.d.numberOf(ticket) : null;
     const entry: KnownRed = { ids, sha, ticket, ...(n ? { n } : {}), at };
     s.reds.push(entry);
@@ -330,6 +332,7 @@ export class FastMode {
   }
 
   private escalate(projectId: number, s: FastState) {
+    if (this.resetMidPass.has(projectId)) return;
     for (const e of s.reds) {
       if (e.escalated || this.now() - e.at < ESCALATE_MS) continue;
       e.escalated = true;

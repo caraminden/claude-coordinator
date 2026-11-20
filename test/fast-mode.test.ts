@@ -286,6 +286,23 @@ test("a pinning run with no verdict, or red only on what it can't name, is no pa
     await w.tick();
     assert.equal(w.runs.length, runs, 'the head counts as verified: not run again until main moves');
   }
+  // An unnamed red that is itself pinned is blamed, but says nothing of the other ids: they are run again, alone.
+  const m = world();
+  m.commit('one');
+  await m.tick();
+  await m.finish(GREEN);
+  const m2 = m.commit('two'), m3 = m.commit('three'), m4 = m.commit('four');
+  m.fm.landed(PEEK, 2, m2), m.fm.landed(PEEK, 3, m3), m.fm.landed(PEEK, 4, m4);
+  await m.tick();
+  await m.finish(red('the check', 'test/a.test.ts'));
+  await m.finish(red('the check'));
+  assert.deepEqual(m.told.map((t) => t.ticket), [2], 'the check is two\'s');
+  assert.equal(m.runs.at(-1)!.sha, m2, 'test/a is run on two again');
+  assert.equal(m.runs.at(-1)!.env.LAND_VERIFY_IDS, 'test/a.test.ts');
+  await m.finish(GREEN);
+  assert.equal(m.runs.at(-1)!.sha, m3);
+  await m.finish(red('test/a.test.ts'));
+  assert.deepEqual(m.told.map((t) => t.ticket), [2, 3]);
   // A retry that gives a verdict goes on as usual.
   const w = world();
   w.commit('one');
@@ -320,6 +337,17 @@ test("a reset while a pass awaits git sticks: the pass doesn't write its old sta
   assert.equal(w.runs.length, runs + 1, 'the head is run afresh');
   await w.finish(red('a'));
   assert.match(w.tm.at(-1)!, /first run since fast mode went on/);
+  // A reset while a red is being blamed (its git lookups): nobody is told of a ledger the reset cleared.
+  const c3 = w.commit('three');
+  w.fm.landed(PEEK, 7, c3);
+  await w.tick();
+  const tm = w.tm.length;
+  const blaming = w.finish(red('a', 'b'));
+  w.fm.reset(PEEK);
+  await blaming;
+  assert.equal(w.tm.length, tm);
+  assert.equal(w.told.length, 0);
+  assert.equal(w.fm.knownRed(PEEK), '');
 });
 
 test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, and the run goes on", async () => {

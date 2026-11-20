@@ -17,7 +17,8 @@ git diff --name-only "$base"...HEAD | cap 80
 [ "$n" -gt 80 ] && echo "... $n files in all; the rest are cut"
 echo "--- CLAUDE.md Project facts: risk-by-file lines"
 if [ -f CLAUDE.md ]; then
-  awk '/^- \*\*(High risk by file|Medium risk at least|Agent instructions)/{p=1;print;next} /^- \*\*|^## /{p=0} p' CLAUDE.md | cap 40
+  out=$(awk '/^- \*\*(High risk by file|Medium risk at least|Agent instructions)/{p=1;print;next} /^- \*\*|^## /{p=0} p' CLAUDE.md | cap 40)
+  [ -n "$out" ] && echo "$out" || echo "none found in CLAUDE.md: read its Project facts by hand"
 else
   echo "no CLAUDE.md"
 fi

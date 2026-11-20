@@ -131,7 +131,12 @@ its second round. A plain blocker on a first fail is yours to fix.
    items a call; when the next round is the last, say so. When the `on_fail:` step that fired names
    a teacher entry, add "Teacher rubric: `<path>`", its file in the review set folder (the
    "Review set:" line names it; the file says `kind: teacher`). A teacher on trial still teaches.
-3. **Apply fix 1,** remake the artifacts and run the next critic round as usual.
+   The scheme's additions to the kit's Professor, when it has some, go in too: the "Kit reviewers:"
+   line names their file (`professor.md`).
+3. **Apply fix 1,** remake the artifacts and run the next critic round as usual. Once that round is
+   judged, record the teacher's run: `review_set` with the teacher entry's slug (`professor` for the
+   kit's own) and `run: {round, verdict}`, the round just judged, one per item its fix went into:
+   `pass` if the item passed, else `fail`. The page shows these as whether its fixes held.
 4. **Playbook:** when the rubric has one, write the entry once the next round is judged: the
    finding's kind, the fix, before and after, the critic's verdict; the person's verdict makes it
    proven or sent back.

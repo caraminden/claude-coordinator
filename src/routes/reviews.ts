@@ -6,17 +6,33 @@ import { BUILT_INS, calibratedText, isKit, loadStarters, nameFor, parseWhen, ren
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
 import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
 import { turnEnv } from '../turn-launch.ts';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Project, Ticket } from '../db.ts';
+
+/** The kit's agent each built-in runs as (#1089): its own text, shown on the page behind a toggle. */
+const KIT_AGENTS: Record<string, string> = { 'pre-ship-review': 'reviewer', 'finding-checker': 'finding-checker', 'fresh-eyes': 'fresh-eyes', professor: 'professor' };
+const AGENTS_DIR = join(import.meta.dirname, '..', '..', 'kit', 'agents');
+/** The kit agent's text without its frontmatter, and where it lives; null for a built-in with no agent of its own. */
+function kitAgent(slug: string): { path: string; text: string } | null {
+  const name = KIT_AGENTS[slug];
+  if (!name) return null;
+  try {
+    return { path: `kit/agents/${name}.md`, text: readFileSync(join(AGENTS_DIR, `${name}.md`), 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '').trim() };
+  } catch {
+    return null;
+  }
+}
 
 /** An entry for the page: a kit built-in's `when` and `what` are the kit's, and its text is only the scheme's additions. */
 const view = (e: ReviewEntry, more: { record?: Record_ ; verdicts?: Verdict[] } = {}) => {
   const kit = isKit(e) ? BUILT_INS.find((b) => b.slug === e.slug) : undefined;
   return {
     ...e, kit: !!kit, what: kit?.what ?? null, when: kit?.when ?? (whenText(e.triggers) || 'ask'), text: kit ? e.body : renderEntry(e, { verdicts: more.verdicts }),
+    agent: kit ? kitAgent(e.slug) : null,
     calibrated: e.calibration ? calibratedText(e.calibration) : null,
     // The record (Q4) and people's verdicts (Q13), read-only here: only a minion adds to them.
-    runs: more.record?.runs ?? [], rate: more.record?.rate ?? null, firsts: more.record?.firsts ?? 0, stuck: more.record?.stuck ?? null, verdicts: more.verdicts ?? [],
+    runs: more.record?.runs ?? [], rate: more.record?.rate ?? null, firsts: more.record?.firsts ?? 0, passes: more.record?.passes ?? 0, stuck: more.record?.stuck ?? null, verdicts: more.verdicts ?? [],
   };
 };
 type Record_ = ReturnType<ReviewSet['record']> extends Map<number, infer R> ? R : never;

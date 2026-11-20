@@ -163,6 +163,8 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
   ] as const).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),
   { slug: 'finding-checker', name: 'Finding checker', kind: 'checker', source: 'kit:citadel:finding-checker', when: 'Deep pre-ship reviews, after the reviewer', what: "Tries to prove each of the reviewer's findings wrong before the author acts on it." },
   { slug: 'fresh-eyes', name: 'Fresh eyes', kind: 'reviewer', source: 'kit:citadel:fresh-eyes', when: 'Feature PRs, after the retro', what: "Reads the requester's own words against the PR and says what was built that they didn't ask for, and what they asked for that wasn't built." },
+  // A teacher (#1089): it runs only when a critic hands it a stubborn fail, so the page hangs it under those critics.
+  { slug: 'professor', name: 'Professor', kind: 'teacher', source: 'kit:citadel:professor', when: "When a critic hands it a stubborn fail: after 2 failed rounds, unless the critic's hand-offs say otherwise", what: "Takes the cause a critic keeps failing work on and returns ranked fixes concrete enough to type. Its record is whether the critic's next round passed after its fix." },
 ];
 export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
 /** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
@@ -609,21 +611,24 @@ export class ReviewSet {
 
   /**
    * The page's record by entry id (Q4): the last 10 runs oldest first, the first-round pass rate over the last 20 first
-   * rounds, and whether it always passes or always fails (5 first rounds or more, all the same).
+   * rounds, and whether it always passes or always fails (5 first rounds or more, all the same). A teacher's rate is over
+   * all its runs, each a fix and whether it held (#1089), with `passes` the fixes that held.
    */
-  record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; stuck: 'pass' | 'fail' | null }> {
-    const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; stuck: 'pass' | 'fail' | null }>();
+  record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }> {
+    const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }>();
     const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY id`).all(projectId) as Row[];
     for (const r of rows) {
-      if (!out.has(r.entry_id)) out.set(r.entry_id, { runs: [], rate: null, firsts: 0, stuck: null });
+      if (!out.has(r.entry_id)) out.set(r.entry_id, { runs: [], rate: null, firsts: 0, passes: 0, stuck: null });
       out.get(r.entry_id)!.runs.push({ id: r.id, minion: r.minion, round: r.round, verdict: r.verdict, disagreed: !!r.disagreed, at: r.at });
     }
-    const firsts = this.db.prepare(`SELECT entry_id, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND r.round = 1) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
+    // A teacher's every run is one fix and whether the critic's next round passed after it (#1089): its rate is how often a fix held.
+    const firsts = this.db.prepare(`SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
     for (const f of firsts) {
       const rec = out.get(f.entry_id)!;
       rec.firsts = f.n;
+      rec.passes = f.pass;
       rec.rate = Math.round((100 * f.pass) / f.n);
-      rec.stuck = f.n >= 5 && (f.pass === f.n || f.pass === 0) ? (f.pass ? 'pass' : 'fail') : null;
+      rec.stuck = !f.teacher && f.n >= 5 && (f.pass === f.n || f.pass === 0) ? (f.pass ? 'pass' : 'fail') : null;
     }
     return out;
   }
@@ -821,7 +826,7 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
       : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, and ship only on that go, the way the scheme ships (with hand_off_land: no risk, and name the go).");
   }
   const rest = off.filter((e) => e.slug !== 'pre-ship-review');
-  if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, and an off fresh eyes means no citadel:fresh-eyes Grunt.`);
+  if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, an off fresh eyes means no citadel:fresh-eyes Grunt, and an off professor means no citadel:professor, so a stubborn fail's hand-off to it goes to the next step (a person, at the last round).`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
     for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to the kit's text\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : ''].filter(Boolean).join('\n\n')}\n`);

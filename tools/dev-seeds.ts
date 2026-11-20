@@ -1000,7 +1000,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'review-set': {
-    about: "the Seeded scheme's Reviewers and critics page (#1054): a Taste panel of two critics and its referee, a blocking critic that always fails and holds a minion's ship, an order, hand-offs, run dots, a pass rate and two recorded verdicts",
+    about: "the Seeded scheme's Reviewers and critics page (#1054): a Taste panel of two critics and its referee, a blocking critic that always fails and holds a minion's ship, an order, hand-offs, run dots, a pass rate and two recorded verdicts; an art critic handing off to its own Art professor teacher, and the kit's Professor under the others, each with fixes that held or didn't (#1089)",
     seed(c) {
       const r = c.store.reviews;
       const id = c.project.id;
@@ -1011,7 +1011,13 @@ mock.boards('#takes', { boards: [
       mk('taste-referee', 'Taste referee', 'referee', { panel: 'Taste' });
       mk('copy-critic', 'Copy critic', 'critic', { gate: 'block', on_fail: [{ after: 1, to: 'layout-critic' }, { after: 3, to: 'person' }] });
       mk('a11y-checker', 'Accessibility checker', 'checker', { stage: 'ship', context: { requester: true } });
+      r.ensureBuiltIns(id);
+      mk('art-professor', 'Art professor', 'teacher', { triggers: {}, body: '## For fixes\n\nRead the palette ramp first; name a tone, a pixel size and a frame range.\n' });
+      mk('art-critic', 'Art critic', 'critic', { triggers: { creative: 'new or changed art' }, on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }] });
       const now = Date.now();
+      // Teacher runs (#1089): the critic's round after each fix, pass when the fix held.
+      ([['art-professor', 3, 'pass'], ['art-professor', 3, 'pass'], ['art-professor', 3, 'fail'], ['art-professor', 3, 'pass'], ['professor', 3, 'fail'], ['professor', 3, 'pass']] as const)
+        .forEach(([slug, round, verdict], i) => r.recordRun(id, slug, { ticketId: t.id, minion: `#${t.number}`, round, verdict }, now - (6 - i) * 5_400_000));
       const runs: [string, number, string][] = [['layout-critic', 1, 'pass'], ['layout-critic', 1, 'fail'], ['layout-critic', 2, 'pass'], ['layout-critic', 1, 'pass'], ['colour-critic', 1, 'fail'], ['colour-critic', 1, 'pass'], ['taste-referee', 1, 'pass'], ['a11y-checker', 1, 'ask']];
       runs.forEach(([slug, round, verdict], i) => r.recordRun(id, slug, { ticketId: t.id, minion: `#${t.number}`, round, verdict }, now - (runs.length - i) * 3_600_000));
       for (let i = 0; i < 6; i++) r.recordRun(id, 'copy-critic', { ticketId: t.id, minion: `#${t.number}`, round: 1, verdict: 'fail' }, now - (6 - i) * 1_800_000);

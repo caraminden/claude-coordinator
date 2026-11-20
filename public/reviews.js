@@ -99,7 +99,9 @@ function board() {
       h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => select(null, 'new') }, '+ New'));
   }
   return h('div', { class: 'rv-board' }, ...cols.map(([stage, label]) => {
-    const list = columnUnits(state.entries.filter((e) => e.stage === stage));
+    // A teacher runs only when a critic hands it work (#1089): it hangs under those critics, not in a column.
+    const list = columnUnits(state.entries.filter((e) => e.stage === stage && e.kind !== 'teacher'));
+    if (stage === 'work') list.push(...state.entries.filter((t) => t.kind === 'teacher' && !handsTo(t).length).map(looseTeacher));
     if (stage === 'schedule') list.push(...state.audits.map(auditCard));
     return h('section', { class: 'rv-col', 'aria-label': label },
       h('h3', {}, label),
@@ -124,7 +126,7 @@ function columnUnits(here) {
     else if (key) {
       const members = here.filter((x) => x.panel === e.panel && !x.kit);
       out.push({ node: panelBox(e.panel, members), runs: members.some((x) => x.enabled) });
-    } else out.push({ node: card(e), runs: !e.kit && e.enabled });
+    } else out.push({ node: withTeachers(e), runs: !e.kit && e.enabled });
   }
   return out.flatMap((u, i) => i && u.runs && out[i - 1].runs ? [h('div', { class: 'rv-then', 'aria-hidden': 'true' }, '↓ then'), u.node] : [u.node]);
 }
@@ -137,7 +139,7 @@ function panelBox(name, members) {
   const ref = refs.some((x) => x.enabled);
   return h('div', { class: 'rv-panel', role: 'group', 'aria-label': `Panel ${name}` },
     h('div', { class: 'rv-panel-head' }, h('b', {}, name), h('span', { class: 'muted' }, ref ? ': judge together, referee merges' : ': judge together')),
-    ...judges.map(card), ...refs.map(card),
+    ...judges.map(withTeachers), ...refs.map(card),
     ref ? h('p', { class: 'muted rv-panel-cost' }, `${on} judge${on === 1 ? '' : 's'} + referee: ${on + 1} model calls a run`)
       : h('p', { class: 'rv-warn rv-panel-cost', role: 'note' }, `No referee on: each judge's verdict stands on its own (${on} model call${on === 1 ? '' : 's'} a run). Add a referee to the panel to merge them.`));
 }
@@ -160,6 +162,35 @@ function card(e) {
 
 const isLens = (e) => e.kit && e.slug.startsWith('lens-');
 
+/** The teachers an entry hands its stubborn fails to, with after how many fails: its hand-offs, or a critic's default (professor after 2). */
+function teachersOf(e) {
+  const steps = e.on_fail ?? (e.kind === 'critic' ? [{ after: 2, to: 'professor' }] : []);
+  return steps.map((st) => ({ after: st.after, t: entry(st.to) })).filter((x) => x.t?.kind === 'teacher');
+}
+/** The entries that hand off to a teacher, with after how many fails. */
+const handsTo = (t) => state.entries.flatMap((e) => teachersOf(e).filter((x) => x.t.slug === t.slug).map((x) => ({ e, after: x.after })));
+/** "fix held 3 of 4", or that it has none yet: a teacher's record is whether the critic passed the work after its fix. */
+const heldText = (t) => (t.firsts ? `fix held ${t.passes} of ${t.firsts}` : 'no fixes yet');
+
+/** A card with a strip under it per teacher it hands off to, so the chain reads top to bottom (take A, #1089). */
+function withTeachers(e) {
+  const ts = teachersOf(e);
+  if (!ts.length) return card(e);
+  return h('div', { class: 'rv-chain' }, card(e), ...ts.map(({ t, after }) => h('button', {
+    type: 'button', class: `rv-teach${t.slug === state.selected ? ' on' : ''}${t.enabled ? '' : ' off'}`, 'aria-pressed': String(t.slug === state.selected),
+    title: `${e.name} hands an item to ${t.name} after ${after} failed round${after === 1 ? '' : 's'}${t.enabled ? '' : ` (${t.name} is off)`}`, onclick: () => select(t.slug) },
+  h('span', { class: 'rv-teach-after' }, `↳ after ${after} fail${after === 1 ? '' : 's'}`),
+  h('span', { class: 'rv-teach-name' }, t.name),
+  h('span', { class: 'rv-teach-rec' }, t.runs?.length ? dots(t.runs) : null, h('span', { class: 'muted' }, t.enabled ? heldText(t) : 'off')))));
+}
+
+/** A teacher no critic here hands off to: at the foot of While working, quiet, still openable. */
+function looseTeacher(t) {
+  return h('button', { type: 'button', class: `rv-teach rv-teach-loose${t.slug === state.selected ? ' on' : ''}${t.enabled ? '' : ' off'}`, 'aria-pressed': String(t.slug === state.selected), onclick: () => select(t.slug) },
+    h('span', { class: 'rv-teach-name' }, t.name),
+    h('span', { class: 'muted' }, `${t.kit ? "The kit's teacher" : 'A teacher'}: no critic here hands off to it${t.enabled ? '' : ', and it is off'}. ${heldText(t)}.`));
+}
+
 /** The pre-ship review's lenses as one card, a switch a row, so nine of them don't bury the column. */
 function lensesCard(lenses) {
   return h('div', { class: 'rv-card rv-lenses' },
@@ -172,7 +203,7 @@ function lensesCard(lenses) {
 
 function chips(e) {
   return h('div', { class: 'rv-chips' },
-    e.kind !== 'critic' ? h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, e.kind) : null,
+    e.kind !== 'critic' ? h('span', { class: 'cui-chip', 'data-tone': e.kind === 'teacher' ? 'violet' : 'neutral' }, e.kind) : null,
     e.trial ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: "On trial: it advises and blocks nothing until it's calibrated" }, 'trial') : null,
     e.gate === 'block' ? h('span', { class: 'cui-chip', 'data-tone': 'info', title: 'Its fail blocks the ship' }, 'blocks') : null,
     e.stuck ? h('span', { class: 'cui-chip', 'data-tone': 'warn', title: `Its last ${e.firsts} first rounds all ${e.stuck === 'pass' ? 'passed: it may be too easy' : 'failed: it may be too strict, or the work keeps missing it'}` }, e.stuck === 'pass' ? 'always passes' : 'always fails') : null,
@@ -298,9 +329,12 @@ function detail() {
       h('h3', {}, e.name), chips(e)),
     h('div', { class: 'rv-switch-row' }, sw, h('span', {}, e.enabled ? 'On' : 'Off')),
     e.slug === 'pre-ship-review' ? preShipNote(e) : null,
-    e.kit ? null : judging(e),
+    e.kit || e.kind === 'teacher' ? null : judging(e),
     e.kit ? section('What it does', h('p', {}, e.what)) : null,
-    section('Reviews', h('p', {}, e.kit ? e.when : whenLine(e)), e.kit ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
+    e.kind === 'teacher' ? section('When it runs', h('p', {}, e.kit ? e.when : 'When a critic hands it a stubborn fail'), handOffs(e))
+      : section('Reviews', h('p', {}, e.kit ? e.when : whenLine(e)), e.kit ? null : h('p', { class: 'muted rv-when' }, h('code', {}, `when: ${e.when}`))),
+    e.agent ? section('Its text', h('p', { class: 'muted' }, 'From ', h('code', {}, e.agent.path), " in the kit: every scheme's minions read the same."),
+      h('details', { class: 'rv-agent' }, h('summary', {}, 'Show its text'), h('pre', { class: 'rv-added' }, e.agent.text))) : null,
     e.kit ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, "None: it reads the kit's text alone. Edit by hand or describe a change to add to it."))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
     e.kit ? null : section('With the others', ...withOthers(e)),
@@ -313,8 +347,19 @@ function detail() {
     h('p', { class: 'muted rv-ver' }, `Version ${e.version}, saved by ${e.updated_by} ${ago(e.updated_at)}`));
 }
 
+/** Who hands work to a teacher, and after how many fails; none says how to wire one. */
+function handOffs(t) {
+  const from = handsTo(t);
+  if (!from.length) return h('p', { class: 'muted' }, "No critic here hands off to it yet. A critic's hand-offs (Edit by hand on the critic) name it.");
+  return h('ul', { class: 'rv-ctx' }, from.map(({ e, after }) => h('li', {}, h('button', { type: 'button', class: 'rv-link', onclick: () => select(e.slug) }, e.name), ` after ${after} failed round${after === 1 ? '' : 's'}`)));
+}
+
 /** Its runs, the first-round pass rate, and a warning when it always passes or always fails (Q4). */
 function record(e) {
+  if (e.kind === 'teacher') {
+    if (!e.runs?.length) return [h('p', { class: 'muted' }, "No fixes recorded yet. After each fix it gives, the critic's next round shows here as a dot: green when the fix held, red when the work failed again.")];
+    return [h('p', { class: 'rv-rec' }, dots(e.runs), h('span', {}, ` ${heldText(e)} `), h('span', { class: 'muted' }, "the critic's next round, after its fix"))];
+  }
   if (!e.runs?.length) return [h('p', { class: 'muted' }, 'No runs recorded yet. Each round a minion runs it shows here as a dot.')];
   return [
     h('p', { class: 'rv-rec' }, dots(e.runs), e.rate === null ? null : h('span', {}, ` ${e.rate}% `), h('span', { class: 'muted' }, e.rate === null ? ` last ${e.runs.length} runs` : `first-round pass, last ${e.firsts} first rounds`)),

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -149,13 +149,33 @@ test("set_app_person: a scheme's Taskmaster switches its own apps for a person, 
 });
 
 test('freeAppPort skips taken and listening ports; schemeRunner reads the label its workflows use', async () => {
-  const busy = createServer().listen(0, '127.0.0.1');
-  await new Promise((ok) => busy.once('listening', ok));
-  const at = (busy.address() as { port: number }).port;
+  // Three neighbouring ports the test holds itself, below 32768: a listen(0) port's neighbour is often an outgoing
+  // connection's (Linux hands those out from 32768 up, even ports to connect), which made this fail in full runs.
+  const listen = (port: number) =>
+    new Promise<Server | null>((ok) => {
+      const s = createServer().once('error', () => ok(null));
+      s.listen(port, '127.0.0.1', () => ok(s));
+    });
+  const close = (s: Server) => new Promise((ok) => s.close(ok));
+  let held: Server[] = [];
+  let at = 0;
+  while (held.length < 3) {
+    for (const s of held) await close(s);
+    at = 10_000 + Math.floor(Math.random() * 22_000);
+    held = [];
+    for (let i = 0; i < 3; i++) {
+      const s = await listen(at + i);
+      if (!s) break;
+      held.push(s);
+    }
+  }
+  // at is free but taken, at + 1 listens, at + 2 is free.
+  await close(held[0]);
+  await close(held[2]);
   try {
-    assert.equal(await freeAppPort(new Set([at - 1]), [at - 1, at + 1]), at + 1);
+    assert.equal(await freeAppPort(new Set([at]), [at, at + 2]), at + 2);
   } finally {
-    busy.close();
+    await close(held[1]);
   }
   assert.equal(schemeRunner({ name: 'Trips' }, join(root, 'trips')), 'trips-ci');
   assert.equal(schemeRunner({ name: 'Plain' }, join(root, 'plain')), null);

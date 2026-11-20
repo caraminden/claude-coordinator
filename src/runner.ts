@@ -2393,20 +2393,26 @@ export class Runner {
     return now - ended >= KEEPALIVE_AFTER_MS && now - ended < CACHE_TTL_MS ? null : 'not due';
   }
 
-  /** Last turn end each minion's gate was counted for: one count per due window, not one per minute. */
-  private gateCounted = new Map<number, number>();
+  /** Each minion's counted due window: its last turn end, the day and the gate it was counted under. */
+  private gateCounted = new Map<number, { ended: number; day: string; gate: string }>();
 
   /**
-   * Count which gate turned a due minion away, or "sent" (#1274): once per idle minion with a series whose last turn
-   * ended 55 to 60 minutes ago, per Pacific day in KEEPALIVE_GATES_KEY. Minions not yet due aren't counted, or "not
-   * due" would drown the rest.
+   * Count which gate turned a due minion away, or "passed" (#1274): once per idle minion whose last turn ended 55 to
+   * 60 minutes ago, per Pacific day in KEEPALIVE_GATES_KEY. A later minute of the same window that finds another gate
+   * moves the count there, so a minion busy at minute 55 and pinged at 56 counts as passed. Minions not yet due aren't
+   * counted, or "not due" would drown the rest. "passed" is the sweep's ask: the launch can still stop a dirty series.
    */
   private countGate(ticketId: number, gate: string | null, now: number) {
-    if (!this.store.getSetting(keepaliveKey(ticketId))) return;
     const ended = this.store.lastTurnEnd(ticketId);
-    if (!ended || now - ended < KEEPALIVE_AFTER_MS || now - ended >= CACHE_TTL_MS || this.gateCounted.get(ticketId) === ended) return;
-    this.gateCounted.set(ticketId, ended);
-    this.store.setSetting(KEEPALIVE_GATES_KEY, countGate(this.store.getSetting(KEEPALIVE_GATES_KEY), pacificDay(now), gate ?? 'sent'));
+    if (!ended || now - ended < KEEPALIVE_AFTER_MS || now - ended >= CACHE_TTL_MS) return;
+    const was = this.gateCounted.get(ticketId);
+    const g = gate ?? 'passed';
+    if (was?.ended === ended && was.gate === g) return;
+    let counts = this.store.getSetting<Record<string, Record<string, number>>>(KEEPALIVE_GATES_KEY);
+    if (was?.ended === ended) counts = countGate(counts, was.day, was.gate, -1);
+    const day = was?.ended === ended ? was.day : pacificDay(now);
+    this.gateCounted.set(ticketId, { ended, day, gate: g });
+    this.store.setSetting(KEEPALIVE_GATES_KEY, countGate(counts, day, g));
   }
 
   /** Mark a minion's keepalive series stopped, with why. */

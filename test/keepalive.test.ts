@@ -320,27 +320,30 @@ test('the weekly readout switches keepalives off when they cost more than they s
   }
 });
 
-test('countGate adds one to a gate on a day and keeps the last 14 days', () => {
-  let c = countGate(null, '2026-11-01', 'sent');
-  c = countGate(c, '2026-11-01', 'sent');
+test('countGate adds one to a gate on a day, moves one away, and keeps the last 14 days', () => {
+  let c = countGate(null, '2026-11-01', 'passed');
+  c = countGate(c, '2026-11-01', 'passed');
   c = countGate(c, '2026-11-01', 'state complete');
-  assert.deepEqual(c, { '2026-11-01': { sent: 2, 'state complete': 1 } });
+  assert.deepEqual(c, { '2026-11-01': { passed: 2, 'state complete': 1 } });
+  c = countGate(c, '2026-11-01', 'state complete', -1);
+  assert.deepEqual(c, { '2026-11-01': { passed: 2 } }, 'a gate counted to nothing goes');
   for (let d = 2; d <= 20; d++) c = countGate(c, `2026-11-${String(d).padStart(2, '0')}`, 'hours');
   assert.equal(Object.keys(c).length, 14);
   assert.ok(!c['2026-11-06'] && c['2026-11-07'] && c['2026-11-20'], 'the oldest days go');
 });
 
-test('each due minion counts once a day under the gate that turned it away, or as sent (#1274)', async () => {
+test('each due minion counts once under the gate that last turned it away in its window, or as passed (#1274)', async () => {
   store.deleteSetting(KEEPALIVE_GATES_KEY);
   const ready = minion();
   const done = minion();
+  const later = minion();
   const night = minion();
   const end = pst(17);
-  await realTurn(ready, end);
-  await realTurn(done, end);
+  for (const id of [ready, done, later]) await realTurn(id, end);
   await realTurn(night, pst(23, 30));
   store.updateTicket(ready, { state: 'ready' });
   store.updateTicket(done, { state: 'complete' });
+  store.updateTicket(later, { state: 'complete' });
   store.updateTicket(night, { state: 'ready' });
   const before = callCount();
   runner.keepaliveSweep(end + 54 * 60_000);
@@ -348,13 +351,17 @@ test('each due minion counts once a day under the gate that turned it away, or a
   runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
   await until('the keepalive to run', () => callCount() > before);
   await idle(ready);
-  // A later minute of the same due window doesn't count the complete one again.
+  assert.deepEqual(store.getSetting(KEEPALIVE_GATES_KEY), { '2026-11-16': { passed: 1, 'state complete': 2 } });
+  // A minute later in the same window: the complete one isn't counted again; the one now waiting on a person moves to passed.
+  store.updateTicket(later, { state: 'ready' });
   runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS + 60_000);
+  await until('the second keepalive to run', () => callCount() > before + 1);
+  await idle(later);
   runner.keepaliveSweep(pst(23, 30) + KEEPALIVE_AFTER_MS); // 00:25 Pacific, the next day
   await idle(night);
   assert.deepEqual(store.getSetting(KEEPALIVE_GATES_KEY), {
     '2026-11-17': { hours: 1 },
-    '2026-11-16': { sent: 1, 'state complete': 1 },
+    '2026-11-16': { passed: 2, 'state complete': 1 },
   });
-  assert.equal(callCount(), before + 1, 'only the ready minion in hours was pinged');
+  assert.equal(callCount(), before + 2, 'only the minions waiting on a person in hours were pinged');
 });

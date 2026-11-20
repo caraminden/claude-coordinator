@@ -32,14 +32,16 @@ export const KEEPALIVE_OFF_KEY = 'keepalive_off';
 /** When the last week's readout went to the Taskmaster (ms). */
 export const KEEPALIVE_REPORT_KEY = 'keepalive_report_at';
 export const WEEK_MS = 7 * 24 * 3_600_000;
-/** Per Pacific day, how many due minions each gate turned away, and how many were "sent" (#1274): { day: { gate: n } }. */
+/** Per Pacific day, how many due minions each gate turned away, and how many "passed" (#1274): { day: { gate: n } }. */
 export const KEEPALIVE_GATES_KEY = 'keepalive_gates';
 /** Days of gate counts kept. */
 const GATE_DAYS = 14;
 
-/** `counts` with one more for `gate` on `day`, keeping the last GATE_DAYS days. */
-export function countGate(counts: Record<string, Record<string, number>> | null, day: string, gate: string): Record<string, Record<string, number>> {
-  const next = { ...counts, [day]: { ...counts?.[day], [gate]: (counts?.[day]?.[gate] ?? 0) + 1 } };
+/** `counts` with `by` (one, or -1 to move a count away) added to `gate` on `day`, keeping the last GATE_DAYS days. */
+export function countGate(counts: Record<string, Record<string, number>> | null, day: string, gate: string, by = 1): Record<string, Record<string, number>> {
+  const n = (counts?.[day]?.[gate] ?? 0) + by;
+  const { [gate]: _, ...rest } = counts?.[day] ?? {};
+  const next = { ...counts, [day]: n > 0 ? { ...rest, [gate]: n } : rest };
   return Object.fromEntries(Object.entries(next).sort(([a], [b]) => b.localeCompare(a)).slice(0, GATE_DAYS));
 }
 

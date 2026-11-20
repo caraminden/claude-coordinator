@@ -132,8 +132,20 @@ foreach ($f in $folders) {
 foreach ($f in $loose) { Copy-Item -ToSession $s -Path $f -Destination (Split-Path $f) -Force }
 Write-Host "  $($loose.Count) loose file(s) copied"
 
-# ---------- 4. the partition, first time only ----------
-if (-not $have) {
+# ---------- 4. the partition: added the first time, and its share set whenever it isn't ours ----------
+# Max and optimal at the share; min at 1%, so a driver that did honour it reserves next to nothing.
+# [decimal]: the encode maximum is 2^64-1, past what a double holds exactly; Max's 1 is [decimal] too, or
+# PowerShell picks Max(int, int) and the 2^64/100 minimum overflows it (#1175, the first run on her PC).
+$values = @{}
+foreach ($k in 'VRAM', 'Encode', 'Decode', 'Compute') {
+  $max = [decimal]$part."MaxPartition$k"
+  $values["MinPartition$k"] = [uint64][Math]::Max([decimal]1, [Math]::Floor($max / 100))
+  $values["MaxPartition$k"] = [uint64][Math]::Floor($max * $SharePercent / 100)
+  $values["OptimalPartition$k"] = $values["MaxPartition$k"]
+}
+# A run that stopped after adding the partition (or a new -SharePercent) leaves values that aren't these: set them again.
+$mine = $have -and [uint64]$have.MaxPartitionVRAM -eq $values.MaxPartitionVRAM -and [uint64]$have.MaxPartitionEncode -eq $values.MaxPartitionEncode
+if (-not $mine) {
   Say 'Giving the box its GPU partition'
   Write-Host '  This shuts the box down cleanly, changes its settings and starts it again: about 3 minutes.'
   Write-Host '  A CI job or minion job running on it now fails and is run again.'
@@ -147,18 +159,9 @@ if (-not $have) {
     Start-Sleep -Seconds 5
   }
   Set-VM -Name $Name -GuestControlledCacheTypes $true -LowMemoryMappedIoSpace 3GB -HighMemoryMappedIoSpace 32GB
-  Add-VMGpuPartitionAdapter -VMName $Name -InstancePath $part.Name
-  # Max and optimal at the share; min at 1%, so a driver that did honour it reserves next to nothing.
-  # [decimal]: the encode maximum is 2^64-1, past what a double holds exactly.
-  $values = @{}
-  foreach ($k in 'VRAM', 'Encode', 'Decode', 'Compute') {
-    $max = [decimal]$part."MaxPartition$k"
-    $values["MinPartition$k"] = [uint64][Math]::Max(1, [Math]::Floor($max / 100))
-    $values["MaxPartition$k"] = [uint64][Math]::Floor($max * $SharePercent / 100)
-    $values["OptimalPartition$k"] = $values["MaxPartition$k"]
-  }
+  if (-not $have) { Add-VMGpuPartitionAdapter -VMName $Name -InstancePath $part.Name }
   Set-VMGpuPartitionAdapter -VMName $Name @values
-  Write-Host "  partition added: up to $SharePercent% of $($card.Name)"
+  Write-Host "  partition set: up to $SharePercent% of $($card.Name)"
   $s = Connect-Box
 }
 

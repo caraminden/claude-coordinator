@@ -1,0 +1,78 @@
+# Proof that a flake fix held (#1120): one test file, 50 runs in a row, on the desktop runner (never GitHub's own).
+# Started by hand or by a fix minion on its branch: gh workflow run flake-proof.yml --ref <branch> -f file=test/x.test.ts
+# The Test health tab reads this run's steps (src/flakes.ts cleanRuns): one step per 10 runs, named "<n> clean runs …",
+# and marks the fix held when the run is green. A red step stops the run: the clean runs must be in a row.
+name: flake-proof
+run-name: flake-proof ${{ inputs.file }}
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'The test file to run, as test/<name>.test.ts'
+        required: true
+
+# Its own group per file: it waits for nothing and holds up no land, and a second dispatch of the same file queues behind the first
+# (a different file's proof never cancels it). Each batch runs the file under CPU load (tools/flake-proof.sh).
+concurrency:
+  group: citadel-flake-proof-${{ inputs.file }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ${{ fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
+      # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
+      # unpacked from their .debs into the runner's home.
+      - name: libatomic1 and sqlite3, when the distro lacks them
+        run: |
+          set -euo pipefail
+          if ! command -v sqlite3 >/dev/null || ! /sbin/ldconfig -p | grep -q 'libatomic\.so\.1'; then
+            dir=$HOME/.local/debs
+            if [ ! -x "$dir/usr/bin/sqlite3" ]; then
+              mkdir -p "$dir" && cd "$dir"
+              apt-get download libatomic1 sqlite3
+              for d in *.deb; do dpkg -x "$d" .; done
+            fi
+            echo "LD_LIBRARY_PATH=$dir/usr/lib/x86_64-linux-gnu" >>"$GITHUB_ENV"
+            echo "$dir/usr/bin" >>"$GITHUB_PATH"
+          fi
+      # Turns in tests start their units with systemd-run --user, as on perigee. Without the user's manager they
+      # fall back to running inside the server, so the real path would go untested (and since #519 that fallback
+      # raises an alert a test counts).
+      - name: the runner user's systemd
+        run: |
+          dir=/run/user/$(id -u)
+          [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
+          echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
+      - name: the file's name
+        env:
+          FILE: ${{ inputs.file }}
+        run: |
+          case "$FILE" in test/*.test.ts) [ -f "$FILE" ] || { echo "no such file: $FILE"; exit 1; } ;; *) echo "not a test file: $FILE"; exit 1 ;; esac
+      - name: 10 clean runs (1 of 5)
+        env: { FILE: '${{ inputs.file }}' }
+        run: tools/flake-proof.sh "$FILE" 10
+      - name: 10 clean runs (2 of 5)
+        env: { FILE: '${{ inputs.file }}' }
+        run: tools/flake-proof.sh "$FILE" 10
+      - name: 10 clean runs (3 of 5)
+        env: { FILE: '${{ inputs.file }}' }
+        run: tools/flake-proof.sh "$FILE" 10
+      - name: 10 clean runs (4 of 5)
+        env: { FILE: '${{ inputs.file }}' }
+        run: tools/flake-proof.sh "$FILE" 10
+      - name: 10 clean runs (5 of 5)
+        env: { FILE: '${{ inputs.file }}' }
+        run: tools/flake-proof.sh "$FILE" 10

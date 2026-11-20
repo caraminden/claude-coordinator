@@ -16,6 +16,7 @@ import type { MessageFile } from '../runner.ts';
 import { place } from '../chunked-uploads.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
+import type { PageItem } from '../ideas.ts';
 import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
 import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks } from '../../public/ui/marks.js';
@@ -250,6 +251,16 @@ async function bridgedPage(app: App, page: unknown): Promise<string | null> {
 }
 
 /** The HTML file a person's viewer opened, as it says it did: an artifact, a file a minion linked, or a shared file. */
+/** mockkit's list of a page's pick items (#1150), checked: at most 500 of { collection, id, title, label? } strings. */
+function pageItems(raw: unknown): PageItem[] {
+  if (!Array.isArray(raw)) return [];
+  const s = (v: unknown, max: number) => (typeof v === 'string' && v.length <= max ? v : null);
+  return raw.slice(0, 500).flatMap((i) => {
+    const collection = s(i?.collection, 100), id = s(i?.id, 200), title = s(i?.title, 500), label = s(i?.label, 200);
+    return collection && id && title !== null ? [{ collection, id, title, ...(label ? { label } : {}) }] : [];
+  });
+}
+
 async function openedPage(app: App, open: any): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
   let found: Awaited<ReturnType<typeof resolveFile>> = null;
   let projectId = 0;
@@ -668,6 +679,11 @@ export const fileRoutes: Route[] = [
       }
       if (answered) app.runner.broadcastTicket(to.id);
       app.runner.personWrote(to.id);
+      // The ideas ledger (#1150): a Later-style pick bar's items become rows now, with the titles the page sent.
+      try {
+        app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
+        app.store.ideas.restatus(project.id);
+      } catch (e) { console.error(`ideas: ${file}: ${(e as Error).message}`); }
       // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
       app.runner.continueLoops((to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id), session.name);
       return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });

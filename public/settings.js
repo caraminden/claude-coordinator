@@ -383,7 +383,8 @@ export function projectTitle(project) {
 export const ORDERS_GROUPS = [
   ['What minions read', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
     ['skills', 'Skills', 'spark', 'What minions know how to do, and when'], ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'],
-    ['reviews', 'Reviewers and critics', 'check', 'What judges work: critics, reviewers, audits'], ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"]]],
+    ['reviews', 'Reviewers and critics', 'check', 'What judges work: critics, reviewers, audits'], ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"],
+    ['ideas', 'Ideas', 'spark', 'Every idea shown, its pick, handoff and minion']]],
   ['How work runs', 'teal', [['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['schedules', 'Schedules', 'rows', 'Minions that start on a timer']]],
 ];
 const ORDERS_PAGES = new Set(ORDERS_GROUPS.flatMap(([, , items]) => items.map(([kind]) => kind)));

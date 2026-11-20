@@ -104,6 +104,7 @@ import { Rollback } from './src/rollback.ts';
 import { HostJobs } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
+import { FlakeFixes } from './src/flake-fixes.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -691,6 +692,21 @@ if (!BOOT_CHECK) {
   setInterval(sweepTurnAudit, 24 * 60 * 60_000).unref();
 }
 
+// The ideas ledger (#1150): each scheme's pages, handoffs and starts re-read hourly, and the weekly held note to its
+// Taskmaster of Later ideas waiting over two weeks (never a wake). Not in previews or dev copies: their Taskmasters aren't real.
+if (!BOOT_CHECK && !PREVIEW) {
+  const ideasPass = () => void safely('ideas ledger', async () => {
+    for (const p of store.listProjects()) {
+      await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
+      const tm = store.getOverlord(p.id);
+      const note = tm && store.ideas.laterNote(p.id);
+      if (note) runner.leaveMail(tm.id, 'Ideas', note);
+    }
+  });
+  setTimeout(ideasPass, 15 * 60_000).unref();
+  setInterval(ideasPass, 60 * 60_000).unref();
+}
+
 // Steps' times from before step_times (#571), once, a minute after boot.
 if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runner.backfillStepTimes()), 60_000).unref();
 
@@ -1207,6 +1223,21 @@ const fastMode = new FastMode({
   },
 });
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fast mode', () => fastMode.tick()), 30_000).unref();
+// A flake fix has to prove it held (#1120, src/flake-fixes.ts): the retro log's flake lines counted, the third sighting in 7 days
+// starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
+const flakeFixes = new FlakeFixes({
+  store, sharedDir: (id) => projectSharedDir(DATA_DIR, id),
+  start: async (project, brief) => {
+    const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' } }, APP_NAME);
+    store.updateTicket(id, { person_id: project.owner_id ?? null });
+    runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
+    runner.send(id, APP_NAME, brief.message, [], { brief: true });
+    return { id };
+  },
+  runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
+  jobs: (p, run) => ciHealth.runJobs(p, run),
+});
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('flake fixes', () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir))), 5 * 60_000).unref();
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },

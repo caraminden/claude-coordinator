@@ -1,0 +1,151 @@
+// A flake fix has to prove it held (#1120, idea S5). Three jobs, run every few minutes by server.ts:
+//  1. Count every flake line the retro log holds (shared/retro-log/<day>/land.md), not only the ones a land's own output named:
+//     the table held 4 rows against about 98 log lines in 9 days, because a minion's own test runs and a deploy's never reach it.
+//  2. The third sighting of one test file inside 7 days starts one bug minion for it. A file whose fix was held and then flaked
+//     again is reopened (a new minion at once: it was fixed once already).
+//  3. A fix is held only once the flake-proof workflow (50 runs of the file in a row, on the desktop runner) is green on the fix
+//     minion's branch; the Test health tab shows the clean runs so far.
+// No test is skipped or quarantined (Cara, 2026-11-10: "Keep failing, log it").
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Job, Run } from './ci-health.ts';
+import type { FlakeFix, Project, Store } from './db.ts';
+import { FLAKE_REPEAT, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
+
+/** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
+/** Minions one scheme's pass starts at most. */
+const MAX_STARTS_PER_PASS = 2;
+const SAME_SIGHTING_MS = 30 * 60_000;
+
+export interface FlakeFixDeps {
+  store: Store;
+  /** The scheme's shared folder, where retro-log/ is; null for a scheme with none. */
+  sharedDir: (projectId: number) => string | null;
+  /** Start the fix minion (server.ts's newMinion and its first message); its id. */
+  start: (project: Project, brief: { title: string; message: string }) => Promise<{ id: number }>;
+  /** The flake-proof workflow's runs on a branch, and a run's jobs (CiHealth.workflowRuns and runJobs); null when GitHub won't say. */
+  runs: (project: Project, branch: string) => Promise<Run[] | null>;
+  jobs: (project: Project, run: Run) => Promise<Job[] | null>;
+  now?: () => number;
+}
+
+export class FlakeFixes {
+  private busy = false;
+  private d: FlakeFixDeps;
+  constructor(d: FlakeFixDeps) { this.d = d; }
+
+  /** Retro-log flake lines of the last 14 days that no counted sighting covers become flake_events rows; how many. */
+  ingest(project: Project, now: number): number {
+    const dir = this.d.sharedDir(project.id);
+    if (!dir) return 0;
+    const root = join(dir, 'retro-log');
+    let days: string[];
+    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    const since = now - FLAKE_WINDOW_MS;
+    const fresh: { file: string; at: number; source: string }[] = [];
+    for (const day of days) {
+      if (Date.parse(`${day}T23:59:59Z`) < since) continue;
+      let md: string;
+      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      for (const s of parseRetroFlakes(md, day)) {
+        if (s.at >= since && s.at <= now + 60_000 && !this.d.store.hasFlakeNear(project.id, s.file, s.at, SAME_SIGHTING_MS)) fresh.push(s);
+      }
+    }
+    // After the check, so two log lines of one file close together both count the first time.
+    for (const s of fresh) this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '' }]);
+    return fresh.length;
+  }
+
+  /** The Test health tab's and the escalation's rules; the minions it starts. */
+  async escalate(project: Project, now: number): Promise<number> {
+    const { store } = this.d;
+    let started = 0;
+    for (const file of store.flakeFiles(project.id, now - FLAKE_REPEAT_MS)) {
+      if (started >= MAX_STARTS_PER_PASS) break; // the first pass after a deploy reads 14 days of log: the rest start on the next passes
+      const fix = store.flakeFix(project.id, file);
+      const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS);
+      let id: number | null = null;
+      if (!fix) {
+        if (sights.length < FLAKE_REPEAT) continue;
+        // A minion a person already started from the tab's button owns it: record the fix on that one, start no second.
+        const title = flakeBrief(file, 0, []).title;
+        const mine = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.title === title);
+        if (mine) { store.addFlakeFix(project.id, file, mine.id, now); continue; }
+        id = store.addFlakeFix(project.id, file, null, now);
+      } else if (fix.state === 'held') {
+        if (!sights.some((t) => t > (fix.held_at ?? 0))) continue;
+        store.updateFlakeFix(fix.id, { state: 'open', reopened: fix.reopened + 1, clean_runs: 0, held_at: null, proof_run: null, started_at: now, ticket_id: null });
+        id = fix.id;
+      } else {
+        const t = fix.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
+        const gone = !t || t.status === 'closed';
+        // An open fix with no live minion starts another only on 3 new sightings since it began, or at once if its minion never started.
+        if (!gone || (fix.ticket_id != null && sights.filter((x) => x > fix.started_at).length < FLAKE_REPEAT)) continue;
+        store.updateFlakeFix(fix.id, { started_at: now, ticket_id: null, clean_runs: 0, proof_run: null });
+        id = fix.id;
+      }
+      try {
+        const count = store.flakeCounts(project.id, now - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file)?.count ?? sights.length;
+        const m = await this.d.start(project, flakeBrief(file, count, store.flakeDetails(project.id, file)));
+        store.updateFlakeFix(id, { ticket_id: m.id });
+        started++;
+      } catch (err: any) {
+        console.error(`Starting the fix of flaky ${file} failed; the next pass retries: ${err?.message ?? err}`);
+      }
+    }
+    return started;
+  }
+
+  /** Each open fix's newest flake-proof run on its minion's branch: the clean runs so far, and held once the run is green. */
+  async prove(project: Project, now: number): Promise<void> {
+    const { store } = this.d;
+    for (const fix of store.flakeFixes(project.id)) {
+      if (fix.state !== 'open' || fix.ticket_id == null) continue;
+      const branch = store.getTicket(fix.ticket_id)?.branch;
+      if (!branch) continue;
+      const runs = await this.d.runs(project, branch);
+      const run = (runs ?? []).filter((r) => r.display_title === `flake-proof ${fix.file}` && Date.parse(r.created_at) >= fix.started_at)
+        .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+      if (!run) continue;
+      const jobs = await this.d.jobs(project, run);
+      const steps = ((jobs ?? [])[0]?.steps ?? []) as { name?: string; conclusion?: string | null }[];
+      const done = run.status === 'completed';
+      const clean = cleanRuns(steps, done ? run.conclusion : null);
+      if (done && run.conclusion === 'success') store.updateFlakeFix(fix.id, { state: 'held', clean_runs: clean, held_at: now, proof_run: run.id });
+      else if (clean !== fix.clean_runs || fix.proof_run !== run.id) store.updateFlakeFix(fix.id, { clean_runs: clean, proof_run: run.id });
+    }
+  }
+
+  /** Fix #1009 held machine-agent-jobs before it flaked again: recorded once, so its next sighting reopens it from the real log. */
+  seedPast(project: Project) {
+    const { store } = this.d;
+    const key = 'flake-fixes:seeded-1009';
+    if (store.getSetting<boolean>(key)) return;
+    const t = store.listTickets(project.id).find((x) => x.number === 1009 && x.title === 'Fix the repeat flaky tests' && x.status === 'closed');
+    store.setSetting(key, true);
+    const file = 'test/machine-agent-jobs.test.ts';
+    if (!t || !t.closed_at || store.flakeFix(project.id, file)) return;
+    store.addFlakeFix(project.id, file, t.id, t.created_at, { state: 'held', clean_runs: 0, held_at: t.closed_at });
+  }
+
+  async tick(projects: Project[]): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const now = (this.d.now ?? Date.now)();
+      for (const p of projects) {
+        try {
+          this.seedPast(p);
+          this.ingest(p, now);
+          await this.escalate(p, now);
+          await this.prove(p, now);
+        } catch (err: any) {
+          console.error(`Flake fixes of ${p.name} failed: ${err?.message ?? err}`);
+        }
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+}
+

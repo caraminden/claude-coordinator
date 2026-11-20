@@ -154,7 +154,8 @@ export class Memory {
     const after = this.store.getSetting<number>(this.markKey(projectId)) ?? 0;
     // The ids first, from the covering index, then the 200 rows' text: the one query sorted every message past the mark with its
     // text in the sorter, 0.7 s of the loop a pass when the mark sat behind a running turn (#1125).
-    const ids = (this.db.prepare(`SELECT e.id FROM events e JOIN tickets t ON t.id = e.ticket_id
+    // CROSS JOIN keeps events_asks in the lead (#1251): led by tickets it seeked into every minion of the scheme and sorted.
+    const ids = (this.db.prepare(`SELECT e.id FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
       WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? ORDER BY e.id LIMIT 200`).all(projectId, after) as { id: number }[]).map((r) => r.id);
     const msgs = (ids.length ? this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
       FROM events e WHERE e.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[] : [])
@@ -196,8 +197,9 @@ export class Memory {
       end = next ?? Infinity;
     }
     // The turn's last words that aren't a Grunt's: its reply.
+    // Row by row (#1251): the reply is nearly always the newest, and all() read the turn's last 300 rows every time.
     const rows = this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND id > ? AND id < ? AND kind = 'claude' ORDER BY id DESC LIMIT 300")
-      .all(m.ticket_id, m.id, Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER) as { data: string }[];
+      .iterate(m.ticket_id, m.id, Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER) as Iterable<{ data: string }>;
     let reply = '';
     for (const r of rows) {
       try {

@@ -133,6 +133,13 @@ test('settingKeys finds exactly the keys under a prefix', () => {
   store.settingKeys('loop:');
   const plan = (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(args as any[])) as { detail: string }[]).map((r) => r.detail).join('; ');
   assert.match(plan, /^SEARCH settings USING COVERING INDEX sqlite_autoindex_settings_1 \(key>\? AND key<\?\)/);
+  // settingsWithPrefix too, with its values (#1251): its LIKE ... ESCAPE read every row.
+  store.setSetting('loop:1', 5);
+  assert.deepEqual(store.settingsWithPrefix('loop:').find((r) => r.key === 'loop:1'), { key: 'loop:1', value: 5 });
+  assert.deepEqual(store.settingsWithPrefix('loop:minions:').map((r) => r.key), ['loop:minions:1:2']);
+  store.settingsWithPrefix('loop:');
+  const withValues = (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(args as any[])) as { detail: string }[]).map((r) => r.detail).join('; ');
+  assert.match(withValues, /^SEARCH settings USING INDEX sqlite_autoindex_settings_1 \(key>\? AND key<\?\)/);
 });
 
 test('the window rolls: messages older than the window stop counting', () => {

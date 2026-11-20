@@ -689,6 +689,10 @@ CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
 CREATE INDEX IF NOT EXISTS events_cards ON events(ticket_id, kind) WHERE kind IN ('question', 'plan', 'approval');
 -- Error events by time, for the post-deploy watch's turnOutcomes (#1178): partial, so it holds only the few error rows and no other query's plan can change.
 CREATE INDEX IF NOT EXISTS events_errors ON events(created_at) WHERE kind = 'error';
+-- Notes and people's messages by id (#1251), partial like events_errors: Home's ship notes walked every claude row since a
+-- visit (13.6 s of the loop), and the memory indexer seeked into every minion of a scheme for new messages (23 s on a busy disk).
+CREATE INDEX IF NOT EXISTS events_notes ON events(id) WHERE kind = 'note';
+CREATE INDEX IF NOT EXISTS events_asks ON events(id) WHERE kind = 'user_message';
 -- What recentCards found of each card, kept across restarts (#762): the first person's reply after it, an approval's result,
 -- and the newest event looked at. The card's minion and own id are kept to tell it from a later card that took a deleted id.
 CREATE TABLE IF NOT EXISTS card_fates (
@@ -1604,6 +1608,7 @@ export const SCHEMA_HISTORY = [
   [93, 'contraption_push_devices (#1138)'],
   [94, 'host_samples (#1123)'],
   [95, 'tickets.goal (#1130)'],
+  [96, 'events_notes and events_asks indexes (#1251)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3874,9 +3879,11 @@ export class Store {
     return row ? JSON.parse(row.value) : null;
   }
 
-  /** Every setting whose key starts with `prefix`, as key and value (the keys hold no LIKE wildcards). */
+  /** Every setting whose key starts with `prefix`, as key and value. */
   settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {
-    return (this.db.prepare("SELECT key, value FROM settings WHERE key LIKE ? ESCAPE '\\'").all(`${prefix.replace(/[\\%_]/g, '\\$&')}%`) as { key: string; value: string }[])
+    // A range on the key's index like settingKeys: LIKE with ESCAPE read every row of the table (part of a 0.6 s hold in fableMeter, #1251).
+    const [where, args] = this.keyRange(prefix);
+    return (this.db.prepare(`SELECT key, value FROM settings WHERE ${where} ORDER BY key`).all(...args) as { key: string; value: string }[])
       .map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
   }
 
@@ -3941,11 +3948,15 @@ export class Store {
 
   /** Every settings key starting with `prefix`. */
   settingKeys(prefix: string): string[] {
-    // A range on the key's index: substr() alone scanned every key, 0.4 ms a call on the live table (#1029).
+    const [where, args] = this.keyRange(prefix);
+    return (this.db.prepare(`SELECT key FROM settings WHERE ${where} ORDER BY key`).all(...args) as { key: string }[]).map((r) => r.key);
+  }
+
+  /** The settings keys starting with `prefix`, as a range on the key's index: substr() alone scanned every key, 0.4 ms a call on the live table (#1029). */
+  private keyRange(prefix: string): [string, (string | number)[]] {
     const last = prefix.codePointAt(prefix.length - 1);
     const upto = last === undefined || last >= 0xd800 ? null : prefix.slice(0, -1) + String.fromCodePoint(last + 1);
-    return (this.db.prepare(`SELECT key FROM settings WHERE key >= ? ${upto === null ? '' : 'AND key < ?'} AND substr(key, 1, ?) = ? ORDER BY key`)
-      .all(...[prefix, upto, prefix.length, prefix].filter((v) => v !== null)) as { key: string }[]).map((r) => r.key);
+    return [`key >= ? ${upto === null ? '' : 'AND key < ?'} AND substr(key, 1, ?) = ?`, [prefix, upto, prefix.length, prefix].filter((v) => v !== null)];
   }
 
   listMachines(): Machine[] {

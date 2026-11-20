@@ -377,6 +377,24 @@ test('a search with a selective filter yields between pages of rows scanned, and
 });
 
 // #1125: the pass read every message past the mark, text and all, into a sort for 200 of them (0.7 s of the loop).
+test('indexing finds new messages through events_asks, not a seek into every minion of the scheme (#1251)', async () => {
+  const { store } = world(join(root, 'asks.db'));
+  const P = store.createProject('P', null);
+  for (let i = 0; i < 3; i++) store.createTicket({ project_id: P.id, title: `m${i}`, permission_mode: 'default', created_by: 'cara' });
+  const t = store.createTicket({ project_id: P.id, title: 'm', permission_mode: 'default', created_by: 'cara' });
+  turn(store, t.id, 'cara', 'question', 'answer');
+  const seen: string[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  await store.memory.index(P.id, embed, 'fake');
+  const ids = seen.find((sql) => /SELECT e\.id FROM events e/.test(sql));
+  assert.ok(ids, 'pendingTurns reads the message ids first');
+  const plan = (prepare(`EXPLAIN QUERY PLAN ${ids}`).all(1, 0) as { detail: string }[]).map((r) => r.detail).join(' | ');
+  // A seek per minion was 2,200 random reads a pass on a big scheme: on a disk busy after a deploy it held the loop 23 s.
+  assert.match(plan, /^SEARCH e USING INDEX events_asks/, plan);
+  assert.doesNotMatch(plan, /TEMP B-TREE/, plan);
+});
+
 test('indexing sorts message ids, never message text', async () => {
   const { store } = world(join(root, 'sort.db'));
   const P = store.createProject('P', null);

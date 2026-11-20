@@ -73,6 +73,25 @@ test('Home\'s working minions and what shipped since, only in the person\'s sche
   assert.equal(homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, Date.now() + 60_000).schemes[0].shipped, 0, 'nothing shipped after `since`');
 });
 
+test('ship notes are read through events_notes, never a walk over every event since (#1251)', () => {
+  const { store, josh, scheme, minion, approvals } = setup('plan.sqlite');
+  const peek = scheme('Peek Auras');
+  store.addEvent(minion(peek, 'one').id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
+  const seen: string[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, 0);
+  store.shippedSince(0);
+  store.shipNotesSince(0);
+  const reads = seen.filter((sql) => /kind = 'note'/.test(sql) && /Shipped/.test(sql));
+  assert.equal(reads.length, 4, 'Home\'s buckets and since, shippedSince and shipNotesSince');
+  for (const sql of reads) {
+    const plan = (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array((sql.match(/\?/g) ?? []).length).fill(0)) as { detail: string }[]).map((r) => r.detail).join(' | ');
+    // Without it every claude row since `since` was read: 13.6 s of the live loop for a visit days back.
+    assert.match(plan, /USING INDEX events_notes/, `${sql}\n${plan}`);
+  }
+});
+
 test('Home\'s ship buckets are read once a minute for everyone, and `shipped` stays per request', () => {
   const { store, josh, scheme, minion, approvals } = setup('cache.sqlite');
   const peek = scheme('Peek Auras');

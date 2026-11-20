@@ -130,7 +130,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
   for (const p of news) {
     for (const rule of rules) {
       const hits = phraseHits(p.text, rule);
-      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), why: `repeats it (${hits.map((h) => `"${h}"`).join(', ')}); its one home is ${rule.pointer}` });
+      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
     }
     const pr = runs(p.text);
     const pw = content(p.text);

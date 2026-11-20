@@ -820,12 +820,13 @@ export function myInstructionsEditor() {
  * its one home, or a paragraph elsewhere sharing most of its words), and the save goes ahead only on Save anyway.
  * Resolves true to save. A failed check never blocks a save.
  */
-async function checkRepeats(scope, text, box) {
+async function checkRepeats(scope, text, box, status) {
   let found;
   try {
     ({ found } = await api(`api/projects/${view.projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
   } catch { return true; }
   if (!found.length) return (box.hidden = true);
+  status.textContent = '';
   return new Promise((done) => {
     const close = (go) => () => { box.hidden = true; done(go); };
     const where = (o) => {
@@ -834,7 +835,7 @@ async function checkRepeats(scope, text, box) {
     };
     box.replaceChildren(
       h('p', {}, h('strong', {}, 'Already said elsewhere. '), 'Work your change in where it is already written, or point there in a few words, or save it anyway.'),
-      h('ul', {}, ...found.map((o) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `(${o.why})`)))),
+      h('ul', {}, ...found.map((o) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`)))),
       h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')));
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
@@ -896,7 +897,7 @@ export function appInstructionsEditor() {
   save.onclick = async () => {
     status.textContent = 'Checking for repeats…';
     save.disabled = true;
-    const go = await checkRepeats('citadel', textarea.value, repeats);
+    const go = await checkRepeats('citadel', textarea.value, repeats, status);
     status.textContent = go ? '' : 'Not saved.';
     sync();
     if (go) saveNow();
@@ -1024,7 +1025,7 @@ export function instructionsEditor() {
   save.onclick = async () => {
     status.textContent = 'Checking for repeats…';
     save.disabled = true;
-    const go = await checkRepeats('scheme', textarea.value, repeats);
+    const go = await checkRepeats('scheme', textarea.value, repeats, status);
     status.textContent = go ? '' : 'Not saved.';
     sync();
     if (!go) return;

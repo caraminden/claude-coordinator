@@ -72,11 +72,11 @@ export function heldPlan(scope: Scope, found: Overlap[], fromGrunt: string[], ed
     `This edit to ${where} says something that is already written elsewhere, so nothing is saved yet. **Save anyway** keeps both, **Work it in** sends it back to put the change where it is already said (or point there), and **Cancel edit** drops it.`,
     '',
     '**Already said elsewhere**',
-    ...found.map((o) => `- ${place(o)}: “${q(o.excerpt)}” (${o.why})`),
+    ...found.map((o) => `- ${place(o)}: “${q(o.excerpt)}” It ${o.why}.`),
     ...fromGrunt.map((g) => `- From the minion's own check: ${q(g)}`),
     '',
     '**The edit**',
-    ...edits.flatMap((e, i) => [`${i + 1}. Before:`, '', ...quote(cut(e.find)), '', '   After:', '', ...quote(cut(e.replace) || '(deleted)'), '']),
+    ...edits.flatMap((e, i) => [`${edits.length > 1 ? `Change ${i + 1}, before` : 'Before'}:`, '', ...quote(cut(e.find)), '', 'After:', '', ...quote(cut(e.replace) || '(deleted)'), '']),
   ].join('\n');
 }
 

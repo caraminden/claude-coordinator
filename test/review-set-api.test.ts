@@ -405,7 +405,8 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   const b = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'two', properties: { type: 'chore' } } })).data;
   // The fake claude fails each new minion's first turn, which writes status 'error' when it ends: let both finish before closing them by hand, or the late write undoes the close (a flake under load).
   for (const m of [a, b]) await until(`#${m.number}'s first turn to fail`, async () => (await call(`/api/tickets/${m.id}`)).data.ticket.status === 'error');
-  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  // A busy timeout, since the server's writer may hold the write lock: node's default of 0 answers "database is locked" at once (#1171).
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 30_000 });
   db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
   db.prepare('UPDATE projects SET owner_id = NULL WHERE id = ?').run(away.id);
   db.prepare('DELETE FROM project_members WHERE project_id = ?').run(away.id);

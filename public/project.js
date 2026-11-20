@@ -24,6 +24,7 @@ import { decisionsPage } from './decisions.js';
 import { ideasPage } from './ideas.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
+import { unitsPage } from './units.js';
 import { releasesPage, setReleasesPage } from './releases.js';
 import { reviewsPage } from './reviews.js';
 import { helpPage } from './help.js';
@@ -122,6 +123,7 @@ function renderCrumbs(main) {
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
+      : main.kind === 'units' ? [projectLink, ' / ', settingsLink, ' / ', 'Units']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'notifications' ? [projectLink, ' / ', settingsLink, ' / ', 'Notifications']
@@ -295,6 +297,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'members' ? membersPage()
     : main.kind === 'people' ? peoplePage()
     : main.kind === 'contraptions' ? contraptionsPage()
+    : main.kind === 'units' ? unitsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'notifications' ? notificationsPage()

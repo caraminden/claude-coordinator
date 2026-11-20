@@ -24,6 +24,8 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    "Touched" lines go here, its "Tried or ruled out" and "Reusable" lines in part 6.
 5. **Leave alone**: what the minion must not touch (files, lanes, another minion's branch, live
    data). "Nothing in particular" when true.
+   Run `who-touches <the files it will edit>` (on every turn's PATH) and name each open minion
+   already changing one of them, so the new one plans around it instead of meeting it as a conflict at the ship.
 6. **Ruled out or tried**: decisions already made (quoted, dated), what was tried and failed and
    why, what is out of scope. Write "Nothing yet" when that's true, so the minion doesn't go looking.
    A change to how saved things are stored, read or applied (records, settings, saved files, a person's

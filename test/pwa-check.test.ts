@@ -82,3 +82,9 @@ test('the check also names the icon to register: its first PNG icon that loads, 
   assert.equal((await check({ ...good, icons: [{ src: 'https://elsewhere.example/i.png', sizes: '512x512' }] })).icon, null);
   assert.deepEqual((await installCheck('toc', app({ '/apps/toc/': page('') }))).icon, null);
 });
+
+test('a home page that did not answer is marked unchecked, not a lack (#1199)', async () => {
+  const r = await installCheck('x', async () => new Response('busy', { status: 503 }));
+  assert.match(r.unchecked ?? '', /answered 503/);
+  assert.equal((await installCheck('x', async () => new Response('<title>no manifest</title>'))).unchecked, undefined, 'a real lack is not unchecked');
+});

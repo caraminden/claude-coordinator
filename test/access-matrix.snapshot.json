@@ -1603,6 +1603,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/instructions/overlaps": {
+  "anon": "401 Not logged in",
+  "person": "400 scope must be \"scheme\" or \"citadel\"",
+  "member": "400 scope must be \"scheme\" or \"citadel\"",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/instructions/sources": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1992,6 +2002,26 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "404 No entry named nope",
   "m2": "404 No entry named nope"
+ },
+ "DELETE /api/projects/:p/reviews/pre-ship-review/lessons": {
+  "anon": "401 Not logged in",
+  "person": "400 Name the lesson by its kind",
+  "member": "400 Name the lesson by its kind",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Name the lesson by its kind",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/reviews/pre-ship-review/refutes": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion that ran the finding checker records what it refuted",
+  "member": "403 Only the minion that ran the finding checker records what it refuted",
+  "outsider": "403 Only the minion that ran the finding checker records what it refuted",
+  "tmA": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding",
+  "m2": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding"
  },
  "GET /api/projects/:p/schedule-audits": {
   "anon": "401 Not logged in",
@@ -3062,6 +3092,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/ship-risk": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/side": {
   "anon": "401 Not logged in",
   "person": "400 text is required",
@@ -3214,8 +3254,8 @@
  },
  "POST /api/tickets/:minion1/verdict": {
   "anon": "401 Not logged in",
-  "person": "400 verdict must be approve or revise",
-  "member": "400 verdict must be approve or revise",
+  "person": "400 verdict must be approve, revise or reject",
+  "member": "400 verdict must be approve, revise or reject",
   "outsider": "404 No such minion",
   "tmA": "403 Only people approve plans",
   "tmB": "403 Only people approve plans",
@@ -3792,6 +3832,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:taskmasterA/ship-risk": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:taskmasterA/side": {
   "anon": "401 Not logged in",
   "person": "400 Side questions are for minions, not the Taskmaster",
@@ -3944,8 +3994,8 @@
  },
  "POST /api/tickets/:taskmasterA/verdict": {
   "anon": "401 Not logged in",
-  "person": "400 verdict must be approve or revise",
-  "member": "400 verdict must be approve or revise",
+  "person": "400 verdict must be approve, revise or reject",
+  "member": "400 verdict must be approve, revise or reject",
   "outsider": "404 No such minion",
   "tmA": "403 Only people approve plans",
   "tmB": "403 Only people approve plans",
@@ -3977,6 +4027,16 @@
   "person": "403 Not for people",
   "member": "403 Not for people",
   "outsider": "403 Not for people",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/units": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",

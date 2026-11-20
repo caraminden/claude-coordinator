@@ -22,6 +22,11 @@ check the Check claims lens runs on the real data when the check only reads.
 - `<kit>`, the Citadel kit's absolute path, since you can't find it yourself.
 - Which lenses apply: "by the diff" (you pick them from the trigger table) or a named list.
   Extra checks a skill adds, such as one of its own references.
+- The scheme's additions file, when the brief names one. Read it before you write findings. Its
+  "Lessons" section lists kinds of finding this repo's finding checker refuted in three reviews
+  or more, each with why it was wrong. Before raising one of those kinds, check whether that reason
+  holds for this diff: when it does, leave the finding out; when the diff makes it untrue, raise
+  it and say in the finding why the lesson's reason doesn't apply here.
 
 ## How
 

@@ -21,6 +21,7 @@ import { memoryFolders, readFolder } from '../src/memory-files.ts';
 import { checkChanges, countLine } from '../src/memory-curator.ts';
 import { templateBlobs } from '../src/kit-sync.ts';
 import { addMention } from '../src/mentions.ts';
+import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -227,6 +228,29 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
         '## Not doing', '', '1. Deleting worktrees (a separate cleanup).', '2. Archiving open minions.',
       ].join('\n') });
       w.done('Posted the plan for approval.');
+      return route(c, t, e);
+    },
+  },
+  'held-instructions': {
+    about: "a minion's edit_instructions held on a card (#1162): its new bullet repeats the card rule, so Save anyway, Work it in or Cancel edit; the scheme's Settings page shows the same list before a person's own save",
+    seed(c) {
+      const old = '## Shipping\nShip once the tests you touched are green.';
+      c.store.setProjectInstructions(c.project.id, old, c.who);
+      const project = c.store.getProject(c.project.id)!;
+      const add = 'Ask with a card for a go, A or B, or an offer of work; tuning details are yours to pick.';
+      const edits = [{ find: 'are green.', replace: `are green.\n\n## Cards\n${add}` }];
+      const text = old.replace(edits[0].find, edits[0].replace);
+      const found = settingsOverlaps({ store: c.store } as never, project, 'scheme', old, text);
+      const fromGrunt = ['CLAUDE.md, Working rules: already says to ask with a card before a choice'];
+      const t = minion(c, 'Card rule in the scheme text', { note: 'edit held on a card' }, 'chore');
+      const w = chat(c, t, 10);
+      w.asked('Add a line to our scheme instructions about when to use cards.');
+      w.init();
+      w.said('Checked what already says it, then made the edit.');
+      const by = `#${t.number} for ${c.who}`;
+      const e = w.put('plan', { id: hex(), status: 'pending', to: c.who, summary: `Edit to the scheme instructions repeats ${found.length + 1} places`,
+        plan: heldPlan('scheme', found, fromGrunt, edits), instructions: { scope: 'scheme', project: project.id, old, text, edits, by, count: found.length + 1 } });
+      w.done('Nothing saved yet: the card asks whether to save anyway, work it in or cancel.');
       return route(c, t, e);
     },
   },

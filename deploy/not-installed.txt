@@ -1,0 +1,2 @@
+# Units in deploy/ that are not installed on purpose: one name per line (a file, or a whole unit), # starts a comment.
+# Listed ones stop showing in Settings > Units and stop pinging.

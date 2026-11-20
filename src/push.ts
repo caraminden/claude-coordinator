@@ -216,6 +216,12 @@ export class Pusher {
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
+  /** Tell every device of the scheme's members (no mute or pin filters: this is about the server, not a minion). */
+  async broadcast(projectId: number, msg: PushMessage): Promise<void> {
+    const subs = this.store.listPushSubscriptions().filter((s) => this.inScheme(s.name, projectId));
+    await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
+  }
+
   /** A minion's owner's name, lowercased, while they're still in its scheme; null for none, so everyone hears (a missed ping is worse than an extra one). */
   private owner(ticket: Ticket): string | null {
     const raw = String(this.store.props.forTarget('minion', ticket.id).assigned ?? '').trim();

@@ -285,6 +285,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator-prune.timer
 ```
 
+**Installed or not.** Every unit and drop-in in `deploy/` is checked against `~/.config/systemd/user/` at boot and every 6 hours (read-only, `src/unit-drift.ts`): Settings > Units (admins) lists each as installed, missing or different with its fish install command, and Citadel's members get one push when one newly goes missing or different. A unit kept out on purpose goes in `deploy/not-installed.txt`.
+
 **Down alerts.** Every 5 minutes `deploy/citadel-watchdog.timer` runs
 `tools/watchdog.ts` (`src/watchdog.ts`): it checks `claude-coordinator.service`
 and `/api/health`, and each contraption's `citadel-app-<name>.service` while it is
@@ -644,3 +646,7 @@ Host and container turns alike.
 The Taskmaster itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage minions but can't run shell
 commands; it hands the real work to minions.
+
+## stale-docs (#1164)
+
+`tools/stale-docs` (on every turn's PATH, plain JS, any scheme's repo): `stale-docs refs` fails when a backticked path in CLAUDE.md, README.md, `.claude/skills/*/SKILL.md` or `.claude/rules/*.md` isn't in the repo (a repo's `.stale-docs-allow` lists the on-purpose ones, each with a reason); `stale-docs shared --dir <shared folder> --refs <repo> <memory folder> --pins <file>` lists which `handoffs/` and `specs/` files nothing points at, and `stale-docs archive --list <approved list> --refs <the same paths>` moves only those to `archive/`, never deleting.

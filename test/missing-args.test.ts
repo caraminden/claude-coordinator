@@ -156,7 +156,7 @@ test('"Message is required": message is accepted for text on the message tools',
   assert.ok(!up.isError, up.text);
   assert.ok(saw(TM.id, 'Alias from the minion.'));
   // message_taskmaster gets past the text check to the scheme lookup.
-  const across = await tool(TM, 'coordinator', 'message_taskmaster', { scheme: 'No such scheme', need: 'ask', message: 'Hi.' });
+  const across = await tool(TM, 'coordinator', 'message_taskmaster', { scheme: 'No such scheme', need: 'ask', saw: 'Hi.', checked: 'my logs', wanted: 'x', by: 'today' });
   assert.doesNotMatch(across.text, /Message is required/);
   refused(await tool(Minion, 'thread', 'message_coordinator', {}), /Message is required/);
 });

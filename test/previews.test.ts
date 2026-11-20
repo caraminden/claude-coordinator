@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { Previews } from '../src/previews.ts';
+import { copyData, Previews } from '../src/previews.ts';
 import { agentToken, listeningPort, PASSWORD, SECRET, stopProcs, stopTurns } from './helpers.ts';
 import { until } from './wait.ts';
 
@@ -320,5 +320,30 @@ createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true })))
         process.kill(p, 'SIGKILL');
       } catch {}
     }
+  }
+});
+
+test('copyData finishes while another connection keeps writing the source (#1204)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'copydata-'));
+  const src = join(dir, 'coordinator.db');
+  const db = new DatabaseSync(src);
+  db.exec('PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v BLOB); CREATE TABLE push_subscriptions (id INTEGER); CREATE TABLE settings (key TEXT, value TEXT)');
+  db.exec("INSERT INTO t (v) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<8000) SELECT randomblob(4000) FROM n");
+  const writer = new DatabaseSync(src);
+  let stop = false;
+  const spin = (async () => {
+    while (!stop) { writer.exec("UPDATE t SET v = randomblob(4000) WHERE id % 50 = 0"); await new Promise((r) => setImmediate(r)); }
+  })();
+  const to = join(dir, 'copy.db');
+  try {
+    await Promise.race([
+      copyData(src, to),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('copy did not finish while the source was written')), 20000)),
+    ]);
+    const copy = new DatabaseSync(to);
+    assert.equal(copy.prepare('SELECT count(*) AS n FROM t').get()!.n, 8000);
+    copy.close();
+  } finally {
+    stop = true; await spin; writer.close(); db.close(); rmSync(dir, { recursive: true, force: true });
   }
 });

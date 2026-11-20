@@ -396,7 +396,7 @@ const SETTINGS_GROUPS = [
   ['Scheme', 'running', [['members', 'Members', 'users', 'Who works in this scheme'], ['orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
     ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend'], ['help', 'How Citadel works', 'doc', 'Schemes, minions, cards and shipping in two minutes']]],
-  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
+  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel'], ['units', 'Units', 'shield', 'Which deploy/ units are installed on this host']], true],
 ];
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
 const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
@@ -818,6 +818,33 @@ export function myInstructionsEditor() {
   return section;
 }
 
+/**
+ * Before a person's save (#1162): the server's matcher lists what already says the new words (a registered rule outside
+ * its one home, or a paragraph elsewhere sharing most of its words), and the save goes ahead only on Save anyway.
+ * Resolves true to save. A failed check never blocks a save.
+ */
+async function checkRepeats(scope, text, box, status) {
+  let found;
+  try {
+    ({ found } = await api(`api/projects/${view.projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
+  } catch { return true; }
+  if (!found.length) return (box.hidden = true);
+  status.textContent = '';
+  return new Promise((done) => {
+    const close = (go) => () => { box.hidden = true; done(go); };
+    const where = (o) => {
+      const name = `${o.label}${o.line ? `, line ${o.line}` : ''}`;
+      return o.href ? h('a', { href: o.href, ...(/^https?:/.test(o.href) ? { target: '_blank', rel: 'noopener' } : {}) }, name) : h('strong', {}, name);
+    };
+    box.replaceChildren(
+      h('p', {}, h('strong', {}, 'Already said elsewhere. '), 'Work your change in where it is already written, or point there in a few words, or save it anyway.'),
+      h('ul', {}, ...found.map((o) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`)))),
+      h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')));
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
+  });
+}
+
 /** The Citadel-wide instructions as last loaded or broadcast, for the tab below. */
 let appInstructions = null;
 
@@ -869,8 +896,17 @@ export function appInstructionsEditor() {
     sync();
   });
   const [history, loadHistory] = recentChanges('api/app/instructions/history', (t) => { textarea.value = t; textarea.dispatchEvent(new Event('input')); textarea.focus(); });
+  const repeats = h('div', { class: 'instructions-repeats', role: 'alert', hidden: true });
+  save.onclick = async () => {
+    status.textContent = 'Checking for repeats…';
+    save.disabled = true;
+    const go = await checkRepeats('citadel', textarea.value, repeats, status);
+    status.textContent = go ? '' : 'Not saved.';
+    sync();
+    if (go) saveNow();
+  };
   // Saved at once; a refusal puts the last saved text back as the saved one, and the field keeps what was typed as a draft.
-  save.onclick = () => {
+  const saveNow = () => {
     const was = appInstructions;
     const mine = { ...appInstructions, text: textarea.value, by: me, at: Date.now() };
     const show = (a, said) => {
@@ -905,6 +941,7 @@ export function appInstructionsEditor() {
     aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
+    repeats,
     h('div', { id: 'app-instructions-recent', class: 'settings-anchor' }, history),
     githubOwnerField());
   (async () => {
@@ -987,7 +1024,14 @@ export function instructionsEditor() {
     status.textContent = '';
     sync();
   });
-  save.onclick = () => {
+  const repeats = h('div', { class: 'instructions-repeats', role: 'alert', hidden: true });
+  save.onclick = async () => {
+    status.textContent = 'Checking for repeats…';
+    save.disabled = true;
+    const go = await checkRepeats('scheme', textarea.value, repeats, status);
+    status.textContent = go ? '' : 'Not saved.';
+    sync();
+    if (!go) return;
     const instructions = textarea.value;
     saveProject(p, { instructions, instructions_updated_by: me, instructions_updated_at: Date.now() }, { instructions }, 'save the instructions', (saved) => {
       status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : 'Not saved.';
@@ -1040,6 +1084,7 @@ export function instructionsEditor() {
     aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
+    repeats,
     h('div', { id: 'instructions-recent', class: 'settings-anchor' }, history),
     repoSetupCard());
   sync();

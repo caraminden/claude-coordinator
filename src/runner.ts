@@ -29,6 +29,7 @@ import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
+import { gradleCacheDir } from './build-cache.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
@@ -37,7 +38,7 @@ import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CO
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { offSkills, pruneKit } from './skills.ts';
-import { alive, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
+import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
@@ -235,6 +236,10 @@ interface LiveTurn {
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
+/** The model's context window (tokens) as its last result reported it, for the chat's size meter (#1193). */
+const windowKey = (ticketId: number) => `ctxwin:${ticketId}`;
+/** The window before a result has reported one: a `[1m]` model id has 1M, the rest 200k. */
+export const guessWindow = (model: string | null | undefined) => (/\[1m\]/i.test(model ?? '') ? 1_000_000 : 200_000);
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
@@ -632,7 +637,8 @@ export class Runner {
   private heavyEnv(ticket: Ticket, person: number | null): Record<string, string> {
     const payer = person ? this.store.getUser(person)?.login : undefined;
     const who = `${this.store.getProject(ticket.project_id)?.name ?? '?'} #${ticket.number}${payer ? ` (${payer})` : ''}`;
-    return { CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: who };
+    // One Gradle build cache for every worktree (#1153, src/build-cache.ts).
+    return { CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: who, CITADEL_GRADLE_CACHE: gradleCacheDir(this.dataDir) };
   }
 
   /** How many turns run in this container now (it isn't restarted under them). */
@@ -832,6 +838,9 @@ export class Runner {
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
+      // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
+      context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
+      context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
       last_turn_end: this.store.lastTurnEnd(ticket.id),
       // A Taskmaster's fresh start under way (#406), which hides the chat's Fresh session button.
@@ -2779,7 +2788,7 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     try {
       const pins = turnPins();
-      cpSync(pins.MCP_DIR, pin, { recursive: true });
+      copyPinned(pins.MCP_DIR, pin);
       // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
       if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
@@ -2811,7 +2820,7 @@ export class Runner {
       const verdicts = this.store.reviews.verdicts(project.id);
       const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
       // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
-      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts)].filter(Boolean);
+      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts, this.store.reviews.lessons(project.id))].filter(Boolean);
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
@@ -3365,7 +3374,24 @@ export class Runner {
     }
     // Each main-thread API call re-reads the whole context: its input is the context's size.
     const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
-    if (u) this.contextSizes.set(ticketId, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0));
+    if (u) {
+      const size = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      const shown = this.contextShown.get(ticketId);
+      this.contextSizes.set(ticketId, size);
+      // The meter follows the turn (#1193), but a view() per API call is too many: a change of 1k or more, at most every 2 s.
+      if (!shown || (Math.abs(size - shown.size) >= 1000 && Date.now() - shown.at >= 2000)) {
+        this.contextShown.set(ticketId, { size, at: Date.now() });
+        this.broadcastTicket(ticketId);
+      }
+    }
+    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string') this.mainModels.set(ticketId, ev.model);
+    if (ev.type === 'result' && ev.modelUsage && typeof ev.modelUsage === 'object') {
+      // Grunts' models are in modelUsage too: the window is the main model's.
+      const main = this.mainModels.get(ticketId);
+      const mu: any = main ? ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')] : null;
+      if (mu && Number(mu.contextWindow) > 0) this.store.setSetting(windowKey(ticketId), Number(mu.contextWindow));
+    }
+    if (ev.type === 'result') this.contextShown.delete(ticketId);
     if (ev.type === 'result' && this.contextSizes.has(ticketId)) {
       this.store.setSetting(contextKey(ticketId), this.contextSizes.get(ticketId));
       this.contextSizes.delete(ticketId);
@@ -3603,6 +3629,10 @@ export class Runner {
 
   /** The running turn's latest context size, saved when it ends (contextKey). */
   private contextSizes = new Map<number, number>();
+  /** What the last broadcast showed of a running turn's context size, and when (#1193). */
+  private contextShown = new Map<number, { size: number; at: number }>();
+  /** The model each running turn's init event named. */
+  private mainModels = new Map<number, string>();
 
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();

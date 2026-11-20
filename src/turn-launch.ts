@@ -2,7 +2,7 @@
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
 import { msgEnv, msgSettings } from './msg-settings.ts';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, statSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
@@ -96,8 +96,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), and citadel-test, a few test files with only the failures shown (#641), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it.
-  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'citadel-android-mic.ts']) {
+  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it; citadel-build-cache shows and clears the shared build caches (#1153).
+  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'stale-docs', 'citadel-android-mic.ts', 'citadel-build-cache']) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
@@ -116,7 +116,35 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
   if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
+  // A turn's pin copy is hard links to these files (copyPinned), so they are read-only: a write into a turn's copy must fail, not reach the server's.
+  const lock = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) lock(join(d, e.name));
+      else if (e.isFile()) chmodSync(join(d, e.name), statSync(join(d, e.name)).mode & ~0o222);
+    }
+  };
+  lock(MCP_DIR);
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+}
+
+/**
+ * A turn's own copy of the pinned files: hard links, since copying ~240 files froze the server's loop for up to 7 s
+ * under load (#1215). A restart's sweep of the originals only unlinks a name, so the turn's links stay good. Falls back
+ * to a byte copy when links aren't possible (another filesystem).
+ */
+export function copyPinned(src: string, dst: string): void {
+  try {
+    mkdirSync(dst, { recursive: true });
+    for (const e of readdirSync(src, { withFileTypes: true })) {
+      const from = join(src, e.name), to = join(dst, e.name);
+      if (e.isDirectory()) copyPinned(from, to);
+      else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
+      else linkSync(from, to);
+    }
+  } catch {
+    rmSync(dst, { recursive: true, force: true });
+    cpSync(src, dst, { recursive: true });
+  }
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */
@@ -487,6 +515,11 @@ export interface LaunchPlan {
   spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
 }
 
+/** Schemes (project ids) whose turns run with Claude Code's --exclude-dynamic-system-prompt-sections (#1188): the per-machine
+ * parts of the system prompt (cwd, git status, auto-memory path) move into the first user message, so new minions share one
+ * cached prefix. Citadel's own scheme only while we measure it (reports/shared-prompt-cache-2026-11.md); add an id to widen, empty it to turn off. */
+export const EXCLUDE_DYNAMIC_PROMPT_SCHEMES: readonly number[] = [2];
+
 /** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnv) and, for a container turn, where claude is (resolveClaude, which throws when it isn't on the server's PATH). */
 export function launchPlan(facts: TurnFacts): LaunchPlan {
   const { project, ticket, dir, pins, place, machines, model, effort, codex } = facts;
@@ -510,6 +543,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
     // Taskmaster's prompts, so those are denied instead of waiting.
     ...permissionArgs(ticket.kind !== 'coordinator'),
+    ...(EXCLUDE_DYNAMIC_PROMPT_SCHEMES.includes(project.id) ? ['--exclude-dynamic-system-prompt-sections'] : []),
   ];
   // Lets edit-only sessions write there too, not just in their working directory. The temp folder too:
   // Claude Code asks before `cd <dir> && rm <glob>` outside the working directories, even in bypassPermissions.

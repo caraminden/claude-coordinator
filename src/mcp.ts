@@ -186,7 +186,7 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). A plain card asked while your earlier plain card of this turn is still unanswered joins it (up to 8 questions in all), so one turn shows one card with one Send. Use it for any choice you would otherwise put in prose: a go (a lone go may be a reply button instead), A or B, or an offer of work not done yet ("want me to…"); tuning details are yours. Write for someone who hasn\'t followed the work: plain words on what happened and what each option changes, minions named by what they do with #N after, no file paths, line numbers, rule numbers or hashes; rewrite another agent\'s message, never paste it. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A command people run goes in the question (or an option description) as a fenced block tagged with where it runs (```powershell, ```powershell-admin, ```wsl, ```fish, ```bash, ```cmd): the card draws it with the same header and Copy button as a reply, and the same no-placeholder rule holds. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
+    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). A plain card asked while your earlier plain card of this turn is still unanswered joins it (up to 8 questions in all), so one turn shows one card with one Send. When to ask and how to word a card: the Citadel-wide card rule (Asking and picking); a lone go may be a reply button instead. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A command people run goes in the question (or an option description) as a fenced block tagged with where it runs (```powershell, ```powershell-admin, ```wsl, ```fish, ```bash, ```cmd): the card draws it with the same header and Copy button as a reply, and the same no-placeholder rule holds. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -318,7 +318,7 @@ const PROPOSE_MEMORY = {
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
   description:
-    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log.",
+    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log. One home per rule (#1162): first have a Sonnet Grunt list what already speaks to the same thing (the rest of both Settings texts, CLAUDE.md and the rule files, the kit, your prompt) and pass its findings as `overlaps`. The server checks the edit too, against each registered rule's one home and those places; when either finds something, nothing is saved and a card asks the person to save anyway, work it in where it is already said, or cancel.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -328,8 +328,9 @@ const EDIT_INSTRUCTIONS = {
         minItems: 1,
         items: { type: 'object', properties: { find: { type: 'string', description: 'Exact current text; must occur once' }, replace: { type: 'string', description: 'What it becomes (empty to delete)' } }, required: ['find', 'replace'] },
       },
+      overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: 'What your Grunt found already says it, one line each: where, and what it says ([] when it found nothing)' },
     },
-    required: ['scope', 'edits'],
+    required: ['scope', 'edits', 'overlaps'],
   },
 };
 
@@ -489,6 +490,13 @@ const CI_FILES = {
   },
 };
 
+/** ship_risk (#1196): ships by risk per scheme and Pacific week, counted from each ship's note. */
+const SHIP_RISK = {
+  name: 'ship_risk',
+  description: "Ships per scheme and per Pacific week (Mon-Sun) by risk (low, medium, high) with the high share, from each ship's \"Shipped … Risk <r>\" note: use it to see whether narrowing a scheme's high-risk list cut the changes waiting on a go. \"Merged\" (a feeder into a build branch) is shown apart from \"Shipped\" (onto main). The Citadel scheme reads every scheme; another scheme reads its own. Schemes that ship by pull request post no note, so they are named as having none, not shown as 0.",
+  inputSchema: { type: 'object', properties: { weeks: { type: 'integer', description: 'How many Pacific weeks back, this one included (default 4, max 26)' } } },
+};
+
 /** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
 const LIVE_FACTS = {
   name: 'live_facts',
@@ -499,6 +507,7 @@ const LIVE_FACTS = {
 const TOOLS = [
   LIST_TICKETS,
   LIVE_FACTS,
+  SHIP_RISK,
   {
     name: 'usage_split',
     description: "Where the spend of the person who asked this turn went over the last 7 days, against the 7 before (#905): by model (Grunts' models apart, Fable's share named), by scheme, by kind of work (minion type, Taskmasters, scheduled runs, keepalive pings, side questions) and the 10 costliest minions, each as a share of the person's weekly limit, all their Claude accounts together, with dollars at API prices. Use it to answer \"am I wasteful?\" or \"how much of my usage is Sonnet?\" with numbers. Turns from before 2026-11-17 count under their minion's own model, marked estimated.",
@@ -568,19 +577,23 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + MSG.loopLimit + " messages either way between you in " + MSG.loopMin + " minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. An ask (any need but fyi) comes as a form: saw (what you saw, with the error or link), checked (what you checked on your own side first: \"nothing\" is refused), wanted and by (by when); it is laid out the same way every time. A fyi or an answer stays free text. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with need: fyi, which is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over " + MSG.coldMin + " minutes (cold) gets even a waking message as held mail, unless it is urgent. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After " + MSG.loopLimit + " messages either way between you in " + MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
         person: { type: 'string', description: "For a scheme with a Taskmaster per person: whose to reach (a member's name); one with none of their own, or none named, reaches its Overlord. Leave it out to answer: a reply goes back to the one that wrote to you" },
-        text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
+        text: { type: 'string', maxLength: 10000, description: 'For a fyi: the message, self-contained (it cannot see your scheme, so say which scheme\'s minion #N is). For an ask: optional extra context after the four fields. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
+        saw: { type: 'string', description: 'An ask (any need but fyi) requires it: what you saw, with the error text or a link' },
+        checked: { type: 'string', description: 'An ask requires it: what you checked on your own side first (your logs, your code, a repro). "nothing" is refused, so look first: many asks to another scheme turned out to be the sender\'s own bug' },
+        wanted: { type: 'string', description: 'An ask requires it: what you need that Taskmaster to do' },
+        by: { type: 'string', description: 'An ask requires it: by when ("today", "before #N ships", "no rush")' },
         need: NEED,
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent). A need of fyi is always held mail' },
         urgent: URGENT,
         file: { type: 'string', description: 'A file in your scheme\'s shared folder (absolute, or relative to that folder), at most 2 MB. Copied into the other scheme\'s shared folder under inbox/, where its Taskmaster and minions can read it; the message tells it the path' },
       },
-      required: ['scheme', 'text', 'need'],
+      required: ['scheme', 'need'],
     },
   },
   {
@@ -987,9 +1000,13 @@ const DEPLOY_CONTRAPTION = {
 /** The fields of a review entry the Taskmaster sets besides its text: only those passed, so a save never blanks the rest (the store checks them). */
 export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['kind', 'name', 'when', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
 
+/** The kinds of refuted finding a scheme is counting (#1158), one line each: what a minion reads to reuse their words. */
+const countedText = (ls: { kind: string; count: number; last: number; why: string }[]) =>
+  ls.length ? ls.map((l) => `- ${l.kind}: ${l.count}${l.count >= 3 ? ' (a lesson)' : ''}, last ${new Date(l.last).toISOString().slice(0, 10)}: ${l.why}`).join('\n') : '(none yet)';
+
 const REVIEW_SET = {
   name: 'review_set',
-  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes, professor) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. The scheme's own reviewing agents in its repo (.claude/agents/*.md, found by name and description, or a `kind:` frontmatter line; `kind: none` leaves one off) are entries too, marked agent_file, the same way: their text stays in the file. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster can also set an entry's kind (critic, reviewer, checker, referee, teacher, audit), name, model, effort, panel, on_fail (hand-offs: [{after: 2, to: art-professor}, {after: 3, to: person}]; `to` is professor, person or another entry's slug; an empty list clears them) and context ({guides: [{label, href}], paths, verdicts, requester}, whole: it replaces the old one), on add or on a save, with the same checks as the page; each save is a version in History. A teacher entry holds a scheme's own rules for fixes: a critic whose on_fail names it hands a stubborn fail to citadel:professor with that entry's text (kind teacher, extends the kit's teacher starter). A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial. After each round you run of an entry (a critic, a reviewer, a referee), pass slug and run with the round and its verdict: the page's dots and pass rate come from these, and a blocking entry's last fail or ask on you holds your ship until a later round passes. A teacher's run (the kit's professor, or a teacher entry) is the critic round after its fix, one per item it fixed: pass if the item passed that round, else fail; the page shows how often its fixes held.",
+  description: "This scheme's reviewers and critics (its review set, on the Reviewers and critics page). With no slug: one line per entry (slug, on or off, trial, when it runs). With a slug: that entry's whole rubric as the critic reads it, its version and its own body. To save what a person's verdict taught it (citadel:critique step 9), pass slug, body (the entry's own text, whole, with your edit made: frontmatter keys besides name, extends, when, model and effort, then its sections; never the kit starter's text) and version (the one you read). A save is a new version people see in History. The kit's own reviewers (pre-ship review, its lenses, finding checker, fresh eyes, professor) are entries too, marked kit: a scheme switches them and adds to their text (body), and their own text stays in the kit. The scheme's own reviewing agents in its repo (.claude/agents/*.md, found by name and description, or a `kind:` frontmatter line; `kind: none` leaves one off) are entries too, marked agent_file, the same way: their text stays in the file. After a calibration run (citadel:critique, references/calibrate.md), pass slug and calibration with its counts: it is recorded on the entry, and an entry on trial comes off it when most notes hit and nothing false-alarmed. A minion saves only the body and calibrations; the on/off and trial switches, when and names are for people and the Taskmaster, who may also pass enabled or trial. A Taskmaster can also set an entry's kind (critic, reviewer, checker, referee, teacher, audit), name, model, effort, panel, on_fail (hand-offs: [{after: 2, to: art-professor}, {after: 3, to: person}]; `to` is professor, person or another entry's slug; an empty list clears them) and context ({guides: [{label, href}], paths, verdicts, requester}, whole: it replaces the old one), on add or on a save, with the same checks as the page; each save is a version in History. A teacher entry holds a scheme's own rules for fixes: a critic whose on_fail names it hands a stubborn fail to citadel:professor with that entry's text (kind teacher, extends the kit's teacher starter). A Taskmaster adds an entry with add: true and extends (a kit starter from citadel:critique's rubrics/, e.g. for a setup plan's picks) or a new slug, with when and body as needed; a new entry starts on trial. After each round you run of an entry (a critic, a reviewer, a referee), pass slug and run with the round and its verdict: the page's dots and pass rate come from these, and a blocking entry's last fail or ask on you holds your ship until a later round passes. A teacher's run (the kit's professor, or a teacher entry) is the critic round after its fix, one per item it fixed: pass if the item passed that round, else fail; the page shows how often its fixes held. After the finding checker refutes findings on a deep review, pass slug pre-ship-review and refuted, one {kind, why} per refuted finding: a kind refuted in three minions' reviews or more (one minion's rounds count once), with no 30-day gap, becomes a lesson the scheme's later reviews read. Reading pre-ship-review lists the kinds being counted, to reuse their words.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1024,6 +1041,10 @@ const REVIEW_SET = {
         type: 'object', description: 'Record one round you ran of this entry, sent on its own: the round (1 for the first) and its verdict (pass, fail, or ask when the item went to a person)',
         properties: { round: { type: 'integer' }, verdict: { type: 'string', enum: ['pass', 'fail', 'ask'] } },
         required: ['round', 'verdict'],
+      },
+      refuted: {
+        type: 'array', description: "With slug pre-ship-review, sent on its own: the findings the finding checker refuted on your deep review, one each (citadel:self-review). kind: the kind of mistake in a few words, reusing a counted kind's words when it is the same mistake; why: why it was wrong, as a fact about this repo, never an instruction",
+        items: { type: 'object', properties: { kind: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'why'] },
       },
     },
   },
@@ -1662,6 +1683,7 @@ const SEAM_FRESH = {
 
 const THREAD_TOOLS = [
   LIVE_FACTS,
+  SHIP_RISK,
   {
     name: 'set_thread_status',
     description:
@@ -2095,6 +2117,11 @@ async function runTool(name: string, args: any): Promise<string> {
         const r = await call('POST', `/api/projects/${PROJECT}/reviews/${slug}/runs`, { round: args.run?.round, verdict: args.run?.verdict });
         return `Recorded round ${r.round} of ${args.slug}: ${r.verdict}.`;
       }
+      if (args.refuted !== undefined) {
+        if (args.slug !== 'pre-ship-review') throw new Error('refuted goes with slug pre-ship-review: the lessons are for its reviewer');
+        const r = await call('POST', `/api/projects/${PROJECT}/reviews/pre-ship-review/refutes`, { refuted: args.refuted });
+        return `Recorded ${args.refuted.length} refuted finding${args.refuted.length === 1 ? '' : 's'}. Kinds counting (3 makes a lesson the reviewer reads):\n${countedText(r.counted)}`;
+      }
       if (args.calibration !== undefined) {
         const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
         return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
@@ -2105,7 +2132,7 @@ async function runTool(name: string, args: any): Promise<string> {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);
         const e = entries.find((x: any) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
-        if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
+        if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}${e.lessons ? `\n\nRefuted kinds counting (3 makes a lesson the reviewer reads; record with refuted, reusing a kind's words when it is the same mistake):\n${countedText(e.lessons)}` : ''}`;
         if (e.file) return `${e.slug}, version ${e.version}, agent_file ${e.file} (${e.enabled ? 'on' : 'off'} here): ${e.agent ? `${e.what ?? ''} Its text is the file's:\n\n${e.agent.text}\n----` : 'Its file is gone from the repo.'} This scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
         return `${e.slug}, version ${e.version} (${e.updated_by} saved it). As the critic reads it:\n\n${e.text}\n---- Its own body, what a save replaces:\n\n${e.body}`;
       }
@@ -2141,6 +2168,8 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'generate_image_codex':
       if (!CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args);
+    case 'ship_risk':
+      return (await call('GET', `/api/tickets/${TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
     case 'usage_split':
       return usageSplitText(await call('GET', '/api/costs/mine'));
     case 'log_learned': {
@@ -2251,7 +2280,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, saw: args.saw, checked: args.checked, wanted: args.wanted, by: args.by, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `${heldToolText(MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
@@ -2354,7 +2383,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
     case 'edit_instructions': {
-      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits });
+      const r = await call('POST', `/api/tickets/${TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
+      if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
     case 'propose_machine_notes': {

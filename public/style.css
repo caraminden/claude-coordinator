@@ -368,6 +368,10 @@ body:has(.split) .update-banner { top: var(--top-inset); }
   body:has(.split) { --strip-pad: max(0.625rem, (var(--top-inset) - 1.9rem) / 2); --split-top: var(--strip-pad); }
   body:has(.split)::before { z-index: -1; background: none; app-region: drag; }
   .split :is(a, button, input, select, textarea, summary, label, [tabindex]) { app-region: no-drag; }
+  /* The header rows drag too (#1186, Josh: "only in a VERY small space at the top can I grab it"): an open panel's
+     summary is all header, so only its ‹ still folds the panel; the buttons and links in them opt out above. */
+  :is(.sidebar, .shelf)[open] > summary, .split .ticket-head > .row:first-child { app-region: drag; }
+  :is(.sidebar, .shelf)[open] > summary::after { app-region: no-drag; }
   body:has(.split) main { --main-pad-l: max(1rem, calc(env(titlebar-area-x, 0px) + 0.5rem - var(--citadel-rail, 0px))); }
   body:has(.split) .update-banner { top: 0; padding-inline: calc(1rem + env(titlebar-area-x, 0px)) calc(1rem + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
   .update-banner :is(a, button) { app-region: no-drag; }

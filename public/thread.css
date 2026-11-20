@@ -581,3 +581,6 @@ details.recap-group:not([open]) > summary { margin: 0; }
   .welcome-body { grid-template-columns: 1fr; }
   .chat .welcome-step-sub { display: none; } /* on the no-scheme page they say how to get in, so they stay */
 }
+/* The chat's context meter (#1193): fixed width, tabular numbers, so a changing number moves nothing. */
+.ctx-meter { display: inline-block; flex: none; min-width: 11ch; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85em; white-space: nowrap; }
+.ctx-meter.hot { color: var(--danger, #c0392b); }

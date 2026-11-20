@@ -1585,8 +1585,9 @@ export const SCHEMA_HISTORY = [
   [88, 'minion_index and handoff_index, full-text (#1156)'],
   [89, 'ideas (#1150)'],
   [90, 'flake_fixes (#1120)'],
-  [91, 'host_samples (#1123)'],
-  [92, 'tickets.goal (#1130)'],
+  [91, 'review_refutes (#1158)'],
+  [92, 'host_samples (#1123)'],
+  [93, 'tickets.goal (#1130)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3829,6 +3830,13 @@ export class Store {
       FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{"text":"Shipped %'
       AND e.data NOT LIKE '%not pushed to origin: the push failed.%' ORDER BY e.id DESC`)
       .all(this.eventIdAt(since)) as ReturnType<Store['shippedNotes']>;
+  }
+
+  /** Every ship note ("Shipped …", "Merged …") posted at or after `since`, with its scheme (#1196): ship-risk's input. */
+  shipNotesSince(since: number): { project_id: number; created_at: number; text: string }[] {
+    const rows = this.db.prepare(`SELECT t.project_id, e.created_at, e.data FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.id >= ? AND e.created_at >= ? AND e.kind = 'note' AND (e.data LIKE '{"text":"Shipped %' OR e.data LIKE '{"text":"Merged %') ORDER BY e.id`).all(this.eventIdAt(since), since) as { project_id: number; created_at: number; data: string }[];
+    return rows.map((r) => ({ project_id: Number(r.project_id), created_at: Number(r.created_at), text: String(JSON.parse(r.data).text ?? '') }));
   }
 
   getSetting<T>(key: string): T | null {

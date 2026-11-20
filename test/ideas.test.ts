@@ -214,3 +214,55 @@ test("a handoff naming its card and source minion, but not the page's path, join
   const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
   assert.equal(store.ideas.linkHandoff(p.id, shared, '../outside/handoff.md', t), null);
 });
+
+// Loop-lag stalls (#1215): a scan of every message or minion's events per page or per pass froze the server for 30 s.
+const counting = (store: Store) => {
+  const db = (store.ideas as unknown as { db: { prepare: (s: string) => unknown } }).db;
+  const real = db.prepare.bind(db);
+  const seen: string[] = [];
+  db.prepare = (sql: string) => {
+    const st = real(sql) as Record<string, unknown>;
+    for (const m of ['get', 'all', 'run']) {
+      const f = (st[m] as (...a: unknown[]) => unknown).bind(st);
+      st[m] = (...a: unknown[]) => { seen.push(sql); return f(...a); };
+    }
+    return st;
+  };
+  return seen;
+};
+
+test('a sync reads the scheme\'s Send messages once, however many untitled pages it has', () => {
+  const store = newStore();
+  const p = store.createProject('Mandate', null);
+  const shared = join(root, 'once-shared');
+  mkdirSync(shared, { recursive: true });
+  const t = store.createTicket({ project_id: p.id, title: 'ideas', permission_mode: 'default', created_by: 'Josh' });
+  for (const page of ['a.html', 'b.html', 'c.html']) {
+    store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A1 One: Go', comment: { path: join(shared, 'mockups', page), about: 'X' } });
+    store.writeArtifactData(p.id, join(shared, 'mockups', page), [{ key: 'db/ideas', value: '{}' }], 'Josh');
+  }
+  const seen = counting(store);
+  store.ideas.sync(p.id, shared);
+  assert.ok(seen.filter((s) => s.includes('Picks on')).length <= 1, 'one scan of the messages, not one per page');
+});
+
+test('restatus rescans a minion\'s events only when it has new ones, and never once it shipped', () => {
+  const store = newStore();
+  const p = store.createProject('Mandate', null);
+  const shared = join(root, 'ship-shared');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  writeFileSync(join(shared, 'handoffs', 'handoff-x.md'), '# Handoff: x\n');
+  const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
+  store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${shared}/handoffs/handoff-x.md\`.` });
+  store.ideas.sync(p.id, shared);
+  const seen = counting(store);
+  store.ideas.shippedTickets(p.id);
+  const first = seen.filter((s) => s.includes('LIKE')).length;
+  store.ideas.shippedTickets(p.id);
+  assert.equal(seen.filter((s) => s.includes('LIKE')).length, first, 'no new events, no new LIKE scan');
+  store.addEvent(t.id, 'note', { text: 'Shipped abc "x": y.' });
+  assert.ok(store.ideas.shippedTickets(p.id).has(t.id));
+  const after = seen.filter((s) => s.includes('LIKE')).length;
+  store.ideas.shippedTickets(p.id);
+  assert.equal(seen.filter((s) => s.includes('LIKE')).length, after, 'a shipped minion is never scanned again');
+});

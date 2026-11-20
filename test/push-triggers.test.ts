@@ -227,3 +227,57 @@ test('taking a minion over or handing it on says so in its chat and the Taskmast
   const got = await pushes(n, 1);
   assert.deepEqual(Object.keys(got), ['josh']);
 });
+
+test('an @mention pings only its person, even on a pinned-only device, opens at the message, and sits in their Needs you until they open the chat (#1149)', async () => {
+  const project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Mentions' } });
+  await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: joshId } });
+  const t = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it', title: 'Mention me' } });
+  const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
+  await idle();
+  await subscribe('Cara', 'cara-m');
+  await subscribe('Josh', 'josh-m');
+  // Josh's device hears only minions he pinned; Cara owns this one, so only a mention reaches him.
+  await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers['josh-m'].endpoint, onlyPinned: true } });
+  const inbox = async (who: string) => (await call(who, `/api/projects/${project.id}/inbox`)).items.filter((i: any) => i.kind === 'mention');
+
+  // Someone not in the scheme, and an email address, mention no one.
+  let n = received.length;
+  await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Nobody mail josh@example.com, and @Cara: a note to self' } });
+  await idle();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(received.length, n);
+  assert.deepEqual(await inbox('Josh'), []);
+  assert.deepEqual(await inbox('Cara'), [], 'nor does the sender themself');
+
+  n = received.length;
+  await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@josh can you look at this' } });
+  const got = await pushes(n, 1);
+  assert.ok(!Object.keys(got).some((k) => k.startsWith('cara')), 'the sender hears nothing');
+  const events = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message');
+  const msg = events.at(-1);
+  // The agent reads the words as typed; the message names who it mentions, for the chip.
+  assert.deepEqual(JSON.parse(msg.data).mentions, ['Josh']);
+  assert.equal(JSON.parse(msg.data).text, '@josh can you look at this');
+  assert.deepEqual(got['josh-m'], { title: '#1 Mention me', body: 'Cara: @josh can you look at this', tag: `thread-${t.id}`, url: `/c/#/p/${project.id}/t/${t.number}?e=${msg.id}` });
+
+  // In Josh's Needs you, not Cara's, until Josh opens the chat.
+  await idle();
+  const [item] = await inbox('Josh');
+  assert.deepEqual([item.ticketId, item.eventId, item.card.by], [t.id, msg.id, 'Cara']);
+  assert.deepEqual(await inbox('Cara'), []);
+  await call('Josh', `/api/tickets/${t.id}/seen`, { method: 'POST', body: {} });
+  assert.deepEqual(await inbox('Josh'), []);
+
+  // An agent's message mentions no one (Josh, 2026-11-20: "People only for now"), and the agent still reads it as typed.
+  n = received.length;
+  const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
+  // The Taskmaster's words to a minion go through the relay, which never mentions.
+  await call(`agent:${coordinator.id}`, `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Josh and @Cara, a look please' } });
+  await idle();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(received.length, n);
+  assert.deepEqual([await inbox('Josh'), await inbox('Cara')], [[], []]);
+  const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message').at(-1);
+  assert.equal(JSON.parse(last.data).text, '@Josh and @Cara, a look please');
+  assert.equal(JSON.parse(last.data).mentions, undefined);
+});

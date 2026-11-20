@@ -38,7 +38,9 @@ export type PushTrigger =
   | { kind: 'error'; text: string; eventId?: number }
   /** A running turn passed a spend stage (#723); `also` is the turn's person, who hears it on top of the usual people. */
   | { kind: 'spend'; text: string; eventId?: number; also?: string }
-  | { kind: 'state'; state: string | null; note: string | null };
+  | { kind: 'state'; state: string | null; note: string | null }
+  /** A person @mentioned `to` in a message (#1149): theirs alone, as a card addressed to them is. */
+  | { kind: 'mention'; by: string; text: string; eventId: number; to: string };
 
 /** States worth a ping: a result to look at, or a blocker. */
 export const NOTIFY_STATES: Record<string, string> = {
@@ -127,7 +129,7 @@ function clip(s: string, max = MAX_BODY): string {
 
 /**
  * The notification for something that happened in a thread, or null if it isn't worth one:
- * a question card, a turn that failed, or a state of ready, complete, try or blocked. Replies alone never are.
+ * a question card, a turn that failed, a mention, or a state of ready, complete, try or blocked. Replies alone never are.
  */
 export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectName = ''): PushMessage | null {
   let body: string;
@@ -141,6 +143,8 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     body = clip(`Turn failed: ${trigger.text.split('\n')[0]}`);
   } else if (trigger.kind === 'spend') {
     body = clip(trigger.text);
+  } else if (trigger.kind === 'mention') {
+    body = clip(`${trigger.by}: ${trigger.text}`);
   } else {
     if (!trigger.state || !NOTIFY_STATES[trigger.state]) return null;
     body = clip(trigger.note || NOTIFY_STATES[trigger.state]);
@@ -202,7 +206,8 @@ export class Pusher {
     // A person's own Taskmaster (#919) pings its person, as its cards are in their Needs you alone (src/inbox.ts).
     const mine = ticket.kind === 'coordinator' && ticket.coordinator_of != null ? this.store.getUser(ticket.coordinator_of)?.name : undefined;
     const owner = to ? null : ticket.kind === 'ticket' ? this.owner(ticket) : mine && this.inScheme(mine, ticket.project_id) ? mine.toLowerCase() : null;
-    const also = trigger.kind === 'spend' && trigger.also ? trigger.also.toLowerCase() : null;
+    // A mention is said to its person (#1149): it reaches their pinned-only devices too, as a spend alert's person.
+    const also = trigger.kind === 'spend' && trigger.also ? trigger.also.toLowerCase() : trigger.kind === 'mention' ? to : null;
     const pinned = (name: string) => this.store.isTicketPinned(name, ticket.id);
     const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to
       : !owner || s.name.toLowerCase() === owner || s.name.toLowerCase() === also || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);

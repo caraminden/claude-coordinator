@@ -20,6 +20,7 @@ import { CARD_OPTIONS } from '../src/welcome.ts';
 import { memoryFolders, readFolder } from '../src/memory-files.ts';
 import { checkChanges, countLine } from '../src/memory-curator.ts';
 import { templateBlobs } from '../src/kit-sync.ts';
+import { addMention } from '../src/mentions.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -620,6 +621,21 @@ mock.boards('#takes', { boards: [
       shipped(c, 'Usage bar in the top bar', 'Shipped 1a2b3c4 "#1201: usage bar": the usage bar shows your week. Risk low: front end only. Live now.');
       shipped(d, 'Chapter 2 balance', 'Shipped 5d6e7f8 "#240: chapter 2": foes hit 10% softer in chapter 2. Risk medium: numbers. Live now.');
       shipped(d, 'Build 8 merge', 'Merged 9a8b7c6 into build/8: a feeder. Risk low: x.');
+      return `#/p/${c.project.id}`;
+    },
+  },
+  mentions: {
+    about: '@mentions (#1149): Josh, a member of Seeded, mentions you in a minion\'s chat; your Needs you shows it, and typing @ in a chat box opens the member picker',
+    seed(c) {
+      const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
+      c.store.addMember(c.project.id, josh.id);
+      const t = minion(c, 'Export button', { state: 'ready', note: 'tested, risk low' });
+      const w = chat(c, t, 4);
+      w.asked('Add an export button to the report page.');
+      w.said('Done: the button is on the report page.');
+      const text = `@${c.who} can you look at this before it ships?`;
+      const id = w.put('user_message', { author: 'Josh', text, mentions: [c.who] });
+      addMention(c.store, c.who, { ticketId: t.id, projectId: c.project.id, eventId: id, at: c.store.lastEventOf(t.id, 'user_message')!.created_at, by: 'Josh', text });
       return `#/p/${c.project.id}`;
     },
   },

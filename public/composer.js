@@ -14,7 +14,7 @@ import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
 import { startPick } from './pick.js';
-import { chatCommandList, matchCommands, menuQuery, parseCommand } from './slash-commands.js';
+import { chatCommandList, matchCommands, mentionQuery, menuQuery, parseCommand } from './slash-commands.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
 // ---------- drafts ----------
@@ -233,6 +233,12 @@ export function composer(chatId, ticket) {
     slash.update();
   }).catch(() => {});
   const slash = slashMenu(form, textarea, () => commands.list);
+  // @mentions (#1149): the scheme's members but you. A person's own Taskmaster is theirs alone, so no one to mention there.
+  if (minion || ticket.coordinator_of == null) {
+    const people = [];
+    api(`api/projects/${ticket.project_id}/members`).then((list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase()))).catch(() => {});
+    mentionMenu(form, textarea, () => people);
+  }
   /** /fresh (#937): a fresh Claude session, Taskmaster or minion, after it writes its handoff. */
   const startFresh = () => {
     const who = minion ? 'this minion' : 'the Taskmaster';
@@ -541,6 +547,71 @@ function slashMenu(form, textarea, list) {
       textarea.focus();
     },
   };
+}
+
+/**
+ * The member picker (#1149): typing "@" opens the scheme's members over the box, filtering by name or login as you type;
+ * a pick (arrows and Enter or Tab, or a tap) writes "@Name ". It floats like the slash menu, so it moves nothing.
+ */
+function mentionMenu(form, textarea, people) {
+  const menu = h('div', { class: 'slash-menu mention-menu', role: 'listbox', id: `mention-${Math.random().toString(36).slice(2)}`, hidden: true });
+  form.prepend(menu);
+  let shown = [];
+  let active = 0;
+  const close = () => {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    textarea.removeAttribute('aria-activedescendant');
+    textarea.setAttribute('aria-expanded', 'false');
+  };
+  const mark = () => {
+    [...menu.children].forEach((el, i) => el.setAttribute('aria-selected', String(i === active)));
+    const el = menu.children[active];
+    if (!el) return;
+    textarea.setAttribute('aria-activedescendant', el.id);
+    el.scrollIntoView({ block: 'nearest' });
+  };
+  const pick = (m) => {
+    const caret = textarea.selectionStart;
+    const q = mentionQuery(textarea.value, caret) ?? '';
+    textarea.setRangeText(`@${m.name} `, caret - q.length - 1, caret, 'end');
+    textarea.dispatchEvent(new Event('input', { bubbles: true })); // saves the draft and fits the box; closes the menu
+    textarea.focus();
+  };
+  const update = () => {
+    const q = textarea.selectionStart === textarea.selectionEnd ? mentionQuery(textarea.value, textarea.selectionStart) : null;
+    const lower = q?.toLowerCase();
+    shown = q === null ? [] : people().filter((m) => m.name.toLowerCase().startsWith(lower) || m.login.toLowerCase().startsWith(lower));
+    if (!shown.length) return close();
+    active = Math.min(active, shown.length - 1);
+    menu.replaceChildren(...shown.map((m, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(m) },
+      h('span', { class: 'slash-name' }, `@${m.name}`), h('span', { class: 'slash-desc' }, m.owner ? 'Owner' : m.login))));
+    menu.hidden = false;
+    textarea.setAttribute('aria-controls', menu.id);
+    textarea.setAttribute('aria-expanded', 'true');
+    mark();
+  };
+  menu.addEventListener('pointerdown', (e) => e.preventDefault());
+  textarea.addEventListener('input', () => {
+    active = 0;
+    update();
+  });
+  textarea.addEventListener('blur', close);
+  form.addEventListener('keydown', (e) => {
+    if (menu.hidden || e.target !== textarea || e.isComposing) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
+      mark();
+    } else if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      pick(shown[active]);
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 }
 
 // ---------- pasted images and attached files ----------

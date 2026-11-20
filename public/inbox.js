@@ -3,7 +3,7 @@
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
-import { askWhy } from './threadstate.js';
+import { askWhy, mentions } from './threadstate.js';
 import { homeEvent, refreshHomeSoon } from './home.js';
 import { mountTips } from './ui/tip.js';
 
@@ -14,7 +14,17 @@ const inboxSeen = new Map();
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
-const faded = (item) => item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
+// A mention (#1149) goes once you've opened its chat since it came.
+const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))
+  || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
+
+/** The newest mention of you in each minion's chat, as its row shows it (#1149). */
+function mentionMap(items) {
+  const out = new Map();
+  for (const i of items) if (i.kind === 'mention' && !(out.get(i.ticketId)?.at > i.at)) out.set(i.ticketId, { by: i.card.by, at: i.at });
+  return out;
+}
+const mentionKeys = (map) => [...map].map(([id, m]) => `${id}:${m.at}`).sort().join();
 
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
@@ -25,7 +35,10 @@ export async function refreshInbox() {
   const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
-  renderInbox();
+  // A new or gone mention changes its minion's row (#1149), so the whole list redraws; renderSidebar draws the strip too.
+  // Imported when needed: sidebar.js imports this module, and loads browser-only code the Node tests can't.
+  if (mentionKeys(mentions) !== mentionKeys(mentionMap(items))) import('./sidebar.js').then((m) => m.renderSidebar());
+  else renderInbox();
 }
 
 /** A scheme's items, kept for its next first paint; null when the fetch failed. Showing a scheme waits on this (project.js). */
@@ -90,7 +103,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', mention: '@ Mention', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
@@ -165,6 +178,8 @@ export function renderInbox() {
     if (!seen) return;
     Object.assign(inbox, { projectId: view.projectId, items: seen });
   }
+  mentions.clear();
+  for (const [id, m] of mentionMap(inbox.items)) mentions.set(id, m);
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
   const items = inbox.items.filter((i) => ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed');
   const strip = inboxStrip();

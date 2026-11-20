@@ -41,3 +41,9 @@ export function chatCommandList(loaded, minion) {
   const taken = new Set(own.map((c) => c.name));
   return [...own, ...loaded.filter((c) => !taken.has(c.name))];
 }
+
+/** The "@word" being typed before the caret, or null: "@" at the start or after a space or opening mark (#1149). */
+export function mentionQuery(value, caret) {
+  const m = /(?:^|[\s(\[{"'“‘])@([\p{L}\p{N}_.-]{0,40})$/u.exec(value.slice(0, caret));
+  return m ? m[1] : null;
+}

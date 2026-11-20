@@ -136,6 +136,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
   if (github && text) text = text.replace(/(^|\s)(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/g, '$1[$2]($2)');
   if (text) msg.append(event ? messageBody(text, event.strikes, null, event.id) : markdown(text));
+  if (event?.mentions?.length) chipMentions(msg, event.mentions);
   if (imageSrcs.length) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
@@ -161,6 +162,28 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
     return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, event?.schedule ? `${who}: ${event.schedule}` : who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
+}
+
+/**
+ * Each "@Name" in a message's words that the server found a mention of (#1149) as a chip; yours stands out. Code and
+ * links keep their text. The words stay as typed, which is what the agent reads.
+ */
+export function chipMentions(root, names) {
+  const esc = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`@(${[...names].sort((a, b) => b.length - a.length).map(esc).join('|')})(?![\\p{L}\\p{N}_-])`, 'giu');
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('code, a, .who, .mention') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+  const texts = [];
+  while (walk.nextNode()) texts.push(walk.currentNode);
+  for (const node of texts) {
+    const parts = node.data.split(re);
+    if (parts.length < 2) continue;
+    // split with one group: words, then the matched name, in turn.
+    node.replaceWith(...parts.map((part, i) => {
+      if (i % 2 === 0) return part;
+      const name = names.find((n) => n.toLowerCase() === part.toLowerCase()) ?? part;
+      return h('span', { class: `mention${me && name.toLowerCase() === me.toLowerCase() ? ' me' : ''}`, title: `Mentioned ${name}` }, `@${part}`);
+    }));
+  }
 }
 
 /** A collapsed message's one line: its text without Markdown marks, struck words keeping their line. */

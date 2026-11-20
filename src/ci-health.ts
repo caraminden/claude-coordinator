@@ -92,6 +92,8 @@ export interface Run {
   event?: string;
   /** Its workflow file, ".github/workflows/drift.yml". */
   path?: string;
+  /** The run name: a workflow with a run-name shows its inputs here (flake-proof.yml: "flake-proof test/x.test.ts"). */
+  display_title?: string;
   triggering_actor?: { login?: string } | null;
 }
 export interface Job {

@@ -272,6 +272,20 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const TICKET_STATES = ['ready', 'complete', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', 'limited'] as const;
 export type TicketState = (typeof TICKET_STATES)[number];
 
+/** A fix of a flaky test file (#1120). */
+export interface FlakeFix {
+  id: number;
+  project_id: number;
+  file: string;
+  ticket_id: number | null;
+  state: 'open' | 'held';
+  started_at: number;
+  clean_runs: number;
+  held_at: number | null;
+  reopened: number;
+  proof_run: number | null;
+}
+
 export interface Ticket {
   id: number;
   project_id: number;
@@ -1237,6 +1251,21 @@ CREATE TABLE IF NOT EXISTS flake_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
+-- One row per fix of a flaky test file (#1120): started by the file's third sighting in 7 days, held only after 50 clean runs in a row
+-- on the desktop runner (state 'held'), and reopened (state 'open' again, reopened + 1) by the next sighting.
+CREATE TABLE IF NOT EXISTS flake_fixes (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  file TEXT NOT NULL,
+  ticket_id INTEGER,
+  state TEXT NOT NULL DEFAULT 'open',
+  started_at INTEGER NOT NULL,
+  clean_runs INTEGER NOT NULL DEFAULT 0,
+  held_at INTEGER,
+  reopened INTEGER NOT NULL DEFAULT 0,
+  proof_run INTEGER
+);
+CREATE INDEX IF NOT EXISTS flake_fixes_file ON flake_fixes(project_id, file);
 -- Three lines after every ship (src/ship-lessons.ts, #1119): what a minion had to find out that its brief or the docs
 -- didn't say, queued per scheme for the weekly Ship lessons pass. lines '' is a ship that said nothing. No foreign keys:
 -- the lines outlive the minion.
@@ -1529,6 +1558,7 @@ export const SCHEMA_HISTORY = [
   [87, 'ship_lessons (#1119)'],
   [88, 'minion_index and handoff_index, full-text (#1156)'],
   [89, 'ideas (#1150)'],
+  [90, 'flake_fixes (#1120)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3609,6 +3639,42 @@ export class Store {
     return this.db.prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
         (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
       FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`).all(projectId, since, limit) as any;
+  }
+
+  /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
+  hasFlakeNear(projectId: number, file: string, at: number, tolMs: number): boolean {
+    return !!this.db.prepare('SELECT 1 FROM flake_events WHERE project_id = ? AND file = ? AND at BETWEEN ? AND ? LIMIT 1').get(projectId, file, at - tolMs, at + tolMs);
+  }
+
+  /** Sighting times of `file` since `since`, oldest first. */
+  flakeSightings(projectId: number, file: string, since: number): number[] {
+    return (this.db.prepare('SELECT at FROM flake_events WHERE project_id = ? AND file = ? AND at >= ? ORDER BY at').all(projectId, file, since) as { at: number }[]).map((r) => r.at);
+  }
+
+  /** Files with a sighting since `since`. */
+  flakeFiles(projectId: number, since: number): string[] {
+    return (this.db.prepare('SELECT DISTINCT file FROM flake_events WHERE project_id = ? AND at >= ?').all(projectId, since) as { file: string }[]).map((r) => r.file);
+  }
+
+  /** The newest fix of a file (#1120), or undefined. */
+  flakeFix(projectId: number, file: string): FlakeFix | undefined {
+    return this.db.prepare('SELECT * FROM flake_fixes WHERE project_id = ? AND file = ? ORDER BY id DESC LIMIT 1').get(projectId, file) as FlakeFix | undefined;
+  }
+
+  flakeFixes(projectId: number): FlakeFix[] {
+    return this.db.prepare('SELECT * FROM flake_fixes WHERE project_id = ? ORDER BY id DESC').all(projectId) as unknown as FlakeFix[];
+  }
+
+  addFlakeFix(projectId: number, file: string, ticketId: number | null, startedAt: number, patch: Partial<FlakeFix> = {}): number {
+    const r = this.db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state, started_at, clean_runs, held_at, reopened) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(projectId, file, ticketId, patch.state ?? 'open', startedAt, patch.clean_runs ?? 0, patch.held_at ?? null, patch.reopened ?? 0);
+    return Number(r.lastInsertRowid);
+  }
+
+  updateFlakeFix(id: number, patch: Partial<Omit<FlakeFix, 'id' | 'project_id' | 'file'>>) {
+    const keys = Object.keys(patch) as (keyof typeof patch)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE flake_fixes SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => patch[k] as any), id);
   }
 
   /** The newest `n` failing outputs kept for a file. */

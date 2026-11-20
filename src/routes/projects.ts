@@ -28,7 +28,7 @@ import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
-import { FLAKE_WINDOW_MS, flakeBrief } from '../flakes.ts';
+import { FLAKE_WINDOW_MS, PROOF_RUNS, flakeBrief } from '../flakes.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1226,7 +1226,11 @@ export const projectRoutes: Route[] = [
       const open = store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed');
       const flakes = store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS).map((f) => {
         const title = flakeBrief(f.file, 0, []).title;
-        return { ...f, minion: open.find((t) => t.title === title)?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
+        const fx = store.flakeFix(project.id, f.file);
+        const ft = fx?.ticket_id == null ? undefined : store.getTicket(fx.ticket_id);
+        // The fix (#1120): its minion's number and person, its age, and the clean runs of the 50 the desktop proof needs.
+        const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : store.getUser(ft.person_id)?.name ?? null, startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
+        return { ...f, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
       });
       json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, now: Date.now() });
     },

@@ -940,6 +940,9 @@ mock.boards('#takes', { boards: [
       const seen = minion(c, 'Port the overlay', { status: 'closed' });
       for (const [file, n, src] of [['test/apps.test.ts', 17, 'in CI'], ['test/previews.test.ts', 12, 'smoke'], ['test/machines.test.ts', 9, 'run-tests'], ['test/checkpoint.test.ts', 4, 'in CI']] as const)
         for (let i = 0; i < n; i++) c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - (i * 20 + 3) * 3_600_000 / 2, [{ file, source: src, detail: `✖ ${file} › case ${i} (timed out after 5000ms)` }]);
+      // #1120: a fix with 30 of its 50 proving runs clean, and a held one that flaked again (reopened).
+      c.store.addFlakeFix(c.project.id, 'test/apps.test.ts', onIt.id, now - 26 * 3_600_000, { clean_runs: 30 });
+      c.store.addFlakeFix(c.project.id, 'test/machines.test.ts', seen.id, now - 80 * 3_600_000, { reopened: 1 });
       const [review, landing, landed] = [minion(c, 'Sound tab in settings'), minion(c, 'Drag panels between monitors', { status: 'closed' }), minion(c, 'Aura vanishes when its outline is removed', { status: 'closed' }, 'bug')];
       const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push', who: Ticket | null = null) => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id), minion: who?.number ?? null });
       c.store.setSetting(`ci-health:view:${c.project.id}`, {

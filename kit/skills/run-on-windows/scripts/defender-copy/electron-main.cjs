@@ -1,6 +1,6 @@
 // A bare Electron window on one address, for check.ps1 (#1186): nothing but the page, so a Defender detection while
 // copying in it is about the process and the address, not Citadel's app. check.ps1 drives it over the debugging port.
-// Usage: electron electron-main.js <url>  (with --remote-debugging-port=<n> before the script)
+// Usage: electron electron-main.cjs <url>  (with --remote-debugging-port=<n> before the script)
 const { app, BrowserWindow } = require('electron');
 
 app.whenReady().then(() => {

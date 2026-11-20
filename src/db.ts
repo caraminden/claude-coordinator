@@ -7,6 +7,7 @@ import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
+import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { Memory } from './memory.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
@@ -1476,6 +1477,7 @@ export const SCHEMA_HISTORY = [
   [83, 'review_runs.source (#1095)'],
   [84, 'events_errors index (#1178)'],
   [85, 'ticket_picks (#1061)'],
+  [86, 'memory_proposals (#1111)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1522,6 +1524,8 @@ export class Store {
   claims: Claims;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
+  /** The memory curator's proposals, waiting on a member (src/memory-curator.ts, #1111). */
+  memoryProposals: MemoryProposals;
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
@@ -1546,11 +1550,12 @@ export class Store {
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
       this.memory = new Memory(this);
+      this.memoryProposals = new MemoryProposals(this.db);
       return;
     }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
     this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
@@ -1572,6 +1577,7 @@ export class Store {
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
     this.memory = new Memory(this);
+    this.memoryProposals = new MemoryProposals(this.db);
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.dropEarlyPeekAurasBuilds();

@@ -52,7 +52,7 @@ export function frontmatter(text: string): { name: string; description: string; 
 }
 
 /** A plain file, never a symlink: a note that links elsewhere would show or overwrite a file outside the memory folder. */
-const plain = (path: string): boolean => { try { return lstatSync(path).isFile(); } catch { return false; } };
+export const plain = (path: string): boolean => { try { return lstatSync(path).isFile(); } catch { return false; } };
 
 const DAY = 86_400_000;
 const pacificDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
@@ -94,7 +94,7 @@ export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, no
 }
 
 /** Write a whole file in one step (a new temp file made exclusively, then a rename), so a session reading it never sees half. */
-function writeAtomic(path: string, text: string) {
+export function writeAtomic(path: string, text: string) {
   const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   const fd = openSync(tmp, 'wx', 0o600);
   try {

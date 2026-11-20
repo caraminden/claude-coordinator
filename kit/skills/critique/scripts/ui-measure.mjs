@@ -129,7 +129,7 @@ export function launch(bin) {
     }
     rmSync(dir, { recursive: true, force: true });
   };
-  send.listen = (fn) => listeners.add(fn);
+  send.listen = (fn) => (listeners.add(fn), () => listeners.delete(fn));
   return { send, close };
 }
 
@@ -180,7 +180,7 @@ export async function openPage(send, url, width, o) {
   // a shot never catches one mid-draw. Never throws: a page that never goes idle (SSE, long-poll) is shot after
   // 3 s with settled: false. { network: false } skips the request wait, for a shot of a click's held state.
   const inflight = new Set();
-  send.listen?.((m) => {
+  const unlisten = send.listen?.((m) => {
     if (m.sessionId !== sessionId) return;
     const id = m.params?.requestId;
     if (m.method === 'Network.requestWillBeSent' && m.params.type !== 'EventSource') inflight.add(id);
@@ -212,7 +212,7 @@ export async function openPage(send, url, width, o) {
     }
     return ok;
   };
-  return { s, evaluate, settle, phone, width, height, close: () => send('Target.disposeBrowserContext', { browserContextId }) };
+  return { s, evaluate, settle, phone, width, height, close: () => { unlisten?.(); return send('Target.disposeBrowserContext', { browserContextId }); } };
 }
 
 // What a person sees first, at the window's size: a full-page capture misplaces fixed bars and makes a

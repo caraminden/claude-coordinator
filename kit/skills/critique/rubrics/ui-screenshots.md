@@ -143,8 +143,12 @@ ignored finding as a note, never a blocker.
 
 - The shots are taken settled: the pointer is moved off the controls, finite animations finish, the network goes
   idle (3 s at most) and a spinner that never ends is frozen on its first frame. Seen: TWIReader #20, a tooltip
-  the click opened; VoiceAnalyzer #31, a spinner caught mid-draw; TWIReader #36, a cut-off shot; VoiceAnalyzer
-  #27, a misframed one; TripPresenter #23's card, a shot flow that timed out in 3 of 4 runs.
+  the click opened; VoiceAnalyzer #31, a spinner caught mid-draw. Also failed critic rounds on the shot, not the
+  app, and not shown fixed by this: TWIReader #36 (cut off), VoiceAnalyzer #27 (misframed), TripPresenter #23's
+  card (a shot flow that timed out in 3 of 4 runs). A shot is the window's size, so a view taller than it needs
+  `--before` to scroll.
+- `--sweep` really clicks: run the script against a dev copy or preview, never live data, and `--ignore` a control
+  that sends, runs or approves something real (only delete, remove and sign-out labels are skipped for you).
 - What happens over time can't be seen in a still: a layout shift when a status changes (rule 13),
   motion, focus order. The script's `--click` covers the click; the rest stays with the author's own
   check (`citadel:contraption-ui`, `references/status.md`).

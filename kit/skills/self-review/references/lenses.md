@@ -58,6 +58,23 @@ Example: #693 removed `.chat.role-taskmaster`'s background in `public/thread.css
 background for the desktop app's title bar; it now got a transparent colour, wrote `#000000`,
 and turned the window controls black.
 
+### Always: twins of what was added
+
+A fact the code works out in one place is often worked out again, or listed, somewhere the diff
+didn't touch: its twin. For each thing the diff adds (a write method; a branch that picks a
+person, owner or payer; a key, path or file name built from parts; a status line or message a
+regex elsewhere reads; a member of a list, enum or switch that another list mirrors), grep outside
+the diff for the twin that lists or derives the same thing (the other list's name, the function
+that already builds that key, the other place that asks the same question) and check it got the
+same case. Two places that answer one question differently are a finding even when each looks
+right alone. Keep it to a few targeted greps per addition. A finding names the twin's file:line
+and the case it now gets wrong.
+
+Example: #795's writer queues only the `Store` methods named in `WRITES` and `VALUE_WRITES`
+(`src/db-writer.ts`). Later diffs added `touch`, `addHostSample` and eight more writes to `Store`
+without listing them, so they ran on the server's thread behind every queued write, and `touch`
+held the loop 1.5 s on a stalled disk.
+
 ### Always: no check-gaming
 
 A diff that weakens a check is Must fix unless the ask or the commit message says why:
@@ -74,7 +91,7 @@ A diff that weakens a check is Must fix unless the ask or the commit message say
 ### Always: audit before you conclude
 
 Before the findings, in at most four lines: the files you read in full, with the caller counts;
-the readers you checked, as `name: N readers`; each lens you ran, as `issue` or `clean`; and what
+the readers and twins you checked, as `name: N readers` and `name: N twins`; each lens you ran, as `issue` or `clean`; and what
 you could not verify, and why. Found
 nothing? Write `No findings.` Never invent one to fill the list.
 

@@ -28,6 +28,7 @@ export const PARTS: Part[] = [
   { name: 'ask-on-the-side', label: 'Ask on the side', page: MINION, where: "beside Send in a minion's chat", words: 'aside btw side question' },
   { name: 'minion-menu', label: "A minion's More menu", page: MINION, where: "the line of buttons under a minion's title (the ⋯ on a phone)", words: 'more menu stop dismiss reopen close leave' },
   { name: 'minion-note', label: "A minion's note", page: MINION, where: "the top of a minion's chat", words: 'note people only' },
+  { name: 'where-it-stands', label: 'Where a minion stands', page: MINION, where: "the strip on top of a minion's chat: its goal, where it is and what it needs from you", words: 'goal now status strip stands asked' },
   { name: 'pin-minion', label: 'Pin a minion', page: MINION, where: "the top of a minion's chat", words: 'pin top list' },
   // Orders → Minion rules
   { name: 'fast-mode', label: 'Fast mode', page: RULES, where: 'Orders → Minion rules → Shipping', words: 'fast ship now test behind land' },

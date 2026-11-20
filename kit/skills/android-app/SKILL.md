@@ -1,6 +1,6 @@
 ---
 name: android-app
-description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, moves an app onto Citadel's shared Android shell or wires its update prompt or push, or tries an APK or a page on the shared emulator (citadel-android), its microphone included.
+description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, moves an app onto the shared shell or wires its updates or push, or tries an APK or a page on the shared emulator (citadel-android), its microphone included.
 ---
 
 # Android app

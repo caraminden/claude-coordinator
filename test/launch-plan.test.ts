@@ -177,6 +177,8 @@ test('copyPins links the pinned files instead of copying their bytes, and keeps 
     assert.equal(statSync(join(dst, 'bin', 'tool')).mode & 0o777, 0o755);
     assert.ok(lstatSync(join(dst, 'bin', 'citadel-node')).isSymbolicLink());
     assert.equal(readlinkSync(join(dst, 'bin', 'citadel-node')), '/usr/bin/node');
+    copyPins(src, join(root, 'boxed'), false);
+    assert.notEqual(statSync(join(root, 'boxed', 'tripwire.ts')).ino, statSync(join(src, 'tripwire.ts')).ino, 'a container turn gets copies');
     rmSync(src, { recursive: true });
     assert.equal(readFileSync(join(dst, 'tripwire.ts'), 'utf8'), 'guard', "the turn's copy outlives the server's");
   } finally {

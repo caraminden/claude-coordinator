@@ -201,4 +201,10 @@ test('settingKeys reads the table once, and follows writes made here and queued 
   store.deleteSetting('loop:2');
   assert.deepEqual(store.settingKeys('loop:'), ['loop:3']);
   assert.equal(count(), 1);
+  // A write that sets settings rows inside its own body runs on the worker's store: the key list is read again.
+  const mine = ticket(store);
+  store.setSetting(`plan:${mine.id}`, 1);
+  assert.deepEqual(store.settingKeys('plan:'), [`plan:${mine.id}`]);
+  store.deleteTicket(mine.id);
+  assert.deepEqual(store.settingKeys('plan:'), []);
 });

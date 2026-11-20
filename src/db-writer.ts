@@ -37,7 +37,10 @@ export const VALUE_WRITES = [
 /** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in
  * between caches what the file still holds. */
 const FORGETS: Record<string, (store: Store, args: any[]) => void> = {
-  deleteTicket: (store, [id]) => (store.forgetCards(), store.memory.forgetTicket(id)),
+  // Writes that set or delete settings rows inside their own body, on the worker's store: the key list is read again (#1125).
+  deleteTicket: (store, [id]) => (store.forgetCards(), store.memory.forgetTicket(id), store.dropKeys()),
+  setAppInstructions: (store) => store.dropKeys(),
+  setProjectSettings: (store) => store.dropKeys(),
   setEventData: (store, [id]) => store.forgetCards(id),
   'memory.deleteTicket': (store, [id]) => store.memory.forgetTicket(id),
 };
@@ -210,6 +213,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   worker.once('exit', (code) => {
     alive = false;
     unwritten.clear();
+    store.dropKeys(); // queued writes were lost, and the key list followed them
     const lost = seq - applied();
     seq = applied();
     for (const p of pending.values()) p.reject(new Error('the DB write worker stopped'));

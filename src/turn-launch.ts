@@ -119,16 +119,17 @@ export function pinTurnFiles(dataDir: string): TurnPins {
  * A turn's copy of the pinned files (#1125): hard links, so no file's bytes are copied. cpSync of the tree held the server
  * 3.8 to 8.7 s on a busy disk, the second stall stack. A link outlives the server's own copy being swept, which is what the
  * copy is for; the pinned files are never written to (pruneKit only unlinks), so the shared inode is safe. Across filesystems
- * (a container's turns folder) a file is copied instead.
+ * (a container's turns folder) a file is copied instead. A container's turn gets copies (`link` false): its folder is mounted writable, so a link would let it change the server's pinned tripwire.
  */
-export function copyPins(src: string, dst: string): void {
+export function copyPins(src: string, dst: string, link = true): void {
   mkdirSync(dst, { recursive: true });
   for (const e of readdirSync(src, { withFileTypes: true })) {
     const from = join(src, e.name), to = join(dst, e.name);
-    if (e.isDirectory()) copyPins(from, to);
+    if (e.isDirectory()) copyPins(from, to, link);
     else if (e.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
     else {
-      try { linkSync(from, to); } catch (err: any) { if (err.code !== 'EXDEV') throw err; cpSync(from, to); }
+      if (!link) cpSync(from, to);
+      else try { linkSync(from, to); } catch (err: any) { if (err.code !== 'EXDEV') throw err; cpSync(from, to); }
     }
   }
 }

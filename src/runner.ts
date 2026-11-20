@@ -2740,7 +2740,7 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     try {
       const pins = turnPins();
-      copyPins(pins.MCP_DIR, pin);
+      copyPins(pins.MCP_DIR, pin, !!place.host);
       // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
       if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));

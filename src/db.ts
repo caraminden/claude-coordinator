@@ -3572,11 +3572,11 @@ export class Store {
   dropKeys() { this.keyCache = null; }
 
   setSetting(key: string, value: unknown) {
-    this.noteKey(key, true);
     // An unchanged value writes nothing: ci-health alone rewrote 250 KB of the same job lists every 5 minutes (#680).
     this.db
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value')
       .run(key, JSON.stringify(value));
+    this.noteKey(key, true);
   }
 
   /** Whether this connection checkpoints the WAL itself on commit (SQLite's default) or leaves it to checkpointOffThread (src/checkpoint.ts, #680). */
@@ -3585,8 +3585,8 @@ export class Store {
   }
 
   deleteSetting(key: string) {
-    this.noteKey(key, false);
     this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+    this.noteKey(key, false);
   }
 
   /** Record a release of a scheme's target (src/releases.ts). */

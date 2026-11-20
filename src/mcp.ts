@@ -818,8 +818,8 @@ const TOOLS = [
   {
     name: 'set_project_instructions',
     description:
-      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway). To register a scheme rule\'s one home (a member asks, or offer it on a card when you write a standing rule), start a minion to add it to the scheme repo\'s `.claude/rule-homes.json` (`citadel:writing-for-agents`, Pruning).',
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose.' } }, required: ['instructions'] },
+      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list: have a Sonnet Grunt judge each, then work them in, or save anyway with repeats_ok and its verdicts as overlaps. To register a scheme rule\'s one home (a member asks, or offer it on a card when you write a standing rule), start a minion to add it to the scheme repo\'s `.claude/rule-homes.json` (`citadel:writing-for-agents`, Pruning).',
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose, and with overlaps.' }, overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: "With repeats_ok: your Sonnet Grunt's verdict on each place the refusal listed, one line each: where, repeats / conflicts / fine, and why" } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
@@ -897,8 +897,8 @@ const APP_INSTRUCTION_TOOLS = [
   {
     name: 'set_app_instructions',
     description:
-      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change; new words that repeat a registered rule or text elsewhere are refused with the list (repeats_ok saves anyway). A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose.' } }, required: ['instructions'] },
+      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change; new words that repeat a registered rule or text elsewhere are refused with the list: have a Sonnet Grunt judge each, then work them in, or save anyway with repeats_ok and its verdicts as overlaps. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose, and with overlaps.' }, overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: "With repeats_ok: your Sonnet Grunt's verdict on each place the refusal listed, one line each: where, repeats / conflicts / fine, and why" } }, required: ['instructions'] },
   },
 ];
 
@@ -1959,20 +1959,22 @@ async function approve(args: any): Promise<string> {
 
 /**
  * The overlap check a person's Settings save gets (#1162), before the Taskmaster saves rule text (#1211): refused with
- * what already says the new words, unless it passes repeats_ok.
+ * what already says the new words. Like a Settings save's Sonnet check, its own Sonnet Grunt judges the hits (Josh,
+ * 2026-11-20: "Yes, its own Grunt"), and repeats_ok saves past them only with the Grunt's verdicts as `overlaps`.
  */
 async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<string> {
   const text = wholeText(args);
-  if (args.repeats_ok === true) return '';
+  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim()) : [];
+  if (args.repeats_ok === true && judged.length) return `\nSaved past the repeat check on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
   let found: any[];
   // Like a Settings save, a check that fails never blocks the save: it says so instead.
   try { ({ found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
   if (!found.length) return '';
   const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
   throw new Error([
-    `Nothing was saved: the new words repeat what is already written elsewhere.`,
+    args.repeats_ok === true ? `repeats_ok needs your Grunt's verdicts as overlaps. Nothing was saved.` : `Nothing was saved: the new words repeat what is already written elsewhere.`,
     ...found.map((o: any) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
-    `Put the change where it is already said, or point there in a few words. If the repeat is on purpose, call again with repeats_ok: true.`,
+    `A word matcher found these, so first have a Sonnet Grunt judge each against the new words (for a registered rule, against its home): repeats, conflicts, or fine (only shared wording). Put what it marks where it is already said, or point there in a few words. To save anyway, call again with repeats_ok: true and its verdicts as overlaps, one line per place.`,
   ].join('\n'));
 }
 

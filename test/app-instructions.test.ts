@@ -161,9 +161,19 @@ test('a Taskmaster save that repeats a registered rule is refused with the list,
     assert.match(held.content[0].text, /repeats_ok/);
     assert.equal(read(), before, `${tool} saved nothing`);
 
-    const saved = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true } }, appTools);
+    assert.match(held.content[0].text, /Sonnet Grunt/, 'it says to have its own Grunt judge them');
+
+    // repeats_ok saves past them only with its Grunt's verdicts (Josh, 2026-11-20: "Yes, its own Grunt").
+    const bare = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true } }, appTools);
+    assert.ok(bare.isError, `${tool}: ${bare.content[0].text}`);
+    assert.match(bare.content[0].text, /repeats_ok needs your Grunt's verdicts as overlaps/);
+    assert.equal(read(), before, `${tool} saved nothing without verdicts`);
+
+    const verdict = 'Registered rule: When a minion closes: repeats; the Closing rule already says this.';
+    const saved = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true, overlaps: [verdict] } }, appTools);
     assert.ok(!saved.isError, saved.content[0].text);
     assert.equal(read(), repeat);
+    assert.ok(saved.content[0].text.includes(verdict), 'the verdicts come back to tell the person');
   }
   // Another scheme's Taskmaster gets the same check on its own scheme's text.
   const delve = await mcp(DelveTM, 'tools/call', { name: 'set_project_instructions', arguments: { instructions: repeat } }, false);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deleteNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags } from '../src/memory-files.ts';
+import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags } from '../src/memory-files.ts';
 
 test('memoryFolders maps a repo path to each login\'s projects/<slug>/memory, once per distinct dir', () => {
   const repo = '/home/cara/.local/share/claude-coordinator/projects/7/repo';
@@ -81,4 +81,25 @@ test('an unreadable index still lists the notes; a past date in prose ("decided 
   mkdirSync(join(dir, 'MEMORY.md'));
   assert.equal(readFolder({ label: 'L', dir }, () => false).notes.length, 2);
   assert.deepEqual(staleFlags('Cara decided on 2026-11-10; set by Josh 2026-11-12', () => false, Date.parse('2026-11-19T12:00:00-08:00')).datesPast, []);
+});
+
+test('indexNote appends a linked line once, makes MEMORY.md when missing, and readFolder reports inIndex', () => {
+  const dir = setup();
+  writeFileSync(join(dir, 'c.md'), '---\nname: C [draft]\ndescription: third one\n---\nbody\n');
+  assert.equal(readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.find((n) => n.file === 'c.md')!.inIndex, false);
+  assert.equal(indexNote(dir, 'c.md'), true);
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A note](a.md) — first\n- [B](b.md) — second\n- [C  draft ](c.md) — third one\n');
+  assert.equal(indexNote(dir, 'c.md'), false, 'a second add leaves the index alone');
+  assert.equal(readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.every((n) => n.inIndex), true);
+  rmSync(join(dir, 'MEMORY.md'));
+  assert.equal(indexNote(dir, 'b.md'), true);
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [B](b.md) — second\n');
+  assert.throws(() => indexNote(dir, 'missing.md'), /No such note/);
+  // Only the first 200 lines load: a 199-line index takes one more, a 200-line one refuses and stays as it was.
+  const lines = (k: number) => Array.from({ length: k }, (_, i) => `- [n${i}](n${i}.md)\n`).join('');
+  writeFileSync(join(dir, 'MEMORY.md'), lines(199));
+  assert.equal(indexNote(dir, 'a.md'), true);
+  writeFileSync(join(dir, 'MEMORY.md'), lines(200));
+  assert.throws(() => indexNote(dir, 'a.md'), (e: any) => e.status === 409 && /full/.test(e.message));
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), lines(200));
 });

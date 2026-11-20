@@ -209,7 +209,12 @@ export async function showSchedules(sidebar) {
   const btn = sidebar.querySelector('.schedules-btn');
   const label = showing ? 'Back to the minions' : 'Scheduled minions';
   Object.entries({ 'aria-pressed': String(showing), 'aria-label': label, title: label }).forEach(([k, v]) => btn.setAttribute(k, v));
-  sidebar.querySelector(':scope > summary .label').textContent = showing ? 'Scheduled' : 'Minions';
+  // The Minions tab reads Scheduled while the list shows, and is the tab in front (#1071).
+  sidebar.querySelector(':scope > summary .tab-name').textContent = showing ? 'Scheduled' : 'Minions';
+  if (showing && sidebar.classList.contains('show-orders')) {
+    sidebar.classList.remove('show-orders');
+    for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) t.setAttribute('aria-selected', String(t.classList.contains('minions-tab')));
+  }
   const pane = sidebar.querySelector('.schedules-pane');
   if (!showing) return pane.replaceChildren();
   if (!pane.childElementCount) pane.replaceChildren(h('p', { class: 'muted small' }, 'Loading…'));

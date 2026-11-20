@@ -2,7 +2,7 @@
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { ciPage } from './ci.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, myInstructionsEditor, notificationsPage, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, isOrdersPage, myInstructionsEditor, notificationsPage, ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import { machinesPage } from './settings-machines.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
@@ -55,16 +55,30 @@ export async function showTicket(ticketId) {
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
 
+/** A tab in the Minions panel's header; it switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
+const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, onclick: (e) => showPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+
+/** Show the minions or the Orders pages in the panel; Orders closes the schedules list first. */
+function showPanelTab(sidebar, name) {
+  const orders = name === 'orders';
+  const sched = sidebar.querySelector('.schedules-btn');
+  if (orders && sched?.getAttribute('aria-pressed') === 'true') sched.click();
+  sidebar.classList.toggle('show-orders', orders);
+  for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) t.setAttribute('aria-selected', String(t.classList.contains('orders-tab') === orders));
+}
+
 function renderCrumbs(main) {
   const { project } = view;
   // The scheme list's row carries the icon's version; the scheme's own doesn't.
   const icon = () => schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project);
   const projectLink = h('a', { href: `#/p/${project.id}`, class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name));
   const filesLink = (to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
-  const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
+  // Orders pages (#1071) sit under Orders, the rest under Settings.
+  const settingsLink = isOrdersPage(main.kind) ? h('a', { href: `#/p/${project.id}/orders` }, 'Orders') : h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
     main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'settings' ? [projectLink, ' / ', 'Settings']
+      : main.kind === 'orders' ? [projectLink, ' / ', 'Orders']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'my-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'My instructions']
@@ -183,7 +197,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
-    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
+    // Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): Orders swaps the list for its pages.
+    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
+      panelTab('minions', h('span', { class: 'tab-name' }, 'Minions')), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true }))), schedulesButton()),
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
@@ -193,8 +209,12 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'saved-views', class: 'saved-views' }),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
     h('div', { id: 'threads' }),
-    h('div', { class: 'schedules-pane' }));
+    h('div', { class: 'schedules-pane' }),
+    ordersMenu());
   showSchedules(sidebar);
+  // An Orders page, or the Orders crumb, opens on the Orders tab; anything else on the minions.
+  showPanelTab(sidebar, isOrdersPage(main.kind) || main.orders ? 'orders' : 'minions');
+  if (main.orders) sidebar.open = true;
   for (const [name, el] of [['shelf', shelf], ['threads', sidebar]]) {
     el.addEventListener('toggle', () => {
       if (!narrowQuery.matches) savePanelState({ ...loadPanelState(), [name]: el.open });
@@ -207,6 +227,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   };
   const section = main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'settings' ? settingsHome()
+    : main.kind === 'orders' ? settingsHome(true)
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'app-instructions' ? appInstructionsEditor()
     : main.kind === 'my-instructions' ? myInstructionsEditor()

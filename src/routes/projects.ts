@@ -30,7 +30,7 @@ import { describeCron, loadTemplates, renderTemplate, templateFields, templateVa
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { deleteNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
+import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
@@ -1145,7 +1145,7 @@ export const projectRoutes: Route[] = [
     handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
-  // The scheme's Claude Code memory notes, read and written in place (the Scheme → Memory page). Not /memory, which is search over chats.
+  // The scheme's Claude Code memory notes, read and written in place (the Orders → Memory page); a PUT with index: true adds a note's line to MEMORY.md. Not /memory, which is search over chats.
   {
     method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
     async handler({ req, res, url, app, project }) {
@@ -1162,13 +1162,14 @@ export const projectRoutes: Route[] = [
             // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
             app.store.deleteClaudeState(join(folder.rel, file));
           }
+          else if (body.index === true) indexNote(folder.dir, file);
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
             saveNote(folder.dir, file, body.text);
           }
         } catch (err: any) {
           if (err instanceof HttpError) throw err;
-          throw new HttpError(404, err.message);
+          throw new HttpError(err.status ?? 404, err.message);
         }
       }
       return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
@@ -1198,7 +1199,7 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Every dated decision this scheme can see, parsed live from where it is written (the Scheme → Decisions page and
+  // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
   // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
   {
     method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],
@@ -1245,7 +1246,7 @@ export const projectRoutes: Route[] = [
       if (r.added.length || r.updated.length) app.registryChanged(project.id, app.store.props.isGlobal(project.id, body.key));
       if (r.unreviewed.length) {
         const coordinator = app.store.getOverlord(project.id);
-        if (coordinator) app.runner.emit(coordinator.id, 'note', { everyone: true, text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
+        if (coordinator) app.runner.emit(coordinator.id, 'note', { everyone: true, text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Orders → Properties.` });
       }
       return json(ctx.res, 200, r);
     },

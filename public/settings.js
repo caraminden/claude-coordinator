@@ -321,8 +321,8 @@ export function renderGithubStrip() {
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
   // Settings sits beside the scheme it belongs to (Josh, 2026-11-13); made once so a rename keeps its count.
-  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Instructions, approvals, properties and machines for this scheme' },
-    'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true }));
+  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Members, your account, machines and usage; the scheme\'s instructions and rules are in Orders, beside Minions' },
+    'Settings');
   const show = () => {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
@@ -373,14 +373,24 @@ export function projectTitle(project) {
 
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
-// The side menu (#995, Cara picked "Side menu, rows that open"): three groups, each its own hue, every page with an
+// The side menu (#995, Cara picked "Side menu, rows that open"): groups, each its own hue, every page with an
 // icon and a one-line summary for the phone's list (#1018). On a phone the menu hides: Settings opens on that list
 // (settingsHome), and each page's bar has a back link to it and the page's own name (Cara picked "A list of pages,
 // each opens full screen").
+// Orders (#1071, Josh 2026-11-19: "Lets go with Orders"; picked "Minions | Orders tabs on the panel"): what minions read
+// and how work runs moved out of Settings to a tab beside Minions (ordersMenu). Settings keeps you and the admin pages.
+// 'schedules' has no page: its row opens the panel's schedules list.
+export const ORDERS_GROUPS = [
+  ['What minions read', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'],
+    ['skills', 'Skills', 'spark', 'What minions know how to do, and when'], ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'],
+    ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"]]],
+  ['How work runs', 'teal', [['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['schedules', 'Schedules', 'rows', 'Minions that start on a timer']]],
+];
+const ORDERS_PAGES = new Set(ORDERS_GROUPS.flatMap(([, , items]) => items.map(([kind]) => kind)));
+/** True for a page that lives in Orders, not Settings. */
+export const isOrdersPage = (kind) => ORDERS_PAGES.has(kind);
 const SETTINGS_GROUPS = [
-  ['Scheme', 'running', [['instructions', 'Instructions', 'doc', 'What every minion reads'], ['approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI'], ['skills', 'Skills', 'spark', 'What minions know how to do, and when'],
-    ['properties', 'Properties', 'tag', 'Type, stage and your own keys'], ['members', 'Members', 'users', 'Who works in this scheme'],
-    ['memory', 'Memory', 'doc', 'What the Taskmaster and minions remember'], ['decisions', 'Decisions', 'check', "Who decided what, and what's reversed"]]],
+  ['Scheme', 'running', [['members', 'Members', 'users', 'Who works in this scheme'], ['orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
     ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend']]],
   ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
@@ -388,7 +398,18 @@ const SETTINGS_GROUPS = [
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
 const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
 
+/** Opens the panel's schedules list (Schedules has no page of its own). */
+function openSchedules(e) {
+  e?.preventDefault();
+  const btn = document.querySelector('.sidebar .schedules-btn');
+  if (btn && btn.getAttribute('aria-pressed') !== 'true') btn.click();
+  const side = btn?.closest('.sidebar');
+  if (side) side.open = true;
+}
+
 export function settingsTabs() {
+  // An Orders page keeps the (hidden) menu so it shares the settings pages' layout; its menu is the panel's Orders tab.
+  if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
   const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
     settingsGroups().map(([label, hue, items]) =>
       h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label),
@@ -398,23 +419,38 @@ export function settingsTabs() {
   return nav;
 }
 
-/** A settings page's title: "Settings" beside the desktop menu; on a phone a back link to the list and the page's name. */
-export function settingsTitle() {
-  const page = SETTINGS_GROUPS.flatMap(([, , items]) => items).find(([kind]) => kind === view.main);
-  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/settings`, title: 'All settings' }, icon('back'), 'Settings'),
-    h('h2', {}, h('span', { class: 'settings-title-wide' }, 'Settings'), h('span', { class: 'settings-title-narrow' }, page?.[1] ?? 'Settings'))];
+/** The Minions panel's Orders tab (#1071): its pages in two groups; each opens in the main pane. */
+export function ordersMenu() {
+  return h('nav', { class: 'orders-pane', 'aria-label': 'Orders' }, ORDERS_GROUPS.map(([label, hue, items]) =>
+    h('div', { class: 'orders-group', 'data-hue': hue }, h('span', { class: 'orders-group-label' }, label),
+      items.map(([kind, text, ic, sum]) =>
+        h('a', { class: view.main === kind ? 'active' : '', href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`, title: sum,
+          'aria-current': view.main === kind ? 'page' : null, onclick: kind === 'schedules' ? openSchedules : null },
+          icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
 }
 
-/** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. */
-export function settingsHome() {
+/** A settings or Orders page's title: its area beside the desktop menu; on a phone a back link to the list and the page's name. */
+export function settingsTitle() {
+  const orders = isOrdersPage(view.main);
+  const page = (orders ? ORDERS_GROUPS : SETTINGS_GROUPS).flatMap(([, , items]) => items).find(([kind]) => kind === view.main);
+  const area = orders ? 'Orders' : 'Settings';
+  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
+    // An Orders page has no menu beside it, so its own name heads it on a desktop too.
+    h('h2', {}, h('span', { class: 'settings-title-wide' }, orders ? page?.[1] ?? area : area), h('span', { class: 'settings-title-narrow' }, page?.[1] ?? area))];
+}
+
+/** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. Orders' list is the same shape. */
+export function settingsHome(orders = false) {
+  const title = orders ? 'Orders' : 'Settings';
   return h('section', { class: 'artifacts-main settings-home' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
+      h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
-    h('nav', { 'aria-label': 'Settings' }, settingsGroups().flatMap(([label, hue, items]) => [
+    h('nav', { 'aria-label': title }, (orders ? ORDERS_GROUPS : settingsGroups()).flatMap(([label, hue, items]) => [
       h('h3', { class: 'settings-section', 'data-hue': hue }, label),
       h('div', { class: 'settings-rows' }, items.map(([kind, text, ic, sum]) =>
-        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
+        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: kind === 'schedules' ? `#/p/${view.projectId}` : `#/p/${view.projectId}/${kind}`,
+          onclick: kind === 'schedules' ? (e) => { openSchedules(e); document.querySelector('.citadel-drawer-handle.right')?.click(); } : null },
           h('span', { class: 'settings-tile' }, icon(ic)),
           h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
           h('span', { class: 'settings-row-chev' }, icon('forward')))))])));

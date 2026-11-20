@@ -1,5 +1,31 @@
 /* The minions panel: the list's sections and rows, search, filters and saved views, the Needs-you strip, schedules. */
 .sidebar.show-schedules > :not(summary, .schedules-pane) { display: none; }
+/* Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): two tabs in the panel's header; Orders swaps the
+   list for its pages, each opening in the main pane. The schedules list, when open, wins over both. */
+.sidebar > summary .panel-tabs { display: inline-flex; align-items: center; flex: 1; min-width: 0; gap: 0.15rem; }
+.sidebar > summary .panel-tab { display: inline-flex; align-items: center; gap: 0.35rem; min-height: calc(var(--control-h) - 0.5rem); padding: 0 0.6rem; border: 1px solid transparent;
+  border-radius: var(--radius-pill); background: none; color: var(--muted); font: inherit; font-weight: 650; cursor: pointer; transition: background var(--motion), color var(--motion); }
+.sidebar > summary .panel-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sidebar > summary .panel-tab[aria-selected='true'] { color: var(--ink); background: var(--panel); border-color: var(--line); }
+.sidebar > summary .panel-tab .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.8em; line-height: 1.4; }
+.sidebar > summary .panel-tab .count[hidden] { display: none; }
+/* Collapsed to its slim tab, the header is one label again: Orders hides and Minions lets the click open the panel. */
+.sidebar:not([open]) > summary .orders-tab { display: none; }
+.sidebar:not([open]) > summary .panel-tab { pointer-events: none; padding: 0; margin: 0; border: 0; background: none; color: inherit; }
+.sidebar.show-orders:not(.show-schedules) > :not(summary, .orders-pane) { display: none; }
+.sidebar:not(.show-orders) > .orders-pane, .sidebar.show-schedules > .orders-pane { display: none; }
+.orders-pane { display: flex; flex-direction: column; gap: 0.1rem; }
+.orders-group { display: flex; flex-direction: column; gap: 0.1rem; }
+.orders-group-label { padding: 0.9rem 0.55rem 0.3rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--h); }
+.orders-group:first-child .orders-group-label { padding-top: 0.2rem; }
+.orders-pane a { display: flex; align-items: center; gap: 0.55rem; min-height: var(--control-h); box-sizing: border-box; padding: 0 0.55rem; border-radius: var(--radius-sm);
+  color: var(--ink); text-decoration: none; transition: background var(--motion); }
+.orders-pane a .icon { flex: none; width: 1rem; height: 1rem; color: var(--h); }
+.orders-pane a .label { flex: 1; min-width: 0; }
+.orders-pane a:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--h) 8%, transparent); }
+.orders-pane a.active { background: color-mix(in srgb, var(--h) 15%, var(--panel)); box-shadow: inset 3px 0 0 var(--h); font-weight: 600; }
+.orders-pane a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
+.orders-pane a .count[hidden] { display: none; }
 :is(.shelf, .sidebar) > summary .schedules-btn[aria-pressed='true'] { color: var(--accent); }
 .schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
 .schedule-row .error { margin: 0.2rem 0 0; }

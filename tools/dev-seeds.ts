@@ -757,11 +757,11 @@ mock.boards('#takes', { boards: [
       const idea = minion(c, 'Ideas for onboarding', {}, 'ideation');
       turn(idea, [skill('docs-and-mocks'), skill('subagents'), grunt('Explore'), grunt('Explore'), end], false);
       turn(taskmaster(c), [skill('subagents'), grunt('Explore'), end], false);
-      return `#/p/${c.project.id}/skills (Settings → Skills in "${c.project.name}")`;
+      return `#/p/${c.project.id}/skills (Orders → Skills in "${c.project.name}")`;
     },
   },
   memory: {
-    about: "Settings → Memory (#1058): the Seeded scheme with a repo folder and six Claude Code memory notes in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index",
+    about: "Orders → Memory (#1058, #1071): the Seeded scheme with a repo folder and six Claude Code memory notes of four kinds in the server login's config dir, one naming a closed minion, two with dates (one passed, one soon), and an index that leaves two out",
     seed(c) {
       const repo = join(c.dataDir, 'seeded-repo');
       mkdirSync(repo, { recursive: true });
@@ -771,21 +771,22 @@ mock.boards('#takes', { boards: [
       const dir = join(c.dataDir, 'claude', 'projects', projectSlug(repo), 'memory');
       mkdirSync(dir, { recursive: true });
       const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
-      const notes: [string, string, string, string][] = [
-        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.'],
-        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".'],
-        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`],
-        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`],
-        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`],
-        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.'],
+      // [file, name, description, body, kind, listed in MEMORY.md]
+      const notes: [string, string, string, string, string, boolean][] = [
+        ['released-means-released', 'Released means released', 'A target is live only when its people can get that version', 'Cara 2026-11-18: say "released" only once people can get the build.', 'feedback', true],
+        ['ship-not-land', 'Ship, not land', 'Cara picked "land", then reversed to "ship" the same day', 'In everything people read, a change going onto main is "shipping".', 'feedback', false],
+        ['for-cara-next-time', 'For Cara next time', 'Still owed to Cara', `Owed: the export check from #${closed.number}, and the Android units.`, 'project', true],
+        ['fable-burst', 'Fable burst', 'Hard jobs on Fable the week of Nov 14', `Recheck after ${day(-5)}.`, 'project', true],
+        ['effort-keep-high', 'Taskmaster effort', 'Cara: keep high', `Recheck after ${day(2)}; cut cost via wakes and context, not effort.`, 'user', true],
+        ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.', 'reference', false],
       ];
-      for (const [file, name, description, body] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: feedback\n---\n\n${body}\n`);
-      writeFileSync(join(dir, 'MEMORY.md'), notes.map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
-      return `#/p/${c.project.id}/memory (Settings → Memory in "${c.project.name}")`;
+      for (const [file, name, description, body, kind] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${kind}\n---\n\n${body}\n`);
+      writeFileSync(join(dir, 'MEMORY.md'), notes.filter((n) => n[5]).map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
+      return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}")`;
     },
   },
   decisions: {
-    about: "Settings → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    about: "Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
     seed(c) {
       SCENARIOS.memory.seed(c);
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
@@ -810,7 +811,7 @@ mock.boards('#takes', { boards: [
       const ship = land.replace(/^Land, not merge \([^\n]*/, 'Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020\'s card, picked `Ship` over keeping "land"; for `fold` she picked "Retire it": "fold was just for major builds"). A change going onto main is "shipping".');
       c.store.setAppInstructions(land, c.who);
       c.store.setAppInstructions(ship, 'Taskmaster');
-      return `#/p/${c.project.id}/decisions (Settings → Decisions in "${c.project.name}")`;
+      return `#/p/${c.project.id}/decisions (Orders → Decisions in "${c.project.name}")`;
     },
   },
   ci: {

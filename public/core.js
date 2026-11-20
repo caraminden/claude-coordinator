@@ -875,8 +875,10 @@ async function route() {
     }
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'files', folder: '@minions' });
-    // Settings itself opens on Instructions beside the desktop menu, and on the list of pages on a phone (#1018).
-    else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|instructions)$/))) await showProject(Number(m[1]), { kind: m[2] === 'settings' && matchMedia('(max-width: 800px)').matches ? 'settings' : 'instructions' });
+    // Settings and Orders open on their list of pages on a phone (#1018); on a desktop Settings opens on Members beside
+    // its menu, and Orders on Instructions with the panel's Orders tab showing (#1071).
+    else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|orders)$/))) await showProject(Number(m[1]), matchMedia('(max-width: 800px)').matches ? { kind: m[2] } : m[2] === 'settings' ? { kind: 'members' } : { kind: 'instructions', orders: true });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/my-instructions$/))) await showProject(Number(m[1]), { kind: 'my-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });

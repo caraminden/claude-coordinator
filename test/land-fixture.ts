@@ -77,7 +77,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
-// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has
+// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
@@ -121,6 +121,8 @@ case "$*" in
         printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
           printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
+        elif [ "\${FAKE_LOG:-mixed}" = due ]; then
+          printf "%b test/busy.test.ts: not rerun: CI's answer is due (land.sh stops waiting then), so the run counts as a real red\\n" "$p"
         else
           printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
         fi ;;

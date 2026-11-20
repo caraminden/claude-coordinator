@@ -314,6 +314,23 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   assert.equal(r.note(), null);
 });
 
+// #1240: a ship's CI run stops rerunning files alone when its answer is due, so a file left unrerun has no "passed
+// alone" label: the run is a real red, refused at once, with no fresh run and no fallback to the suite here.
+test("a red whose reruns alone were cut at CI's deadline is a real red: refused, not run again, not run here", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'due', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /busy\.test\.ts: not rerun: CI's answer is due.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'one run only');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.equal(c.localRuns(), 0);
+});
+
 // #769 (Cara, 2026-11-15, #767's card: "2 Rerun CI on flake-only red"): a red in which every failed file passed alone
 // gets one fresh run of the same commit, and only a fully green one lands.
 test('a red of flakes only gets one fresh CI run, and lands when that run is green', () => {

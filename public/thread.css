@@ -511,7 +511,7 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .select-menu.bar { border-radius: 0; border-width: 1px 0; justify-content: center; box-shadow: none; }
 /* Where it stands (#1130, the mock on #1091's choices page): goal, now and your move as three tiles under the head, each
    topped in its state's colour (sidebar.css .f-*). Fixed heights, every text cut short with its whole on hover, so the
-   chat under it never moves when the state changes. Phones: one line, the goal, opening to three on a tap. */
+   chat under it never moves when the state changes. Phones: one line, your move, opening to three on a tap; opened, a line wraps to two. */
 .ticket-head .stands { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
 .ticket-head .stands-line { min-width: 0; padding: 0.45rem 0.7rem 0.5rem; border-radius: 8px; background: var(--panel);
   box-shadow: inset 0 3px 0 var(--c, var(--control-line)), 0 0 0 1px var(--line); font-size: 0.88em; line-height: 1.35; }
@@ -528,3 +528,6 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .ticket-head .stands.phone .stands-text { display: block; height: auto; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head .stands.phone .stands-line + .stands-line { padding-right: 0.6rem; }
 .chat.stands-away .ticket-head .stands.phone { display: none; }
+/* Opened by a tap, a long goal or state wraps to a second line rather than hiding behind a hover title phones lack. */
+.ticket-head .stands.phone.open .stands-line { height: auto; min-height: 2rem; padding-top: 0.3rem; padding-bottom: 0.3rem; }
+.ticket-head .stands.phone.open .stands-text { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; line-clamp: 2; }

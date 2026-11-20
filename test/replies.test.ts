@@ -95,6 +95,7 @@ test('a goal is set at create, changed and checked by PATCH, and null clears it 
   assert.equal(t.goal, 'Left-align the card buttons', 'one line, its whitespace folded');
   const patch = (goal: unknown) => call(`/api/tickets/${t.id}`, { method: 'PATCH', body: { goal } });
   assert.equal((await patch('x'.repeat(141))).status, 400, 'at most 140 characters');
+  assert.equal((await patch(false)).status, 400, 'a string or null, not false');
   assert.equal((await patch('Left-align them; centred looks off')).data.goal, 'Left-align them; centred looks off');
   assert.equal((await patch(null)).data.goal, null);
   await until('the first turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');

@@ -463,6 +463,16 @@ test('standsLines: goal, now and your move for each kind of minion; the card wai
     assert.deepEqual([appr.move.text, appr.move.href], ['Approve or deny its approval card', '#a']);
     // Two of yours: the oldest, with how many more.
     assert.equal(standsLines(t({ pending_card_at: NOW - MIN, open_cards: [card(), card({ what: 'plan', kind: 'plan' })] }), null, NOW).move.text, 'Answer the question card (+1 more) · waiting 1m');
+    // Cara's card is the older one: the wait it says isn't yours, so no age.
+    assert.equal(standsLines(t({ pending_card_at: NOW - HOUR, open_cards: [card({ to: 'Cara' }), card()] }), null, NOW).move.text, 'Answer the question card');
+    // A card to you on a parked minion is still your move, as Needs you counts it.
+    const parkedCard = standsLines(t({ state: 'parked', open_cards: [card({ to: 'Josh' })] }), null, NOW).move;
+    assert.deepEqual([parkedCard.fam, parkedCard.href], ['you', '#/p/2/t/9?e=5']);
+    // A spend alert leads, linked, as on the list row.
+    const spend = standsLines(t({ status: 'running', spend_alert: { usd: 20, href: '#s', event: 4 } }), null, NOW).move;
+    assert.deepEqual([spend.text, spend.fam, spend.href], ['Answer its spend alert: it passed $20', 'broken', '#s']);
+    // Working with no plan: what it last did.
+    assert.equal(standsLines(t({ status: 'running', last_activity: 'Running tests… 2/4' }), null, NOW).now.text, 'This Minion is working · Running tests… 2/4');
   } finally {
     setAccount(null);
   }

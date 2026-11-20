@@ -588,7 +588,7 @@ let standsFor = null;
  * Where it stands (#1130): three lines on top of a minion's chat, its goal, where it is now and whose move it is, from
  * threadstate.js standsLines. None on a Taskmaster's chat (Josh, 2026-11-19: "No strip there"). Every line is one
  * line, cut short with its whole text on hover, so the strip keeps its height and the chat under it never moves when
- * the state changes. On a phone it is one line, the goal, that opens to three on a tap, and it goes while you read
+ * the state changes. On a phone it is one line, your move, that opens to three on a tap, and it goes while you read
  * back up the chat (Josh: "Pinned on desktop only"; standsAway below).
  */
 function standsStrip(t, phone) {

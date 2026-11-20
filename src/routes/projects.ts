@@ -1060,7 +1060,7 @@ export const projectRoutes: Route[] = [
       // the thread renames itself once it knows what the work is.
       const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
       // Its goal in a line (#1130), shown on top of its chat; the minion may set or sharpen it later.
-      const goal = body.goal ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
+      const goal = body.goal != null && body.goal !== '' ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
       // Insert first so concurrent creates get distinct ids, then build the working dir.
       // Every start names its model and effort (#698): the Taskmaster picks them from its table, a person's start with none gets the table's pick for its type below.
       if (caller && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('create_ticket'));

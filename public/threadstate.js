@@ -305,7 +305,7 @@ export function standsLines(t, usage, now = Date.now()) {
   const st = rowState(t, usage, now);
   const w = t.status !== 'closed' && !st.quiet && waitShows(t.wait) ? t.wait : null;
   const shipped = t.status === 'closed' && !t.release ? shippedWords(t) : null;
-  const extra = w ? waitWords(w) : st.rank === 1 && t.steps ? `${t.steps.done} of ${t.steps.total} steps done` : t.note && st.rank !== 1 && !st.label.includes(t.note) ? t.note : '';
+  const extra = w ? waitWords(w) : st.rank === 1 && t.steps ? `${t.steps.done} of ${t.steps.total} steps done` : st.rank === 1 && t.last_activity ? t.last_activity : t.note && st.rank !== 1 && !st.label.includes(t.note) ? t.note : '';
   const nowText = shipped ?? [st.label, extra].filter(Boolean).join(' · ');
   return {
     goal: { text: t.goal || t.title, fam: 'none', title: t.goal ? '' : 'No goal written yet: its title stands in' },
@@ -318,12 +318,16 @@ export function standsLines(t, usage, now = Date.now()) {
 function yourMove(t, st, now) {
   const nothing = (why) => ({ text: `Nothing: ${why}`, fam: 'idle' });
   const yours = cardsYours(t);
-  const waiting = t.pending_card_at ? ` · waiting ${span(now - t.pending_card_at)}` : '';
+  // pending_card_at is the oldest open card's: say how long only when that one is yours.
+  const waiting = t.pending_card_at && yours.length === (t.open_cards ?? []).length ? ` · waiting ${span(now - t.pending_card_at)}` : '';
+  // A running turn's spend alert leads the list row's badge (#723), so it leads here too.
+  if (t.spend_alert && t.status !== 'closed') return { text: `Answer its spend alert: it passed $${t.spend_alert.usd}`, fam: 'broken', href: t.spend_alert.href };
   if (t.approvals && st.rank === 0) {
     const card = (t.open_cards ?? []).find((c) => c.kind === 'approval');
     return { text: 'Approve or deny its approval card', fam: 'you', href: card?.href };
   }
-  if (st.rank === 0 && st.fam === 'you' && yours.length) {
+  // A card addressed to you is your move whatever else it is doing (parked, working), as Needs you counts it.
+  if (yours.length) {
     const card = yours[0];
     const more = yours.length > 1 ? ` (+${yours.length - 1} more)` : '';
     return { text: `Answer the ${cardWord(card)} card${more}${waiting}`, fam: 'you', href: card.href, title: card.label };

@@ -68,7 +68,7 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
   if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
   if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
   if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
-  if (body.goal !== undefined) fields.goal = body.goal ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
+  if (body.goal !== undefined) fields.goal = body.goal !== null && body.goal !== '' ? str(body.goal, 'Goal', GOAL_MAX).replace(/\s+/g, ' ') : null;
   if (body.build !== undefined) fields.build = buildNumber(body.build);
   if (body.replies !== undefined) fields.replies = replyList(body.replies);
   // Complete always says what's left (#547; Josh, 2026-11-11): its note comes with it, and stays while it holds.

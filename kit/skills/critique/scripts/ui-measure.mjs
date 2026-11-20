@@ -89,9 +89,11 @@ export function findChrome() {
 
 // --- the browser, over --remote-debugging-pipe -------------------------------------------------------
 
-export function launch(bin) {
+// `wrap`: a command to start the browser through, which must become it (Citadel's ui-shot: tools/heavy-unit --exec).
+export function launch(bin, wrap = []) {
   const dir = mkdtempSync(join(tmpdir(), 'ui-measure-'));
-  const chrome = spawn(bin, ['--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--disable-dev-shm-usage', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  const [cmd, ...pre] = [...wrap, bin];
+  const chrome = spawn(cmd, [...pre, '--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--disable-dev-shm-usage', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   let log = '';
   chrome.stderr.on('data', (d) => (log += d));
   const [input, output] = [chrome.stdio[3], chrome.stdio[4]];

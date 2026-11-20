@@ -266,7 +266,8 @@ async function serverFor(o: Opts): Promise<{ server: Server; note: string }> {
 function browserFor(): { send: any; close: () => Promise<void> } {
   const bin = process.env.CHROME || findChrome();
   if (!bin) throw new Error("no browser: install Playwright's chrome-headless-shell (npx playwright install chromium-headless-shell)");
-  return launch(bin);
+  // In a scope of its own in citadel-heavy.slice (#1298), so a browser that runs out of memory doesn't end the turn.
+  return launch(bin, [join(root, 'tools', 'heavy-unit'), '--exec', '--what', 'ui-shot browser']);
 }
 
 /** Open one route at one width and theme, ready to drive; `onPage` gets it even when the load then hangs. */

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Run one heavy command (tests, a build, a browser, a dev copy) in a unit of its own in citadel-heavy.slice (#1298):
+#   heavy-unit [--what <name>] [--exec] <command> [args...]
+# A turn's own unit stops as a whole when the kernel OOM-kills anything in it (OOMPolicy=stop), so a test run or a
+# browser that ran out of memory used to take its turn down with it. Here the command runs in a transient scope under
+# citadel-heavy.slice (deploy/citadel-heavy.slice: its own MemoryHigh and MemoryMax, low CPU weight), so the kernel
+# acts on it alone, and the turn sees a failed command it can retry. It keeps the caller's process,
+# terminal, fds and process group (a scope moves the process, nothing more), so it reads and writes as before and a
+# Ctrl-C or a timeout still reaches it.
+# The scope is bound to the caller's unit when that is a turn, land or Taskmaster unit (BindsTo): when the turn
+# ends, its heavy commands stop with it, as they did inside its cgroup, and a dev copy left running dies with it.
+# Wherever it runs, the command gets oom_score_adj 1000, so a wider OOM (citadel.slice's, a container's cap) picks
+# it before the claude CLI. In a container, or without systemd-run or the user bus, that is all it does: it runs the
+# command in place (Taskmaster, 2026-11-20: no host helper for container turns).
+# Exits with the command's status. Killed with SIGKILL (137), it says whether memory did it and what to do next.
+# --exec: it becomes the command (the same pid, through systemd-run's own exec), for a caller that stops it by its pid
+# (ui-shot's browser, a dev copy's server). It then says nothing when the command is killed, and checks first that
+# systemd-run can start a scope here, since it can't run the command again after an exec that failed.
+# Nested calls (the command calls heavy-unit again) run in place, already in the slice.
+# CITADEL_HEAVY_SLICE names another slice (tests), CITADEL_HEAVY_UNIT_PROPS adds `-p` properties to the scope
+# (space-separated, tests: MemoryMax=64M), CITADEL_HEAVY_UNIT=0 runs everything in place.
+set -uo pipefail
+
+say() { echo "heavy-unit: $*" >&2; }
+usage() { say "usage: heavy-unit [--what <name>] [--exec] <command> [args...]"; exit 2; }
+what= become=
+while :; do
+  case ${1:-} in
+    --what) [ $# -ge 2 ] || usage; what=$2; shift 2 ;;
+    --exec) become=1; shift ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || usage
+what=${what:-$*}
+[ ${#what} -le 100 ] || what="${what:0:97}..."
+slice=${CITADEL_HEAVY_SLICE:-citadel-heavy.slice}
+
+# First in the kernel's line when memory runs out anywhere above it. Raising one's own score needs no privilege.
+echo 1000 >/proc/self/oom_score_adj 2>/dev/null
+
+# The unit this runs in: the last part of its cgroup path ("…/citadel-turns.slice/citadel-turn-….service").
+cg=$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null)
+here() { exec "$@"; }
+case /$cg/ in */"$slice"/*) here "$@" ;; esac
+[ "${CITADEL_HEAVY_UNIT:-}" != 0 ] || here "$@"
+# A container (podman's marker, docker's) has no host systemd to ask; nor has a box without a user bus.
+{ [ -e /run/.containerenv ] || [ -e /.dockerenv ]; } && here "$@"
+command -v systemd-run >/dev/null && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ] || here "$@"
+
+# Bind to the caller's unit only when it is one of Citadel's own work units: never to the server (a restart would
+# stop every test) or to a person's login session.
+leaf=${cg##*/}
+bind=()
+case /$cg/ in
+  */citadel-turns.slice/*|*/citadel-taskmasters.slice/*|*/citadel-builds.slice/*)
+    case $leaf in *.service|*.scope) bind=(-p "BindsTo=$leaf" -p "After=$leaf") ;; esac ;;
+esac
+props=()
+for p in ${CITADEL_HEAVY_UNIT_PROPS:-}; do props+=(-p "$p"); done
+
+unit="citadel-heavy-$$-$RANDOM$RANDOM"
+# --expand-environment=no: else systemd-run turns `$$` into `$` and expands $NAME in the command (systemd 254+; an
+# older one refuses the option, and the command runs in place).
+run=(systemd-run --user --scope --quiet --expand-environment=no "--slice=$slice")
+desc="--description=heavy: ${CITADEL_HEAVY_WHO:+$CITADEL_HEAVY_WHO: }$what"
+if [ -n "$become" ]; then
+  "${run[@]}" --collect true >/dev/null 2>&1 || { say "could not start its own unit in $slice, so it runs here, in this turn's own memory"; here "$@"; }
+  exec "${run[@]}" --collect "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- "$@"
+fi
+# The marker tells "systemd-run could not start it" from "the command failed": only the command's side writes it.
+marker=$(mktemp "${TMPDIR:-/tmp}/heavy-unit.XXXXXX") && rm -f "$marker" || marker=
+# No --collect: a scope that failed stays loaded until reset-failed below, so its Result (oom-kill or signal) can be
+# read. One that succeeded is gone at once either way.
+"${run[@]}" "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- /bin/sh -c '[ -z "$0" ] || : >"$0"; exec "$@"' "$marker" "$@"
+status=$?
+started=1
+[ -z "$marker" ] || { [ -e "$marker" ] || started=; rm -f "$marker"; }
+if [ -z "$started" ]; then
+  say "could not start its own unit in $slice (systemd-run exited $status), so it runs here, in this turn's own memory"
+  here "$@"
+fi
+result=
+[ "$status" -eq 0 ] || result=$(systemctl --user show -p Result --value "$unit.scope" 2>/dev/null)
+systemctl --user reset-failed "$unit.scope" >/dev/null 2>&1
+if [ "$result" = oom-kill ]; then
+  say "killed for memory: \`$what\` ran out of room in $slice (the heavy commands' own memory limit), so only it stopped; your turn is fine. Retry it when fewer heavy jobs run, run fewer test files at once, or send it to CI with citadel-heavy <command>."
+  [ "$status" -ne 0 ] || status=137
+elif [ "$status" -eq 137 ]; then
+  say "killed (SIGKILL): \`$what\` was stopped from outside its unit, most likely for memory (the kernel, or systemd-oomd after a long stall); only it stopped, your turn is fine. Retry it, or send it to CI with citadel-heavy <command>."
+fi
+exit "$status"

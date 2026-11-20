@@ -1,0 +1,22 @@
+# The heavy commands a turn runs itself (#1298): citadel-test, citadel-heavy's local runs, ui-shot's browser and dev
+# copies, each in a scope of its own (tools/heavy-unit), under citadel.slice beside citadel-turns.slice and
+# citadel-builds.slice. A turn's unit stops as a whole when the kernel OOM-kills anything in it (OOMPolicy=stop), so a
+# test or a browser that ran out of memory used to end its turn ("the turn's process was killed"). Here only that
+# command dies, and the turn reads heavy-unit's message and retries (Cara, 2026-11-20: "I want to be able to just kick
+# off as many minions as I want ... if the individual jobs take longer or whatever because of CPU or Memory constraints
+# stopping real work, thats ok").
+# MemoryHigh throttles them first; past MemoryMax the kernel kills inside this slice, never in a turn. systemd-oomd
+# also watches it, by the drop-in every user slice gets (/usr/lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf:
+# memory pressure past 80% for 30 s), which overrides this file: a stall that long kills a heavy command, not a turn.
+# Low CPU and IO weight: turns, the server and ships get the cores first; heavy work takes what's left.
+# Starting numbers (#1298), not measured yet: single-file runs and a browser take well under 1G each, and about one to
+# four run at once; cargo and gradle builds go to CI first (#1160). Tune from #1280's storm records on the Status page.
+# Not installed yet, the slice still works, with no limit of its own.
+[Unit]
+Description=Heavy commands of Citadel's turns
+
+[Slice]
+MemoryHigh=8G
+MemoryMax=10G
+CPUWeight=20
+IOWeight=20

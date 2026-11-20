@@ -123,8 +123,10 @@ async function start(args: string[]): Promise<void> {
   const password = randomBytes(16).toString('hex');
   const pidFile = join(home, 'server.pid');
   const log = openSync(logFile, 'a');
-  const holder = spawn('sh', ['-c', '"$0" "$1" & echo $! > "$2"; wait $!', process.execPath, server, pidFile], {
-    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }) }, detached: true, stdio: ['ignore', log, log],
+  // In a scope of its own in citadel-heavy.slice (#1298), bound to this turn, so a server that runs out of memory doesn't
+  // end the turn. heavy-unit needs the user bus to start it; the server itself gets the preview's env without it.
+  const holder = spawn(join(worktree, 'tools', 'heavy-unit'), ['--exec', '--what', 'dev copy', 'sh', '-c', 'unset XDG_RUNTIME_DIR; "$0" "$1" & echo $! > "$2"; wait $!', process.execPath, server, pidFile], {
+    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR }, detached: true, stdio: ['ignore', log, log],
   });
   closeSync(log);
   holder.unref();

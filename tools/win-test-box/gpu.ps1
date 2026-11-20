@@ -51,7 +51,9 @@ function Get-Want {
   @(Get-ChildItem $wantDir -File | Where-Object {
     $p = $null
     if ($_.Name -match '^\d+$') { $p = Get-Process -Id ([int]$_.Name) -ErrorAction SilentlyContinue }
-    $live = $p -and $_.LastWriteTime -gt (Get-Date).AddHours(-2) -and "$($p.StartTime.Ticks)" -eq (Get-Content $_.FullName -Raw).Trim()
+    # A file it can't read yet counts as the job's: an error here would end Sync with the GPU left on.
+    $same = try { "$($p.StartTime.Ticks)" -eq "$(Get-Content $_.FullName -Raw)".Trim() } catch { $true }
+    $live = $p -and $_.LastWriteTime -gt (Get-Date).AddHours(-2) -and $same
     if (-not $live) { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
     $live
   })
@@ -210,11 +212,17 @@ console.log(names.join(', ') || 'none');
     if (-not $gpu) { Write-Host 'This box has no GPU partition, so there is no GPU to turn on. Nothing was run.'; exit 2 }
     New-Item -ItemType Directory -Force $wantDir | Out-Null
     $ask = "$wantDir\$PID"
-    Set-Content -Path $ask -Value (Get-Process -Id $PID).StartTime.Ticks
+    # Written whole, then moved in: Sync never sees it half-written.
+    $tmp = [IO.Path]::GetTempFileName()
+    Set-Content -Path $tmp -Value (Get-Process -Id $PID).StartTime.Ticks
+    Move-Item $tmp $ask -Force
     try {
       $until = (Get-Date).AddSeconds(90)
       $kicked = [datetime]::MinValue
-      while (-not (Test-GpuOn)) {
+      # Still on 5 s later: a Sync that looked just before this ask may switch it off once more (and on
+      # again a round later), and the job shouldn't start in between.
+      while ($true) {
+        if (Test-GpuOn) { Start-Sleep -Seconds 5; if (Test-GpuOn) { break } }
         if ((Get-Date) -gt $until) {
           Write-Host "The GPU didn't come on in 90 s: $((Get-Gpu | ForEach-Object { "$($_.FriendlyName) $($_.Status)" }) -join ', '). Nothing was run. The box's C:\citadel-box\gpu.log says why."
           exit 3

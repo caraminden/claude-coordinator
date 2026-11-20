@@ -2,7 +2,7 @@
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
 import { msgEnv, msgSettings } from './msg-settings.ts';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
@@ -113,6 +113,26 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
   if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+}
+
+/**
+ * A turn's own copy of the pinned files: hard links, since copying ~240 files froze the server's loop for up to 7 s
+ * under load (#1215). A restart's sweep of the originals only unlinks a name, so the turn's links stay good. Falls back
+ * to a byte copy when links aren't possible (another filesystem).
+ */
+export function copyPinned(src: string, dst: string): void {
+  try {
+    mkdirSync(dst, { recursive: true });
+    for (const e of readdirSync(src, { withFileTypes: true })) {
+      const from = join(src, e.name), to = join(dst, e.name);
+      if (e.isDirectory()) copyPinned(from, to);
+      else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
+      else linkSync(from, to);
+    }
+  } catch {
+    rmSync(dst, { recursive: true, force: true });
+    cpSync(src, dst, { recursive: true });
+  }
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */

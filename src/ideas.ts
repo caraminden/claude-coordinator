@@ -173,6 +173,11 @@ export class Ideas {
   private heads = new Map<string, { mtime: number; head: HandoffHead }>();
   /** Pages whose Sends were searched this server life: a page with no Later-style bar makes no rows, so "fresh" alone would search it every pass. */
   private searched = new Set<string>();
+  /** Minions seen shipped, and the last event id scanned for a ship line in each one that hasn't (#1215). */
+  private shipped = new Set<number>();
+  private shipScanned = new Map<number, number>();
+  /** The Send messages of a scheme, read once per sync pass and filtered per page (#1215). */
+  private sends: { projectId: number; rows: { data: string; number: number | null; kind: string }[] } | null = null;
   private pages = new Map<string, { mtime: number; colls: string[] }>();
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
   private running = new Map<number, Promise<void>>();
@@ -362,10 +367,23 @@ export class Ideas {
   shippedTickets(projectId: number): Set<number> {
     const linked = (this.db.prepare('SELECT DISTINCT ticket_id FROM ideas WHERE project_id = ? AND ticket_id IS NOT NULL').all(projectId) as { ticket_id: number }[]).map((r) => r.ticket_id);
     const out = new Set<number>();
-    const ship = this.db.prepare(`SELECT 1 FROM events WHERE ticket_id = ? AND kind IN ('note', 'user_message')
+    // A ship line never goes away, so a shipped minion is remembered, and an unshipped one's events are only
+    // read past the last one already scanned: this runs every pass, and a LIKE over every event froze the loop (#1215).
+    const ship = this.db.prepare(`SELECT 1 FROM events WHERE ticket_id = ? AND id > ? AND kind IN ('note', 'user_message')
       AND (data LIKE '{"text":"Shipped %' OR data LIKE '%"text":"PR #% was merged%') LIMIT 1`);
+    const last = this.db.prepare('SELECT MAX(id) AS m FROM events WHERE ticket_id = ?');
     const lesson = this.db.prepare('SELECT 1 FROM ship_lessons WHERE ticket_id = ? LIMIT 1');
-    const did = (id: number) => !!ship.get(id) || !!lesson.get(id);
+    const did = (id: number) => {
+      if (this.shipped.has(id)) return true;
+      if (lesson.get(id)) { this.shipped.add(id); return true; }
+      const m = (last.get(id) as { m: number | null }).m ?? 0;
+      const from = this.shipScanned.get(id) ?? 0;
+      if (m <= from) return false;
+      this.shipScanned.set(id, m);
+      if (!ship.get(id, from)) return false;
+      this.shipped.add(id);
+      return true;
+    };
     for (const id of linked) {
       if (did(id)) { out.add(id); continue; }
       const t = this.db.prepare('SELECT build FROM tickets WHERE id = ?').get(id) as { build: number | null } | undefined;
@@ -400,6 +418,7 @@ export class Ideas {
 
   /** The whole scan for one scheme: its pages, its handoffs, its minions' starts, then every row's status. */
   sync(projectId: number, sharedDir: string): void {
+    this.sends = null;
     const files = (this.db.prepare("SELECT DISTINCT file FROM artifact_data WHERE project_id = ? AND key LIKE 'db/%'").all(projectId) as { file: string }[]).map((r) => r.file);
     for (const file of files) {
       const src = this.db.prepare(`SELECT t.number FROM artifacts a JOIN tickets t ON t.id = a.ticket_id WHERE a.project_id = ? AND a.path = ? AND t.kind = 'ticket' ORDER BY a.created_at LIMIT 1`).get(projectId, file) as { number: number | null } | undefined;
@@ -417,13 +436,18 @@ export class Ideas {
     for (const rel of handoffFiles(sharedDir)) this.fromHandoff(projectId, sharedDir, rel);
     this.linkStarts(projectId, sharedDir);
     this.restatus(projectId);
+    this.sends = null;
   }
 
   /** The Send texts posted from a page, newest first, from any chat in the scheme, and the minion they first went to. */
   sendsOf(projectId: number, file: string): { text: string; source: number | null } {
     // The Send's comment carries the page's path; the (ticket_id, kind) index keeps this to the scheme's user messages.
-    const rows = this.db.prepare(`SELECT e.data, t.number, t.kind FROM tickets t JOIN events e ON e.ticket_id = t.id AND e.kind = 'user_message'
-      WHERE t.project_id = ? AND e.data LIKE '%Picks on %' AND e.data LIKE ? ORDER BY e.id`).all(projectId, `%${file.replace(/[%_]/g, '_')}%`) as { data: string; number: number | null; kind: string }[];
+    // One read of every Send in the scheme serves all the pages of a pass: a scan per page froze the loop for 30 s (#1215).
+    if (this.sends?.projectId !== projectId) {
+      this.sends = { projectId, rows: this.db.prepare(`SELECT e.data, t.number, t.kind FROM tickets t JOIN events e ON e.ticket_id = t.id AND e.kind = 'user_message'
+        WHERE t.project_id = ? AND e.data LIKE '%Picks on %' ORDER BY e.id`).all(projectId) as { data: string; number: number | null; kind: string }[] };
+    }
+    const rows = this.sends.rows.filter((r) => r.data.includes(file));
     const texts: string[] = [];
     for (const r of rows) {
       try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }

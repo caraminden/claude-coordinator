@@ -226,7 +226,7 @@ export function cardChip(cards) {
 }
 
 /** A card's kind as its chip says it: the go card reads "Ship It" (Cara, 2026-11-19: "The Chip and card should say "Ship It""). */
-const CARD_WORDS = { ship: 'Ship It' };
+const CARD_WORDS = { ship: 'Ship It', merge: 'Merge' };
 export const cardWord = (c) => CARD_WORDS[c.what] ?? c.what ?? c.kind;
 
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */

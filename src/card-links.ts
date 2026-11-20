@@ -50,6 +50,8 @@ export type CardWhat = 'question' | 'plan' | 'ship' | 'merge' | 'approval' | 'tr
 export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
   // A PR into a major build's branch merges into the build; every other go ships.
   if (kind === 'approval' && /^build\//.test(data?.merge?.pr?.base ?? '')) return 'merge';
+  // A feeder's own go card (asked with kind merge, stamped with its build) merges into the build too.
+  if (kind === 'question' && data?.kind === 'merge' && data?.into) return 'merge';
   if (data?.kind === 'merge' || (kind === 'approval' && data?.merge)) return 'ship';
   if (kind === 'approval' && data?.tripwire) return 'tripwire';
   if (kind === 'question' && data?.secret) return 'secret';

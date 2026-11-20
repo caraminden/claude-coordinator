@@ -219,7 +219,7 @@ const ASK_QUESTION = {
           required: ['question', 'options'],
         },
       },
-      kind: { type: 'string', enum: ['merge', 'ship', 'land'], description: '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "Ship It". Leave out otherwise.' },
+      kind: { type: 'string', enum: ['merge', 'ship', 'land'], description: '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "Ship It", or "Merge" on a feeder\'s card (a minion in a build, which merges into `build/<n>`; header and option "Merge"). Leave out otherwise.' },
       to: DIRECT_TO,
       doc: {
         type: 'string', maxLength: 1000,

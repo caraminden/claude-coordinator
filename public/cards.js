@@ -536,7 +536,7 @@ export function questionCard(ticketId, card, opts = {}) {
     const gallery = q.options.some((o) => o.image);
     return h('div', { class: 'q', 'data-q': i },
       // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
-      h('div', { class: 'qtitle' }, card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? 'Ship It' : q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
+      h('div', { class: 'qtitle' }, card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? (card.into ? 'Merge' : 'Ship It') : q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
         q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
       card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
       gallery

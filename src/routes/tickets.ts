@@ -21,8 +21,9 @@ import { runnerLabel } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { offSkills } from '../skills.ts';
-import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
+import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { lineDiff } from '../instructions.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
@@ -612,8 +613,11 @@ export const ticketRoutes: Route[] = [
       // A card asking for the go to ship says so, for the minions list's chip (#575). "ship" is the word people read
       // (Cara, 2026-11-19, picked "Ship" on #1020's card); it is stored as the older kind "merge", and "land" still counts.
       const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? 'merge' as const : null;
+      // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
+      const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
+      const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
-      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {

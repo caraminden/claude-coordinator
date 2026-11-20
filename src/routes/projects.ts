@@ -1398,6 +1398,26 @@ export const projectRoutes: Route[] = [
   },
   // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
   // Taskmasters take and free them (every member decides alike, so any of them frees one whoever holds it).
+  // Three lines after every ship (#1119, src/ship-lessons.ts): the scheme's queue, read and marked taken by its weekly
+  // Ship lessons run or a Taskmaster now, and by the memory curator (#1111) once it reads the queue.
+  {
+    method: 'GET', path: '/api/projects/:project/ship-lessons', who: ['person', 'taskmaster', 'minion'],
+    handler: ({ res, url, app, project }) => {
+      const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 60, 1), 365);
+      const since = Date.now() - days * 86_400_000;
+      const week = app.store.lessons.stats(project.id, Date.now() - 7 * 86_400_000);
+      return json(res, 200, { days, lessons: app.store.lessons.list(project.id, { since, taken: url.searchParams.get('taken') === '1' }), week, window: app.store.lessons.stats(project.id, since) });
+    },
+  },
+  {
+    method: 'POST', path: '/api/projects/:project/ship-lessons/take', who: ['person', 'taskmaster', 'minion'],
+    async handler({ req, res, app, project }) {
+      const body = await readJson(req);
+      if (!Array.isArray(body.ids) || !body.ids.length || body.ids.length > 200 || !body.ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0)) throw new HttpError(400, 'ids is a list of 1 to 200 lesson ids');
+      const note = str(body.note, 'Note', 300);
+      return json(res, 200, { taken: app.store.lessons.take(project.id, body.ids, note) });
+    },
+  },
   {
     method: 'GET', path: '/api/projects/:project/claims', who: ['person', 'taskmaster', 'minion'],
     handler: ({ res, app, project }) => json(res, 200, { claims: app.store.claims.list(project.id).map((c) => claimView(app, c)) }),

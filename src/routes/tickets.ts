@@ -29,6 +29,7 @@ import { lineDiff } from '../instructions.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
+import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
@@ -1266,6 +1267,18 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // log_learned (#1119): a pull-request ship's three lines; hand_off_land takes them as learned instead.
+    method: 'POST', path: '/api/tickets/:ticket/learned', who: ['minion'], refuse: 'Only the minion itself logs what it learned',
+    async handler({ req, res, app, ticket }) {
+      const body = (await readJson(req)) ?? {};
+      const lines = parseLearned(body.learned);
+      if (lines === null) throw new HttpError(400, 'learned is text: up to three lines, or "nothing"');
+      const files = ticket.cwd ? await touchedFiles(ticket.cwd) : [];
+      const row = queueLesson(app.store, app.dataDir, ticket, lines, files, 'tool');
+      return json(res, 200, { id: row.id, lines: row.lines, files: row.files.length });
+    },
+  },
+  {
     // hand_off_land (#706): the server runs tools/land.sh and reports it (LandHandoffs in src/land.ts), so the minion ends its turn now.
     method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
@@ -1328,6 +1341,12 @@ export const ticketRoutes: Route[] = [
       // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
       const clash = await landConflict(ticket.cwd, env, args);
       if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
+      // Its three lines (#1119) ride with the hand-off and queue on a clean land; they never refuse it.
+      const learned = parseLearned(body.learned);
+      if (learned !== null) {
+        h.learned = learned;
+        h.touched = await touchedFiles(ticket.cwd, args[0] === '--into' ? [args[1], `origin/${args[1]}`, 'main'] : undefined);
+      }
       if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
       app.runner.broadcastTicket(ticket.id);

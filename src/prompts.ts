@@ -357,9 +357,9 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
  */
 export function shippingLine(p: Pick<Project, 'ship_path' | 'go_from' | 'try_first'>, deploys: boolean): string {
   const path = {
-    citadel: 'once tested and self-reviewed, hand it off with `hand_off_land` (the server runs tools/land.sh)',
-    'pr-auto': 'once tested and self-reviewed, push your branch, open a pull request and turn on auto-merge (`gh pr merge --auto --squash`), so it ships once CI is green',
-    'pr-person': 'once tested and self-reviewed, push your branch and open a pull request; merging it waits for a person\'s Approve',
+    citadel: 'once tested and self-reviewed, hand it off with `hand_off_land` (the server runs tools/land.sh), with up to 3 lines in `learned`: what the brief missed, what fought you ("nothing" is fine)',
+    'pr-auto': 'once tested and self-reviewed, log up to 3 lines with `log_learned`: what the brief missed, what fought you ("nothing" is fine), push your branch, open a pull request and turn on auto-merge (`gh pr merge --auto --squash`), so it ships once CI is green',
+    'pr-person': 'once tested and self-reviewed, log up to 3 lines with `log_learned`: what the brief missed, what fought you ("nothing" is fine), push your branch and open a pull request; merging it waits for a person\'s Approve',
   }[p.ship_path ?? 'citadel'] ?? p.ship_path;
   const go = (p.go_from ?? 'high') === 'never'
     ? 'No change waits for a person\'s go, whatever its risk label.'

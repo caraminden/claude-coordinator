@@ -8,6 +8,7 @@ import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
+import { ShipLessons } from './ship-lessons.ts';
 import { Memory } from './memory.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
@@ -1234,6 +1235,22 @@ CREATE TABLE IF NOT EXISTS flake_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
+-- Three lines after every ship (src/ship-lessons.ts, #1119): what a minion had to find out that its brief or the docs
+-- didn't say, queued per scheme for the weekly Ship lessons pass. lines '' is a ship that said nothing. No foreign keys:
+-- the lines outlive the minion.
+CREATE TABLE IF NOT EXISTS ship_lessons (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  ticket_id INTEGER,
+  number INTEGER,
+  lines TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'land',
+  at INTEGER NOT NULL,
+  taken_at INTEGER,
+  taken_note TEXT
+);
+CREATE INDEX IF NOT EXISTS ship_lessons_scheme ON ship_lessons(project_id, at);
 -- Who touched a minion (#919): requested, assigned, wrote in its chat or answered its card. It only grows;
 -- left_at is set when the person leaves it, and a later touch rejoins. Updates reach each touched person's Taskmaster.
 CREATE TABLE IF NOT EXISTS ticket_touches (
@@ -1478,6 +1495,7 @@ export const SCHEMA_HISTORY = [
   [84, 'events_errors index (#1178)'],
   [85, 'ticket_picks (#1061)'],
   [86, 'memory_proposals (#1111)'],
+  [87, 'ship_lessons (#1119)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1522,6 +1540,8 @@ export class Store {
   reviews: ReviewSet;
   /** Single-holder duties such as the pipeline lane (src/claims.ts, #921). */
   claims: Claims;
+  /** Three lines after every ship, per scheme (src/ship-lessons.ts, #1119). */
+  lessons: ShipLessons;
   /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
   memory: Memory;
   /** The memory curator's proposals, waiting on a member (src/memory-curator.ts, #1111). */
@@ -1549,6 +1569,7 @@ export class Store {
       this.schedules = new Schedules(this.db);
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
+    this.lessons = new ShipLessons(this.db);
       this.memory = new Memory(this);
       this.memoryProposals = new MemoryProposals(this.db);
       return;
@@ -1576,6 +1597,7 @@ export class Store {
     this.schedules = new Schedules(this.db);
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
+    this.lessons = new ShipLessons(this.db);
     this.memory = new Memory(this);
     this.memoryProposals = new MemoryProposals(this.db);
     this.serverLoginOwnerOnly();

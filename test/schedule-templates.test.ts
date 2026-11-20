@@ -11,7 +11,7 @@ const vars = { scheme: 'Genesis Tree', citadelShared: '/data/projects/2/shared/p
 
 test('every kit template parses, says when it applies, and renders with nothing left to fill in', () => {
   const all = loadTemplates();
-  assert.deepEqual([...all.keys()].sort(), ['app-turns', 'code-health', 'memory-curator', 'monthly-retro', 'test-audit', 'upstream-check']);
+  assert.deepEqual([...all.keys()].sort(), ['app-turns', 'code-health', 'memory-curator', 'monthly-retro', 'ship-lessons', 'test-audit', 'upstream-check']);
   for (const [slug, t] of all) {
     assert.ok(t.name && t.type && t.model && t.effort, slug);
     assert.ok(t.applies.length > 20, `${slug} says when a scheme gets it`);

@@ -41,6 +41,7 @@ import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } fro
 import { ScheduledRuns } from './src/schedules.ts';
 import { curatorTarget } from './src/memory-curator.ts';
 import { addAppTurnsChecks, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
+import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { keepServing, safely } from './src/safely.ts';
@@ -1176,6 +1177,10 @@ const landHandoffs = new LandHandoffs({
   landed: (id, commit) => {
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
+  },
+  learned: (id, h) => {
+    const t = store.getTicket(id);
+    if (t && h.learned !== undefined) queueLesson(store, DATA_DIR, t, h.learned, h.touched ?? [], 'land');
   },
   runnersBack: (id, reason) => {
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);

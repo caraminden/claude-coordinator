@@ -181,7 +181,11 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.equal(r.status, 429);
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'still fine' })).status, 202);
   // Each ask posts its message and then a note: count once the last ask's note is written too.
-  await until("the last ask's note", () => store.listEvents(tm()!.id).at(-2)?.data.includes('still fine'));
+  await until("the note after Rachel's last ask", () => {
+    const all = store.listEvents(tm()!.id);
+    const at = all.findIndex((e) => e.kind === 'user_message' && e.data.includes('still fine'));
+    return at >= 0 && at < all.length - 1;
+  });
   assert.equal(said().filter((e) => e.text.includes('one too many')).length, 0);
 
   // A data ask (#318) only files: its files and a sidecar with its words, no message and no turn, even

@@ -218,8 +218,8 @@ const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.
 // CITADEL_DB_WRITE_DELAY_MS is for tests (#1239): every write waits that long on the worker, as on a starved box, so a test
-// that reads the database itself right after a response, without waiting for the row, goes red every run.
-writeOffThread(store, { delayMs: Number(process.env.CITADEL_DB_WRITE_DELAY_MS) || 0 });
+// that reads the database itself right after a response, without waiting for the row, goes red every run. At most 1 s.
+writeOffThread(store, { delayMs: Math.min(Number(process.env.CITADEL_DB_WRITE_DELAY_MS) || 0, 1000) });
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
 checkpointOffThread(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.

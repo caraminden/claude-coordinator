@@ -11,9 +11,10 @@ on:
         description: 'The test file to run, as test/<name>.test.ts'
         required: true
 
-# Its own group: it waits for nothing and holds up no land. The desktop is shared, so it runs one proof at a time.
+# Its own group per file: it waits for nothing and holds up no land, and a second dispatch of the same file queues behind the first
+# (a different file's proof never cancels it). Each batch runs the file under CPU load (tools/flake-proof.sh).
 concurrency:
-  group: citadel-flake-proof
+  group: citadel-flake-proof-${{ inputs.file }}
   cancel-in-progress: false
 
 permissions:
@@ -62,16 +63,16 @@ jobs:
           case "$FILE" in test/*.test.ts) [ -f "$FILE" ] || { echo "no such file: $FILE"; exit 1; } ;; *) echo "not a test file: $FILE"; exit 1 ;; esac
       - name: 10 clean runs (1 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: for i in 1 2 3 4 5 6 7 8 9 10; do tools/citadel-node --test --test-force-exit "$FILE" || exit 1; done
+        run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (2 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: for i in 1 2 3 4 5 6 7 8 9 10; do tools/citadel-node --test --test-force-exit "$FILE" || exit 1; done
+        run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (3 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: for i in 1 2 3 4 5 6 7 8 9 10; do tools/citadel-node --test --test-force-exit "$FILE" || exit 1; done
+        run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (4 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: for i in 1 2 3 4 5 6 7 8 9 10; do tools/citadel-node --test --test-force-exit "$FILE" || exit 1; done
+        run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (5 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: for i in 1 2 3 4 5 6 7 8 9 10; do tools/citadel-node --test --test-force-exit "$FILE" || exit 1; done
+        run: tools/flake-proof.sh "$FILE" 10

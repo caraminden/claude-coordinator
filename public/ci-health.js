@@ -78,6 +78,7 @@ function flakeBlock(s, flakes, refresh) {
   const fixLine = (fx) => {
     const owner = fx.owner ? `${fx.owner}'s ` : '';
     const age = ago(fx.startedAt);
+    if (fx.state === 'held' && !fx.cleanRuns) return `fix held before the desktop proof existed, ${ago(fx.heldAt)}`;
     if (fx.state === 'held') return `fix held: ${fx.cleanRuns}/${fx.need} clean runs on the desktop, ${ago(fx.heldAt)}`;
     return `${fx.reopened ? 'reopened, ' : ''}${owner}fix started ${age}: ${fx.cleanRuns}/${fx.need} clean runs on the desktop`;
   };

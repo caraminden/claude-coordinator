@@ -13,6 +13,8 @@ import type { FlakeFix, Project, Store } from './db.ts';
 import { FLAKE_REPEAT, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
+/** Minions one scheme's pass starts at most. */
+const MAX_STARTS_PER_PASS = 2;
 const SAME_SIGHTING_MS = 30 * 60_000;
 
 export interface FlakeFixDeps {
@@ -59,11 +61,16 @@ export class FlakeFixes {
     const { store } = this.d;
     let started = 0;
     for (const file of store.flakeFiles(project.id, now - FLAKE_REPEAT_MS)) {
+      if (started >= MAX_STARTS_PER_PASS) break; // the first pass after a deploy reads 14 days of log: the rest start on the next passes
       const fix = store.flakeFix(project.id, file);
       const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS);
       let id: number | null = null;
       if (!fix) {
         if (sights.length < FLAKE_REPEAT) continue;
+        // A minion a person already started from the tab's button owns it: record the fix on that one, start no second.
+        const title = flakeBrief(file, 0, []).title;
+        const mine = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.title === title);
+        if (mine) { store.addFlakeFix(project.id, file, mine.id, now); continue; }
         id = store.addFlakeFix(project.id, file, null, now);
       } else if (fix.state === 'held') {
         if (!sights.some((t) => t > (fix.held_at ?? 0))) continue;
@@ -97,7 +104,7 @@ export class FlakeFixes {
       const branch = store.getTicket(fix.ticket_id)?.branch;
       if (!branch) continue;
       const runs = await this.d.runs(project, branch);
-      const run = (runs ?? []).filter((r) => (r.display_title ?? '').includes(fix.file) && Date.parse(r.created_at) >= fix.started_at)
+      const run = (runs ?? []).filter((r) => r.display_title === `flake-proof ${fix.file}` && Date.parse(r.created_at) >= fix.started_at)
         .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
       if (!run) continue;
       const jobs = await this.d.jobs(project, run);
@@ -118,7 +125,7 @@ export class FlakeFixes {
     store.setSetting(key, true);
     const file = 'test/machine-agent-jobs.test.ts';
     if (!t || !t.closed_at || store.flakeFix(project.id, file)) return;
-    store.addFlakeFix(project.id, file, t.id, t.created_at, { state: 'held', clean_runs: 50, held_at: t.closed_at });
+    store.addFlakeFix(project.id, file, t.id, t.created_at, { state: 'held', clean_runs: 0, held_at: t.closed_at });
   }
 
   async tick(projects: Project[]): Promise<void> {

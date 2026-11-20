@@ -126,3 +126,21 @@ test('a third sighting starts exactly one minion; a held fix reopens on the next
   assert.deepEqual([again.state, again.reopened, again.clean_runs], ['open', 1, 0], 'a re-sighting reopens it');
   assert.equal(started.length, 2, 'and starts a new minion at once');
 });
+
+test('a minion already on the file (the tab\'s button) is the fix: no second one; and one pass starts at most two', async () => {
+  const dir = mkdtempSync(join(root, 'cap-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('Q', null);
+  const now = Date.now();
+  for (const f of ['a', 'b', 'c', 'd']) for (let i = 0; i < 3; i++) st.addFlakeEvents(project.id, null, null, now - (i + 1) * 3_600_000, [{ file: `test/${f}.test.ts`, source: 'in CI', detail: '' }]);
+  const manual = st.createTicket({ project_id: project.id, title: 'Flaky test: test/a.test.ts', permission_mode: 'x', created_by: 'Cara' });
+  const started: string[] = [];
+  const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [],
+    start: async (_p, b) => { started.push(b.title); return { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }; } });
+  await fx.tick([project]);
+  assert.equal(st.flakeFix(project.id, 'test/a.test.ts')!.ticket_id, manual.id);
+  assert.equal(started.length, 2, 'a is covered by the manual minion; b and c start, d waits');
+  await fx.tick([project]);
+  assert.equal(started.length, 3);
+  assert.equal(new Set(started).size, 3);
+});

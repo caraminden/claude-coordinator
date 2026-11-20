@@ -2,7 +2,8 @@
 
 Every hook and in-tool check Citadel runs, for the first step of `SKILL.md`: before writing a rule, find the
 shape below that could hold it, and extend that file rather than starting a new hook. `test/kit-hooks.test.ts`
-fails when a hook file is missing from this list.
+fails when a hook file is missing from this list. The `src/`, `tools/` and `kit/` paths are in Citadel's repo: from another
+scheme, ask Citadel's Taskmaster (message_taskmaster) to extend one; your repo's own hooks are the last table.
 
 **Modes**, cheapest for the agent first: *counts* (a `would refuse` line in the retro log, which the weekly process
 digest reads; nothing reaches the agent), *reminds* (adds a line to the agent's context, never blocks), *sends back

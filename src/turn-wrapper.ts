@@ -10,9 +10,11 @@
 //   stderr.log    out: claude's stderr
 //   exit.json     out: { code, signal, error? } once claude has exited
 //   beat          out: touched every 5 s while this runs
+//   mcp-stdio.json in: the turn's own-helpers tool config, used instead of mcp.json when spec.pool won't start (#1259)
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { keepTurn, type PoolSpec } from './pool-client.ts';
 
 const dir = process.argv[2];
 const file = (name: string) => join(dir, name);
@@ -32,6 +34,27 @@ function done(exit: { code: number | null; signal: string | null; error?: string
 function failed(err: Error) {
   appendFileSync(file('stderr.log'), `Could not start ${spec.command}: ${err.message}\n`);
   done({ code: null, signal: null, error: err.message });
+}
+
+// The shared tool server (#1259, src/mcp-pool.ts): the turn's tools come from its place's pool, which this keeps up
+// and keeps the turn registered with. If it won't start, the turn runs its own helpers, as before the pool.
+if (spec.pool) {
+  const pool: PoolSpec = spec.pool;
+  const token: string = spec.env.COORDINATOR_TOKEN ?? '';
+  const reg = { env: spec.env, cwd: spec.cwd };
+  try {
+    const p = await keepTurn(pool, token, reg);
+    spec.env = { ...spec.env, CITADEL_POOL_PORT: String(p.port) };
+    let busy = false;
+    setInterval(() => {
+      if (busy) return;
+      busy = true;
+      keepTurn(pool, token, reg).catch(() => {}).finally(() => (busy = false));
+    }, 2_000).unref();
+  } catch (err: any) {
+    appendFileSync(file('stderr.log'), `The shared tool server didn't start (${err.message}); this turn runs its own helpers.\n`);
+    spec.args = spec.args.map((a: string) => (a === file('mcp.json') ? file('mcp-stdio.json') : a));
+  }
 }
 
 // The env is exactly the runner's allowlist (turnEnv), not this unit's: the user manager adds its own.

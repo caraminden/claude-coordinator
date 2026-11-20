@@ -66,8 +66,10 @@ async function fakeApp() {
   return { base: `http://127.0.0.1:${(srv.address() as AddressInfo).port}`, calls, machine };
 }
 
-function spec(dir: string, version = 'v1', script = join(REPO, 'src', 'mcp-pool.ts')): PoolSpec {
-  return { dir: join(dir, version), script, node: process.execPath, version, env: { PATH: process.env.PATH ?? '', CITADEL_POOL_IDLE_MS: '1500', CITADEL_POOL_TTL_MS: '1000' } };
+/** Short TTL and idle times so the version test sees a pool exit; `long` keeps turns registered through slow steps. */
+function spec(dir: string, version = 'v1', script = join(REPO, 'src', 'mcp-pool.ts'), long = false): PoolSpec {
+  const times = long ? { CITADEL_POOL_IDLE_MS: '60000', CITADEL_POOL_TTL_MS: '60000' } : { CITADEL_POOL_IDLE_MS: '1500', CITADEL_POOL_TTL_MS: '1000' };
+  return { dir: join(dir, version), script, node: process.execPath, version, env: { PATH: process.env.PATH ?? '', ...times, CITADEL_POOL_WAIT_MS: '2000' } };
 }
 
 async function started(s: PoolSpec): Promise<PoolInfo> {
@@ -98,7 +100,7 @@ const toolCall = (id: number, name: string, args: object = {}) => ({ id, method:
 
 test('each turn acts only as itself: its token picks its own identity, and an unregistered token or a key-less registration is refused', async () => {
   const app = await fakeApp();
-  const pool = await started(spec(root()));
+  const pool = await started(spec(root(), 'v1', undefined, true));
   await registerTurn(pool, 'token-a', turn(app.base, 11, 1, { COORDINATOR_DEPLOYS: '1' }));
   await registerTurn(pool, 'token-b', turn(app.base, 22, 2));
 
@@ -126,7 +128,7 @@ test('each turn acts only as itself: its token picks its own identity, and an un
 
 test('a pool killed mid-turn is back within seconds on the same port, and the turn\'s next tool call works', async () => {
   const app = await fakeApp();
-  const s = spec(root());
+  const s = spec(root(), 'v1', undefined, true);
   const t = turn(app.base, 11, 1);
   const first = await keepTurn(s, 'token-a', t);
   pools.push(first.pid);
@@ -147,7 +149,7 @@ test('a pool killed mid-turn is back within seconds on the same port, and the tu
 
 test('a call that arrives before the restarted pool has its turn back waits for the wrapper\'s registration', async () => {
   const app = await fakeApp();
-  const s = spec(root());
+  const s = spec(root(), 'v1', undefined, true);
   const pool = await started(s);
   const pending = rpc(pool.port, 'token-late', '/mcp', toolCall(1, 'set_thread_status', { note: 'late' }));
   await new Promise((r) => setTimeout(r, 300));
@@ -196,7 +198,7 @@ test('two pinned versions run side by side, each serving only its own turns, and
 test('machine tools are lazy: a remembered tool list answers the turn\'s start, and the machine is only opened on its first call', async () => {
   const app = await fakeApp();
   const r = root();
-  const pool = await started(spec(r));
+  const pool = await started(spec(r, 'v1', undefined, true));
   await registerTurn(pool, 'token-a', turn(app.base, 11, 1));
   const path = '/machine/5/mcp?name=box';
   const cache = join(r, 'machine-tools', '5-mcp.json');

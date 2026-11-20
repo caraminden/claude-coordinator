@@ -13,6 +13,7 @@ import { parseMarks } from './ui/marks.js';
 import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { renderFiles } from './files.js';
+import { ARTIFACT_ALLOW, ARTIFACT_SANDBOX } from './frames.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -612,7 +613,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
   } else if (kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
-    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
+    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: ARTIFACT_SANDBOX, allow: ARTIFACT_ALLOW, allowfullscreen: true, title: name });
     if (bridge) attachBridge(frame, { ...bridge, name, api, draw: drawForPage });
     body.append(frame);
   } else if (kind === 'pdf') {

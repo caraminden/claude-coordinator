@@ -15,7 +15,9 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import { homedir } from 'node:os';
 import type { IncomingMessage } from 'node:http';
 import { connect } from 'node:net';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { appFolder, MANIFEST } from './app-services.ts';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
@@ -164,10 +166,29 @@ export class Contraptions {
     return this.appsDomain ? `https://${name}.${this.appsDomain}/` : null;
   }
 
-  /** The contraptions enabled for a person in their rail order, each with whether it is up: the rail's list (GET /api/contraptions/mine). */
+  /** The home folder apps live under (~/apps/<name>, AppServices' home), set at boot. */
+  appsHome = homedir();
+
+  /**
+   * The contraptions enabled for a person in their rail order, each with whether it is up: the rail's list (GET /api/contraptions/mine).
+   * `clipboard: true` when its live citadel-app.json says `"clipboard": "write"`: only its frame may use navigator.clipboard (#1086).
+   */
   mine(uid: number) {
     return Promise.all(inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps'))
-      .map(async (c) => ({ name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}) })));
+      .map(async (c) => ({
+        name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}),
+        ...(await this.clipboard(c) ? { clipboard: true } : {}),
+      })));
+  }
+
+  /** Whether an app's live manifest asks for clipboard writes in its frame; an app with no readable manifest doesn't. */
+  async clipboard(row: Pick<ContraptionRow, 'name' | 'folder'>): Promise<boolean> {
+    const text = await readFile(join(appFolder(row, this.appsHome), MANIFEST), 'utf8').catch(() => '');
+    try {
+      return JSON.parse(text)?.clipboard === 'write';
+    } catch {
+      return false;
+    }
   }
 
   /**

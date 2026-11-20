@@ -42,6 +42,12 @@ export interface Manifest {
   disk_warn_gb: number | null;
   /** Paths in its repo whose change means the data moved on (#1016): a roll back past one is refused. */
   migrations: string[];
+  /**
+   * 'write' lets its frame in Citadel use navigator.clipboard.writeText (#1086); null: it can't, and a Copy button copies
+   * the old way inside its click (Citadel UI's copyText falls back to that by itself). For an app whose own Copy buttons call
+   * navigator.clipboard; nothing grants clipboard reads.
+   */
+  clipboard: 'write' | null;
 }
 
 /** An app's DATA_DIR size, from the last background measure (#847). */
@@ -100,7 +106,8 @@ export function parseManifest(text: string): Manifest {
   if (m.disk_warn_gb !== undefined && !(typeof m.disk_warn_gb === 'number' && m.disk_warn_gb > 0 && m.disk_warn_gb <= 1e6)) throw new Error('disk_warn_gb must be a number of GB above 0');
   if (m.migrations !== undefined && (!Array.isArray(m.migrations) || m.migrations.length > 20)) throw new Error('migrations must be a list of at most 20 paths in the repo, like ["src/migrations", "src/schema.ts"]');
   const migrations = (m.migrations ?? []).map((v: unknown) => relDir(v, 'each of migrations'));
-  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20, disk_warn_gb: m.disk_warn_gb ?? null, migrations };
+  if (m.clipboard !== undefined && m.clipboard !== null && m.clipboard !== 'write') throw new Error('clipboard must be "write" (its Copy buttons call navigator.clipboard), or left out');
+  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20, disk_warn_gb: m.disk_warn_gb ?? null, migrations, clipboard: m.clipboard ?? null };
 }
 
 /** The first line of every unit file Citadel writes; it touches no other. */

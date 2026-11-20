@@ -393,6 +393,10 @@ const atCitadel = () => root.origin === location.origin;
 
 /** Each app's own address, https://<name>.<domain>/, from `mine` when Citadel serves apps on their own hosts (APPS_DOMAIN, #827). */
 const shortUrls = new Map();
+// The apps whose citadel-app.json asks for clipboard writes (#1086): only their frames get clipboard-write (frames.js).
+const clipboardApps = new Set();
+/** Whether contraption `name`'s frame may use navigator.clipboard.writeText. */
+export const appClipboard = (name) => clipboardApps.has(name);
 
 /**
  * The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts).
@@ -412,6 +416,11 @@ const fetchItems = async () => {
     }
     shortUrls.clear();
     for (const c of mine ?? []) if (c?.url) shortUrls.set(c.name, c.url);
+    if (!inContraption) {
+      clipboardApps.clear();
+      for (const c of mine ?? []) if (c?.clipboard) clipboardApps.add(c.name);
+      dispatchEvent(new Event('citadel-apps')); // a frame made before this answer gets its permissions put right (frames.js)
+    }
     if (!inContraption) tellFrames(); // a frame that loaded before this answer has no app hosts yet
     // A drop still saving: the rail keeps it, though this answer may predate it.
     return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), atCitadel() ? root.pathname : root.href, !inContraption);

@@ -1343,6 +1343,7 @@ const BACKUP_SCHEME = 2;
 
 // Contraptions' own services under /apps/<name>/, on their own hosts with APPS_DOMAIN (src/apps.ts).
 contraptions.appsDomain = APPS_DOMAIN;
+contraptions.appsHome = services.opts.home;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN, { chunked, home: services.opts.home });
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);

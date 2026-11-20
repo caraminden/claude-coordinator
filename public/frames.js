@@ -7,7 +7,7 @@
 import { frameKey } from './appswitch.js';
 import { h, icon, tintTitleBar } from './base.js';
 import { canBack, canForward, goBack, goForward, replaceHash } from './navstack.js';
-import { FRAME } from './rail.js';
+import { appClipboard, FRAME } from './rail.js';
 
 const frames = new Map();
 let box = null;
@@ -127,12 +127,42 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * No clipboard for a framed page (#1086), said outright: a frame on Citadel's own origin (no APPS_DOMAIN, a dev copy) would
+ * otherwise get it by default, as the policy's default is the page's own origin.
+ */
+const NO_CLIPBOARD = ["clipboard-read 'none'", "clipboard-write 'none'"];
+
+/**
+ * What a sandboxed page a minion wrote (an artifact, artifacts.js) gets: fullscreen, and no clipboard, so a Copy button in it
+ * copies the old way inside its click (the kit's mockkit.js does) and nothing copies on its own.
+ */
+export const ARTIFACT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads';
+export const ARTIFACT_ALLOW = ['fullscreen *', ...NO_CLIPBOARD].join('; ');
+
+/**
  * What a framed contraption may ask the browser for (#892). With APPS_DOMAIN, /apps/<name>/ on Citadel's host redirects to
  * https://<name>.<domain>/ (#709), so the frame ends on another origin than its src attribute; Chrome gives a bare
  * `allow="microphone"` to the src's origin only, and getUserMedia in the page was refused. `*` delegates to whatever origin
  * the frame is on: it only ever reaches Citadel's own contraption hosts, and the browser still asks the person.
+ * No clipboard (#1086): Chrome lets a focused page's navigator.clipboard.writeText run with no click, and a hidden frame
+ * stays loaded. Without it a Copy button still copies the old way inside its click (Citadel UI's copyText falls back).
  */
-export const FRAME_ALLOW = ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen'].map((f) => `${f} *`).join('; ');
+export const FRAME_ALLOW = [...['microphone', 'camera', 'fullscreen'].map((f) => `${f} *`), ...NO_CLIPBOARD].join('; ');
+
+/** A contraption frame's `allow`: clipboard writes only for an app whose citadel-app.json asks for them (rail.js appClipboard). */
+export const frameAllow = (clipboard) => (clipboard ? FRAME_ALLOW.replace("clipboard-write 'none'", 'clipboard-write *') : FRAME_ALLOW);
+
+// The rail's first list arrived after a frame was made (a link straight into an app): one that now gets other permissions
+// reloads with them, since a loaded page keeps the ones it started with. Only the first: a later change (an app's deploy
+// asking for the clipboard) reaches its frame at the next reload rather than reloading a page someone is using.
+globalThis.addEventListener?.('citadel-apps', () => {
+  for (const [name, frame] of frames) {
+    const allow = frameAllow(appClipboard(name));
+    if (frame.allow === allow) continue;
+    frame.allow = allow;
+    frame.src = frame.src;
+  }
+}, { once: true });
 
 /** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
 export function showFrame(name, src) {
@@ -154,7 +184,7 @@ export function showFrame(name, src) {
   if (!frame) {
     frame = document.createElement('iframe');
     frame.src = src ?? `/apps/${name}/`;
-    frame.allow = FRAME_ALLOW;
+    frame.allow = frameAllow(appClipboard(name));
     frame.title = name;
     frame.dataset.app = name;
     frame.addEventListener('load', fit);

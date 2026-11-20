@@ -33,7 +33,19 @@ test('a browser tab or a desktop window keeps its contraption', () => {
 });
 
 // #892: a contraption's page is on its own host (the frame's src redirects there), so its mic needs the delegation to name any origin.
-test('a contraption frame may use the microphone, camera, clipboard and fullscreen on whatever host it ends on', async () => {
+test('a contraption frame may use the microphone, camera and fullscreen on whatever host it ends on', async () => {
   const { FRAME_ALLOW } = await import('../public/frames.js');
-  for (const f of ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen']) assert.match(FRAME_ALLOW, new RegExp(`(^|; )${f} \\*(;|$)`));
+  for (const f of ['microphone', 'camera', 'fullscreen']) assert.match(FRAME_ALLOW, new RegExp(`(^|; )${f} \\*(;|$)`));
+});
+
+// #1086: Chrome lets a focused page write the clipboard with no click, which Windows Defender flags as a ClickFix attack.
+test('only an app that asks for it gets clipboard writes, and no app gets clipboard reads', async () => {
+  const { FRAME_ALLOW, frameAllow } = await import('../public/frames.js');
+  const { ARTIFACT_ALLOW } = await import('../public/frames.js');
+  // Said outright, as a frame on Citadel's own origin gets the clipboard by default.
+  for (const allow of [FRAME_ALLOW, ARTIFACT_ALLOW]) for (const f of ['clipboard-read', 'clipboard-write']) assert.match(allow, new RegExp(`(^|; )${f} 'none'(;|$)`));
+  assert.equal(frameAllow(false), FRAME_ALLOW);
+  assert.match(frameAllow(true), /(^|; )clipboard-write \*(;|$)/);
+  assert.match(frameAllow(true), /(^|; )clipboard-read 'none'(;|$)/);
+  for (const f of ['microphone', 'camera', 'fullscreen']) assert.match(frameAllow(true), new RegExp(`(^|; )${f} \\*(;|$)`));
 });

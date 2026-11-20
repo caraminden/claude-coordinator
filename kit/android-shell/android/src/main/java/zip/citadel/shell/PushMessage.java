@@ -50,7 +50,7 @@ public final class PushMessage {
     static String open(String path, String origin, String self) {
         if (origin == null || self == null) return null;
         String home = origin + self + "/";
-        if (path == null || !Links.under(path, self) || path.contains("//") || path.contains("\\") || path.contains("/../") || path.endsWith("/..")) return home;
+        if (path == null || !Links.under(path, self) || path.contains("//") || path.contains("\\") || path.contains("/../") || path.endsWith("/..") || path.toLowerCase(java.util.Locale.ROOT).contains("%2e")) return home;
         return origin + path;
     }
 

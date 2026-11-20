@@ -82,8 +82,10 @@ public class ShellPlugin extends Plugin {
         String open = intent.getStringExtra(ShellMessagingService.EXTRA_OPEN);
         if (open == null) return;
         intent.removeExtra(ShellMessagingService.EXTRA_OPEN);
-        // The launcher activity is exported, so the extra could come from another app: only this app's pages load.
-        if (origin == null || self == null || !open.startsWith(origin + self + "/")) return;
+        // The launcher activity is exported, so the extra could come from another app: only a page that passes the
+        // push path check (under the app's own path, no dot segments) loads, never one it would have rewritten.
+        if (origin == null || self == null || !open.startsWith(origin)) return;
+        if (!open.equals(PushMessage.open(open.substring(origin.length()), origin, self))) return;
         WebView view = bridge.getWebView();
         watchdog.navigationStarted();
         view.loadUrl(open);

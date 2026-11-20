@@ -53,6 +53,7 @@ public class PushMessageTest {
         assertEquals(home, PushMessage.open("/apps/voice//evil.example", ORIGIN, SELF));
         assertEquals(home, PushMessage.open("/apps/voice/../../c/", ORIGIN, SELF));
         assertEquals(home, PushMessage.open("/apps/voice/..", ORIGIN, SELF));
+        assertEquals(home, PushMessage.open("/apps/voice/%2E%2e/%2e%2E/c/", ORIGIN, SELF));
         assertEquals("https://voice.citadel.zip/apps/voice/takes?id=3", PushMessage.open("/apps/voice/takes?id=3", ORIGIN, SELF));
         // An app with no known address can't open anything; the tap just brings it up.
         assertNull(PushMessage.open("/apps/voice/", null, SELF));

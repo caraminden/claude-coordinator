@@ -5,9 +5,9 @@
 // notification itself from the citadel_* keys, even when the app was killed. (src/push.ts is Web Push for Citadel's
 // own pages, a different thing.)
 //
-// The key is a Firebase service account's JSON file at FCM_KEY_PATH (mode 600), read on the first send, so copying
-// it there needs no restart. Its OAuth token comes from a JWT signed with node:crypto and is kept until a minute
-// before it ends.
+// The key is a Firebase service account's JSON file at FCM_KEY_PATH (mode 600), read on the first send that finds
+// it, so copying it in needs no restart (replacing one already read does). Its OAuth token comes from a JWT signed
+// with node:crypto and is kept until a minute before it ends.
 import { createPrivateKey, sign } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

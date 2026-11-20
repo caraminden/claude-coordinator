@@ -944,7 +944,7 @@ const DEPLOY_CONTRAPTION = {
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 /** The fields of a review entry the Taskmaster sets besides its text: only those passed, so a save never blanks the rest (the store checks them). */
-export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['kind', 'name', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
+export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['kind', 'name', 'when', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
 
 const REVIEW_SET = {
   name: 'review_set',
@@ -978,7 +978,7 @@ const REVIEW_SET = {
       },
       add: { type: 'boolean', description: 'Taskmaster only: add a new entry (with extends, or a new slug)' },
       extends: { type: 'string', description: 'With add: the kit starter it builds on, e.g. ui-screenshots' },
-      when: { type: 'string', description: 'With add: when it runs, as the rubric format writes it, e.g. "diff: app/web/**"' },
+      when: { type: 'string', description: 'Taskmaster only (a minion passing it is refused): when it runs, on add or on a save (a new version), as the rubric format writes it, e.g. "diff: app/web/**"' },
       run: {
         type: 'object', description: 'Record one round you ran of this entry, sent on its own: the round (1 for the first) and its verdict (pass, fail, or ask when the item went to a person)',
         properties: { round: { type: 'integer' }, verdict: { type: 'string', enum: ['pass', 'fail', 'ask'] } },
@@ -1960,6 +1960,7 @@ async function runTool(name: string, args: any): Promise<string> {
         const e = await call('PATCH', `/api/projects/${PROJECT}/reviews/${slug}`, { calibration: args.calibration });
         return `Recorded on ${e.slug}: ${e.calibrated}.${e.trial ? ' It stays on trial (advises only).' : ''}`;
       }
+      if (args.extends !== undefined) throw new Error('extends is only for add: true; a save cannot change what an entry builds on');
       const extra = reviewFields(args);
       if (args.body === undefined && args.enabled === undefined && args.trial === undefined && !Object.keys(extra).length) {
         const { entries } = await call('GET', `/api/projects/${PROJECT}/reviews`);

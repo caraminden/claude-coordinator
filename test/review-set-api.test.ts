@@ -100,9 +100,9 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   assert.deepEqual(own((await call(`/api/projects/${other.id}/reviews`)).data.entries), []);
 
   // The minion's tool: list, read one, save what it learned.
-  const tool = async (args: Record<string, unknown>, name = 'review_set') => {
+  const tool = async (args: Record<string, unknown>, name = 'review_set', as: { id: number } = minion) => {
     const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), minion.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread' },
+      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
     try {
@@ -119,11 +119,20 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   const saved = await tool({ slug: 'claims', body: '# Claims\n\n## Notes\n\nCara passed the hedged ones.', version: 1, note: 'Calibration' });
   assert.equal(saved.text, 'Saved claims as version 2.');
   assert.ok((await tool({ slug: 'claims', enabled: false })).error);
+  // A save's `when` is not dropped: the Taskmaster's sets it as a new version, a minion's is refused.
+  const refused = await tool({ slug: 'claims', when: 'diff: src/**', version: 2 });
+  assert.ok(refused.error, 'a minion passing when gets an error, not Saved');
+  assert.equal((await tool({ slug: 'claims', extends: 'ui-screenshots', body: 'x', version: 2 })).error, true, 'extends without add is refused, not dropped');
+  const { data: page2 } = await call(`/api/projects/${p.id}`);
+  const widened = await tool({ slug: 'claims', when: 'diff: src/**', version: 2 }, 'review_set', page2.coordinator);
+  assert.equal(widened.text, 'Saved claims as version 3.');
+  assert.match((await tool({ slug: 'claims' })).text, /when: "diff: src\/\*\*"/);
+  assert.ok((await tool({ slug: 'claims', when: 'nonsense: x', version: 3 }, 'review_set', page2.coordinator)).error, 'the page\'s checks apply');
   // Phase 3: a round's verdict, and a person's disagreement, recorded with the tools.
   assert.equal((await tool({ slug: 'claims', run: { round: 1, verdict: 'fail' } })).text, 'Recorded round 1 of claims: fail.');
   assert.ok((await tool({ slug: 'claims', run: { round: 1, verdict: 'meh' } })).error);
   assert.equal((await tool({ slug: 'claims', person: 'Cara', words: 'Hedging is fine here.' }, 'record_verdict')).text, 'Recorded on claims: Cara, "Hedging is fine here.". Its later runs read it.');
-  assert.match((await tool({})).text, /\nclaims \(critic, on, trial, 0% first-round pass\): schedule: monthly$/);
+  assert.match((await tool({})).text, /\nclaims \(critic, on, trial, 0% first-round pass\): diff: src\/\*\*$/);
   assert.match((await tool({ slug: 'claims' })).text, /## Verdicts[^]*Cara, \d{4}-\d\d-\d\d, on #\d+: "Hedging is fine here\."/);
 });
 

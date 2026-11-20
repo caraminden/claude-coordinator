@@ -46,8 +46,9 @@ const DEFAULT_CLAUDE_MCP = 'godot-ai';
 /**
  * What a person ticked for a machine to lend (#439): one of the MCP servers its agent found, and its workspaces, by name.
  * gpu_off (#1175): GPU jobs switched off, so a GPU_TASK is refused and one running is stopped.
+ * before_ticks: saved for an agent from before #439, only to hold gpu_off; its ticks start fresh once it is managed.
  */
-export type Lend = { server: string | null; workspaces: string[]; gpu_off?: true };
+export type Lend = { server: string | null; workspaces: string[]; gpu_off?: true; before_ticks?: true };
 /** The workspace task that runs a job with the machine's GPU on (tools/win-test-box/gpu.ps1 adds it). */
 export const GPU_TASK = 'run-gpu';
 const GPU_OFF_WHO = 'the GPU jobs switch on the Machines page';
@@ -59,7 +60,7 @@ export function cleanLend(v: any): Lend | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
   if (v.server !== null && !(typeof v.server === 'string' && SERVER_NAME.test(v.server))) return null;
   if (!Array.isArray(v.workspaces) || v.workspaces.length > 50 || !v.workspaces.every((w: unknown) => typeof w === 'string' && WORKSPACE_NAME.test(w))) return null;
-  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}) };
+  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}) };
 }
 
 function storedLend(m: Machine): Lend | null {
@@ -470,9 +471,10 @@ export class MachineRelay {
     }
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
-      if (!storedLend(machine)) {
+      const prev = storedLend(machine);
+      if (!prev || prev.before_ticks) {
         const was = machine.mcp_kind === 'claude' ? machine.mcp_command || DEFAULT_CLAUDE_MCP : null;
-        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [] };
+        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [], ...(prev?.gpu_off ? { gpu_off: true as const } : {}) };
         this.store.updateMachine(machine.id, { lend: JSON.stringify(lend) });
       }
       this.sendLend(machine.id);
@@ -499,7 +501,8 @@ export class MachineRelay {
   setLend(machineId: number, lend: Lend) {
     const machine = this.store.getMachine(machineId);
     if (!machine) return;
-    const swapped = storedLend(machine)?.server !== lend.server;
+    // An agent from before #439 lends what its command line says: only its GPU switch is saved here.
+    const swapped = !lend.before_ticks && storedLend(machine)?.server !== lend.server;
     const check = swapped && storedCheck(machine);
     this.store.updateMachine(machineId, { lend: JSON.stringify(lend), ...(check ? { last_check: JSON.stringify({ ...check, results: check.results.filter((r) => r.server !== 'mcp') }) } : {}) });
     this.sendLend(machineId);

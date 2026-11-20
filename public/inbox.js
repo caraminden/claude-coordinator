@@ -57,7 +57,6 @@ function refreshSoon() {
 export function refreshSchemeCounts() {
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
-    for (const el of document.querySelectorAll('[data-scheme-inbox="home"]')) el.replaceWith(homeCount(projects.filter((p) => !p.hidden && p.member !== false)));
     for (const p of projects) {
       for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
       // A favicon a merge added or changed since the page drew it.
@@ -124,20 +123,11 @@ export function schemeCount(p) {
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
-    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working && p.id !== 'home' ? h('b', {}, working) : null) : null,
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }
 
 let pillTips = null;
-
-/** The Home line's pill (#1140): every shelf scheme's counts summed. Never purple and no working digit, only the spinner (Josh, 2026-11-20: "Lets make the Home not go purple on unreads? it feels like duplicating information", then "same for the working number actually"): each scheme's own pill already shows what's new. */
-export const homeCount = (schemes) => schemeCount({
-  id: 'home',
-  inbox: schemes.reduce((n, p) => n + (p.inbox || 0), 0),
-  running: schemes.some((p) => p.running),
-  working: schemes.reduce((n, p) => n + (p.running ? p.working || 1 : 0), 0),
-  fresh: false,
-});
 
 const badge = { on: null };
 /** The installed app's icon badge follows the purple pills (#980). */

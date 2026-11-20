@@ -2,7 +2,8 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { askWhy, byUrgency, cardChip, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
+import { setAccount } from '../public/base.js';
+import { askWhy, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -15,11 +16,14 @@ const pill = (over, usage = null) => {
 test('rowState: each kind of minion gets its family, text and rank', () => {
   const rows = [
     // what the minion is                                         rank, family, text
-    [{}, [0, 'you', 'reply 5m']],
-    [{ state: 'ready' }, [0, 'done', 'ready 5m']],
-    [{ state: 'complete', note: 'nothing left' }, [0, 'done', 'complete 5m']],
-    [{ state: 'try' }, [0, 'you', 'try it 5m']],
-    [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', '? 2h']],
+    // Nothing running and nothing asked is idle, grey, not your move (#1121: it was amber "reply").
+    [{}, [4, 'idle', 'idle 5m']],
+    [{ replies: ['Ship it'] }, [0, 'you', 'answer 5m']],
+    // For a person to look at, not an answer (#1121): after Needs you, before working.
+    [{ state: 'ready' }, [LOOK, 'done', 'ready 5m']],
+    [{ state: 'complete', note: 'nothing left' }, [LOOK, 'done', 'read it 5m']],
+    [{ state: 'try' }, [LOOK, 'work', 'try it 5m']],
+    [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', 'answer 2h']],
     [{ approvals: 1, status: 'running' }, [0, 'you', 'approve 5m']],
     [{ status: 'error' }, [0, 'broken', 'stuck 5m']],
     [{ status: 'running' }, [1, 'work', 'working', 'pulse']],
@@ -44,27 +48,55 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
 
+test('rowState: amber only for a card or replies of yours; another person\'s says whose (#1121)', () => {
+  const card = (over) => ({ kind: 'question', href: '#/p/2/t/9?e=5', ...over });
+  setAccount({ name: 'Josh' });
+  try {
+    const age = { pending_card_at: NOW - HOUR };
+    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'josh' })] }), [0, 'you', 'answer 1h'], 'addressed to you, any case');
+    assert.deepEqual(pill({ ...age, open_cards: [card()] }), [0, 'you', 'answer 1h'], "anyone's, on no one's minion");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Josh' } }), [0, 'you', 'answer 1h'], "anyone's, on yours");
+    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' })] }), [2, 'wait', 'Cara 1h'], 'addressed to Cara');
+    assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 1h'], "anyone's, on Cara's minion");
+    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' }), card({ to: 'Josh' })] }), [0, 'you', 'answer 1h'], 'one of them yours');
+    assert.equal(rowState(t({ ...age, open_cards: [card({ to: 'Cara' })] }), null, NOW).label, 'Waiting on Cara');
+    assert.equal(rowState(t({ ...age, open_cards: [card()] }), null, NOW).label, 'Answer needed');
+    assert.deepEqual(pill({ replies: ['Go'], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's go");
+    assert.equal(rowState(t({}), null, NOW).label, 'Idle');
+    assert.equal(rowState(t({ state: 'try' }), null, NOW).label, 'Ready to try');
+    // An approval is the assignee's, as the server counts it; the badge and the popover link go by whose card it is.
+    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's approval");
+    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'josh' } }), [0, 'you', 'approve 5m'], 'your approval');
+    const mixed = { ...age, open_cards: [card({ to: 'Cara', href: '#cara' }), card({ to: 'Josh', href: '#josh' })] };
+    assert.deepEqual(cardsYours(t(mixed)).map((c) => c.href), ['#josh']);
+    assert.equal(rowWhy(t(mixed), rowState(t(mixed), null, NOW), NOW).link.href, '#josh', 'the popover opens your card, not the older one of Cara\'s');
+    assert.deepEqual(cardsYours(t({ ...age, open_cards: [card({ to: 'Cara' })] })), [], 'none of yours: the badge goes violet');
+  } finally {
+    setAccount(null);
+  }
+});
+
 test('rowState: a waiting minion says what wakes it in its label (#718)', () => {
   assert.equal(rowState(t({ state: 'parked', status: 'new', parked_for: "#3 T's work is merged", wakes_on: "#3 T's work is merged" }), null, NOW).label, "Waiting: starts when #3 T's work is merged");
   assert.equal(rowState(t({ state: 'parked', wakes_on: 'the fix in #9 goes live' }), null, NOW).label, 'Waiting: the fix in #9 goes live');
 });
 
 test('rowState: a complete minion says what is left in its label (#547)', () => {
-  assert.equal(rowState(t({ state: 'complete', note: 'read: the audit report' }), null, NOW).label, 'Complete: read: the audit report');
-  assert.equal(rowState(t({ state: 'complete' }), null, NOW).label, 'Complete: no work left');
+  assert.equal(rowState(t({ state: 'complete', note: 'read: the audit report' }), null, NOW).label, 'Done, read it: read: the audit report');
+  assert.equal(rowState(t({ state: 'complete' }), null, NOW).label, 'Done, read it');
 });
 
 test('rowState: ages and the steps flag', () => {
-  assert.equal(pill({ updated_at: NOW - 20_000 })[2], 'reply now');
-  assert.equal(pill({ updated_at: NOW - 3 * HOUR })[2], 'reply 3h');
-  assert.equal(pill({ updated_at: NOW - 50 * HOUR })[2], 'reply 2d');
+  assert.equal(pill({ updated_at: NOW - 20_000 })[2], 'idle now');
+  assert.equal(pill({ updated_at: NOW - 3 * HOUR })[2], 'idle 3h');
+  assert.equal(pill({ updated_at: NOW - 50 * HOUR })[2], 'idle 2d');
   // `counted` tells the row to drop the count from its activity line; `since` times a card from its posting.
   assert.equal(rowState(t({ status: 'running', steps: { done: 1, total: 2 } }), null, NOW).counted, true);
   assert.equal(rowState(t({ status: 'running' }), null, NOW).counted, false);
   assert.equal(rowState(t({ pending_card_at: NOW - HOUR }), null, NOW).since, NOW - HOUR);
 });
 
-test('rowState: a minion that hit the usage limit counts down, then becomes your move', () => {
+test('rowState: a minion that hit the usage limit counts down, then is idle until someone carries it on', () => {
   const limited = { status: 'error', state: 'limited' };
   // Its own resume time wins, in the short time-left form.
   assert.deepEqual(pill({ ...limited, limit_resume_at: NOW + 40 * MIN }), [2, 'wait', 'resumes 40m']);
@@ -77,7 +109,7 @@ test('rowState: a minion that hit the usage limit counts down, then becomes your
   assert.deepEqual(pill(limited, shut), [2, 'wait', 'resets 1h30']);
   // A window whose reset has passed doesn't count; a later turn's report says the limit is over.
   const reopened = { weekly: { status: 'rejected', resetsAt: NOW - MIN }, updatedAt: NOW - MIN };
-  assert.deepEqual(pill(limited, reopened), [0, 'you', 'resume 5m']);
+  assert.deepEqual(pill(limited, reopened), [4, 'idle', 'idle 5m']);
   // Nothing known since it stopped.
   assert.deepEqual(pill(limited, { updatedAt: NOW - HOUR }), [2, 'wait', 'limit hit']);
   assert.deepEqual(pill(limited), [2, 'wait', 'limit hit']);
@@ -88,15 +120,16 @@ test('byUrgency: needs-you first with the longest wait on top, then working, wai
     t({ id: 'parked', state: 'parked' }),
     t({ id: 'parked-until', state: 'parked', wakes_on: 'live' }),
     t({ id: 'working-old', status: 'running', updated_at: NOW - HOUR }),
-    t({ id: 'reply-new', updated_at: NOW - MIN }),
+    t({ id: 'reply-new', replies: ['Go'], updated_at: NOW - MIN }),
+    t({ id: 'idle', updated_at: NOW - 2 * MIN }),
     t({ id: 'waiting', state: 'outside' }),
     t({ id: 'working-new', status: 'running', updated_at: NOW - MIN }),
-    t({ id: 'reply-old', updated_at: NOW - 3 * HOUR }),
+    t({ id: 'reply-old', replies: ['Go'], updated_at: NOW - 3 * HOUR }),
     // Timed from its card (2h), not from its last update (1m).
     t({ id: 'card', pending_card_at: NOW - 2 * HOUR, updated_at: NOW - MIN }),
   ];
   const order = rows.sort((a, b) => byUrgency(a, b, null, NOW)).map((r) => r.id);
-  assert.deepEqual(order, ['reply-old', 'card', 'reply-new', 'working-new', 'working-old', 'waiting', 'parked-until', 'parked']);
+  assert.deepEqual(order, ['reply-old', 'card', 'reply-new', 'working-new', 'working-old', 'waiting', 'parked-until', 'idle', 'parked']);
 });
 
 test('SHIP: every stage has a colour family, and only a branch has no badge', () => {
@@ -117,7 +150,7 @@ test('rowState: a wait colours the chip while working or outside, which keeps th
     [{ status: 'running', wait: testing }, [1, 'work', 'working', 'pulse']],
     [{ state: 'outside', wait: testing }, [2, 'work', 'waiting', 'pulse']],
     [{ state: 'pending-deploy', steps: { done: 5, total: 5 }, wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'deploying 5/5']],
-    [{ state: 'ready', wait: line }, [0, 'done', 'ready 5m']],
+    [{ state: 'ready', wait: line }, [LOOK, 'done', 'ready 5m']],
     [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
     // A PR's CI run (#546): violet while queued, blue while its jobs run, green or red once it ends.
@@ -194,7 +227,7 @@ test('rowUnread: an unseen row is unread only when it has something for a person
   const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #575 (waiting for CI)', since: NOW - MIN, usual: 160 };
   const ci = (stage) => ({ ...line, kind: 'ci', stage, chip: `CI · ${stage}` });
   const forPerson = [
-    [{}, 'your move'],
+    [{ replies: ['Go'] }, 'one-tap replies'],
     [{ state: 'ready' }, 'ready'],
     [{ state: 'complete', note: 'read the report' }, 'complete'],
     [{ state: 'try' }, 'try it'],
@@ -202,7 +235,6 @@ test('rowUnread: an unseen row is unread only when it has something for a person
     [{ status: 'running', approvals: 1 }, 'an approval'],
     [{ status: 'error' }, 'stuck'],
     [{ state: 'blocked' }, 'blocked'],
-    [{ status: 'error', state: 'limited' }, 'limit hit, reset seen since', { session: { status: 'allowed' }, updatedAt: NOW }],
   ];
   for (const [over, what, usage] of forPerson) assert.equal(unread(over, usage), true, what);
   const notForPerson = [
@@ -216,11 +248,14 @@ test('rowUnread: an unseen row is unread only when it has something for a person
     [{ status: 'error', state: 'limited', limit_resume_at: NOW + HOUR }, 'usage limit, resumes by itself'],
     [{ status: 'error', state: 'limited' }, 'usage limit, nothing known'],
     [{ status: 'running' }, 'working'],
+    // Idle (#1121): nothing asked of anyone, so no unread dot, the reset limit's idle row included.
+    [{}, 'idle'],
+    [{ status: 'error', state: 'limited' }, 'limit hit, reset seen since', { session: { status: 'allowed' }, updatedAt: NOW }],
     [{ status: 'running', wait: ci('failed') }, 'working, CI failed in the turn'],
     [{ state: 'parked' }, 'parked'],
     [{ status: 'closed', state: 'ready' }, 'dismissed'],
   ];
-  for (const [over, what] of notForPerson) assert.equal(unread(over), false, what);
+  for (const [over, what, usage] of notForPerson) assert.equal(unread(over, usage), false, what);
   assert.equal(rowUnread(t({ state: 'ready' }), rowState(t({ state: 'ready' }), null, NOW), true), false, 'seen since it changed');
 });
 
@@ -346,7 +381,7 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
   const card = { kind: 'question', what: 'question', href: '#/p/2/t/9?e=5' };
   const release = { name: 'Release 14', target: 'Citadel', stage: 'restart', text: 'waits for 3 turns' };
   const states = [
-    {}, { state: 'ready' }, { state: 'complete', note: 'nothing left' }, { state: 'try' }, { approvals: 1, status: 'running', open_cards: [card] },
+    {}, { replies: ['Go'] }, { pending_card_at: NOW - HOUR, open_cards: [{ ...card, to: 'Cara' }] }, { state: 'ready' }, { state: 'complete', note: 'nothing left' }, { state: 'try' }, { approvals: 1, status: 'running', open_cards: [card] },
     { state: 'ready', pending_card_at: NOW - HOUR, open_cards: [card] }, { status: 'error' }, { status: 'running' },
     { status: 'running', turnStartedAt: NOW - 12 * MIN, last_activity: 'Editing thread.css', steps: { done: 2, total: 5, since: NOW - 3 * MIN, usual: 300 } },
     { status: 'new' }, { status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' }, { state: 'parked' }, { state: 'parked', wakes_on: 'the fix in #9 goes live' },
@@ -376,7 +411,7 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
   const kinds = [
     { kind: 'approval', card: {} }, { kind: 'question', card: {} }, { kind: 'question', card: { doc: 'x.html' } }, { kind: 'question', card: { notice: 'x' } },
     { kind: 'question', card: { secret: { name: 'X' } } }, { kind: 'plan', card: {} }, { kind: 'spend', card: { stage: 5 } }, { kind: 'quiet' },
-    { kind: 'state' }, { kind: 'replies' },
+    { kind: 'replies' },
   ];
   for (const item of kinds) {
     const why = askWhy({ at, ...item }, { state: 'ready' }, NOW);
@@ -384,7 +419,6 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
     assert.doesNotMatch(why, /^Waiting on you since/, `${item.kind} has its own words`);
   }
   assert.match(askWhy({ kind: 'question', at, card: { doc: 'x.html' } }, null, NOW), /^A choices page card/);
-  assert.match(askWhy({ kind: 'state', at }, { state: 'ready' }, NOW), /^Ready/);
 });
 
 test('progressWhy: a release says its stage, what it waits on, since when and its usual (#906)', () => {

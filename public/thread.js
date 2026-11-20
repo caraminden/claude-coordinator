@@ -24,6 +24,7 @@ import { pushNote, pushRun, pushRunParts, senderTone, shortDuration, shortNote }
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
 import { sideEvent } from './sidethread.js';
+import { selectActions } from './selectact.js';
 import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { applyEvent, createProgress, nowDoing, planEstimate } from './progress.js';
@@ -326,6 +327,7 @@ export function chatSection(chatId, ticket) {
   form.prepend(h('div', { id: 'chat-held', hidden: true }));
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
+  selectActions(log, form);
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
@@ -1022,7 +1024,7 @@ function drawEvent(event, scroll) {
         // A reply the link check sent back, which its rewrite replaced (#281).
         if (block.type === 'text' && block.text.trim() && !data.replaced) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
-          const msg = stamped(h('div', { class: 'msg reply' }, h('div', { class: 'who' }, speaker()), body), event);
+          const msg = stamped(h('div', { class: 'msg reply', 'data-reply-event': event.id }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
           spoke = msg;
           view.latestReply = event.id;

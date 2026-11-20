@@ -97,9 +97,10 @@ test('recap sections: changed minions only, newest first, by what they need', as
     t(4, 90, { status: 'running', rank: 1, fam: 'work' }), // a turn finished, still running
     t(5, 130, { status: 'closed', rank: 5, fam: 'idle' }),
     t(6, 110, { state: 'parked', rank: 4, fam: 'idle' }),
+    t(7, 140, { state: 'try', rank: 0.5, fam: 'work' }), // to try: its own section, not "Still working" (#1121)
   ];
   assert.deepEqual(recapSections(tickets, 100, { 4: 1 }, stateOf).map((s) => [s.key, s.rows.map((r) => r.id)]),
-    [['you', [3, 2]], ['work', [4]], ['wait', [6]], ['closed', [5]]]);
+    [['you', [3, 2]], ['look', [7]], ['work', [4]], ['wait', [6]], ['closed', [5]]]);
   assert.deepEqual(recapSections(tickets, 200, {}, stateOf), []);
 });
 

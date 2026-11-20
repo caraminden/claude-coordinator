@@ -39,7 +39,7 @@ export function schemePill(p) {
   // still be purple"). Items only going away leave it plain, and at zero there's nothing to show.
   const fresh = need > 0 && !!p.fresh;
   const parts = [];
-  if (need) parts.push(`${need} waiting on you${fresh ? ' (something new since you last opened it)' : ''}`);
+  if (need) parts.push(`${need} need${need === 1 ? 's' : ''} your answer${fresh ? ' (something new since you last opened it)' : ''}`);
   if (busy) parts.push(p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working');
   return { need, busy, working: busy && p.working > 1 ? p.working : 0, fresh, label: parts.join(' · ') };
 }
@@ -95,5 +95,5 @@ export function otherSchemes(refetch) {
 /** Where a minion's Needs-you row takes you (#236): the oldest thing it waits on you for, as a jump target (an event id, or 'latest' for a ready, try or replies item: the minion's latest reply); null for none. */
 export function rowTarget(items) {
   const oldest = items.reduce((a, b) => (b.at < a.at ? b : a));
-  return oldest.eventId ?? (['state', 'replies', 'loop'].includes(oldest.kind) ? 'latest' : null);
+  return oldest.eventId ?? (['replies', 'loop'].includes(oldest.kind) ? 'latest' : null);
 }

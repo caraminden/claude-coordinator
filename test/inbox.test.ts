@@ -10,7 +10,7 @@ import { directCards, inboxCount, inboxItems } from '../src/inbox.ts';
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies, approvals first, then newest first', () => {
+test('a scheme\'s inbox: open cards and ones offering replies, not ready or complete ones (#1121), approvals first, then newest first', () => {
   const store = new Store(join(root, 'db.sqlite'));
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
@@ -43,7 +43,7 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
   const items = inboxItems(store, approvals, p1, 'Cara');
   assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
   assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null]).sort(),
-    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null], ['state', complete, null], ['state', ready, null]].sort(), 'a ready or complete minion with replies is listed once');
+    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null]].sort(), 'a ready or complete minion is for looking at, not an answer: not listed, its replies neither (#1121)');
   for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
   assert.equal((items[0].card as any).tool, 'Bash');
 });
@@ -150,7 +150,7 @@ test('open cards read again on the same server: an answered card stays gone, new
   assert.deepEqual(ids(), ['p1', 'q2', 'q4', 'q5']);
 });
 
-test('each item carries the chat event it jumps to: its card\'s for approvals, questions and plans; none for ready and replies (#236)', () => {
+test('each item carries the chat event it jumps to: its card\'s for approvals, questions and plans; none for replies (#236)', () => {
   const store = new Store(join(root, 'events.sqlite'));
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals((ticketId, kind, data) => store.addEvent(ticketId, kind, data));
@@ -164,12 +164,12 @@ test('each item carries the chat event it jumps to: its card\'s for approvals, q
   const approvalEvent = store.listEvents(asking).find((e) => e.kind === 'approval' && JSON.parse(e.data).id === approvalId)!;
 
   const byKind = Object.fromEntries(inboxItems(store, approvals, p, 'Cara').map((i) => [i.kind, i.eventId]));
-  assert.deepEqual(byKind, { approval: approvalEvent.id, question: question.id, plan: plan.id, state: undefined });
+  assert.deepEqual(byKind, { approval: approvalEvent.id, question: question.id, plan: plan.id });
   // Each item's key names it while it waits, for the scheme pill's "something new" (#539).
-  assert.deepEqual(inboxItems(store, approvals, p, 'Cara').map((i) => i.key).sort(), [`approval:${approvalId}`, `plan:${plan.id}`, `question:${question.id}`, `state:${ready}`].sort());
+  assert.deepEqual(inboxItems(store, approvals, p, 'Cara').map((i) => i.key).sort(), [`approval:${approvalId}`, `plan:${plan.id}`, `question:${question.id}`].sort(), 'the ready minion is not an answer owed (#1121)');
 });
 
-test('inboxCount: the Needs-you badge\'s number for one person; a ready or replies minion they opened since it changed stops counting, cards never do', () => {
+test('inboxCount: the Needs-you badge\'s number for one person; a replies minion they opened since it changed stops counting, cards never do, ready never counts (#1121)', () => {
   const store = new Store(join(root, 'count.sqlite'));
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
@@ -181,8 +181,9 @@ test('inboxCount: the Needs-you badge\'s number for one person; a ready or repli
   store.addEvent(asking, 'question', { id: 'q', questions: [] });
   const at = (id: number) => store.getTicket(id)!.updated_at;
 
-  assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 3);
-  assert.equal(inboxCount(store, approvals, p, 'Cara', { [ready]: at(ready), [offering]: at(offering) - 1, [asking]: at(asking) + 1 }), 2, 'only the opened ready minion fades');
+  assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 2, 'the ready minion is not counted');
+  assert.equal(inboxCount(store, approvals, p, 'Cara', { [offering]: at(offering) - 1, [asking]: at(asking) + 1 }), 2, 'opened before it changed: still counts');
+  assert.equal(inboxCount(store, approvals, p, 'Cara', { [ready]: at(ready), [offering]: at(offering), [asking]: at(asking) + 1 }), 1, 'only the opened replies minion fades');
 });
 
 test('each person\'s inbox holds only their own minions and unassigned ones, cards and approvals too (#197)', () => {
@@ -193,7 +194,7 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   const minion = (title: string, assigned?: string) => {
     const id = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
     if (assigned) store.props.set('minion', id, p, { assigned }, 'Cara');
-    store.updateTicket(id, { state: 'ready' });
+    store.updateTicket(id, { replies: JSON.stringify(['Go']) });
     return id;
   };
   const cara = minion('cara', 'Cara'), josh = minion('josh', 'Josh'), nobody = minion('nobody');
@@ -205,7 +206,7 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   const ids = (person: string) => [...new Set(inboxItems(store, approvals, p, person).map((i) => i.ticketId))].sort();
   assert.deepEqual(ids('cara'), [cara, nobody, tm].sort(), 'names match in any case');
   assert.deepEqual(ids('Josh'), [josh, nobody, tm].sort());
-  assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 3, 'their minion (ready, with a question and an approval), the unassigned one and the Taskmaster: minions, not items (Cara, 2026-11-01)');
+  assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 3, 'their minion (offering replies, with a question and an approval), the unassigned one and the Taskmaster: minions, not items (Cara, 2026-11-01)');
 });
 
 test('a minion assigned under a person\'s sign-in or GitHub login is in their inbox, its cards too (#582)', () => {
@@ -223,8 +224,8 @@ test('a minion assigned under a person\'s sign-in or GitHub login is in their in
   };
   const byGithub = minion('github', 'KatzMeIfYouCan'), byLogin = minion('login', 'jkatz'), other = minion('other', 'Cara');
   store.addEvent(byGithub, 'question', { id: 'q-go', questions: [] });
-  store.updateTicket(byLogin, { state: 'ready' });
-  store.updateTicket(other, { state: 'ready' });
+  store.updateTicket(byLogin, { replies: JSON.stringify(['Go']) });
+  store.updateTicket(other, { replies: JSON.stringify(['Go']) });
   const ids = [...new Set(inboxItems(store, approvals, p, 'Josh').map((i) => i.ticketId))].sort();
   assert.deepEqual(ids, [byGithub, byLogin].sort());
   assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 2);

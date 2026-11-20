@@ -13,7 +13,7 @@ const inboxSeen = new Map();
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
-const faded = (item) => (item.kind === 'state' || item.kind === 'replies') && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
+const faded = (item) => item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
 
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
@@ -84,7 +84,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
@@ -218,7 +218,7 @@ function inboxRow(items) {
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
   for (const i of items) {
-    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.kind === 'state' ? t.state : i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
+    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
     // The chip's popover says why it's here (#906): the newest of its kind.
     const was = asks.get(ask);
     asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, t), at: Math.max(was?.at ?? 0, i.at) });

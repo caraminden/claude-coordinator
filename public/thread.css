@@ -502,3 +502,9 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .tm-banner button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--held); font: inherit; text-decoration: underline; cursor: pointer; }
 .mcopies > summary .who { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .note .push-count { font-variant-numeric: tabular-nums; }
+
+/* Select text in a message to act on it (#1133): fixed, so it never moves the chat; a slim bar above the box on phones. */
+.select-menu { position: fixed; z-index: 30; display: flex; gap: 0.25rem; padding: 0.3rem; background: var(--panel); border: 1px solid var(--border, var(--muted)); border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); }
+.select-menu[hidden] { display: none; }
+.select-menu button.small { padding: 0.3rem 0.65rem; font-size: 0.85em; white-space: nowrap; }
+.select-menu.bar { border-radius: 0; border-width: 1px 0; justify-content: center; box-shadow: none; }

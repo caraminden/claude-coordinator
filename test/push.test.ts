@@ -99,7 +99,7 @@ test('only decisions, blockers and results make a notification', () => {
   assert.equal(notificationFor(ticket(), { kind: 'error', text: 'claude exited with code 1:\nboom' })?.body, 'Turn failed: claude exited with code 1:');
   assert.equal(notificationFor(ticket(), { kind: 'spend', text: 'This turn has used about $30 in 70 min.', eventId: 5 })?.url, '/c/#/p/2/t/34?e=5');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'ready', note: 'PR #12 open' })?.body, 'PR #12 open');
-  assert.equal(notificationFor(ticket(), { kind: 'state', state: 'try', note: null })?.body, 'Ready for you to try');
+  assert.equal(notificationFor(ticket(), { kind: 'state', state: 'try', note: null })?.body, 'Ready to try');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'blocked', note: 'needs a token' })?.body, 'needs a token');
   for (const state of ['parked', 'outside', null]) assert.equal(notificationFor(ticket(), { kind: 'state', state, note: 'x' }), null);
   const coord = notificationFor(ticket({ kind: 'coordinator', number: null }), { kind: 'question', questions: [{ question: 'Which first?' }] }, 'Coordinator app');

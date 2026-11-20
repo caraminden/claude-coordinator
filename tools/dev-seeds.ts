@@ -480,6 +480,38 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'waiting-on-you': {
+    about: 'two schemes (Seeded, Delve) with every kind of "waiting on you" row (#1121): your card, Josh\'s card, replies for you and for Josh, ready, try, done and idle',
+    seed(c) {
+      const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
+      const user = c.store.listUsers().find((u) => u.name === c.who);
+      const delve = c.store.listProjects().find((x) => x.name === 'Delve') ?? c.store.createProject('Delve', null, user?.id ?? null);
+      c.store.setProjectSettings(delve.id, { onboarding: 'skipped' });
+      for (const p of [c.project.id, delve.id]) { c.store.addMember(p, josh.id); if (user) c.store.addMember(p, user.id); }
+      const card = (s: SeedCtx, title: string, note: string, to?: string) => {
+        const t = minion(s, title, { note });
+        if (to) s.store.props.set('minion', t.id, s.project.id, { assigned: to }, s.who);
+        chat(s, t, 2).put('question', { id: hex(), ...(to ? { to } : {}), questions: [{ question: 'Which way?', header: 'Pick', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] });
+      };
+      const replies = (s: SeedCtx, title: string, note: string, to?: string) => {
+        const t = minion(s, title, { note, replies: JSON.stringify(['Ship it']) });
+        if (to) s.store.props.set('minion', t.id, s.project.id, { assigned: to }, s.who);
+      };
+      card(c, 'Memory curator you approve', 'grilling: 7 design questions on one card');
+      card(c, 'Build 7 balance leftovers', 'run-back and 3 cards waiting for Josh', 'Josh');
+      replies(c, 'Merge the rail icons', 'tested, risk low; needs a go');
+      minion(c, 'Splitwise receipts', { state: 'try', note: 'live: add key, try one real receipt' });
+      minion(c, 'Heavy-slot history read-back', { state: 'complete', note: 'report: reports/heavy-slot-week.md' });
+      minion(c, 'Build 5: For people', { note: 'build/5 made; waiting for feeders to merge in' });
+      const d: SeedCtx = { ...c, project: c.store.getProject(delve.id)! };
+      card(d, "Ideas: how Peek's minions work", '32 ideas on the choices page; waiting on picks');
+      card(d, 'Retiree portraits', 'two takes on one card for Josh', 'Josh');
+      replies(d, 'Chapter 3 balance pass', 'tested; needs his go', 'Josh');
+      minion(d, 'Confirm replacing a retiree', { state: 'ready', note: 'PR #237 green, ready to merge into Build 8' });
+      minion(d, 'Dungeon tiles atlas', { note: 'shipped; nothing asked' });
+      return `#/p/${c.project.id}`;
+    },
+  },
   'taskmaster-chat': {
     about: 'the scheme page with a long Taskmaster chat and 30 minions, for scrolling every column',
     seed(c) {

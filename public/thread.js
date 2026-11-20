@@ -441,6 +441,15 @@ function renderWaiting() {
   slot.replaceChildren(strip ?? '');
 }
 
+/** The chat's context meter (#1193): "84k / 200k", fixed width so a new number moves nothing. */
+const kTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+function contextMeter(t) {
+  const used = t.context_live ?? t.context_tokens;
+  const full = used && t.context_window ? used / t.context_window : 0;
+  return h('span', { class: `ctx-meter muted${full >= 0.9 ? ' hot' : ''}`, title: used ? `${used.toLocaleString()} of ${t.context_window.toLocaleString()} tokens of context in use` : 'Context size shows after its first turn' },
+    used ? `${kTokens(used)} / ${kTokens(t.context_window)}` : `– / ${kTokens(t.context_window || 200000)}`);
+}
+
 export function renderTicketHead() {
   renderModelPicker();
   const el = document.getElementById('ticket-head');
@@ -555,6 +564,7 @@ export function renderTicketHead() {
       h('span', { class: `dot ${working ? 'running' : t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       presenceHead(t),
+      contextMeter(t),
       coord && view.merged ? tmViewSwitch() : '',
       phone ? h('span', { class: 'spacer' }) : '',
       phone ? more : '',

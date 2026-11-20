@@ -235,6 +235,10 @@ interface LiveTurn {
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
+/** The model's context window (tokens) as its last result reported it, for the chat's size meter (#1193). */
+const windowKey = (ticketId: number) => `ctxwin:${ticketId}`;
+/** The window before a result has reported one: a `[1m]` model id has 1M, the rest 200k. */
+export const guessWindow = (model: string | null | undefined) => (/\[1m\]/i.test(model ?? '') ? 1_000_000 : 200_000);
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
@@ -832,6 +836,9 @@ export class Runner {
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
+      // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
+      context_live: this.contextSizes.get(ticket.id) ?? null,
+      context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
       last_turn_end: this.store.lastTurnEnd(ticket.id),
       // A Taskmaster's fresh start under way (#406), which hides the chat's Fresh session button.
@@ -3365,7 +3372,24 @@ export class Runner {
     }
     // Each main-thread API call re-reads the whole context: its input is the context's size.
     const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
-    if (u) this.contextSizes.set(ticketId, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0));
+    if (u) {
+      const size = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      const shown = this.contextShown.get(ticketId);
+      this.contextSizes.set(ticketId, size);
+      // The meter follows the turn (#1193), but a view() per API call is too many: a change of 1k or more, at most every 2 s.
+      if (!shown || (Math.abs(size - shown.size) >= 1000 && Date.now() - shown.at >= 2000)) {
+        this.contextShown.set(ticketId, { size, at: Date.now() });
+        this.broadcastTicket(ticketId);
+      }
+    }
+    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string') this.mainModels.set(ticketId, ev.model);
+    if (ev.type === 'result' && ev.modelUsage && typeof ev.modelUsage === 'object') {
+      // Grunts' models are in modelUsage too: the window is the main model's.
+      const main = this.mainModels.get(ticketId);
+      const mu: any = main ? ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')] : null;
+      if (mu && Number(mu.contextWindow) > 0) this.store.setSetting(windowKey(ticketId), Number(mu.contextWindow));
+    }
+    if (ev.type === 'result') this.contextShown.delete(ticketId);
     if (ev.type === 'result' && this.contextSizes.has(ticketId)) {
       this.store.setSetting(contextKey(ticketId), this.contextSizes.get(ticketId));
       this.contextSizes.delete(ticketId);
@@ -3603,6 +3627,10 @@ export class Runner {
 
   /** The running turn's latest context size, saved when it ends (contextKey). */
   private contextSizes = new Map<number, number>();
+  /** What the last broadcast showed of a running turn's context size, and when (#1193). */
+  private contextShown = new Map<number, { size: number; at: number }>();
+  /** The model each running turn's init event named. */
+  private mainModels = new Map<number, string>();
 
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();

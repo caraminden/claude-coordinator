@@ -766,6 +766,7 @@ export function onTicketUpdate(ticket) {
     const tm = view.taskmasters?.find((t) => t.id === ticket.id);
     const before = tm?.ticket;
     if (tm) tm.ticket = ticket;
+    if (view.id === ticket.id) { view.ticket = ticket; renderTicketHead(); }
     return void inboxTicket(before, ticket);
   }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);

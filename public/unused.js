@@ -5,6 +5,8 @@ import { settingsTabs, settingsTitle } from './settings.js';
 
 const KIND = { page: 'Page', route: 'Route group', tool: 'MCP tool', schedule: 'Schedule', setting: 'Setting changed', skill: 'Skill', grunt: 'Grunt type' };
 
+const nw = (t) => t.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); // no break inside a date or a kind: the table's cells wrap whatever their style says
+
 export function unusedPage() {
   const slot = h('div', { class: 'where-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
   api('api/admin/usage').then(({ since, items }) => {
@@ -12,10 +14,10 @@ export function unusedPage() {
     const idle = items.filter((i) => i.idle).length;
     slot.replaceChildren(
       h('p', { class: 'meta' }, `${idle} of ${items.length} items had nothing in the last 30 days. Counting began ${since ?? 'just now'}; anything used before that is not here.`),
-      h('table', { class: 'unused-table' },
+      h('div', { style: 'overflow-x:auto' }, h('table', { class: 'unused-table', style: 'min-width:max-content' },
         h('thead', {}, h('tr', {}, ['Kind', 'Name', 'First seen', 'Last used', 'Uses'].map((t) => h('th', { scope: 'col' }, t)))),
         h('tbody', {}, items.map((i) => h('tr', { class: i.idle ? 'idle' : '' },
-          h('td', {}, KIND[i.kind] ?? i.kind), h('td', {}, i.name), h('td', {}, i.first), h('td', {}, i.never ? 'never' : i.last), h('td', {}, String(i.n)))))));
+          h('td', {}, nw(KIND[i.kind] ?? i.kind)), h('td', {}, i.name), h('td', {}, nw(i.first)), h('td', {}, nw(i.never ? 'never' : i.last)), h('td', {}, String(i.n))))))));
   }).catch((err) => { slot.classList.remove('loading'); slot.replaceChildren(h('p', { class: 'key' }, err.message)); });
   return h('section', { class: 'artifacts-main usage-main' },
     h('div', { class: 'ticket-head' },

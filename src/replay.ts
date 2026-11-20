@@ -34,6 +34,8 @@ export interface Kept {
   agents: boolean;
   webSearch: boolean;
   compactWindow: number;
+  effort?: string | null;
+  toolSearch?: boolean;
   calls: { name: string; input: unknown; ok: boolean | null; result: string | null }[];
   text: string;
 }
@@ -133,7 +135,7 @@ async function side(o: Opts, file: string, chat: Kept[], system: string, toolsFi
   try {
     for (const t of chat) {
       const servers = t.servers.map((name) => ({ name, path: '' }));
-      const req = { system: [system, toolNamesPrompt(t.servers)].filter(Boolean).join('\n\n'), blind: false, model: o.model ?? t.model, compactWindow: t.compactWindow, mcp: servers, agents: t.agents ? { max: 1 } : (false as const), webSearch: t.webSearch, media: false };
+      const req = { system: [system, toolNamesPrompt(t.servers)].filter(Boolean).join('\n\n'), blind: false, model: o.model ?? t.model, compactWindow: t.compactWindow, effort: t.effort ?? null, toolSearch: t.toolSearch === true, mcp: servers, agents: t.agents ? { max: 1 } : (false as const), webSearch: t.webSearch, media: false };
       // The stub runs in the work folder, so its paths must be absolute.
       // shortcut: the machines note real turns add isn't rebuilt, and Agent runs without its cap's hook; add them if replays of those apps matter.
       const config = mcpConfig(0, []);

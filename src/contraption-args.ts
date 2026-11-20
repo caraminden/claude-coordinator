@@ -12,6 +12,10 @@ export interface TurnShape {
   blind: boolean;
   model: string | null;
   compactWindow: number;
+  /** `claude --effort` (#1084); null leaves Claude Code's default. */
+  effort: string | null;
+  /** Claude Code's tool search (#1084): MCP tools load when the model searches for them, not in every request. */
+  toolSearch: boolean;
   mcp: McpServer[];
   agents: { max: number } | false;
   webSearch: boolean;
@@ -33,9 +37,10 @@ export function toolNamesPrompt(servers: string[]): string {
   return `Your tools' full names are ${full}. Where these instructions name a tool without that prefix, such as \`x\`, call it by its full name (mcp__${servers[0]}__x): a bare name fails with "No such tool available".`;
 }
 
-/** The built-in tools a turn gets: Agent and WebSearch/WebFetch, each only if asked for. */
+/** The built-in tools a turn gets: Agent, WebSearch/WebFetch and ToolSearch, each only if asked for. */
 export function builtins(req: TurnRequest): string[] {
-  return [...(req.agents ? ['Agent'] : []), ...(req.webSearch ? ['WebSearch', 'WebFetch'] : [])];
+  // ToolSearch is all tool search needs: Claude Code defers MCP tools whenever it may use it (2.1.323), and `--tools ''` drops it.
+  return [...(req.agents ? ['Agent'] : []), ...(req.webSearch ? ['WebSearch', 'WebFetch'] : []), ...(req.toolSearch ? ['ToolSearch'] : [])];
 }
 
 /** The `claude` arguments for a turn: only the contraption's MCP servers and (maybe) Agent and web search, nothing of the user's or Citadel's. */
@@ -46,7 +51,7 @@ export function args(req: TurnRequest, dir: string, claudeSession: string, resum
     '--input-format', 'stream-json', '--replay-user-messages',
     // No user, project or local settings: no CLAUDE.md, hooks, plugins, permissions or MCP servers of theirs.
     '--setting-sources', '',
-    // The built-in tools: Agent and web search if asked for, else none. Subagents get no more than this.
+    // The built-in tools: Agent, web search and tool search if asked for, else none. Subagents get no more than this.
     '--tools', builtins(req).join(','),
     '--strict-mcp-config', '--mcp-config', join(dir, 'mcp.json'),
     '--settings', join(dir, 'settings.json'),
@@ -58,6 +63,7 @@ export function args(req: TurnRequest, dir: string, claudeSession: string, resum
   // Blind: the app's text is the whole prompt, not an addition to Claude Code's own.
   if (req.system) a.push(req.blind ? '--system-prompt-file' : '--append-system-prompt-file', join(dir, 'system.md'));
   if (req.model) a.push('--model', req.model);
+  if (req.effort) a.push('--effort', req.effort);
   a.push(resume ? '--resume' : '--session-id', claudeSession);
   return a;
 }

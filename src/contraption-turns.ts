@@ -93,6 +93,10 @@ export interface TurnRequest {
   system: string;
   model: string | null;
   compactWindow: number;
+  /** `claude --effort`: low, medium or high (#1084); null leaves Claude Code's default. */
+  effort: string | null;
+  /** Load MCP tools only when the model searches for them (Claude Code's tool search, #1084); off unless asked. */
+  toolSearch: boolean;
   mcp: McpServer[];
   agents: { max: number; model: string | null } | false;
   /** WebSearch and WebFetch, off unless the contraption asks (#332). */
@@ -134,6 +138,8 @@ const BLIND_ROOT = '/tmp';
 interface Blind { root: string | null; cwd: string }
 const SESSION_NAME = /^[\w.:@-]{1,100}$/;
 const MODEL = /^[\w.\[\]-]{1,60}$/;
+/** Effort an app may ask for: nothing above high (Citadel-wide "Usage, effort and models"). */
+export const TURN_EFFORTS = ['low', 'medium', 'high'];
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,40}$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,100}$/;
 
@@ -179,6 +185,8 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
     agents = { max: int(a.max, 'agents.max', 1, 10, 1), model: a.model ?? null };
   }
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
+  if (body.effort != null && !TURN_EFFORTS.includes(body.effort)) bad(`effort must be ${TURN_EFFORTS.join(', ')} or left out`);
+  if (body.toolSearch !== undefined && typeof body.toolSearch !== 'boolean') bad('toolSearch must be true or false');
   if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
   if (body.media !== undefined && typeof body.media !== 'boolean') bad('media must be true or false');
   if (body.images !== undefined && (!Array.isArray(body.images) || body.images.some((p: unknown) => typeof p !== 'string'))) bad('images must be a list of paths');
@@ -189,7 +197,7 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
     person: body.person, session: body.session, fresh: body.fresh === true || body.blind === true, prompt: body.prompt, system: body.system ?? '', model,
-    compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
+    compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), effort: body.effort ?? null, toolSearch: body.toolSearch === true, mcp, agents,
     webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, keep: body.keep === true, images: body.images ?? [], timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
@@ -771,7 +779,7 @@ export class ContraptionTurns {
       // Checked again at the end: the person may have opted out, or deleted the session, while the turn ran.
       if (kept && keepAt && !this.store.getSetting(optOutKey(req.person)) && this.store.contraptionSession(c.id, req.person, req.session)) {
         try {
-          keepTurn(keepAt, { at: Date.now(), turn: live.id, prompt: req.prompt, images: req.imageBlocks?.length ?? 0, system: sha256(req.system), model: req.model, servers: Object.keys(config.mcpServers), agents: !!req.agents, webSearch: req.webSearch, compactWindow: req.compactWindow, calls: [...kept.calls.values()], text: cap(kept.text), stop: String(result.stop_reason ?? result.subtype ?? 'end_turn') });
+          keepTurn(keepAt, { at: Date.now(), turn: live.id, prompt: req.prompt, images: req.imageBlocks?.length ?? 0, system: sha256(req.system), model: req.model, servers: Object.keys(config.mcpServers), agents: !!req.agents, webSearch: req.webSearch, compactWindow: req.compactWindow, effort: req.effort, toolSearch: req.toolSearch, calls: [...kept.calls.values()], text: cap(kept.text), stop: String(result.stop_reason ?? result.subtype ?? 'end_turn') });
         } catch (err: any) {
           console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${err?.code ?? 'error'}`); // no content in the log
         }

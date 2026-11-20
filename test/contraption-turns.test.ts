@@ -322,6 +322,19 @@ test('webSearch: true adds WebSearch and WebFetch to the tools and the allow lis
   assert.equal(argAfter(lastRun().argv, '--tools'), '', 'false is the default: no built-in tools');
 });
 
+test('effort passes --effort and toolSearch adds ToolSearch to the tools and the allow list, both off unless asked (#1084)', async () => {
+  await turn(mandate, { session: 'levers', effort: 'low', toolSearch: true, webSearch: true, mcp: [{ name: 'mandate', path: '/mcp' }] });
+  let run = lastRun();
+  assert.equal(argAfter(run.argv, '--effort'), 'low');
+  assert.equal(argAfter(run.argv, '--tools'), 'WebSearch,WebFetch,ToolSearch');
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'WebSearch', 'WebFetch', 'ToolSearch']);
+  await turn(mandate, { session: 'levers', mcp: [{ name: 'mandate', path: '/mcp' }] });
+  run = lastRun();
+  assert.equal(run.argv.includes('--effort'), false, "Claude Code's own default");
+  assert.equal(argAfter(run.argv, '--tools'), '');
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
+});
+
 test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624), and goes to the error digest with its tool (#835)', async () => {
   const digest: string[] = [];
   turns.onToolError = (c, tool, error) => digest.push(`${c.name} ${tool} ${error.slice(0, 40)}`);
@@ -704,6 +717,8 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   assert.deepEqual(t.calls, [{ name: 'mcp__mandate__move', input: { to: 'Thursday' }, ok: true, result: 'SECRET TOOL OUTPUT' }]);
   assert.match(t.text, /Moved it[\s\S]*to Thursday\./);
   assert.equal(t.system.length, 64, 'a hash of the system text, not the text');
+  assert.equal(t.effort, null, 'the levers a replay reruns with (#1084)');
+  assert.equal(t.toolSearch, false);
   for (let i = 0; i < 6; i++) await turn(app, { session: 'k1', system: 'Be an aura.', keep: true });
   assert.equal(lines(join(dir, files[0])).length, 5, 'only the first five');
   // Without keep, on an app with no home scheme, or for a person who opted out: nothing.
@@ -826,10 +841,16 @@ test('requests are checked before anything runs', () => {
   bad({ media: 'yes' });
   bad({ media: true, mcp: [{ name: 'citadel', path: '/mcp' }] }); // the name media takes
   bad({ compactWindow: 5 });
+  bad({ effort: 'max' }); // nothing above high
+  bad({ effort: 3 });
+  bad({ toolSearch: 'yes' });
   bad({ timeoutSec: 0 });
   bad({ timeoutSec: 901 }); // a running turn holds back Citadel's restarts
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', agents: false }, mandate).agents, false);
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).webSearch, false, 'off unless asked');
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).effort, null, "Claude Code's default unless asked");
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', effort: 'medium' }, mandate).effort, 'medium');
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).toolSearch, false, 'off unless asked');
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).machines, true, 'on unless turned off');
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).media, false, 'off unless asked');
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', mcp: [{ name: 'citadel', path: '/mcp' }] }, mandate).mcp.length, 1, 'an app server may be called citadel without media');

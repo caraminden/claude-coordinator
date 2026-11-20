@@ -248,6 +248,8 @@ Body up to 4,000,000 bytes:
   "system": "You are Acolyte, …",
   "model": "haiku",
   "compactWindow": 40000,
+  "effort": "medium",
+  "toolSearch": true,
   "mcp": [{ "name": "mandate", "path": "/apps/mandate/mcp", "headers": { "Authorization": "Bearer <a token you minted for this turn>" } }],
   "agents": { "max": 3, "model": "haiku" },
   "webSearch": false,
@@ -266,12 +268,14 @@ Body up to 4,000,000 bytes:
 | `system` | | Text appended to the agent's system prompt; default none. Name your tools in it in full (`mcp__<server>__<tool>`): the agent can only call them by that name, and Citadel adds a line saying so after your text |
 | `model` | | `^[\w.\[\]-]{1,60}$`; default the registry's `default_model`, else Claude Code's default. Per call, so each turn may pick its own |
 | `compactWindow` | | Tokens before the conversation compacts: 10,000 to 1,000,000, default 40,000 |
+| `effort` | | `low`, `medium` or `high`: how hard the agent thinks, as `claude --effort` (Citadel #1084). Thinking is often the largest share of a long chat's cost and time, so try `low` or `medium` on a replay before you ship it. Default none, which is Claude Code's own default. A turn on Codex gets the same level |
+| `toolSearch` | | `true` loads MCP tools only when the agent searches for them (Claude Code's ToolSearch), instead of putting every tool's schema in every request (Citadel #1084). Tested on Claude Code 2.1.323 with 40 tools: a turn's first request went from 40,409 to 3,784 input tokens, and the agent found and called a deferred tool by searching first. It takes hold on a fresh session: a session that already ran without it keeps every tool loaded when it resumes. Claude models only (Sonnet 4+, Opus 4+, Haiku 4.5+). Default `false` |
 | `mcp` | | Up to 10 servers: `name` (`^[A-Za-z0-9_-]{1,40}$`, unique), `path` (on your port, starting with `/`, at most 200 printable characters), `headers` (an object of header names matching `^[A-Za-z0-9-]{1,100}$` to values of at most 8,192 characters with no line breaks) |
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
 | `machines` | | `false` leaves out the person's online machines and the system prompt's note on them; default `true`. For a turn that must see only its prompt, such as a blind grader |
 | `blind` | | `true` makes a turn whose context names no person or app: it runs in a random empty folder under `/tmp`, `system` is the whole system prompt (not an addition), and it is always fresh (no resume), without the person's machines, and on Claude only (a Codex model is refused, and "Enable Codex override" is ignored). **Not fully blind:** Claude Code still puts the person's Claude account email in the model's context (it fetches it from Anthropic with the person's token; no flag or setting turns it off, tested on 2.1.323), besides its own platform, OS and model lines. Your `mcp` server names and tool descriptions are yours: keep them neutral too. Default `false` |
-| `keep` | | `true` keeps this turn for replay tests (Citadel #836) if it is among its session's first 5: the prompt exactly as you sent it, the agent's tool calls with their results, its reply, and a hash of `system`, in your home scheme's shared folder under `.replay/<app>/`. That folder is hidden from the Files view and only the scheme's minions read it, through the `citadel:replay` skill, when someone changes your agent's prompt or tools. Files go after 30 days, when you delete the session, and when the person turns "App chats for replay tests" off in Settings → Your account, which also stops keeping theirs. Nothing is kept for an app with no home scheme, and `keep` with `blind` is refused (`400`). The person's switch is a floor, not consent: send `keep` only for players who agreed to their chats being used to improve your app. Default `false` |
+| `keep` | | `true` keeps this turn for replay tests (Citadel #836) if it is among its session's first 5: the prompt exactly as you sent it, the agent's tool calls with their results, its reply, a hash of `system`, and the turn's `model`, `effort`, `toolSearch` and other switches (a replay reruns with them), in your home scheme's shared folder under `.replay/<app>/`. That folder is hidden from the Files view and only the scheme's minions read it, through the `citadel:replay` skill, when someone changes your agent's prompt or tools. Files go after 30 days, when you delete the session, and when the person turns "App chats for replay tests" off in Settings → Your account, which also stops keeping theirs. Nothing is kept for an app with no home scheme, and `keep` with `blind` is refused (`400`). The person's switch is a floor, not consent: send `keep` only for players who agreed to their chats being used to improve your app. Default `false` |
 | `images` | | Up to 8 paths of image files inside your own `DATA_DIR` (absolute, or relative to it). Citadel shrinks each to at most 1568 px on the long side (never enlarges), re-encodes it as JPEG and puts it before the prompt in the turn's first message, on any turn including `blind: true`. Symlinks and `..` are resolved first: a path that lands outside `DATA_DIR` is refused with HTTP `400`. Caps, checked before the turn starts: more than 8 images, or more than 40 MB of files in total, is HTTP `413` and the message says whether it was the count or the total size; an unreadable or missing file is `400`. Claude turns only: with a Codex model, or the Codex override, the turn ends with `bad_request`. Nothing is kept beyond what a turn already keeps. Default none |
 | `media` | | `true` gives the agent Citadel's image and sound tools, spending the person's own OpenRouter money, or their Codex plan for PNGs ("Media" below); default `false`. Your own `mcp` servers can't be called `citadel` then |
 | `timeoutSec` | | 1 to 900, default 180 |
@@ -284,7 +288,7 @@ there: Citadel passes it through and never reads it.
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
 own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
 a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, WebSearch and WebFetch
-if `webSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image`, `generate_audio` and `generate_speech` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
+if `webSearch` is `true`, ToolSearch if `toolSearch` is `true`, and `mcp__citadel__generate_image`, `edit_image`, `generate_audio` and `generate_speech` if `media` is `true` (and `generate_image_codex` when the person has Codex). Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
 
@@ -978,6 +982,9 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-19:** Turns take `effort` (`low`, `medium`, `high`) and `toolSearch: true` (MCP tools
+  load only when the agent searches for them). Kept turns record both. Claude Code doesn't let a
+  turn clear old tool results before compacting yet: Citadel has no switch for it.
 - **2026-11-19:** `/api/projects/<id>/ci-files/pins`: the builds a roll back holds your scheme's CI
   packages at, for your updater to hand out in place of the newest ("Your home scheme's CI files").
 

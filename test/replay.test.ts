@@ -70,7 +70,7 @@ process.stdin.on('data', (d) => {
     const r = lines[2].result;
     out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__app__get', input: { id: 1 } }] } });
     out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: r.isError, content: r.content }] } });
-    out({ type: 'assistant', message: { content: [{ type: 'text', text: system.split('\\n')[0] + ' | ' + prompt + ' | tools ' + tools + ' | resumed ' + !!opt('--resume') }] } });
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: system.split('\\n')[0] + ' | ' + prompt + ' | tools ' + tools + ' | resumed ' + !!opt('--resume') + ' | effort ' + (opt('--effort') ?? 'default') + ' | builtins ' + opt('--tools') }] } });
     out({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.01 });
   });
   const rpc = (m) => stub.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');
@@ -88,7 +88,7 @@ test('a run reruns each kept chat on the old and new prompt, writes X and Y with
   mkdirSync(chats);
   const lines = (t: Kept[]) => t.map((x) => JSON.stringify({ v: 1, at: 0, turn: 1, ...x })).join('\n') + '\n';
   const call = (n: number) => [{ name: 'mcp__app__get', input: { id: 1 }, ok: true, result: `recorded ${n}` }];
-  writeFileSync(join(chats, 'a-s1-aaaaaaaa.jsonl'), lines([turn(1, call(1), 'Make my aura blue.'), turn(2, call(2), 'Brighter.')]));
+  writeFileSync(join(chats, 'a-s1-aaaaaaaa.jsonl'), lines([turn(1, call(1), 'Make my aura blue.'), turn(2, call(2), 'Brighter.')].map((t) => ({ ...t, effort: 'low', toolSearch: true }))));
   writeFileSync(join(chats, 'b-s2-bbbbbbbb.jsonl'), lines([turn(1, call(1), 'Hi')]));
   writeFileSync(join(root, 'old.md'), 'OLD PROMPT\nrest');
   writeFileSync(join(root, 'new.md'), 'NEW PROMPT\nrest');
@@ -112,7 +112,8 @@ test('a run reruns each kept chat on the old and new prompt, writes X and Y with
     if (k.file.startsWith('a-')) {
       assert.match(md, /Make my aura blue\.[\s\S]*Brighter\./);
       assert.match(md.split('## Turn 2')[1], /recorded 2[\s\S]*resumed true/, "turn 2 resumes and gets turn 2's recorded result");
-    }
+      assert.match(x, /effort low \| builtins ToolSearch/, 'the kept effort and tool search (#1084)');
+    } else assert.match(x, /effort default \| builtins \n/, 'a turn kept before #1084: default effort, no tool search');
   }
   assert.deepEqual(readdirSync(join(config, 'projects')), [], 'the transcripts are gone');
   // Over the cap: refused before any turn runs, unless asked.

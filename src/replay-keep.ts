@@ -44,6 +44,9 @@ export interface KeptTurn {
   agents: boolean;
   webSearch: boolean;
   compactWindow: number;
+  /** #1084; turns kept before it have neither, and ran at Claude Code's default effort without tool search. */
+  effort?: string | null;
+  toolSearch?: boolean;
   calls: KeptCall[];
   text: string;
   stop: string;

@@ -206,8 +206,8 @@ function finish(el, head, tail) {
 
 let closedGroup = null, closedList = [];
 const closedRows = new Map();
-// The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place).
-let closedUsage = null, closedDay = '';
+// The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place) and the weekly limit (cost.js).
+let closedUsage = null, closedDay = '', closedShare = null;
 
 function dismissedGroup() {
   const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed'));
@@ -229,7 +229,9 @@ function fillClosed(closed) {
   const rows = [];
   if (view.showClosed) {
     const day = pacificDay();
-    if (closedUsage !== usage || closedDay !== day) closedRows.clear();
+    const share = weekShare(1);
+    if (closedUsage !== usage || closedDay !== day || closedShare !== share) closedRows.clear();
+    closedShare = share;
     closedDay = day;
     closedUsage = usage;
     const live = new Set();

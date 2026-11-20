@@ -480,13 +480,16 @@ test('a container that will not go keeps the job running and /out unread, then s
 });
 
 test('a failed pause leaves the job running, and its time limit still counts', async () => {
-  const r = runner();
+  const lines: string[] = [];
+  const r = runner(block(), (l) => lines.push(l));
   const msg = start({ limit_s: 1 }, { resumable: true });
   await r.handle(msg);
   await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
   stickContainer(msg.id, true);
   await r.handle({ type: 'job.pause', id: msg.id });
-  await until('the stop tried', () => podmanCalls().some((c) => c.join(' ') === `stop -t 1 citadel-job-${msg.id}`), 6000, statesTail);
+  // Waits for the runner to hear the stop failed, not for the stop in argv.log: the fake logs its argv before it reads
+  // the stuck flag, so un-sticking on the log line let a slow stop succeed and really pause the job (#1208).
+  await until('the stop failed', () => lines.some((l) => l.startsWith(`Job ${msg.id}: podman stop failed, still running`)), 6000, statesTail);
   stickContainer(msg.id, false);
   await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 4000, statesTail);
   assert.match(lastState(msg.id)!.error!, /time limit/);

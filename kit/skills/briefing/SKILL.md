@@ -19,6 +19,9 @@ goes on working out what was meant. Six parts, in this order, cut that down.
    test goes green, a file exists in a folder), not process steps. One to five lines.
 4. **Ruled out or tried**: decisions already made (quoted, dated), what was tried and failed and
    why, what is out of scope. Write "Nothing yet" when that's true, so the minion doesn't go looking.
+   A change to how saved things are stored, read or applied (records, settings, saved files, a person's
+   own items) also says here what happens to the ones saved before it: migrated, left as they are on
+   purpose, or flagged to their owner.
 5. **Read first**: paths to the handoffs, specs, reports and code worth reading, each with a clause
    on why. Paths, never pasted text: the minion reads the file itself.
 6. **Model and effort**, with one line of why from the Taskmaster's model table: `Opus 5.5 high:

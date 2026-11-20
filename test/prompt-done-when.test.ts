@@ -23,3 +23,10 @@ test('a minion prompt carries the finishing-work lines in its cached system part
   assert.match(p, /a summary that announces the next step/);
   assert.match(p, /risky or destructive actions, and ships at the Shipping line's go threshold, wait for a person's go/);
 });
+
+test('the Taskmaster prompt says a brief covers what happens to things saved before a change (#1172)', () => {
+  const line = build('coordinator').split('\n').find((l) => l.includes('"Done when"'))!;
+  assert.match(line, /how saved things are stored, read or applied/);
+  assert.match(line, /what happens to the ones saved before the change: migrated, left as they are on purpose, or flagged to their owner/);
+  assert.ok(!build('ticket').includes('saved before the change'));
+});

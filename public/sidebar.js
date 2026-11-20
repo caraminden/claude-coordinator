@@ -9,6 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
+import { refreshWelcome, welcomePanel } from './welcome.js';
 import { byUrgency, cardChip, cardsYours, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
@@ -33,7 +34,10 @@ export async function openStartScheme() {
   if (id != null) return replaceHash(`#/p/${id}`); // replace: Back shouldn't bounce through here
   setView({ kind: 'projects' });
   crumbs.replaceChildren('New scheme');
-  app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
+  // In no scheme yet (#1151): the welcome says how to get into one, over the form to make one.
+  const welcome = welcomePanel(null, []);
+  if (welcome) refreshWelcome();
+  app.replaceChildren(...(welcome ? [welcome] : []), h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
 }
 
 /** Where a new scheme's code comes from. */

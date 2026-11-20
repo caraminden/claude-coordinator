@@ -27,6 +27,7 @@ import { payerLine } from './payer.js';
 import { sideEvent } from './sidethread.js';
 import { selectActions } from './selectact.js';
 import { waitingStrip } from './waiting.js';
+import { chatWelcome, refreshWelcome } from './welcome.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { applyEvent, createProgress, nowDoing, planEstimate } from './progress.js';
 import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote, unclamp, userBubble } from './bubbles.js';
@@ -329,7 +330,8 @@ export function chatSection(chatId, ticket) {
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
   selectActions(log, form);
-  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
+  // A new person's first-day welcome (#1151), over their Taskmaster's chat only.
+  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), chatWelcome(ticket), log, view.typingEl, form);
 }
 
 
@@ -831,6 +833,8 @@ function newSessionState(part) {
 }
 
 export function appendEvent(event, scroll = true) {
+  // "Say hi" ticks as you send (#1151): only live items, and only while the welcome is still yours.
+  if (scroll && event.kind === 'user_message' && account?.welcome && JSON.parse(event.data).author === me) refreshWelcome();
   const m = view.merged;
   if (!m) return drawEvent(event, scroll);
   const id = event.ticket_id;

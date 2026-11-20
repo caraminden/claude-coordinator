@@ -184,6 +184,19 @@ export const TURN_SLICE = 'citadel-turns.slice';
 /** Host Taskmaster turns and the shared Citadel tools pool they call (#1280): apart from minion turns, so a storm there doesn't stall them. */
 export const TASKMASTER_SLICE = 'citadel-taskmasters.slice';
 
+/** The folder beside a turn's pinned scripts that keeps Node's compile cache for its hook starts (hookCommand). */
+export const COMPILE_CACHE = '.compile-cache';
+
+/**
+ * A hook's shell command: node, the pinned script and its arguments, each quoted, with Node's compile cache in
+ * COMPILE_CACHE beside the script (#1296). Node keys the cache by path, so each turn's pin folder warms its own on its
+ * first call and it goes with the turn, and a deploy's new copies never read an old one. A warm start costs about a bare
+ * node start: the tripwire's 167 ms of CPU fell to 33 on a quiet box.
+ */
+export function hookCommand(script: string, ...args: string[]): string {
+  return [`NODE_COMPILE_CACHE='${join(dirname(script), COMPILE_CACHE)}'`, ...[process.execPath, script, ...args].map((s) => `'${s}'`)].join(' ');
+}
+
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
 export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean, readOnly: string[] = [], envFiles: string[] = []): TripwireConfig {
   return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask, ...(readOnly.length ? { readOnly } : {}), ...(envFiles.length ? { envFiles } : {}) };
@@ -196,14 +209,14 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
  */
 export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE, readOnly: string[] = [], envFiles: string[] = []) {
   const config = tripwireConfig(projectId, claudeConfig, ask, readOnly, envFiles);
-  const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
+  const command = hookCommand(script, JSON.stringify(config));
   // onFailure: a check that times out (or dies outside tripwire.ts's own fail-open catch) blocks the call; without it Claude Code lets it through.
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
 }
 
 /** The PreToolUse hook a side question's fork gets (#932): every tool goes through src/side-guard.ts, which refuses writes. */
 export function sideGuardHook(script = turnPins().SIDE_GUARD) {
-  return { matcher: '.*', hooks: [{ type: 'command', command: [process.execPath, script].map((s) => `'${s}'`).join(' '), timeout: 10, onFailure: 'block' }] };
+  return { matcher: '.*', hooks: [{ type: 'command', command: hookCommand(script), timeout: 10, onFailure: 'block' }] };
 }
 
 /**
@@ -213,7 +226,7 @@ export function sideGuardHook(script = turnPins().SIDE_GUARD) {
  * folder the check leaves once it has sent the reply back. `refs` is the scheme-refs snapshot (writeSchemeRefs).
  */
 export function linkCheckHooks(roots: string[], script = turnPins().LINK_CHECK, nudged?: string, refs?: string) {
-  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}), ...(refs ? { refs } : {}) })].map((s) => `'${s}'`).join(' ');
+  const command = hookCommand(script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}), ...(refs ? { refs } : {}) }));
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
@@ -226,7 +239,7 @@ export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinato
  * is the scheme's shared folder and the minion's own, since people read the files in both. `sent` is a file in the turn's folder listing the sentences already refused.
  */
 export function wordingHooks(shared: string[], sent: string, script = turnPins().WORDING) {
-  const command = [process.execPath, script, JSON.stringify({ shared, sent })].map((s) => `'${s}'`).join(' ');
+  const command = hookCommand(script, JSON.stringify({ shared, sent }));
   return { matcher: WORDING_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }
 
@@ -236,7 +249,7 @@ export function wordingHooks(shared: string[], sent: string, script = turnPins()
  * `sent` a file in the turn's folder listing the numbers already refused.
  */
 export function schemeRefsHooks(refs: string, sent: string, script = turnPins().SCHEME_REFS) {
-  const command = [process.execPath, script, JSON.stringify({ refs, sent })].map((s) => `'${s}'`).join(' ');
+  const command = hookCommand(script, JSON.stringify({ refs, sent }));
   return { matcher: SCHEME_REFS_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }
 
@@ -659,6 +672,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
   args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
   env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+  // The kit's hooks (kit/hooks/hooks.json) keep their compile cache where the turn's own hooks do (hookCommand).
+  env.CITADEL_HOOK_CACHE = join(pin, COMPILE_CACHE);
   // The kit's title check (kit/hooks/answer-check.ts, #1154) compares the title the turn starts with to its prompt. Not
   // COORDINATOR_: those count toward the cached prefix's fingerprint (src/keepalive.ts), which a rename doesn't change.
   if (ticket.kind !== 'coordinator') env.CITADEL_MINION_TITLE = ticket.title;

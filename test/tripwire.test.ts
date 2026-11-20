@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { envBelow, tripwire, type TripwireConfig } from '../src/tripwire.ts';
@@ -859,7 +859,7 @@ test('reasons say why and what to do instead', () => {
 });
 
 test('the hook script blocks with exit 2, asks in a minion turn, and lets other calls through', () => {
-  const hook = (ask: boolean) => tripwireHooks(2, `${home}/.claude`, ask).PreToolUse[0].hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
+  const hook = (ask: boolean) => tripwireHooks(2, `${home}/.claude`, ask).PreToolUse[0].hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
   const [node, script, config] = hook(true);
   assert.equal(script, TRIPWIRE);
   const run = (input: object, c = config) => spawnSync(node, [script, c], { input: JSON.stringify(input), encoding: 'utf8' });
@@ -876,6 +876,18 @@ test('the hook script blocks with exit 2, asks in a minion turn, and lets other 
   assert.equal(run(enable, hook(false)[2]).status, 2);
   assert.equal(run({ tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: '/tmp' }).status, 0);
   assert.equal(spawnSync(node, [script, '{bad'], { input: '{}', encoding: 'utf8' }).status, 0);
+});
+
+test('the hook command runs through bash as Claude Code runs it, and warms a compile cache beside the pinned script (#1296)', () => {
+  const { command } = tripwireHooks(2, `${home}/.claude`, true).PreToolUse[0].hooks[0];
+  const cache = join(dirname(TRIPWIRE), '.compile-cache');
+  assert.ok(command.startsWith(`NODE_COMPILE_CACHE='${cache}' `), command);
+  const run = (cmd: string) => spawnSync('bash', ['-c', cmd], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cat ~/.ssh/id_rsa' }, cwd: '/tmp' }), encoding: 'utf8' });
+  const blocked = run(command);
+  assert.equal(blocked.status, 2);
+  assert.match(blocked.stderr, /\[tripwire\].*SSH keys/);
+  assert.ok(readdirSync(cache).length, 'node wrote its cache');
+  assert.equal(run(command).status, 2, 'and blocks the same from a warm cache');
 });
 
 test('the tripwire hook is set to block the call when its check times out', () => {

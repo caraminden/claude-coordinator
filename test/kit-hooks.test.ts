@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -32,6 +32,8 @@ test('hooks.json is valid and every script it names exists in kit/hooks', () => 
     assert.ok(file && readdirSync(HOOKS).includes(file), c);
   }
   assert.ok(hooks.Stop[0].hooks.some((h: any) => h.command.includes('job-check.ts')));
+  // Every node hook starts with the turn's compile cache (#1296); outside a Citadel turn the variable is empty, which leaves it off.
+  for (const c of commands.filter((c: string) => /\bnode /.test(c))) assert.ok(c.startsWith('NODE_COMPILE_CACHE="$CITADEL_HOOK_CACHE" node '), c);
 });
 
 test('job check: refuses a minion\'s stop while its background job runs, at most twice per prompt', () => {
@@ -435,4 +437,20 @@ test('batch nudge: third single lookup in a row, even-numbered minions only, nev
   assert.equal(callsInMessage(tp, 'y1'), 1);
   assert.equal(callsInMessage(tp, 'none'), 1);
   for (const id of ['x1', 'x2', 'x1', 'x2']) assert.equal(call('Read', { transcript_path: tp, tool_use_id: id }, env, 's5'), null, 'batched calls never count');
+});
+
+test('a kit hook runs through bash as Claude Code runs it, cached in CITADEL_HOOK_CACHE when the turn sets it (#1296)', () => {
+  const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+  const command = hooks.PreToolUse.find((m: any) => m.matcher.includes('Agent')).hooks[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', join(HOOKS, '..'));
+  const dir = mkdtempSync(join(tmpdir(), 'kit-hook-cache-'));
+  const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: dir, tool_input: { description: 'd', prompt: 'p' } });
+  const run = (env: Record<string, string>) => spawnSync('bash', ['-c', command], { cwd: dir, input, encoding: 'utf8', env: { ...process.env, CITADEL_HOOK_CACHE: '', ...env } });
+  const cache = join(dir, 'pin', '.compile-cache');
+  const cached = run({ CITADEL_HOOK_CACHE: cache });
+  assert.equal(JSON.parse(cached.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  assert.ok(readdirSync(cache).length, 'node wrote its cache');
+  // Outside a Citadel turn: the same answer, and no cache anywhere.
+  assert.equal(run({}).stdout, cached.stdout);
+  assert.deepEqual(readdirSync(dir), ['pin']);
+  rmSync(dir, { recursive: true, force: true });
 });

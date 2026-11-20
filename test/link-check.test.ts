@@ -97,13 +97,13 @@ test('one nudge per prompt, counted by its own marker, not by another hook\'s st
 });
 
 test('the hook script prints a block decision, or nothing', () => {
-  const [node, script, config] = linkCheckHooks(cfg.roots).Stop[0].hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
+  const [node, script, config] = linkCheckHooks(cfg.roots).Stop[0].hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
   assert.equal(script, LINK_CHECK);
   assert.deepEqual(JSON.parse(config), cfg);
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   // As the runner wires it, with the turn's marker: the second stop of the prompt ends.
   const nudged = join(root, 'script-nudged');
-  const withMarker = linkCheckHooks(cfg.roots, LINK_CHECK, nudged).Stop[0].hooks[0].command.split(' ')[2].slice(1, -1);
+  const withMarker = linkCheckHooks(cfg.roots, LINK_CHECK, nudged).Stop[0].hooks[0].command.split(' ')[3].slice(1, -1);
   const again = { hook_event_name: 'Stop', stop_hook_active: true, prompt_id: 'p', last_assistant_message: '![x](../shared/268/people-desktop.png)' };
   assert.equal(JSON.parse(run(again, withMarker).stdout).decision, 'block');
   assert.deepEqual([existsSync(nudged), run(again, withMarker).stdout], [true, '']);

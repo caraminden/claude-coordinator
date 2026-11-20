@@ -38,9 +38,9 @@ let joshCookie = '';
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 
-async function edit(scope: string, edits: unknown) {
+async function edit(scope: string, edits: unknown, overlaps?: string[]) {
   const res = await fetch(`${base}/api/tickets/${ticket.id}/edit-instructions`, {
-    method: 'POST', headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, edits }),
+    method: 'POST', headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, edits, overlaps }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
@@ -92,4 +92,65 @@ test('Citadel-wide text is refused for a turn run for a non-member, and saves on
   await edit('citadel', [{ find: 'Rule A.', replace: 'Rule B.' }]);
   assert.equal(store.appInstructions().text, 'Rule B.');
   assert.equal(store.appInstructionHistory(1)[0].by, `#${ticket.id} for Josh`);
+});
+
+// One home per rule (#1162): an edit that repeats a registered rule, or that the turn's Grunt says is already written, is
+// held on a card; Save anyway saves exactly what it showed, Work it in and Cancel edit save nothing.
+const COPY = 'Ask with a card for a go, A or B, or an offer of work; tuning details are yours to pick.';
+const lastCard = () => JSON.parse(store.eventsOfKinds(ticket.id, ['plan']).at(-1)!.data);
+// A decided card wakes the minion with the answer: wait for that turn, whose token the next edit uses.
+const verdict = async (verdict: string, as = cookie, notes?: string) => {
+  const n = turns().length;
+  const res = await fetch(`${base}/api/tickets/${ticket.id}/verdict`, { method: 'POST', headers: { Cookie: as, 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: lastCard().id, verdict, notes }) });
+  if (res.status === 202) await until('the answer\'s turn', () => turns().length > n);
+  return { status: res.status, body: await res.json() };
+};
+
+test('an edit repeating the card rule is held on a card, and Save anyway saves what it showed', async () => {
+  const was = store.getProject(project.id)!.instructions;
+  const r = await edit('scheme', [{ find: 'Gamma.', replace: `Gamma.\n\n${COPY}` }]);
+  assert.equal(r.held, 1);
+  assert.match(r.found[0], /Registered rule: When to use a card/);
+  assert.equal(store.getProject(project.id)!.instructions, was, 'nothing saved yet');
+  const card = lastCard();
+  assert.equal(card.instructions.scope, 'scheme');
+  assert.equal(card.to, 'Josh');
+  assert.match(card.plan, /Already said elsewhere[\s\S]*the Citadel-wide card rule/);
+  const ok = await verdict('approve');
+  assert.equal(ok.status, 202, JSON.stringify(ok.body).slice(0, 300));
+  assert.equal(store.getProject(project.id)!.instructions, `${was}\n\n${COPY}`);
+  assert.match(store.instructionHistory(project.id, 1)[0].by, new RegExp(`#${ticket.id} for Josh, saved by `));
+  assert.equal((await verdict('reject')).status, 409, 'decided once');
+});
+
+test("the turn's own Grunt findings hold an edit too; Cancel edit and Work it in save nothing", async () => {
+  const was = store.getProject(project.id)!.instructions;
+  const r = await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. Plus a short new line here.' }], ['CLAUDE.md, Working rules: already says this']);
+  assert.equal(r.held, 1);
+  assert.match(lastCard().plan, /From the minion's own check: CLAUDE\.md, Working rules/);
+  assert.equal((await verdict('reject')).status, 202);
+  assert.equal(lastCard().status, 'rejected');
+  await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. Plus a short new line here.' }], ['CLAUDE.md says it']);
+  assert.equal((await verdict('revise')).status, 202, 'notes are optional');
+  assert.equal(store.getProject(project.id)!.instructions, was);
+});
+
+test('Save anyway refuses when the text changed under the card, and a Citadel-wide one needs an admin', async () => {
+  await edit('scheme', [{ find: 'Beta two.', replace: `Beta two.\n\n${COPY} Again.` }]);
+  store.setProjectInstructions(project.id, `${store.getProject(project.id)!.instructions}\nMoved on.`, 'Cara');
+  assert.equal((await verdict('approve')).status, 409);
+  store.setAppInstructions('Rule B.', 'Cara');
+  await edit('citadel', [{ find: 'Rule B.', replace: `Rule B.\n\n${COPY}` }]);
+  store.updateUser(josh, { admin: 0 });
+  assert.equal((await verdict('approve', joshCookie)).status, 403);
+  assert.equal(store.appInstructions().text, 'Rule B.');
+  assert.equal((await verdict('approve')).status, 202);
+  assert.match(store.appInstructions().text, /tuning details/);
+});
+
+test('a person\'s own Settings save is checked by the same matcher', async () => {
+  const r = await api(`/api/projects/${project.id}/instructions/overlaps`, 'POST', { scope: 'scheme', text: `Hello.\n\nOne card, one choice: ask early and together, with your pick marked.` });
+  assert.equal(r.found.length, 1);
+  assert.match(r.found[0].why, /one home is the Citadel-wide card rule/);
+  assert.deepEqual((await api(`/api/projects/${project.id}/instructions/overlaps`, 'POST', { scope: 'scheme', text: 'Hello there, a brand new line about lunch plans.' })).found, []);
 });

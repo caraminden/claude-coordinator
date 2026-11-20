@@ -1593,6 +1593,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/instructions/overlaps": {
+  "anon": "401 Not logged in",
+  "person": "400 scope must be \"scheme\" or \"citadel\"",
+  "member": "400 scope must be \"scheme\" or \"citadel\"",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/instructions/sources": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -3224,8 +3234,8 @@
  },
  "POST /api/tickets/:minion1/verdict": {
   "anon": "401 Not logged in",
-  "person": "400 verdict must be approve or revise",
-  "member": "400 verdict must be approve or revise",
+  "person": "400 verdict must be approve, revise or reject",
+  "member": "400 verdict must be approve, revise or reject",
   "outsider": "404 No such minion",
   "tmA": "403 Only people approve plans",
   "tmB": "403 Only people approve plans",
@@ -3964,8 +3974,8 @@
  },
  "POST /api/tickets/:taskmasterA/verdict": {
   "anon": "401 Not logged in",
-  "person": "400 verdict must be approve or revise",
-  "member": "400 verdict must be approve or revise",
+  "person": "400 verdict must be approve, revise or reject",
+  "member": "400 verdict must be approve, revise or reject",
   "outsider": "404 No such minion",
   "tmA": "403 Only people approve plans",
   "tmB": "403 Only people approve plans",

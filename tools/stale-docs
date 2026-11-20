@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+// stale-docs (#1164): two checks for documents that have gone out of date. Plain JavaScript in one file, so the copy on a
+// turn's PATH runs in any scheme's repo; it reads, and writes only when `archive` is told to.
+//
+//   stale-docs refs [--repo <dir>] [--allow <file>]
+//     Every repo path written in backticks in the repo's own instruction files (CLAUDE.md, README.md, AGENTS.md,
+//     .claude/skills/*/SKILL.md, .claude/rules/*.md) must exist in the repo (git's tracked and untracked files). Prints
+//     `file:line  path  (why)` per dead one and exits 1. A span counts as a path when it has a slash and its first folder is
+//     one the repo has, or has a file extension, or ends in `/`; placeholders (<x>, {x}, $x, ...), URLs, `~` and absolute
+//     paths are skipped. A path that lives only in the shared folder (specs/, handoffs/ ...) is dead in a repo doc too:
+//     the hint says so. Allow-list: <repo>/.stale-docs-allow, one `pattern  # reason` per line (* matches anything, a
+//     reason is required, so an example or a shared-folder path stays on purpose). A line with no reason is an error.
+//
+//   stale-docs shared --dir <shared folder> [--pins <file>] [--refs <path>...] [--sub handoffs,specs] [--min-age <days>] [--json]
+//     For each file in the shared folder's handoffs/ and specs/: who points at it (any other shared file, or any --refs
+//     file or folder: the repo, the memory folder, a dump of minion briefs), whether it is pinned (--pins: one path per
+//     line, relative to the folder), the minions it names (#N, for the caller to check closed and live), its age, and a
+//     reason. Verdict: pinned, pointed-at, young (under --min-age days, default 14) or unpointed: the only archive candidate.
+//     A spec that says "Nothing is built" / "Nothing here is built" is listed as a stale claim for a person to check.
+//
+//   stale-docs archive --dir <shared folder> --list <file> [--pins <file>] [--refs <path>...]
+//     Moves the files named in <list> (one path per line, relative to the folder) into <folder>/archive/<same path>, never
+//     deleting. It re-checks each one first and leaves it where it is when it is pinned or something points at it.
+//     Run it only on a list a member has approved.
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+
+const usage = 'usage: stale-docs refs|shared|archive [options] (see the header of this file)';
+const die = (msg, code = 2) => { process.stderr.write(`stale-docs: ${msg}\n`); process.exit(code); };
+
+const [cmd, ...argv] = process.argv.slice(2);
+const opt = { refs: [] };
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  const val = () => argv[++i] ?? die(usage);
+  if (a === '--repo') opt.repo = val();
+  else if (a === '--allow') opt.allow = val();
+  else if (a === '--dir') opt.dir = val();
+  else if (a === '--pins') opt.pins = val();
+  else if (a === '--list') opt.list = val();
+  else if (a === '--sub') opt.sub = val();
+  else if (a === '--min-age') opt.minAge = Number(val());
+  else if (a === '--json') opt.json = true;
+  else if (a === '--refs') { while (argv[i + 1] && !argv[i + 1].startsWith('--')) opt.refs.push(argv[++i]); }
+  else if (a === '-h' || a === '--help') { console.log(usage); process.exit(0); }
+  else die(`unknown option ${a}\n${usage}`);
+}
+
+const lines = (file) => readFileSync(file, 'utf8').split('\n');
+const globRe = (g) => new RegExp('^' + g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+
+// ---------- refs ----------
+const SHARED_DIRS = ['handoffs', 'specs', 'reports', 'mockups', 'scout', 'inbox', 'rule-drafts', 'retro-log'];
+const EXT = /\.(ts|js|mjs|cjs|tsx|jsx|md|sh|json|html|css|yml|yaml|txt|toml|py|rs|ps1|sql|png|svg)$/;
+
+function repoFiles(repo) {
+  let out = '';
+  try { out = execFileSync('git', ['-C', repo, 'ls-files', '-co', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 64 << 20 }); }
+  catch { die(`${repo} is not a git repo`); }
+  return out.split('\n').filter(Boolean);
+}
+
+function instructionFiles(repo, files) {
+  return files.filter((f) => /^(CLAUDE\.md|README\.md|AGENTS\.md)$/.test(f) || /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f) || /^\.claude\/rules\/[^/]+\.md$/.test(f));
+}
+
+function readAllow(file) {
+  if (!existsSync(file)) return [];
+  const rules = [];
+  lines(file).forEach((raw, n) => {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) return;
+    const m = line.match(/^(\S+)\s+#\s*(\S.*)$/);
+    if (!m) die(`${file}:${n + 1}: an allow-list line needs a reason: "pattern  # reason"`);
+    rules.push(globRe(m[1].replace(/^\.\//, '')));
+  });
+  return rules;
+}
+
+/** The repo path a backticked span names, or null when it isn't one. */
+export function pathOf(span, tops) {
+  let s = span.trim();
+  if (!s || /^(https?:|~|\/)/.test(s) || /[<>{}$|…]|\.\.\.|\s--/.test(s.split(/\s+/)[0]) ) return null;
+  s = s.split(/\s+/)[0]; // `tools/land.sh --full` names tools/land.sh
+  s = s.replace(/^\.\//, '').replace(/#.*$/, '').replace(/:\d+(-\d+)?$/, '').replace(/[.,;:)]+$/, '');
+  if (!/^[\w.@+-][\w.@+\/*-]*$/.test(s)) return null;
+  if (/^\d+\/\d+/.test(s)) return null;
+  const hasSlash = s.includes('/');
+  if (hasSlash) {
+    if (s.startsWith('.git/')) return null;
+    if (EXT.test(s) || tops.has(s.split('/')[0])) return s;
+    return null;
+  }
+  return EXT.test(s) && /^[\w][\w.-]*$/.test(s) ? s : null;
+}
+
+function exists(p, files, dirs, bases) {
+  if (p.includes('*')) { const re = globRe(p.replace(/\/$/, '')); return files.some((f) => re.test(f)) || [...dirs].some((d) => re.test(d)); }
+  const q = p.replace(/\/$/, '');
+  if (q.includes('/')) return files.includes(q) || dirs.has(q);
+  return files.includes(q) || dirs.has(q) || bases.has(q);
+}
+
+function refsCheck() {
+  const repo = resolve(opt.repo ?? '.');
+  const files = repoFiles(repo);
+  const dirs = new Set();
+  for (const f of files) for (let d = dirname(f); d !== '.'; d = dirname(d)) dirs.add(d);
+  const tops = new Set(files.map((f) => f.split('/')[0]).filter((t) => dirs.has(t)));
+  const bases = new Set(files.map((f) => basename(f)));
+  const allow = readAllow(opt.allow ?? join(repo, '.stale-docs-allow'));
+  const dead = [];
+  const docs = instructionFiles(repo, files);
+  for (const doc of docs) {
+    let fence = false;
+    lines(join(repo, doc)).forEach((line, n) => {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return; }
+      if (fence) return;
+      for (const m of line.matchAll(/`([^`\n]+)`/g)) {
+        const p = pathOf(m[1], tops);
+        if (!p || allow.some((re) => re.test(p)) || exists(p, files, dirs, bases)) continue;
+        const shared = SHARED_DIRS.includes(p.split('/')[0]) ? ' it lives only in the shared folder, which a repo doc can\'t count on: point at the repo, or allow-list it with a reason' : '';
+        dead.push(`${doc}:${n + 1}  ${p}  (not in the repo.${shared})`);
+      }
+    });
+  }
+  if (dead.length) { console.log(dead.join('\n')); console.log(`\n${dead.length} dead path${dead.length > 1 ? 's' : ''} in ${docs.length} instruction files. Fix the doc, or add the path to .stale-docs-allow with a reason.`); process.exit(1); }
+  console.log(`ok: every backticked repo path in ${docs.length} instruction files exists`);
+}
+
+// ---------- shared ----------
+function walk(dir, base = dir, out = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'archive' && dir === base) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, base, out); else out.push(relative(base, p));
+  }
+  return out;
+}
+
+const TEXT = /\.(md|txt|json|ts|js|html|sh|yml|yaml|diff)$/;
+function corpusOf(dir, extra) {
+  // Every text file that could point at a shared file: the shared folder itself and each --refs path.
+  const corpus = [];
+  const skip = [opt.list, opt.pins].filter(Boolean).map((f) => resolve(f));
+  const add = (root, label, rel) => { if (skip.includes(resolve(root, rel))) return; try { corpus.push({ id: `${label}${rel}`, text: readFileSync(join(root, rel), 'utf8') }); } catch { /* unreadable: skip */ } };
+  for (const f of walk(dir).filter((f) => TEXT.test(f))) add(dir, '', f);
+  for (const r of extra) {
+    const root = resolve(r);
+    if (!existsSync(root)) continue;
+    if (statSync(root).isDirectory()) for (const f of walk(root).filter((f) => TEXT.test(f))) add(root, `${basename(root)}/`, f);
+    else corpus.push({ id: basename(root), text: readFileSync(root, 'utf8') });
+  }
+  return corpus;
+}
+
+function pinsOf() { return new Set(opt.pins && existsSync(opt.pins) ? lines(opt.pins).map((l) => l.trim()).filter(Boolean) : []); }
+
+/** Files (other than itself) whose text names this file's path or its file name. */
+function pointers(file, corpus) {
+  const name = basename(file);
+  return corpus.filter((c) => c.id !== file && (c.text.includes(file) || c.text.includes(name))).map((c) => c.id);
+}
+
+function judge(dir, file, corpus, pins, minAge) {
+  const text = readFileSync(join(dir, file), 'utf8');
+  const age = Math.floor((Date.now() - statSync(join(dir, file)).mtimeMs) / 864e5);
+  const by = pointers(file, corpus);
+  const minions = [...new Set([...text.matchAll(/(?:^|[^\w&])#(\d{2,5})\b/g)].map((m) => Number(m[1])))].slice(0, 12);
+  const claim = /nothing (here )?is built/i.test(text) && file.startsWith('specs/') ? 'says "Nothing is built": check the minion that built it' : '';
+  let verdict, reason;
+  if (pins.has(file)) { verdict = 'pinned'; reason = 'pinned: moving it would leave the pin missing'; }
+  else if (by.length) { verdict = 'pointed-at'; reason = `named by ${by.slice(0, 3).join(', ')}${by.length > 3 ? ` and ${by.length - 3} more` : ''}`; }
+  else if (age < minAge) { verdict = 'young'; reason = `${age} days old, under ${minAge}`; }
+  else { verdict = 'unpointed'; reason = `nothing names it; ${age} days old`; }
+  return { file, verdict, reason, age_days: age, pointed_by: by.length, minions, claim };
+}
+
+function sharedCheck() {
+  const dir = resolve(opt.dir ?? die('--dir <shared folder> is needed'));
+  const subs = (opt.sub ?? 'handoffs,specs').split(',');
+  const corpus = corpusOf(dir, opt.refs);
+  const pins = pinsOf();
+  const rows = [];
+  for (const s of subs) if (existsSync(join(dir, s))) for (const f of walk(join(dir, s)).filter((f) => TEXT.test(f))) rows.push(judge(dir, `${s}/${f}`, corpus, pins, opt.minAge ?? 14));
+  rows.sort((a, b) => a.file.localeCompare(b.file));
+  if (opt.json) { console.log(JSON.stringify(rows, null, 1)); return; }
+  const count = (v) => rows.filter((r) => r.verdict === v).length;
+  console.log(`${rows.length} files: ${count('unpointed')} unpointed (archive candidates), ${count('pointed-at')} pointed at, ${count('young')} young, ${count('pinned')} pinned\n`);
+  for (const r of rows) console.log(`${r.verdict.padEnd(10)} ${r.file}  ${r.reason}${r.minions.length ? `  [${r.minions.map((n) => '#' + n).join(' ')}]` : ''}${r.claim ? `  ** ${r.claim}` : ''}`);
+}
+
+function archive() {
+  const dir = resolve(opt.dir ?? die('--dir <shared folder> is needed'));
+  const list = lines(opt.list ?? die('--list <file> is needed')).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const corpus = corpusOf(dir, opt.refs);
+  const pins = pinsOf();
+  let moved = 0;
+  for (const file of list) {
+    if (file.startsWith('/') || file.split('/').includes('..') || file.startsWith('archive/')) { console.log(`skipped ${file}: not a path inside the folder`); continue; }
+    if (!existsSync(join(dir, file))) { console.log(`skipped ${file}: not there`); continue; }
+    const r = judge(dir, file, corpus, pins, 0);
+    if (r.verdict !== 'unpointed') { console.log(`skipped ${file}: ${r.reason}`); continue; }
+    const to = join(dir, 'archive', file);
+    if (existsSync(to)) { console.log(`skipped ${file}: archive/${file} exists`); continue; }
+    mkdirSync(dirname(to), { recursive: true });
+    renameSync(join(dir, file), to);
+    console.log(`moved ${file} -> archive/${file}`);
+    moved++;
+  }
+  console.log(`${moved} of ${list.length} moved`);
+}
+
+if (process.argv[1] && import.meta.filename === resolve(process.argv[1])) {
+  if (cmd === 'refs') refsCheck();
+  else if (cmd === 'shared') sharedCheck();
+  else if (cmd === 'archive') archive();
+  else die(usage);
+}

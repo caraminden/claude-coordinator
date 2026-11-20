@@ -44,3 +44,4 @@ tools/affected-map.txt: test/affected.test.ts
 tools/always-tests.txt: test/citadel-test.test.ts
 src/backup.html: test/backup.test.ts
 src/backup.ts: test/backup.test.ts
+tools/stale-docs: test/stale-docs.test.ts

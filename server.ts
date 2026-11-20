@@ -299,6 +299,9 @@ const runner = new Runner(
 // Turns run in units of their own when this is the systemd service (systemd sets INVOCATION_ID), so a
 // restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
 runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
+// Turns share their place's tool server (#1259) in the service too, not in tests or dev copies; TURN_POOL=0 or 1 overrides that
+// (0: every turn runs its own helpers again).
+runner.pool = process.env.TURN_POOL ? process.env.TURN_POOL === '1' : !!process.env.INVOCATION_ID;
 runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
 // The server notices a stall (#1139): counts each minion's red tests, file churn and failed ships, and suggests a step-up to its Taskmaster.

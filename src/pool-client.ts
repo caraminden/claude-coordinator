@@ -3,6 +3,7 @@
 // turn-launch pins it beside turn-wrapper.ts.
 import { spawn } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { request } from 'node:http';
 import { join } from 'node:path';
 
 /** Where one version's pool lives and how to start it; `systemdRun` (the host) runs it in its own unit, so it outlives the turn that started it. */
@@ -30,9 +31,25 @@ export function readPool(dir: string): PoolInfo | null {
 }
 
 async function healthy(p: PoolInfo, version: string): Promise<boolean> {
-  const r = await fetch(`http://127.0.0.1:${p.port}/health`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
-  const h = r?.ok ? await r.json().catch(() => null) : null;
-  return h?.pid === p.pid && h?.version === version;
+  try {
+    const r = await call(p.port, 'GET', '/health');
+    const h = r.status === 200 ? JSON.parse(r.text) : null;
+    return h?.pid === p.pid && h?.version === version;
+  } catch {
+    return false;
+  }
+}
+
+/** One request to the pool on this host. node:http, not fetch: fetch's client adds about 15 MB to every turn's wrapper. */
+function call(port: number, method: string, path: string, headers: Record<string, string> = {}, body?: string): Promise<{ status: number; text: string }> {
+  return new Promise((done, fail) => {
+    const req = request({ host: '127.0.0.1', port, method, path, headers, timeout: 3000 }, (res) => {
+      let text = '';
+      res.setEncoding('utf8').on('data', (c) => (text += c)).on('end', () => done({ status: res.statusCode ?? 0, text })).on('error', fail);
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out'))).on('error', fail);
+    req.end(body);
+  });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -89,13 +106,8 @@ function start(spec: PoolSpec) {
 
 /** Tell the pool who `token` is; it forgets a turn not registered again within its TTL. Throws on any refusal. */
 export async function registerTurn(pool: PoolInfo, token: string, reg: TurnReg): Promise<void> {
-  const r = await fetch(`http://127.0.0.1:${pool.port}/register`, {
-    method: 'POST',
-    headers: { 'X-Pool-Key': pool.key, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(reg),
-    signal: AbortSignal.timeout(3000),
-  });
-  if (!r.ok) throw new Error(`the shared tool server refused the turn (${r.status}): ${await r.text().catch(() => '')}`);
+  const r = await call(pool.port, 'POST', '/register', { 'X-Pool-Key': pool.key, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, JSON.stringify(reg));
+  if (r.status >= 300) throw new Error(`the shared tool server refused the turn (${r.status}): ${r.text}`);
 }
 
 /** One beat of a turn's wrapper: its pool is up (started again if it died) and knows the turn. */

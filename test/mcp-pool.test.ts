@@ -173,11 +173,14 @@ test('two pinned versions run side by side, each serving only its own turns, and
   writeFileSync(newer, readFileSync(newer, 'utf8').replace("name: 'close_self',", "name: 'close_self_v2',"));
   const sOld = spec(r, 'old', join(copies[0], 'mcp-pool.ts'));
   const sNew = spec(r, 'new', join(copies[1], 'mcp-pool.ts'));
+  // Each turn is kept registered the way its wrapper does, so a slow start of the other pool doesn't idle one out.
   const oldPool = await started(sOld);
-  const newPool = await started(sNew);
-  assert.notEqual(oldPool.port, newPool.port);
   await registerTurn(oldPool, 'token-old', turn(app.base, 1, 1));
+  const keepOld = setInterval(() => registerTurn(oldPool, 'token-old', turn(app.base, 1, 1)).catch(() => {}), 300).unref();
+  const newPool = await started(sNew);
   await registerTurn(newPool, 'token-new', turn(app.base, 2, 1));
+  const keep = setInterval(() => registerTurn(newPool, 'token-new', turn(app.base, 2, 1)).catch(() => {}), 300).unref();
+  assert.notEqual(oldPool.port, newPool.port);
   const names = async (p: PoolInfo, t: string) => (await rpc(p.port, t, '/mcp', { id: 1, method: 'tools/list' })).result.tools.map((x: any) => x.name);
   assert.ok((await names(oldPool, 'token-old')).includes('close_self'));
   assert.ok((await names(newPool, 'token-new')).includes('close_self_v2'));
@@ -185,7 +188,7 @@ test('two pinned versions run side by side, each serving only its own turns, and
   assert.equal((await (await fetch(`http://127.0.0.1:${oldPool.port}/health`)).json()).version, 'old');
 
   // The old version's last turn ends (its wrapper stops refreshing): that pool exits; the new one keeps its turn.
-  const keep = setInterval(() => registerTurn(newPool, 'token-new', turn(app.base, 2, 1)).catch(() => {}), 300);
+  clearInterval(keepOld);
   try {
     await until('the old pool exits', () => { try { process.kill(oldPool.pid, 0); return false; } catch { return true; } }, 10_000);
     assert.equal(readPool(sOld.dir), null);

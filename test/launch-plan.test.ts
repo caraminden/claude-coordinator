@@ -120,6 +120,34 @@ test('a lent machine is an MCP server of the turn, allowed by name, and never in
   assert.equal(p.args.join(' ').includes('perigee'), false);
 });
 
+test('a pooled turn reaches its place\'s shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)', () => {
+  const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'] } as TurnFacts['machines'][number]];
+  const own = plan({ machines });
+  const p = plan({ machines, pool: true });
+  const http = file(p, 'mcp.json').mcpServers;
+  // The same servers by name, so allow rules and the tool names the turn sees don't change.
+  assert.deepEqual(Object.keys(http), Object.keys(file(own, 'mcp.json').mcpServers));
+  assert.deepEqual(file(p, 'mcp-stdio.json'), file(own, 'mcp.json'));
+  assert.deepEqual(file(p, 'settings.json'), file(own, 'settings.json'));
+  assert.deepEqual(http.thread, { type: 'http', url: 'http://127.0.0.1:${CITADEL_POOL_PORT}/mcp', headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, timeout: own.files.length && file(own, 'mcp.json').mcpServers.thread.timeout });
+  assert.equal(http['perigee godot-ws'].url, 'http://127.0.0.1:${CITADEL_POOL_PORT}/machine/3/ws?name=perigee%20godot-ws');
+  // The token only travels in the env, never in a file.
+  assert.equal(p.files.some((f) => f.text.includes('tok')), false);
+  assert.deepEqual(p.args, own.args);
+  assert.equal(own.pool, undefined);
+  assert.equal(p.pool!.dir, join(root, '.pool', pins.POOL_VERSION));
+  assert.equal(p.pool!.script, join(dir, 'pin', 'mcp-pool.ts'));
+  assert.equal(p.pool!.node, join(dir, 'pin', 'bin', 'citadel-node'));
+  // A plain env: no token, no sign-in.
+  assert.deepEqual(Object.keys(p.pool!.env).sort(), ['HOME', 'PATH', 'TZ']);
+  assert.equal(p.pool!.systemdRun, undefined);
+  assert.ok(plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!.some((a) => a.startsWith('--unit=citadel-mcp-pool-')));
+  assert.equal(plan({ pool: true, place: container, unit: 'never-used' }).pool!.systemdRun, undefined);
+  const codex = plan({ pool: true, codex: { thread: null } });
+  assert.equal(codex.pool, undefined);
+  assert.equal(codex.files.some((f) => f.name === 'mcp-stdio.json'), false);
+});
+
 test('a Codex turn runs the shim in claude\'s place, on its thread when it has one, checked in turn mode', () => {
   const claude = plan();
   const fresh = plan({ codex: { thread: null } });

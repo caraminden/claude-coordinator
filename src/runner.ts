@@ -579,6 +579,8 @@ export class Runner {
   containerStartMs = 60_000;
   /** Run turns in transient systemd user units, which outlive this server, rather than as its children. */
   units = false;
+  /** Turns get their Citadel tools from their place's shared tool server (#1259, src/mcp-pool.ts) rather than helpers of their own; set by server.ts. */
+  pool = false;
   /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
   turnsDir: string;
   /** The data dir this runner's turns use (beside the database), so a test's or dev copy's stay apart. */
@@ -2892,7 +2894,7 @@ export class Runner {
       const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
       // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
       const plan = launchPlan({
-        project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
+        project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex,
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
           // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
           openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
@@ -2952,7 +2954,7 @@ export class Runner {
       plan.args.push('--resume', resume.id, ...(resume.fork ? ['--fork-session'] : []));
       writeFileSync(join(dir, 'prompt.jsonl'), prompt);
       for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
-      writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: plan.command, args: plan.args, cwd: ticket.cwd, env: plan.env }), { mode: 0o600 });
+      writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: plan.command, args: plan.args, cwd: ticket.cwd, env: plan.env, ...(plan.pool ? { pool: plan.pool } : {}) }), { mode: 0o600 });
     } catch (err) {
       rmSync(dir, { recursive: true, force: true });
       throw err;

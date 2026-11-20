@@ -4,8 +4,10 @@
 import { LIVE_MANIFEST } from './host-tools.ts';
 import { msgEnv, msgSettings } from './msg-settings.ts';
 import { chmodSync, cpSync, statSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import type { PoolSpec } from './pool-client.ts';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
@@ -56,6 +58,9 @@ export interface TurnPins {
   CODEX_REVIEW: string;
   /** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */
   CODEX_TURN: string;
+  /** The shared tool server (#1259, src/mcp-pool.ts), and a hash of its code: turns of one version share one pool per place. */
+  POOL: string;
+  POOL_VERSION: string;
 }
 let pins: TurnPins | null = null;
 
@@ -92,6 +97,17 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const WORDING = pinnedCopy('wording.ts');
   const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
   const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+  const POOL = pinnedCopy('mcp-pool.ts');
+  /** The pool's code and every local file it imports, so a deploy that changes any of it starts a new pool. */
+  const closure = (file: string, seen = new Set<string>()): Set<string> => {
+    if (seen.has(file)) return seen;
+    seen.add(file);
+    for (const [, dep] of readFileSync(join(MCP_DIR, file), 'utf8').matchAll(/from '\.\/([^']+)'/g)) closure(dep, seen);
+    return seen;
+  };
+  const hash = createHash('sha256');
+  for (const f of [...closure('mcp-pool.ts')].sort()) hash.update(`${f}\0`).update(readFileSync(join(MCP_DIR, f)));
+  const POOL_VERSION = hash.digest('hex').slice(0, 16);
   const KIT = join(MCP_DIR, 'kit');
   const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
   if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
@@ -126,7 +142,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     }
   };
   lock(MCP_DIR);
-  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
 }
 
 /**
@@ -489,6 +505,8 @@ export interface TurnFacts {
   side?: boolean;
   /** The systemd unit it runs in, or null for a plain child (and in a container). */
   unit: string | null;
+  /** Its Citadel tools and machine links come from its place's shared tool server (#1259), not helpers of its own. Never a Codex turn's. */
+  pool?: boolean;
 }
 
 /** Claude Code refuses a settings file past 2 MiB (2.1.x: "Settings file exceeds the 2MiB limit"). */
@@ -517,6 +535,8 @@ export interface LaunchPlan {
   /** Files for the turn's folder, in the order to write them. */
   files: { name: string; text: string; mode?: number }[];
   spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
+  /** The shared tool server the wrapper keeps up for this turn (src/pool-client.ts); with it, `mcp.json` reaches the pool and `mcp-stdio.json` is the fallback. */
+  pool?: PoolSpec;
 }
 
 /** Schemes (project ids) whose turns run with Claude Code's --exclude-dynamic-system-prompt-sections (#1188): the per-machine
@@ -570,7 +590,18 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   }
   const files: LaunchPlan['files'] = [];
   // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
-  files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: servers }) });
+  // Pooled (#1259): the same servers by name, over HTTP to the place's shared tool server; Claude Code fills in the port
+  // the wrapper found and the turn's own token from the env. The stdio config stays beside it for when the pool won't start.
+  const pooled = facts.pool && !codex;
+  if (pooled) {
+    const pool = (path: string, extra: object = {}) => ({ type: 'http', url: `http://127.0.0.1:\${CITADEL_POOL_PORT}${path}`, headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, ...extra });
+    const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
+    for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}`);
+    files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
+    files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });
+  } else {
+    files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: servers }) });
+  }
   // The contraptions' folders the Citadel scheme's Taskmaster reads this turn (#656) stay unwritable to it.
   const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? facts.everyScheme?.apps ?? [] : [];
   // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
@@ -690,5 +721,14 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
     : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
     : { how: 'child', wrapper };
-  return { command, args, env, configDir, files, spawn };
+  // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
+  // On the host it runs in a unit of its own, so it outlives the turn that started it.
+  const poolDir = join(dirname(dir), '.pool', pins.POOL_VERSION);
+  const poolEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
+  const pool: PoolSpec | undefined = pooled ? {
+    dir: poolDir, script: pinned(pins.POOL), node, version: pins.POOL_VERSION, env: poolEnv,
+    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077'] } : {}),
+  } : undefined;
+  return { command, args, env, configDir, files, spawn, ...(pool ? { pool } : {}) };
 }

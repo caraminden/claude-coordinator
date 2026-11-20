@@ -676,10 +676,10 @@ export class ReviewSet {
     if (!this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
   }
 
-  /** Every entry's recorded verdicts in a scheme, newest first, by entry id. */
+  /** Every entry's recorded verdicts in a scheme, newest first by date (a backfilled one keeps its log's, #1095), by entry id. */
   verdicts(projectId: number): Map<number, Verdict[]> {
     const out = new Map<number, Verdict[]>();
-    const rows = this.db.prepare(`SELECT v.* FROM review_verdicts v JOIN review_entries e ON e.id = v.entry_id WHERE e.project_id = ? ORDER BY v.id DESC`).all(projectId) as Row[];
+    const rows = this.db.prepare(`SELECT v.* FROM review_verdicts v JOIN review_entries e ON e.id = v.entry_id WHERE e.project_id = ? ORDER BY v.at DESC, v.id DESC`).all(projectId) as Row[];
     for (const r of rows) {
       const list = out.get(r.entry_id) ?? [];
       if (!out.has(r.entry_id)) out.set(r.entry_id, list);

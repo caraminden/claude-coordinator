@@ -325,6 +325,7 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   const t0 = Date.UTC(2026, 10, 1);
   // A live run recorded today, before the backfill inserts older history with higher ids.
   set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' }, t0 + 30 * 86_400_000);
+  set.recordVerdict(3, 'ui', { person: 'Josh', words: 'Too loose', ticketId: 40, minion: '#40' }, t0 + 31 * 86_400_000);
   const logs = [
     { project: 3, scheme: 'Peek Auras', log: '3/shared/40/critic.md', ticketId: 40, minion: '#40', runs: [
       { slug: 'ui', round: 1, verdict: 'fail', at: t0 }, { slug: 'ui', round: 2, verdict: 'ask', at: t0 + 60_000 },
@@ -341,10 +342,10 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   assert.equal(set.get(3, 'professor')!.kind, 'teacher', "a teacher run brings the kit's professor onto the page, as opening it would");
   assert.deepEqual(set.holds(3, 40), [], "an old log's ask doesn't hold the minion's ship: its live pass is what counts");
   const ui = set.record(3).get(set.get(3, 'ui')!.id)!;
-  assert.deepEqual(ui.runs.map((r) => [r.minion, r.round, r.verdict, r.disagreed]), [['design: x', 1, 'pass', false], ['#40', 1, 'fail', false], ['#40', 2, 'ask', true], ['#40', 1, 'pass', false]], 'by date, the live run last; the run before the person spoke is amber');
+  assert.deepEqual(ui.runs.map((r) => [r.minion, r.round, r.verdict, r.disagreed]), [['design: x', 1, 'pass', false], ['#40', 1, 'fail', false], ['#40', 2, 'ask', true], ['#40', 1, 'pass', true]], 'by date, the live run last; the run before the person spoke is amber');
   assert.deepEqual([ui.firsts, ui.passes], [3, 2]);
   assert.equal(set.record(3).get(set.get(3, 'professor')!.id)!.passes, 1);
-  assert.equal(set.verdicts(3).get(set.get(3, 'ui')!.id)![0].words, 'Ship as is');
+  assert.deepEqual(set.verdicts(3).get(set.get(3, 'ui')!.id)!.map((v) => v.words), ['Too loose', 'Ship as is'], "newest first by date, so a log's old verdict sits under today's");
   // Once: a second start adds nothing, and a direct second pass finds every log already in.
   assert.deepEqual(backfillRuns(store, logs), []);
   const count = () => (db.prepare("SELECT count(*) AS n FROM review_runs WHERE source = 'backfill'").get() as { n: number }).n;
@@ -362,7 +363,12 @@ test('src/review-backfill.json: every run is well formed and in date order per l
   for (const l of logs) {
     assert.ok(Number.isInteger(l.project) && l.scheme && l.log.endsWith('critic.md') && l.minion, l.log);
     assert.ok(l.ticketId === null ? l.minion.startsWith('design: ') : /^#\d+$/.test(l.minion), l.log);
-    for (const r of l.runs) assert.ok((VERDICTS as readonly string[]).includes(r.verdict) && Number.isInteger(r.round) && r.round >= 1 && Number.isFinite(r.at), `${l.log} ${JSON.stringify(r)}`);
+    for (const r of l.runs) assert.ok((VERDICTS as readonly string[]).includes(r.verdict) && Number.isInteger(r.round) && r.round >= 1 && Number.isInteger(r.at), `${l.log} ${JSON.stringify(r)}`);
+    // A critic's round is one run over every item it judged; only a teacher's runs are one per item.
+    const rounds = l.runs.filter((r: { slug: string }) => r.slug !== 'professor').map((r: { slug: string; round: number; at: number }) => `${r.slug} ${r.round} ${r.at}`);
+    assert.equal(new Set(rounds).size, rounds.length, `${l.log}: a critic round twice`);
+    // A verdict lands only beside its log's runs of that entry, so the "already in" check keeps a replay from doubling it.
+    for (const v of l.verdicts) assert.ok(Number.isInteger(v.at) && l.runs.some((r: { slug: string }) => r.slug === v.slug), `${l.log} ${JSON.stringify(v)}`);
     assert.deepEqual(l.runs.map((r: { at: number }) => r.at), l.runs.map((r: { at: number }) => r.at).sort((a: number, b: number) => a - b), l.log);
   }
 });

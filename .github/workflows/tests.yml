@@ -151,8 +151,22 @@ jobs:
         env:
           CITADEL_TEST_CONCURRENCY: ${{ vars.CI_RUNNER != 'github' && '16' || '' }}
           NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
+          LAND_REF: ${{ startsWith(github.ref, 'refs/heads/land/') && '1' || '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           rc=0
+          # A land's run answers before land.sh stops waiting (#1240): its LAND_CI_TIMEOUT, 360 s from the push, less 30 s
+          # for the job to end and land.sh's next look. run-tests.sh fits its reruns alone into that, so a real red is
+          # red in time instead of "no answer" and the whole suite again on perigee.
+          if [ -n "$LAND_REF" ]; then
+            if created=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin)["created_at"])') && created=$(date -d "$created" +%s); then
+              export DEPLOY_RERUN_DEADLINE=$((created + 360 - 30))
+              echo "reruns alone end by $(date -u -d "@$DEPLOY_RERUN_DEADLINE" +%T) UTC, before land.sh stops waiting"
+            else
+              echo "couldn't read when this run was made (the curl line above says why), so the reruns alone have no deadline"
+            fi
+          fi
           echo "nproc $(nproc), $([ -n "$CITADEL_TEST_CONCURRENCY" ] && echo "$CITADEL_TEST_CONCURRENCY" || echo $((($(nproc) + 1) / 2))) test files at once"
           # The log streams while the suite runs (#560): a run cancelled at land.sh's cap used to show nothing,
           # since the log was only printed once run-tests.sh ended. node prints files in order, so the hung file

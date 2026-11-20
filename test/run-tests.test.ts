@@ -15,7 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'run-tests-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make the inner `node --test` report to this runner; COORDINATOR_SHARED_DIR would write
 // into the real scheme's retro log; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope (run-tests-scope.test.ts).
-const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined, CITADEL_TEST_TIMEOUT: undefined };
+const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined, DEPLOY_RERUN_DEADLINE: undefined, CITADEL_TEST_TIMEOUT: undefined };
 
 const FIXTURES: Record<string, string> = {
   'ok.test.mjs': "import test from 'node:test';\ntest('fine', () => {});\n",
@@ -216,6 +216,33 @@ test('the reruns share one time budget: once it is spent, the files left are not
   assert.match(r.log, /test\/once-then-hang2\.test\.mjs: hung when rerun alone \(stopped after [12]s\)/);
   assert.match(r.log, /test\/once-then-hang3\.test\.mjs: not rerun: the reruns' 5s ran out/);
   assert.equal(existsSync(join(r.dir, 'ran-once-then-hang3')), true, 'the full run did reach the third file');
+});
+
+// A ship's CI run sets DEPLOY_RERUN_DEADLINE to when land.sh stops waiting (#1240), so a real red answers red in time.
+const inSeconds = (n: number) => String(Math.floor(Date.now() / 1000) + n);
+
+test("with CI's deadline set, once one file fails again alone the rest are not rerun: the run is already a real red", async () => {
+  const r = await run(['always1.test.mjs', 'always2.test.mjs'], { DEPLOY_RERUN_DEADLINE: inSeconds(300) });
+  assert.equal(r.code, 1, r.log);
+  assert.equal(r.log.match(/: failed again alone: a real failure/g)?.length, 1, r.log);
+  assert.equal(r.log.match(/: not rerun: a real failure already makes this run red/g)?.length, 1, r.log);
+});
+
+test("with CI's deadline passed, a failed file is not rerun and stays unlabelled, so land.sh reads the run as red", async () => {
+  const r = await run(['once.test.mjs'], { DEPLOY_RERUN_DEADLINE: inSeconds(-1) });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/once\.test\.mjs: not rerun: CI's answer is due/);
+  assert.doesNotMatch(r.log, /passed alone/);
+  assert.deepEqual(flakeLines(r.retro), []);
+});
+
+test("a rerun alone is cut at CI's deadline, well before its own limit, and counts as a real failure", async () => {
+  const t0 = Date.now();
+  const r = await run(['once-then-hang.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '60', DEPLOY_RERUN_DEADLINE: inSeconds(10) });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/once-then-hang\.test\.mjs: rerun alone stopped after \d+s, when CI's answer was due: counts as a real failure/);
+  assert.ok(Date.now() - t0 < 40_000, `took ${Date.now() - t0} ms`);
+  assert.deepEqual(flakeLines(r.retro), []);
 });
 
 test('more failed files than a load blip explains are not rerun, and the run fails', async () => {

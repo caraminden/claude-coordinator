@@ -25,7 +25,7 @@ $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$en
 
 function Detections { @(Get-MpThreatDetection -ErrorAction SilentlyContinue) }
 $all = Detections
-"before: $($all.Count) detection(s) on this PC in total"
+"before: $(@($all).Count) detection(s) on this PC in total"
 
 foreach ($case in $Cases) {
   $kind, $where = $case -split '@'
@@ -39,7 +39,8 @@ foreach ($case in $Cases) {
     $p = Start-Process $edge -ArgumentList "--remote-debugging-port=$port", "--user-data-dir=`"$prof`"", '--no-first-run', '--no-default-browser-check', '--new-window', $url -PassThru
   }
   Set-Clipboard -Value 'cleared'
-  & $node "$here\copy.mjs" $port $Text | ForEach-Object { "  $_" }
+  # The text goes base64: a command line holding `irm ... | iex` is itself a Defender detection (2147852719), on node.
+  & $node "$here\copy.mjs" $port ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Text))) | ForEach-Object { "  $_" }
   Start-Sleep -Seconds $Wait
   $clip = (Get-Clipboard -Raw) -replace '\s+$', ''
   $new = @(Detections | Where-Object { $_.InitialDetectionTime -ge $since.AddSeconds(-2) })

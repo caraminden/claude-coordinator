@@ -3,7 +3,7 @@
 // imports no view, so node tests can import it; the app shell (router, stream, login) is core.js.
 import { iconSrc } from './schemes.js';
 
-const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Dismissed' };
+const STATUS_LABEL = { running: 'Running', idle: 'Idle', new: 'Starting', error: 'Error', closed: 'Dismissed' };
 // Thread naming and the threads list follow Delve's Custom view: threads are grouped by their `type`
 // property, and each is one compact row of number + short ask, a state, and a terse note.
 // In the list's order; `other` has no header word, as a minion of no particular kind.
@@ -27,8 +27,8 @@ export function listGroupsOf(p) {
 }
 export const STATES = {
   ready: { label: 'Ready to ship or pick up' },
-  complete: { label: 'Complete: no work left' },
-  try: { label: 'Ready for you to try' },
+  complete: { label: 'Done, read it' },
+  try: { label: 'Ready to try' },
   parked: { label: 'Parked' },
   blocked: { label: 'Blocked on something outside the minion' },
   outside: { label: 'Waiting on work running elsewhere' },

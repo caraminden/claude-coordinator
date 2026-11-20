@@ -135,7 +135,7 @@ test('minion names: the full name, its phone-friendly parts, the address and the
   assert.equal(threadHref(tm), '#/p/2');
   assert.equal(statusLabel(tm), 'Ready');
   assert.equal(statusLabel({ ...minion, status: 'new' }), 'Starting');
-  assert.equal(statusLabel(minion), 'Waiting for you');
+  assert.equal(statusLabel(minion), 'Idle');
 });
 
 test('isSeen: a thread opened at or after its last change, and not one never opened', (t) => {

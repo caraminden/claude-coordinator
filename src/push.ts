@@ -43,8 +43,8 @@ export type PushTrigger =
 /** States worth a ping: a result to look at, or a blocker. */
 export const NOTIFY_STATES: Record<string, string> = {
   ready: 'Ready to ship or pick up',
-  complete: 'Complete: no work left',
-  try: 'Ready for you to try',
+  complete: 'Done, read it',
+  try: 'Ready to try',
   blocked: 'Blocked on something outside the minion',
 };
 

@@ -1,6 +1,6 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
-import { isCoordinator, STATES } from './base.js';
+import { isCoordinator, me, STATES } from './base.js';
 import { waitFam, waitShows, waitWords } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
@@ -19,10 +19,11 @@ export function byUrgency(a, b, usage, now = Date.now()) {
 export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || (st.rank === 2 && t.state === 'blocked'));
 
 /**
- * A thread's state pill, coloured by family (one meaning each): you (amber, your move, with how
- * long it has waited), done (green), broken (red), work (blue, with steps done), wait (violet: the
- * usage reset, a deploy, CI, parked until something wakes it), idle (grey: parked, dismissed). `cell` is the pill's text and `pulse`
- * says it gets the working dot.
+ * A thread's state pill, coloured by family (one meaning each): you (amber: an answer of yours is owed, with how
+ * long it has waited, and nothing else, #1121), done (green: done, read it), broken (red), work (blue: working, or
+ * ready to try), wait (violet: waiting on another person's card, the usage reset, a deploy, CI, parked until
+ * something wakes it), idle (grey: idle, parked, dismissed). `cell` is the pill's text and `pulse` says it gets the
+ * working dot.
  */
 export function rowState(t, usage, now = Date.now()) {
   const st = baseState(t, usage, now);
@@ -61,10 +62,14 @@ export function serverLabel(w) {
   return 'Server is shipping…';
 }
 
+/** Whose answer a card waits on (#1121): its `to`, else the minion's assignee; '' for anyone's, which is yours. */
+const cardFor = (c, t) => String(c?.to || t.properties?.assigned || '').trim();
+const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
+
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
-  if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
+  if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Answer needed: approve or deny' };
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
   // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
@@ -90,12 +95,26 @@ function baseState(t, usage, now) {
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
   // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
-  if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at, now)}`, label: 'Waiting for you to answer a question or plan', since: t.pending_card_at };
+  // Amber only when one is yours (#1121; Josh picked "Say what is owed", 2026-11-19); else it waits on whose it is.
+  if (t.pending_card_at) {
+    const cards = t.open_cards?.length ? t.open_cards : [{}];
+    const age = shortAgo(t.pending_card_at, now);
+    if (cards.some((c) => isYou(cardFor(c, t)))) return { rank: 0, fam: 'you', cell: `answer ${age}`, label: 'Answer needed', since: t.pending_card_at };
+    const who = cardFor(cards[0], t);
+    return { rank: 2, fam: 'wait', cell: `${who} ${age}`, label: `Waiting on ${who}`, since: t.pending_card_at };
+  }
   if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
   // Complete carries what's left (nothing, or what to read) in its note, so the label says it at a glance (#547).
-  if (t.state === 'complete') return { rank: 0, fam: 'done', cell: waited('complete'), label: t.note ? `Complete: ${t.note}` : state.label };
-  if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
-  return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };
+  if (t.state === 'complete') return { rank: 0, fam: 'done', cell: waited('read it'), label: t.note ? `${state.label}: ${t.note}` : state.label };
+  if (t.state === 'try') return { rank: 0, fam: 'work', cell: waited('try it'), label: state.label };
+  // One-tap replies wait on a go, as a card does: its assignee's, else anyone's.
+  if (t.replies?.length) {
+    const who = cardFor(null, t);
+    if (isYou(who)) return { rank: 0, fam: 'you', cell: waited('answer'), label: 'Answer needed: it offered replies' };
+    return { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who}` };
+  }
+  // Nothing running and nothing asked: not your move, so grey, beside parked (#1121; before it, amber "Your move").
+  return { rank: 4, fam: 'idle', cell: waited('idle'), label: 'Idle' };
 }
 
 /**
@@ -106,7 +125,7 @@ function limitState(t, waited, usage, now) {
   if (t.limit_resume_at) return { rank: 2, fam: 'wait', cell: `resumes ${shortIn(t.limit_resume_at, now)}`, label: 'Usage limit: resumes by itself' };
   const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > now);
   if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt, now)}`, label: STATES.limited.label };
-  if (usage?.updatedAt > t.updated_at) return { rank: 0, fam: 'you', cell: waited('resume'), label: 'The usage limit has reset: send a message to carry on' };
+  if (usage?.updatedAt > t.updated_at) return { rank: 4, fam: 'idle', cell: waited('idle'), label: 'Idle: the usage limit has reset; send a message to carry on' };
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
@@ -175,10 +194,10 @@ export function askWhy(item, t, now = Date.now()) {
     case 'question': case 'plan': return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
     case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
     case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
-    case 'state': return `${STATES[t?.state]?.label ?? 'Waiting on you'} since ${since}, assigned to you or no one. It stops counting once you open it.`;
+    case 'state': return `${STATES[t?.state]?.label ?? 'Answer needed'} since ${since}, assigned to you or no one. It stops counting once you open it.`;
     case 'loop': return `The loop guard has held ${card.n === 1 ? 'a message' : `${card.n} messages`} since ${since} ("${card.text}"). Continue in its chat sends ${card.n === 1 ? 'it' : 'them'}.`;
     case 'replies': return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
-    default: return `Waiting on you since ${since}.`;
+    default: return `Answer needed since ${since}.`;
   }
 }
 

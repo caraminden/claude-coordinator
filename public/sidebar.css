@@ -96,7 +96,7 @@
 .f-you { --c: var(--waiting); --t: var(--waiting-tint); }
 .f-done { --c: var(--done); --t: var(--done); }
 .f-broken { --c: var(--error); --t: var(--error); }
-.f-work { --c: var(--running); }
+.f-work { --c: var(--running); --t: var(--running); }
 .f-wait { --c: var(--held); }
 .f-idle { --c: var(--closed); }
 /* Your move: a tint of its colour over the zebra striping, stronger while unread, a bit stronger again when open. */

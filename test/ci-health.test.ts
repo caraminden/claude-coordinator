@@ -888,6 +888,21 @@ test("fast mode: a land's push going red on main wakes no one and makes no item;
   assert.match(told[1], /run 9103 failed on bad0103/);
 });
 
+test("a citadel-heavy job's red is the minion's own command, not main's: it wakes no one and makes no item, even watched (#1254)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, text: string) => (told.push(text), true) });
+  // Dispatched on the default branch, with the minion's snapshot as an input: GitHub files it under main.
+  const heavy = (fields: Partial<Run>) => runOf({ workflow_id: 9, name: 'citadel-heavy', path: '.github/workflows/citadel-heavy.yml', event: 'workflow_dispatch', conclusion: 'failure', ...fields });
+  w.gh.mainRuns = [heavy({ id: 9201, head_sha: 'aaa0201fff', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  w.store.setProjectSettings(w.peek.id, { ci_watch: 'citadel-heavy.yml' });
+  await health.tick(NOW + RED_FIX_MS + MIN);
+  assert.deepEqual(told, []);
+  assert.ok(!w.puts.some(([, key]) => /^ci\.(red|open)/.test(key)), 'no Mandate item');
+});
+
 test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on with no fix minion naming the run, or once it is still red after the fix closed (#968)', async () => {
   const w = outsideWorld();
   w.quietDelve();

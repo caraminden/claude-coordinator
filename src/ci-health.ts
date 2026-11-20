@@ -50,7 +50,7 @@ import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
 
-import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
+import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
 import { LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
@@ -667,7 +667,8 @@ export class CiHealth {
     // expected to some extent"): a land's push red on main is src/fast-mode.ts's to pin and hand out, so it neither wakes
     // the Taskmaster nor makes an item. Scheduled and dispatched reds still do, and so does a workflow the scheme watches.
     const landed = (r: Run) => p.land_mode === 'fast' && r.event === 'push';
-    const watched = (r: Run) => watch.has(workflowFile(r)) || (!landed(r) && !quiet.has(workflowFile(r)));
+    // A heavy job's red is the minion's own (its command failed), not main's, even if ci_watch lists it.
+    const watched = (r: Run) => workflowFile(r) !== HEAVY_WORKFLOW && (watch.has(workflowFile(r)) || (!landed(r) && !quiet.has(workflowFile(r))));
     const save = () => {
       // Ids GitHub no longer lists are dropped, but only when the list was read, so a bad answer can't forget them.
       this.store.setSetting(key, Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told]);

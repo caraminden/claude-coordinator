@@ -73,7 +73,9 @@ export const short = (sha: string) => sha.slice(0, 7);
 export const runUrl = (slug: string, r: Run) => `https://github.com/${slug}/actions/runs/${r.id}`;
 /** A run's workflow file name, as a scheme's ci_quiet lists it. */
 export const workflowFile = (r: Run) => (r.path ?? '').split('/').pop() || r.name;
-export const quietWorkflow = (p: Project, r: Run) => lines(p.ci_quiet).includes(workflowFile(r));
+/** citadel-heavy's workflow (#1160): a minion's own command, dispatched on the default branch, so never a verdict on it (#1254). */
+export const HEAVY_WORKFLOW = 'citadel-heavy.yml';
+export const quietWorkflow = (p: Project, r: Run) => workflowFile(r) === HEAVY_WORKFLOW || lines(p.ci_quiet).includes(workflowFile(r));
 /** When dispatched runs started counting (#678), so the deploy that brought them told none from before. */
 export const DISPATCH_SINCE = 'ci-health:dispatch-since';
 

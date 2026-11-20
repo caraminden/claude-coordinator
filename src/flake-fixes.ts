@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
-import { FLAKE_REPEAT, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
+import { FLAKE_REPEAT, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
 /** Minions one scheme's pass starts at most. */
@@ -26,6 +26,8 @@ export interface FlakeFixDeps {
   /** The flake-proof workflow's runs on a branch, and a run's jobs (CiHealth.workflowRuns and runJobs); null when GitHub won't say. */
   runs: (project: Project, branch: string) => Promise<Run[] | null>;
   jobs: (project: Project, run: Run) => Promise<Job[] | null>;
+  /** When the test file last changed on main (ms; default: git log in the scheme's repo). Sightings before it don't count toward a new fix (#1219). */
+  changedAt?: (project: Project, file: string) => Promise<number | null>;
   now?: () => number;
 }
 
@@ -67,6 +69,9 @@ export class FlakeFixes {
       let id: number | null = null;
       if (!fix) {
         if (sights.length < FLAKE_REPEAT) continue;
+        // Sightings from before the file's newest commit were of the file as it was: a fix may already have shipped (#1189). Only newer ones count.
+        const changed = await (this.d.changedAt ?? ((p, f) => (p.repo_dir ? fileChangedAt(p.repo_dir, f) : Promise.resolve(null))))(project, file);
+        if (changed != null && sights.filter((t) => t > changed).length < FLAKE_REPEAT) continue;
         // A minion a person already started from the tab's button owns it: record the fix on that one, start no second.
         const title = flakeBrief(file, 0, []).title;
         const mine = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.title === title);

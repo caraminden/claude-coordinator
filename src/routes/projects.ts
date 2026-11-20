@@ -29,7 +29,7 @@ import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
-import { FLAKE_WINDOW_MS, PROOF_RUNS, flakeBrief } from '../flakes.ts';
+import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1238,16 +1238,21 @@ export const projectRoutes: Route[] = [
   // The CI page's Test health tab (#1063): fast mode's state and known reds, and the flakiest test files of the last 14 days, each with the open minion on it.
   {
     method: 'GET', path: '/api/projects/:project/test-health', who: ['person'],
-    handler({ res, app, project }) {
+    async handler({ res, app, project }) {
       const { store } = app;
       const open = store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed');
-      const flakes = store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS).map((f) => {
+      const counts = store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS);
+      // Sightings from before the file's newest commit on main (#1219): shown as such, and not counted toward a new fix.
+      const changed = new Map(await Promise.all(counts.map(async (f) => [f.file, project.repo_dir ? await fileChangedAt(project.repo_dir, f.file) : null] as const)));
+      const flakes = counts.map((f) => {
+        const at = changed.get(f.file) ?? null;
+        const before = at == null ? 0 : store.flakeSightings(project.id, f.file, Date.now() - FLAKE_WINDOW_MS).filter((t) => t <= at).length;
         const title = flakeBrief(f.file, 0, []).title;
         const fx = store.flakeFix(project.id, f.file);
         const ft = fx?.ticket_id == null ? undefined : store.getTicket(fx.ticket_id);
         // The fix (#1120): its minion's number and person, its age, and the clean runs of the 50 the desktop proof needs.
         const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : store.getUser(ft.person_id)?.name ?? null, startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
-        return { ...f, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
+        return { ...f, before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
       });
       json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, now: Date.now() });
     },

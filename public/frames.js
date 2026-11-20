@@ -183,14 +183,18 @@ export function showFrame(name, src) {
   let frame = frames.get(name);
   if (!frame) {
     frame = document.createElement('iframe');
-    frame.src = src ?? `/apps/${name}/`;
     frame.allow = frameAllow(appClipboard(name));
+    frame.src = src ?? `/apps/${name}/`;
     frame.title = name;
     frame.dataset.app = name;
     frame.addEventListener('load', fit);
     box.append(frame);
     frames.set(name, frame);
-  } else if (src) frame.src = src;
+  } else if (src) {
+    // A deep link navigates the frame, which takes up its allow as it is now: the app's opt-in may have changed.
+    frame.allow = frameAllow(appClipboard(name));
+    frame.src = src;
+  }
   for (const [n, f] of frames) f.hidden = n !== name;
   setFramed(true);
   fit();

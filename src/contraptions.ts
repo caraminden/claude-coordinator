@@ -17,7 +17,7 @@ import type { IncomingMessage } from 'node:http';
 import { connect } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { appFolder, MANIFEST } from './app-services.ts';
+import { appFolder, MANIFEST, parseManifest } from './app-services.ts';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
@@ -185,7 +185,8 @@ export class Contraptions {
   async clipboard(row: Pick<ContraptionRow, 'name' | 'folder'>): Promise<boolean> {
     const text = await readFile(join(appFolder(row, this.appsHome), MANIFEST), 'utf8').catch(() => '');
     try {
-      return JSON.parse(text)?.clipboard === 'write';
+      // A manifest a deploy would refuse grants nothing.
+      return parseManifest(text).clipboard === 'write';
     } catch {
       return false;
     }

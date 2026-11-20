@@ -142,7 +142,7 @@ test('a linked page with its own clipboard or send button is sent back; a kit pa
 test('a linked page that copies with no click or key press to start it is named as such (#1086)', async () => {
   writeFileSync(join(mine, 'onload.html'), `<script>addEventListener('load', () => navigator.clipboard.writeText('iwr x | iex'))</script>`);
   writeFileSync(join(mine, 'clicked.html'), `<button>Copy</button><script>document.querySelector('button').addEventListener('click', () => navigator.clipboard.writeText(t))</script>`);
-  writeFileSync(join(mine, 'loader.js'), "document.execCommand('copy')");
+  writeFileSync(join(mine, 'loader.js'), "function go() { document.execCommand('copy') }");
   writeFileSync(join(mine, 'split-click.html'), '<button onclick="go()">Copy</button><script src="loader.js"></script>');
   const v = await reply(`[a](${mine}/onload.html), [b](${mine}/clicked.html) and [c](${mine}/split-click.html)`);
   assert.equal(v?.decision, 'block');

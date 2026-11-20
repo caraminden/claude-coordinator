@@ -87,7 +87,8 @@ test("a contraption's frame gets the clipboard only when its citadel-app.json as
   manifest('writes', JSON.stringify({ start: ['node'], clipboard: 'write' }));
   manifest('plain', JSON.stringify({ start: ['node'] }));
   manifest('broken', '{ not json');
-  for (const [name, want] of [['writes', true], ['plain', false], ['broken', false], ['missing', false]] as const) assert.equal(await reader.clipboard({ name, folder: null }), want, name);
+  manifest('no-start', JSON.stringify({ clipboard: 'write' }));
+  for (const [name, want] of [['writes', true], ['plain', false], ['broken', false], ['no-start', false], ['missing', false]] as const) assert.equal(await reader.clipboard({ name, folder: null }), want, name);
   assert.equal(await reader.clipboard({ name: 'elsewhere', folder: join(home, 'apps', 'writes') }), true, 'its own folder, when it has one');
 });
 

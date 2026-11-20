@@ -53,6 +53,7 @@ test("a branch whose ADR number main took ships it under the next one, with its 
   const r = start();
   write(r.wt, { 'docs/adr/0002-mine.md': '# ADR 0002: mine\n\nAfter ADR 0001.\n', 'notes.md': 'Per ADR 0002 ([mine](docs/adr/0002-mine.md)).\n' }, '#1: ADR 0002 mine');
   write(r.source, { 'docs/adr/0002-theirs.md': '# ADR 0002: theirs\n', 'docs/theirs.md': 'Per ADR 0002.\n' }, '#2: ADR 0002 theirs');
+  writeFileSync(join(r.wt, 'scratch.txt'), 'not for main\n');
   const res = r.run();
   assert.equal(res.status, 0, res.stderr);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'it landed');
@@ -63,6 +64,7 @@ test("a branch whose ADR number main took ships it under the next one, with its 
   assert.ok(!existsSync(join(r.source, 'docs/adr/0002-mine.md')));
   assert.match(git(r.source, 'log', '-1', '--format=%s', 'main'), /ADR 0002 → 0003/);
   assert.match(res.stderr, /ADR 0002 → 0003/);
+  assert.equal(git(r.source, 'ls-tree', '--name-only', 'main', 'scratch.txt'), '', 'an untracked file stays out of the commit');
 });
 
 test('a schema clash it cannot sort out is refused before the line, with the number to take', () => {

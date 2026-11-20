@@ -237,6 +237,24 @@ under_of() {
   done < <(cat "$state/taken-back" 2>/dev/null || true)
   echo "$u"
 }
+# Numbers at ship time (#1221): git with tools/ship-numbers.ts as the merge driver for src/db.ts, so a SCHEMA_HISTORY
+# number main took while this waited goes to the branch's next free one instead of conflicting. <main side> names which
+# side of the merge is main or the build (ours for merge-tree and a rebase, theirs for --build's merge of main): its
+# numbers stay. Only land.sh's own merges get it, not a person's rebase. A tools/ that lacks the driver (mid-rebase
+# onto a build without it) merges as git would.
+numbers_git() {
+  local side=$1
+  shift
+  git -c "core.attributesFile=$tools/ship-numbers.attributes" -c "merge.citadel-numbers.name=SCHEMA_HISTORY numbers at ship time" \
+    -c "merge.citadel-numbers.driver=if [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
+}
+# A conflict in src/db.ts the driver couldn't sort out: the number to take, from <onto>'s history.
+number_hint() {
+  local n
+  case ", $1, " in *", src/db.ts, "*) ;; *) return 0 ;; esac
+  n=$(git show "$2:src/db.ts" 2>/dev/null | sed -n '/^export const SCHEMA_HISTORY = \[$/,/^\] as const;$/p' | grep -oE '^  \[[0-9]+' | tail -n 1 | tr -dc 0-9)
+  [ -z "$n" ] || echo " SCHEMA_HISTORY ends at $n on ${2#refs/heads/}: number this branch's new lines from $((n + 1)), and its schema_version checks with them."
+}
 # What to do about a conflict, the same for a rebase or merge that stopped and for the early check below.
 conflict_fix() {
   case $mode in
@@ -254,12 +272,12 @@ conflict_fix() {
 # the rebase would skip it: the git rebase the refusal names then goes through clean. Upgrade to a replay if that bites.
 early_check() {
   local out rc=0 files at
-  out=$(git -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  out=$(numbers_git ours -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
   [ "$rc" = 1 ] || return 0
   files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   at=$(git log -1 --format='%h "%s"' "$1")
   retro_log "land conflict · $label onto ${at%% *}: ${files:-no conflicted files named} · $2"
-  say "$branch won't $([ "$mode" = build ] && echo "merge ${1#refs/heads/} in" || echo "rebase onto ${1#refs/heads/}") ($at) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}. $(conflict_fix)"
+  say "$branch won't $([ "$mode" = build ] && echo "merge ${1#refs/heads/} in" || echo "rebase onto ${1#refs/heads/}") ($at) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}.$(number_hint "$files" "$1") $(conflict_fix)"
   return 1
 }
 
@@ -413,7 +431,7 @@ conflict() {
   if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h "$1"): $conflicted"; else what=": no conflicted files found (the $2 may not have started)"; fi
   retro_log "land conflict · $label$what"
   git "$2" --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
-  refuse "$3${conflicted:+; conflicted files: $conflicted}. $(conflict_fix)"
+  refuse "$3${conflicted:+; conflicted files: $conflicted}.$(number_hint "$conflicted" "$1") $(conflict_fix)"
 }
 if [ "$mode" = build ] && [ "$redo" = 1 ]; then
   git reset -q --keep "$base" # main went back while this waited: main is merged in again without what came off it
@@ -424,7 +442,7 @@ case $mode in
     [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
     [ -n "$quiet" ] || queue_phase "rebasing onto main"
     [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-    git rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" ;;
+    numbers_git ours rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" ;;
   into | full)
     if git merge-base --is-ancestor "$base" HEAD; then
       say "$build is already under $branch: no rebase"
@@ -432,7 +450,7 @@ case $mode in
       # A rebase would flatten the build minion's merge of main.
       [ "$mode" = into ] || refuse "$build has commits this branch doesn't: run git merge $build (not a rebase), re-test, then run this again. Nothing merged"
       say "rebasing $branch onto $build ($(git log -1 --format='%h "%s"' "$base"))"
-      git rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched"
+      numbers_git ours rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched"
     fi
     claims_check main ;; # again under the lock: a feeder that merged while this waited may own a file now
   build)
@@ -450,13 +468,25 @@ case $mode in
     else
       [ -n "$quiet" ] || queue_phase "merging main into $build"
       say "merging main ($(git log -1 --format='%h "%s"' main)) into $build on $branch"
-      git merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed"
+      numbers_git theirs merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed"
     fi ;;
 esac
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9 (and the build's on fd 6), and its own rebase finds
 # nothing to do. Not --into: that holds no deploy lock for the copy to find, and only tests and moves a branch.
 [ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
+
+# ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
+# while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
+adr_onto=
+case $mode in land | build) adr_onto=main ;; into) adr_onto=$base ;; esac
+if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
+  renamed=$("$tools/citadel-node" --no-warnings "$tools/ship-numbers.ts" adr "$adr_onto") || refuse "renumbering this branch's ADRs failed (see above), so nothing landed. Run git status, put back what it left, then this again"
+  if [ -n "$renamed" ]; then
+    sed 's/^/land: /' <<<"$renamed" >&2
+    git commit -q -m "$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed"
+  fi
+fi
 
 # The undo guard (#677, after Peek Auras #361's tools/undo-guard.sh): prints, and exits 1 on, the commits among
 # <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean

@@ -83,7 +83,7 @@ export interface StatusDeps {
   ciSnapshot?: (canSee: (id: number) => boolean) => { id: number; view: CiView }[];
   desktops?: () => PcView[];
   diskUse?: (row: ContraptionRow) => DiskUse | null;
-  /** systemctl --user show for these units; null where it can't be read (a preview, a test). */
+  /** systemctl --user show for these units; left out where they can't be read (a preview, a test). */
   unitStates?: (units: string[]) => Promise<UnitState[]>;
   now?: () => number;
   mem?: () => Promise<{ total: number; avail: number }>;
@@ -148,13 +148,20 @@ export class StatusPage {
     return data;
   }
 
-  private async unitRows(apps: ContraptionRow[]): Promise<UnitState[]> {
+  /** The units' states; [] where they aren't read (a preview, a test), null when the read failed. */
+  private async unitRows(apps: ContraptionRow[]): Promise<UnitState[] | null> {
     const now = this.now();
     if (this.units && now - this.units.at < 60_000 && now >= this.units.at) return this.units.rows;
     const names = [...CITADEL_UNITS, ...apps.map((a) => `citadel-app-${a.name}.service`)];
-    const rows = await this.deps.unitStates?.(names).catch(() => [] as UnitState[]) ?? [];
-    this.units = { at: now, rows };
-    return rows;
+    try {
+      const rows = (await this.deps.unitStates?.(names)) ?? [];
+      this.units = { at: now, rows };
+      return rows;
+    } catch (err: any) {
+      // Not cached: a failed read says so on the page and asks again on the next one.
+      console.error(`Status: reading the units failed: ${err?.message ?? err}`);
+      return null;
+    }
   }
 
   async build(viewer: Viewer, now = this.now()): Promise<StatusData> {
@@ -163,7 +170,7 @@ export class StatusPage {
     const since = now - STATUS_DAYS * DAY_MS;
     const apps = store.listContraptions().filter((a) => (a.home_scheme === null ? viewer.admin : viewer.canSee(a.home_scheme)));
     const units = await this.unitRows(store.listContraptions());
-    const unitOf = (u: string) => units.find((r) => r.unit === u) ?? null;
+    const unitOf = (u: string) => units?.find((r) => r.unit === u) ?? null;
     return {
       now,
       days,
@@ -172,7 +179,7 @@ export class StatusPage {
     };
   }
 
-  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[]): CitadelStatus {
+  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[] | null): CitadelStatus {
     const { store, bootAt } = this.deps;
     const dayOf = (at: number) => pacificDay(at);
     const blank = () => Object.fromEntries(days.map((d) => [d, 0])) as Record<string, number>;
@@ -225,11 +232,12 @@ export class StatusPage {
       workflows: view.workflows.filter((w) => !w.quiet).map((w) => ({ name: w.name, conclusion: w.verdict?.conclusion ?? null, status: w.verdict?.status ?? null, at: w.verdict?.at ?? null, url: w.verdict?.url ?? null })),
       runs: done.length, green: done.filter((r: any) => r.conclusion === 'success').length,
     } : null;
-    const citadelUnits = units.filter((u) => CITADEL_UNITS.includes(u.unit));
+    const citadelUnits = (units ?? []).filter((u) => CITADEL_UNITS.includes(u.unit));
     const desktops = (this.deps.desktops?.() ?? []).map((pc) => ({ host: pc.host, verdict: pc.verdict, now: pc.now, restarts: pc.restarts, seen: pc.series.some((s) => s[1] !== null) }));
     // The verdict: bad on a failed unit; warn on a restart that wasn't a ship, a long stall, low memory or disk, or red CI.
     const reasons: [Tone, string][] = [];
     for (const u of citadelUnits) if (u.active === 'failed') reasons.push(['bad', `${u.unit} failed`]);
+    if (units === null) reasons.push(['warn', 'its services couldn\'t be read']);
     const dayAgo = now - DAY_MS;
     const oddBoots = boots.filter((b) => b.at >= dayAgo && b.detail.startsWith('a restart'));
     if (oddBoots.length) reasons.push(['warn', `${oddBoots.length} restart${oddBoots.length > 1 ? 's' : ''} without a ship in the last day`]);
@@ -245,8 +253,9 @@ export class StatusPage {
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), detail: lastStall.detail.slice(0, 300) } : null },
       host: { series, latest, sampledFrom: samples[0]?.at ?? null },
       ciVisible,
-      ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: shipChanges(lastShip) } : null },
+      ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,
+      unitsFailed: units === null,
       units: citadelUnits.map((u) => ({ unit: u.unit, load: u.load, active: u.active, sub: u.sub })),
       desktops,
       // Tiles still to come: the minions that build them fill these in (Build 5, lane 3).
@@ -343,6 +352,8 @@ export interface CitadelStatus {
   /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
   ciVisible: boolean;
   ci: { at: number; url: string; workflows: { name: string; conclusion: string | null; status: string | null; at: string | null; url: string | null }[]; runs: number; green: number } | null;
+  /** The read of the units failed this time: `units` is empty because it is unknown, not because none run. */
+  unitsFailed: boolean;
   units: { unit: string; load: string; active: string; sub: string }[];
   desktops: { host: string; verdict: PcView['verdict']; now: PcView['now']; restarts: number[]; seen: boolean }[];
   slots: { key: string; title: string; note: string }[];

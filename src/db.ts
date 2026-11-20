@@ -3541,7 +3541,8 @@ export class Store {
     const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
-      this.db.prepare('DELETE FROM health_events WHERE id <= ?').run(Number(id) - HEALTH_MAX_ROWS);
+      // Boots are few and the Status page's week of restarts needs them: only the time keep drops them.
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind != 'boot'").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

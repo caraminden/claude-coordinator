@@ -150,12 +150,15 @@ test('a viewer outside Citadel sees its health but not its CI', async () => {
   const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
   const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id,
     ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any }] : []) });
+  store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A private fix"}]', started_at: Date.now() - 60_000, live_at: Date.now() - 30_000, outcome: 'live', stages: '{}' });
   const outside = (await page.build(viewer(store, mia.id))).citadel;
+  assert.deepEqual(outside.ships.last?.changes, [], 'what shipped is only for people who can see Citadel\'s scheme');
   assert.equal(outside.ci, null);
   assert.equal(outside.ciVisible, false, 'the page says "not yours to see", not "no reading yet"');
   const admin = (await page.build({ canSee: () => true, admin: true, key: 'a' })).citadel;
   assert.equal(admin.ci?.workflows[0].conclusion, 'failure');
   assert.equal(admin.ciVisible, true);
+  assert.equal(admin.ships.last?.changes.length, 1);
   assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests']);
 });
 
@@ -167,4 +170,28 @@ test('health readings and host samples are kept a week and a day', () => {
   store.addHostSample({ at: 1000, ...s });
   store.addHostSample({ at: 1000 + 9 * DAY, ...s });
   assert.deepEqual(store.hostSamples(0).map((r) => r.at), [1000 + 9 * DAY]);
+});
+
+test('a failed read of the units warns and is asked again, not cached as "none running"', async () => {
+  const { store, josh, citadel } = setup('units');
+  let fail = true;
+  let now = Date.now();
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
+    unitStates: async (units) => { if (fail) throw new Error('systemctl: no bus'); return units.map((unit) => ({ unit, load: 'loaded', active: 'failed', sub: 'failed', enabled: '' })); } });
+  const first = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(first.unitsFailed, true);
+  assert.ok(first.verdict.reasons.includes("its services couldn't be read"));
+  fail = false;
+  now += 1000;
+  const second = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(second.unitsFailed, false);
+  assert.equal(second.verdict.tone, 'bad', 'the next read, inside the cache minute, asks again and sees the failed units');
+});
+
+test('boot rows outlive the row cap: only the time keep drops them', () => {
+  const { store } = setup('cap');
+  const now = Date.now();
+  store.addHealthEvent('boot', now - DAY, 'a', 'a ship: new code a');
+  for (let i = 0; i < 5100; i++) store.addHealthEvent('client-error', now - 1000 + (i % 100), 'a', 'x');
+  assert.equal(store.healthEventsSince(['boot'], 0).length, 1);
 });

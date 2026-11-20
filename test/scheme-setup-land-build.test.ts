@@ -152,3 +152,31 @@ test('--build refuses a branch not at a build\'s tip, and one a merge of main ah
   assert.equal(git(b.main, 'log', '-1', '--format=%s', 'main'), 'c.txt: someone else');
   assert.equal(b.has('refs/heads/build/1'), true);
 });
+
+test('--check --into --full exits 0 on a build that moved: the land itself says to merge, never to rebase', () => {
+  const b = buildSetup();
+  b.commit(b.wts[1], 'shared.txt', 'two\n');
+  assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 0);
+  b.commit(b.wts[2], 'shared.txt', 'three\n');
+  const res = b.run(3, '--check', '--into', 'build/1', '--full');
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /git rebase/);
+});
+
+test('--build after a landing killed mid-way: the worktree goes back on its branch and the build ships', () => {
+  const b = buildSetup();
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'f3.txt', '3\n');
+  assert.equal(b.run(3, '--into', 'build/1', '--full').status, 0);
+  b.commit(b.main, 'c.txt', 'someone else\n');
+  // Where a --build killed after its merge leaves things: detached on the merge, the branch named in land-branch.
+  const at = git(b.wts[2], 'rev-parse', 'HEAD');
+  git(b.wts[2], 'checkout', '-q', '--detach');
+  git(b.wts[2], 'merge', '-q', '--no-edit', 'main');
+  writeFileSync(join(git(b.wts[2], 'rev-parse', '--absolute-git-dir'), 'land-branch'), `ticket/3-x\n${git(b.wts[2], 'rev-parse', 'HEAD')}\n`);
+  const res = b.run(3, '--build');
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /is back on ticket\/3-x as it was/);
+  assert.equal(git(b.main, 'rev-parse', 'main^1'), at, 'main is the build with main merged in');
+  assert.equal(b.has('refs/heads/build/1'), false);
+});

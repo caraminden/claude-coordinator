@@ -738,24 +738,24 @@ cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
 [ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
-# --build ships the build whose tip the branch is at.
-if [ "$mode" = build ]; then
+# --build ships the build whose tip the branch is at. After the recovery below, which may put the branch back.
+find_build() {
   build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/')
-  if ! [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]]; then
-    [ -z "$check" ] || exit 0 # the land itself refuses it
-    ahead='' # one merge ahead of a build: $BRANCH merged in by hand
-    [ -n "$build" ] || ! git rev-parse -q --verify HEAD^2 >/dev/null || ahead=$(git for-each-ref --points-at HEAD^1 --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
-    [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a merge of $BRANCH by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
-    refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
-  fi
-fi
+  [[ ! $build =~ ^build/[1-9][0-9]{0,5}$ ]] || return 0
+  [ -z "$check" ] || exit 0 # the land itself refuses it
+  local ahead='' # one merge ahead of a build: $BRANCH merged in by hand
+  [ -n "$build" ] || ! git rev-parse -q --verify HEAD^2 >/dev/null || ahead=$(git for-each-ref --points-at HEAD^1 --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
+  [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a merge of $BRANCH by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
+  refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
+}
 if [ -n "$check" ]; then
   { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || exit 0 # the land itself refuses these
+  [ "$mode" != build ] || find_build
   case $mode in
     land | build) early_conflict HEAD "at hand-off" || exit 3 ;;
-    *) ! git show-ref -q --verify "refs/heads/$build" || git merge-base --is-ancestor "refs/heads/$build" HEAD || early_conflict HEAD "at hand-off" "$build" || exit 3 ;;
+    into) git merge-base --is-ancestor "refs/heads/$build" HEAD 2>/dev/null || ! git show-ref -q --verify "refs/heads/$build" || early_conflict HEAD "at hand-off" "$build" || exit 3 ;;
   esac
-  exit 0
+  exit 0 # --full: no rebase, so nothing to check
 fi
 # A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
 if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
@@ -768,6 +768,7 @@ if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
 fi
 rm -f "$gitdir/land-branch"
 { [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || refuse "run it from a minion's branch, not $BRANCH or a detached HEAD"
+[ "$mode" != build ] || find_build
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 case $mode in
   land)
@@ -1306,7 +1307,7 @@ smoke() {
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
   if [ -n "$SMOKE_CMD" ]; then
-    out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1) || rc=$?
+    out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1 6>&-) || rc=$?
     if { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ -n "$FAST" ]; then
       refuse "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, and a fast land goes live on it alone, so nothing landed. Find what hangs; a land labelled high takes the full gate"
     elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then

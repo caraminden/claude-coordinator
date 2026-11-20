@@ -188,6 +188,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
         return f.apply(this, args);
       }
       seq = n;
+      if (name === 'setSetting' || name === 'deleteSetting') store.noteKey(args[0], name === 'setSetting');
       if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
       else if (name === 'deleteSetting') unwritten.set(args[0], { seq: n, json: null });
       // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).

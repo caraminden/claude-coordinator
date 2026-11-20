@@ -182,3 +182,23 @@ test('writes still queued when the process exits are written first, and writes m
   assert.equal((db.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'k%' OR key = 'at exit'").get() as { n: number }).n, 11);
   db.close();
 });
+
+// #1125: settingKeys scanned the settings table on every call, the top stall stack (continueLoops: 0.7 s a message).
+test('settingKeys reads the table once, and follows writes made here and queued for the write worker', () => {
+  const { store } = open();
+  const scans = () => { let n = 0; const prep = store.db.prepare.bind(store.db); store.db.prepare = ((sql: string, ...r: any[]) => { if (/FROM settings/.test(sql)) n++; return prep(sql, ...r); }) as any; return () => n; };
+  store.setSetting('loop:1', 1);
+  const count = scans();
+  assert.deepEqual(store.settingKeys('loop:'), ['loop:1']);
+  store.settingKeys('loop:');
+  store.settingKeys('x:');
+  assert.equal(count(), 1, 'one scan for three calls');
+  store.setSetting('loop:2', 1);
+  store.deleteSetting('loop:1');
+  assert.deepEqual(store.settingKeys('loop:'), ['loop:2']);
+  store.setSetting('loop:3', 1); // queued for the worker
+  assert.deepEqual(store.settingKeys('loop:'), ['loop:2', 'loop:3']);
+  store.deleteSetting('loop:2');
+  assert.deepEqual(store.settingKeys('loop:'), ['loop:3']);
+  assert.equal(count(), 1);
+});

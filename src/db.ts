@@ -3226,7 +3226,7 @@ export class Store {
     try {
       for (const c of changes) c.data == null ? remove.run(c.id) : update.run(c.data, c.id);
       // Task-list states saved from the old events (planKey) no longer match them.
-      if (changes.length) this.db.prepare("DELETE FROM settings WHERE key LIKE 'plan:%'").run();
+      if (changes.length) { this.db.prepare("DELETE FROM settings WHERE key LIKE 'plan:%'").run(); this.dropKeys(); }
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
@@ -3563,7 +3563,16 @@ export class Store {
     return (this.db.prepare("SELECT COALESCE(SUM(m.cost_usd), 0) AS c FROM turn_models m JOIN turns u ON u.id = m.turn_id WHERE u.ended_at >= ? AND m.model LIKE '%fable%'").get(since) as { c: number }).c;
   }
 
+  /** Every settings key, kept in memory (shortcut: a key written behind this connection's back, by raw SQL, needs dropKeys()). */
+  private keyCache: Set<string> | null = null;
+  /** A key was added or removed, by setSetting or deleteSetting here or queued for the write worker (src/db-writer.ts). */
+  noteKey(key: string, present: boolean) {
+    if (present) this.keyCache?.add(key); else this.keyCache?.delete(key);
+  }
+  dropKeys() { this.keyCache = null; }
+
   setSetting(key: string, value: unknown) {
+    this.noteKey(key, true);
     // An unchanged value writes nothing: ci-health alone rewrote 250 KB of the same job lists every 5 minutes (#680).
     this.db
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value')
@@ -3576,6 +3585,7 @@ export class Store {
   }
 
   deleteSetting(key: string) {
+    this.noteKey(key, false);
     this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
   }
 
@@ -3619,11 +3629,9 @@ export class Store {
 
   /** Every settings key starting with `prefix`. */
   settingKeys(prefix: string): string[] {
-    // A range on the key's index: substr() alone scanned every key, 0.4 ms a call on the live table (#1029).
-    const last = prefix.codePointAt(prefix.length - 1);
-    const upto = last === undefined || last >= 0xd800 ? null : prefix.slice(0, -1) + String.fromCodePoint(last + 1);
-    return (this.db.prepare(`SELECT key FROM settings WHERE key >= ? ${upto === null ? '' : 'AND key < ?'} AND substr(key, 1, ?) = ? ORDER BY key`)
-      .all(...[prefix, upto, prefix.length, prefix].filter((v) => v !== null)) as { key: string }[]).map((r) => r.key);
+    // Read once, then kept: the scan held the loop 0.7 s a message from continueLoops, the top stall stack (#1125).
+    this.keyCache ??= new Set((this.db.prepare('SELECT key FROM settings').all() as { key: string }[]).map((r) => r.key));
+    return [...this.keyCache].filter((k) => k.startsWith(prefix)).sort();
   }
 
   listMachines(): Machine[] {

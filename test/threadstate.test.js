@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount } from '../public/base.js';
-import { askWhy, byUrgency, cardChip, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
+import { askWhy, byUrgency, cardChip, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -19,9 +19,10 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     // Nothing running and nothing asked is idle, grey, not your move (#1121: it was amber "reply").
     [{}, [4, 'idle', 'idle 5m']],
     [{ replies: ['Ship it'] }, [0, 'you', 'answer 5m']],
-    [{ state: 'ready' }, [0, 'done', 'ready 5m']],
-    [{ state: 'complete', note: 'nothing left' }, [0, 'done', 'read it 5m']],
-    [{ state: 'try' }, [0, 'work', 'try it 5m']],
+    // For a person to look at, not an answer (#1121): after Needs you, before working.
+    [{ state: 'ready' }, [LOOK, 'done', 'ready 5m']],
+    [{ state: 'complete', note: 'nothing left' }, [LOOK, 'done', 'read it 5m']],
+    [{ state: 'try' }, [LOOK, 'work', 'try it 5m']],
     [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', 'answer 2h']],
     [{ approvals: 1, status: 'running' }, [0, 'you', 'approve 5m']],
     [{ status: 'error' }, [0, 'broken', 'stuck 5m']],
@@ -142,7 +143,7 @@ test('rowState: a wait colours the chip while working or outside, which keeps th
     [{ status: 'running', wait: testing }, [1, 'work', 'working', 'pulse']],
     [{ state: 'outside', wait: testing }, [2, 'work', 'waiting', 'pulse']],
     [{ state: 'pending-deploy', steps: { done: 5, total: 5 }, wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'deploying 5/5']],
-    [{ state: 'ready', wait: line }, [0, 'done', 'ready 5m']],
+    [{ state: 'ready', wait: line }, [LOOK, 'done', 'ready 5m']],
     [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
     // A PR's CI run (#546): violet while queued, blue while its jobs run, green or red once it ends.
@@ -403,7 +404,7 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
   const kinds = [
     { kind: 'approval', card: {} }, { kind: 'question', card: {} }, { kind: 'question', card: { doc: 'x.html' } }, { kind: 'question', card: { notice: 'x' } },
     { kind: 'question', card: { secret: { name: 'X' } } }, { kind: 'plan', card: {} }, { kind: 'spend', card: { stage: 5 } }, { kind: 'quiet' },
-    { kind: 'state' }, { kind: 'replies' },
+    { kind: 'replies' },
   ];
   for (const item of kinds) {
     const why = askWhy({ at, ...item }, { state: 'ready' }, NOW);
@@ -411,7 +412,6 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
     assert.doesNotMatch(why, /^Waiting on you since/, `${item.kind} has its own words`);
   }
   assert.match(askWhy({ kind: 'question', at, card: { doc: 'x.html' } }, null, NOW), /^A choices page card/);
-  assert.match(askWhy({ kind: 'state', at }, { state: 'ready' }, NOW), /^Ready/);
 });
 
 test('progressWhy: a release says its stage, what it waits on, since when and its usual (#906)', () => {

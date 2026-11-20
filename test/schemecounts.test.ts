@@ -73,40 +73,40 @@ test('forget: after the counts are fetched afresh, a minion the watcher last saw
 
 test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on you for (#236)', () => {
   assert.equal(rowTarget([{ kind: 'approval', at: 30, eventId: 9 }, { kind: 'question', at: 10, eventId: 4 }, { kind: 'plan', at: 20, eventId: 6 }]), 4);
-  assert.equal(rowTarget([{ kind: 'question', at: 20, eventId: 4 }, { kind: 'state', at: 10 }]), 'latest', 'ready or try: the latest reply');
+  assert.equal(rowTarget([{ kind: 'question', at: 20, eventId: 4 }, { kind: 'replies', at: 10 }]), 'latest', 'replies: the latest reply');
   assert.equal(rowTarget([{ kind: 'replies', at: 10 }]), 'latest');
   assert.equal(rowTarget([{ kind: 'approval', at: 10 }]), null, 'a card whose event is gone opens the chat as usual');
 });
 
 test('schemePill: the spinner shows beside the Needs-you count, not only at zero (#314), with the working number only over 1 (#278)', () => {
   assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, fresh: false, label: '' }, 'nothing: hidden');
-  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, fresh: false, label: '2 waiting on you' }, 'badge only');
+  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, fresh: false, label: '2 need your answer' }, 'badge only');
   assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, fresh: false, label: '1 minion working' }, 'spinner only, one minion: no number');
   assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, fresh: false, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, fresh: false, label: '2 waiting on you · 1 minion working' }, 'both');
-  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, fresh: false, label: '2 waiting on you · 3 minions working' }, 'both, with the working number');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, fresh: false, label: '2 need your answer · 1 minion working' }, 'both');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, fresh: false, label: '2 need your answer · 3 minions working' }, 'both, with the working number');
   assert.equal(schemePill({ inbox: 1, running: false, working: 3 }).working, 0, 'no turn running: no working number, whatever the field says');
 });
 
 test('schemePill: violet only when something new waits, not when the count moved, and nothing at zero (#498, #539)', () => {
   assert.equal(schemePill({ inbox: 3 }).fresh, false, 'nothing new');
-  assert.deepEqual(schemePill({ inbox: 3, fresh: true }), { need: 3, busy: false, working: 0, fresh: true, label: '3 waiting on you (something new since you last opened it)' }, 'new');
+  assert.deepEqual(schemePill({ inbox: 3, fresh: true }), { need: 3, busy: false, working: 0, fresh: true, label: '3 need your answer (something new since you last opened it)' }, 'new');
   assert.deepEqual(schemePill({ inbox: 0, fresh: true }), { need: 0, busy: false, working: 0, fresh: false, label: '' }, 'at zero: hidden, never a violet 0');
-  assert.equal(schemePill({ inbox: 2, fresh: true, running: true, working: 1 }).label, '2 waiting on you (something new since you last opened it) · 1 minion working');
+  assert.equal(schemePill({ inbox: 2, fresh: true, running: true, working: 1 }).label, '2 need your answer (something new since you last opened it) · 1 minion working');
 });
 
 test('the scheme you\'re in: a new ask is new unless the chat you\'re on asks it, until you open another chat (#548)', () => {
   const item = (key, ticketId) => ({ key, ticketId });
-  const a = item('question:1', 7), b = item('state:8', 8), c = item('plan:3', 9);
+  const a = item('question:1', 7), b = item('replies:8', 8), c = item('plan:3', 9);
   let seen = seenInScheme(new Set(), [a], 7, true);
   assert.deepEqual([...seen], ['question:1'], 'opening a chat sees everything waiting');
   seen = seenInScheme(seen, [a, b], 7, false);
-  assert.equal(seen.has('state:8'), false, 'another minion asks while you stay put: new to you');
+  assert.equal(seen.has('replies:8'), false, 'another minion asks while you stay put: new to you');
   seen = seenInScheme(seen, [a, b, item('approval:x', 7)], 7, false);
   assert.equal(seen.has('approval:x'), true, 'the minion you have open asks: not new');
-  assert.equal(seen.has('state:8'), false, 'and the other one is still new');
+  assert.equal(seen.has('replies:8'), false, 'and the other one is still new');
   seen = seenInScheme(seen, [b, c], 9, true);
-  assert.deepEqual([...seen].sort(), ['plan:3', 'state:8'], 'moving to any chat sees all of it, and what stopped waiting drops out');
+  assert.deepEqual([...seen].sort(), ['plan:3', 'replies:8'], 'moving to any chat sees all of it, and what stopped waiting drops out');
   const gone = seenInScheme(seen, [b], 7, false);
   assert.equal(seenInScheme(gone, [b, c], 7, false).has('plan:3'), false, 'an item that stops waiting and waits again later is new again');
 });

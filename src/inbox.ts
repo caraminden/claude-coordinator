@@ -5,12 +5,12 @@ import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
 
 export interface InboxItem {
-  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'state' for a minion in state ready, complete or try, 'quiet' for a running turn gone quiet (#906), 'loop' for messages the loop guard holds for a person's Continue (#1067), or 'replies' for one offering one-tap replies in another state. */
+  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'quiet' for a running turn gone quiet (#906), 'loop' for messages the loop guard holds for a person's Continue (#1067), or 'replies' for one offering one-tap replies in another state. */
   kind: string;
   ticketId: number;
   /** When it started waiting. */
   at: number;
-  /** The card as its chat shows it, so the inbox can act on it in place; none for 'state'. */
+  /** The card as its chat shows it, so the inbox can act on it in place; none for 'replies', 'quiet' or 'loop'. */
   card?: unknown;
   /** Names this item while it waits, so a scheme's pill can tell a new one from one you saw (#539). */
   key: string;
@@ -66,7 +66,7 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     }),
     // Messages the loop guard holds (#1067; Josh, 2026-11-19, "Needs-you + chat"), until a person continues them.
     ...[...loopHolds(store)].filter(([id]) => ids.has(id)).map(([ticketId, hold]) => ({ kind: 'loop', ticketId, at: hold.at, card: hold, key: `loop:${ticketId}:${hold.at}` })),
-    ...tickets.filter((t) => ['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
+    // Ready, try and complete are for a person to look at, not answers, so they're not here (#1121; Josh, 2026-11-19: "Answers only").
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
     ...tickets.filter((t) => t.replies && !['ready', 'complete', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
   ];

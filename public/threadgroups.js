@@ -15,6 +15,8 @@
 // a running or stuck turn or a waiting approval sends it back to its type. Open question cards that don't hold the land up keep
 // it here; its row's question chip still puts it in the Needs-you strip.
 
+import { LOOK } from './threadstate.js';
+
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
@@ -74,6 +76,7 @@ export function threadMatches(t, query) {
 export function recapSections(tickets, since, turns, stateOf) {
   const sections = [
     { key: 'you', label: 'Needs you', rows: [] },
+    { key: 'look', label: 'Ready, to try or done', rows: [] },
     { key: 'work', label: 'Still working', rows: [] },
     { key: 'wait', label: 'Parked or waiting', rows: [] },
     { key: 'closed', label: 'Dismissed', rows: [] },
@@ -81,7 +84,7 @@ export function recapSections(tickets, since, turns, stateOf) {
   const changed = tickets.filter((t) => turns[t.id] || t.updated_at > since).sort((a, b) => b.updated_at - a.updated_at);
   for (const t of changed) {
     const st = stateOf(t);
-    const key = t.status === 'closed' ? 'closed' : st.rank === 0 ? 'you' : st.fam === 'work' ? 'work' : 'wait';
+    const key = t.status === 'closed' ? 'closed' : st.rank === 0 ? 'you' : st.rank === LOOK ? 'look' : st.fam === 'work' ? 'work' : 'wait';
     sections.find((s) => s.key === key).rows.push(t);
   }
   return sections.filter((s) => s.rows.length);

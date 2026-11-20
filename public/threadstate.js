@@ -16,7 +16,7 @@ export function byUrgency(a, b, usage, now = Date.now()) {
  * limit, or is parked or dismissed (#576; Cara, 2026-11-11: "isnt that for when there is something you need to do?").
  * By rank, not family: a wait recolours the chip (CI passed is green) without making it your move. `st` is its rowState.
  */
-export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || (st.rank === 2 && t.state === 'blocked'));
+export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || st.rank === LOOK || (st.rank === 2 && t.state === 'blocked'));
 
 /**
  * A thread's state pill, coloured by family (one meaning each): you (amber: an answer of yours is owed, with how
@@ -62,6 +62,9 @@ export function serverLabel(w) {
   return 'Server is shipping…';
 }
 
+/** The rank of a row for a person to look at (ready, try it, done): after the answers owed (0), before working (1). */
+export const LOOK = 0.5;
+
 /** Whose answer a card waits on (#1121): its `to`, else the minion's assignee; '' for anyone's, which is yours. */
 const cardFor = (c, t) => String(c?.to || t.properties?.assigned || '').trim();
 const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
@@ -103,10 +106,12 @@ function baseState(t, usage, now) {
     const who = cardFor(cards[0], t);
     return { rank: 2, fam: 'wait', cell: `${who} ${age}`, label: `Waiting on ${who}`, since: t.pending_card_at };
   }
-  if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
+  // Ready to ship, ready to try and done, read it: for a person to look at, not an answer owed, so not amber and not in
+  // Needs you (#1121; Josh, 2026-11-19: "Answers only", ready "Its own green state"). LOOK sorts them after the answers.
+  if (t.state === 'ready') return { rank: LOOK, fam: 'done', cell: waited('ready'), label: state.label };
   // Complete carries what's left (nothing, or what to read) in its note, so the label says it at a glance (#547).
-  if (t.state === 'complete') return { rank: 0, fam: 'done', cell: waited('read it'), label: t.note ? `${state.label}: ${t.note}` : state.label };
-  if (t.state === 'try') return { rank: 0, fam: 'work', cell: waited('try it'), label: state.label };
+  if (t.state === 'complete') return { rank: LOOK, fam: 'done', cell: waited('read it'), label: t.note ? `${state.label}: ${t.note}` : state.label };
+  if (t.state === 'try') return { rank: LOOK, fam: 'work', cell: waited('try it'), label: state.label };
   // One-tap replies wait on a go, as a card does: its assignee's, else anyone's.
   if (t.replies?.length) {
     const who = cardFor(null, t);
@@ -194,7 +199,6 @@ export function askWhy(item, t, now = Date.now()) {
     case 'question': case 'plan': return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
     case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
     case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
-    case 'state': return `${STATES[t?.state]?.label ?? 'Answer needed'} since ${since}, assigned to you or no one. It stops counting once you open it.`;
     case 'loop': return `The loop guard has held ${card.n === 1 ? 'a message' : `${card.n} messages`} since ${since} ("${card.text}"). Continue in its chat sends ${card.n === 1 ? 'it' : 'them'}.`;
     case 'replies': return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
     default: return `Answer needed since ${since}.`;

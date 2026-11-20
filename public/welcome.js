@@ -132,6 +132,7 @@ function welcomeLooked(w) {
   account.welcome = w?.done ? null : w;
   if (!live?.el.isConnected) return;
   if (w) live.draw(w);
+  else { live.el.remove(); live = null; } // finished or dismissed elsewhere (another tab, your phone)
 }
 
 let asking = null;

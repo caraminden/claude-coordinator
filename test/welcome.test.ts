@@ -1,7 +1,7 @@
 // The first-day welcome (#1151): who gets it, each step ticking from what the server knows, and gone for good once
 // done or dismissed.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -49,4 +49,11 @@ test('dismissed is gone for good, and acting on a finished welcome changes nothi
   assert.equal(welcomeView(store, u, false), null);
   welcomeAct(store, u.id, { card: CARD_OPTIONS[1] });
   assert.equal(welcomeView(store, u, false), null);
+});
+
+test("the panel's practice card offers exactly the answers the server takes", () => {
+  const js = readFileSync(new URL('../public/welcome.js', import.meta.url), 'utf8');
+  const listed = js.match(/const OPTIONS = (\[[^\]]*\]);/)?.[1];
+  assert.ok(listed, 'public/welcome.js declares its OPTIONS on one line');
+  assert.deepEqual(JSON.parse(listed.replaceAll("'", '"')), [...CARD_OPTIONS]);
 });

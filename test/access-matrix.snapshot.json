@@ -669,6 +669,16 @@
   "m1": "200",
   "m2": "200"
  },
+ "GET /api/home": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/host-check": {
   "anon": "401 Not logged in",
   "person": "403 Only a turn can run host checks",

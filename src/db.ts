@@ -3634,6 +3634,13 @@ export class Store {
     });
   }
 
+  /** The "Shipped …" notes posted at or after `since`, newest first, each with its minion's scheme, number and title: Home's "Shipped since your last visit" (#1140). */
+  shippedNotes(since: number): { ticket_id: number; project_id: number; number: number | null; kind: TicketKind; title: string; text: string; at: number }[] {
+    return this.db.prepare(`SELECT e.ticket_id, t.project_id, t.number, t.kind, t.title, json_extract(e.data, '$.text') AS text, e.created_at AS at
+      FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{"text":"Shipped %' ORDER BY e.id DESC`)
+      .all(this.eventIdAt(since)) as ReturnType<Store['shippedNotes']>;
+  }
+
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;

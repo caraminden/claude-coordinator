@@ -1,6 +1,7 @@
 // The Needs-you inbox: everything in a scheme that waits on a person, as one list of items.
 import type { Approvals } from './approvals.ts';
-import type { Store } from './db.ts';
+import type { Project, Store, Ticket, TicketKind } from './db.ts';
+import { inOrder } from '../public/reorder.js';
 import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
 
@@ -108,4 +109,64 @@ export function directCards(store: Store, projectId: number, person: string): In
     }
   }
   return items.sort((a, b) => b.at - a.at);
+}
+
+/** A new visit to Home starts after this long without one of its fetches (#1140). */
+export const HOME_VISIT_GAP = 30 * 60_000;
+/** A first visit to Home shows what shipped in the day before it. */
+export const HOME_FIRST_LOOK = 24 * 3_600_000;
+
+/**
+ * When this person's visit to Home started counting what shipped (#1140; Josh, 2026-11-19, "Last visit to Home"): the
+ * end of their last visit, kept for the whole of this one, so a live refresh doesn't empty the list. Stored per person.
+ */
+export function homeSince(store: Store, person: string, now: number): number {
+  const key = `home-visit:${person.toLowerCase()}`;
+  const was = store.getSetting<{ since: number; last: number }>(key);
+  const since = !was ? now - HOME_FIRST_LOOK : now - was.last > HOME_VISIT_GAP ? was.last : was.since;
+  store.setSetting(key, { since, last: now });
+  return since;
+}
+
+export interface HomeView {
+  /** What waits on the person, each with `from` naming its scheme and minion: Taskmasters first, then oldest first (Josh, 2026-11-19, "Taskmasters first"). */
+  items: InboxItem[];
+  /** Their schemes in their shelf's order, each with the minions (and their Taskmaster) doing work now. */
+  schemes: { id: number; name: string; working: { id: number; number: number | null; kind: TicketKind; title: string }[] }[];
+  /** What shipped in those schemes since `since`, newest first, at most HOME_SHIPPED; `total` counts them all. */
+  shipped: { since: number; total: number; items: { projectId: number; ticketId: number; number: number | null; kind: TicketKind; title: string; text: string; at: number }[] };
+}
+
+export const HOME_SHIPPED = 50;
+
+/**
+ * Home (#1140): everything waiting on a person across the schemes they own or are a member of and haven't hidden,
+ * what's working in them, and what shipped since `since`. Admin reach doesn't add schemes: Home is about the person.
+ * `busy` says whether a minion's turn is doing work, as api/projects counts it.
+ */
+export function homeView(store: Store, approvals: Approvals, who: { name: string; uid?: number }, busy: (t: Ticket) => boolean, since: number): HomeView {
+  const hidden = store.hiddenProjects(who.uid ?? -1);
+  const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
+  const schemes = ids.map((id) => store.getProject(id)).filter((p): p is Project => !!p);
+  const items: InboxItem[] = [];
+  const out: HomeView['schemes'] = [];
+  for (const p of schemes) {
+    const tickets = store.listTickets(p.id);
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    for (const i of inboxWaiting(store, approvals, p.id, who.name, store.seenTimes(who.name, p.id))) {
+      const t = byId.get(i.ticketId);
+      if (t) items.push({ ...i, from: { projectId: p.id, scheme: p.name, number: t.number, kind: t.kind, title: t.title } });
+    }
+    // Another person's own Taskmaster in a split scheme (#919) is theirs.
+    const working = tickets.filter((t) => t.status !== 'closed' && (t.coordinator_of == null || t.coordinator_of === who.uid) && busy(t));
+    out.push({ id: p.id, name: p.name, working: working.map((t) => ({ id: t.id, number: t.number, kind: t.kind, title: t.title })) });
+  }
+  const isTaskmaster = (i: InboxItem) => Number(i.from?.kind === 'coordinator');
+  items.sort((a, b) => isTaskmaster(b) - isTaskmaster(a) || a.at - b.at);
+  const mine = new Set(ids);
+  const shipped = store.shippedNotes(since).filter((n) => mine.has(n.project_id));
+  return {
+    items, schemes: out,
+    shipped: { since, total: shipped.length, items: shipped.slice(0, HOME_SHIPPED).map((n) => ({ projectId: n.project_id, ticketId: n.ticket_id, number: n.number, kind: n.kind, title: n.title, text: n.text, at: n.at })) },
+  };
 }

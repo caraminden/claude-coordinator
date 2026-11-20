@@ -1964,17 +1964,17 @@ async function approve(args: any): Promise<string> {
  */
 async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<string> {
   const text = wholeText(args);
-  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim()) : [];
-  if (args.repeats_ok === true && judged.length) return `\nSaved past the repeat check on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
+  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim().slice(0, 300)) : [];
   let found: any[];
   // Like a Settings save, a check that fails never blocks the save: it says so instead.
   try { ({ found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
   if (!found.length) return '';
+  if (args.repeats_ok === true && judged.length >= found.length) return `\nSaved past ${found.length} flagged place${found.length > 1 ? 's' : ''} on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
   const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
   throw new Error([
-    args.repeats_ok === true ? `repeats_ok needs your Grunt's verdicts as overlaps. Nothing was saved.` : `Nothing was saved: the new words repeat what is already written elsewhere.`,
+    args.repeats_ok === true ? `repeats_ok needs your Grunt's verdict on each place as overlaps (${found.length} listed, ${judged.length} given). Nothing was saved.` : `Nothing was saved: a word matcher flagged places that may already say the new words.`,
     ...found.map((o: any) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
-    `A word matcher found these, so first have a Sonnet Grunt judge each against the new words (for a registered rule, against its home): repeats, conflicts, or fine (only shared wording). Put what it marks where it is already said, or point there in a few words. To save anyway, call again with repeats_ok: true and its verdicts as overlaps, one line per place.`,
+    `First have a Sonnet Grunt judge each against the new words (for a registered rule, against its home): repeats, conflicts, or fine (only shared wording). Put what it marks where it is already said, or point there in a few words. To save anyway, call again with repeats_ok: true and its verdicts as overlaps, one line per place.`,
   ].join('\n'));
 }
 

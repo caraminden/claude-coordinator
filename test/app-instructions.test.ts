@@ -166,7 +166,7 @@ test('a Taskmaster save that repeats a registered rule is refused with the list,
     // repeats_ok saves past them only with its Grunt's verdicts (Josh, 2026-11-20: "Yes, its own Grunt").
     const bare = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true } }, appTools);
     assert.ok(bare.isError, `${tool}: ${bare.content[0].text}`);
-    assert.match(bare.content[0].text, /repeats_ok needs your Grunt's verdicts as overlaps/);
+    assert.match(bare.content[0].text, /repeats_ok needs your Grunt's verdict on each place as overlaps \(1 listed, 0 given\)/);
     assert.equal(read(), before, `${tool} saved nothing without verdicts`);
 
     const verdict = 'Registered rule: When a minion closes: repeats; the Closing rule already says this.';

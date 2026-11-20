@@ -232,7 +232,7 @@ setTimeout(() => createServer((req, res) => res.end(JSON.stringify({ ok: true, p
   }
 });
 
-test('a preview whose health check hangs is asked again, not waited on for minutes (C8)', async () => {
+test('a preview whose health check hangs is asked again, not waited on for minutes (C8)', async (ctx) => {
   const d5 = join(root, 'data5');
   mkdirSync(d5);
   const s5 = new Store(join(d5, 'coordinator.db'));
@@ -253,11 +253,23 @@ createServer((req, res) => {
   s5.setTicketDir(t.id, wt, 'ticket/5-hung');
   const previews = new Previews(s5, d5);
   const t0 = Date.now();
+  // Each health check the boot made and how it ended, so a failure says which side lost the re-ask (#1197).
+  const asks: { at: number; how?: string }[] = [];
+  const realFetch = globalThis.fetch;
+  ctx.mock.method(globalThis, 'fetch', async (input: any, init?: any) => {
+    const ask: (typeof asks)[number] = { at: Date.now() - t0 };
+    asks.push(ask);
+    const ended = (how: string) => (ask.how = `${how} at +${Date.now() - t0}`);
+    return realFetch(input, init).then((res) => (ended(`${res.status}`), res), (e) => { ended(e.cause?.code ?? e.name); throw e; });
+  });
   let booted = 0;
   let failed: unknown;
   const boot = previews.start(s5.getTicket(t.id)!).then(() => void (booted = Date.now()), (e) => void (failed = e ?? new Error('failed')));
   const seen = () => (existsSync(hits) ? readFileSync(hits, 'utf8').trim().split('\n').map((x) => `+${Number(x) - t0} ms`) : []);
-  const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}`;
+  const alive = () => { try { return process.kill(Number(readFileSync(join(wt, 'pid'), 'utf8')), 0) && 'running'; } catch { return 'gone'; } };
+  const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}; `
+    + `health checks: ${asks.filter((a) => !a.how?.startsWith('ECONNREFUSED')).map((a) => `+${a.at} (${a.how ?? 'pending'})`).join(', ') || 'none'}`
+    + ` after ${asks.filter((a) => a.how?.startsWith('ECONNREFUSED')).length} refused; the server is ${alive()}`;
   try {
     // Timed from the hung request, not from start(): copying the data and starting the server aren't what this checks (#973).
     await until('the first health check to reach the preview', () => seen().length || failed, 30_000, what);

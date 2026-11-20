@@ -1,20 +1,17 @@
 {
-  "description": "Citadel kit hooks: the job check (with the answer check), the retro log, the test-first reminder, the flail brake, the big-read guard, the grunt-model guard and the after-compact reminder (kit/README.md).",
+  "description": "Citadel kit hooks: the job check (with the answer check), the retro log, the test-first reminder, the flail brake (those three after a call run in one process, hooks/run.ts), the grunt-model guard and the after-compact reminder (kit/README.md).",
   "hooks": {
     "SessionStart": [
       { "matcher": "compact", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/after-compact.sh\"", "timeout": 30 }] }
     ],
     "PreToolUse": [
-      { "matcher": "^(Read|Bash)$", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/big-read.ts\"", "timeout": 10 }] },
       { "matcher": "^(Agent|Task)$", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/grunt-model.ts\"", "timeout": 10 }] }
     ],
     "PostToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }, { "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/test-first.ts\"", "timeout": 10 }, { "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/flail-brake.ts\"", "timeout": 10 }] },
-      { "matcher": "^(Read|Grep|Glob)$", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/flail-brake.ts\"", "timeout": 10 }] },
-      { "matcher": "^(Write|Edit|MultiEdit|NotebookEdit)$", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/test-first.ts\"", "timeout": 10 }, { "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/flail-brake.ts\"", "timeout": 10 }] }
+      { "matcher": "^(Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit)$", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ts\"", "timeout": 10 }] }
     ],
     "PostToolUseFailure": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }, { "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/test-first.ts\"", "timeout": 10 }, { "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/flail-brake.ts\"", "timeout": 10 }] }
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "NODE_COMPILE_CACHE=\"$CITADEL_HOOK_CACHE\" node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ts\"", "timeout": 10 }] }
     ],
     "Stop": [
       { "hooks": [

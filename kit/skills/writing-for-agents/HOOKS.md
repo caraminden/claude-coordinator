@@ -22,18 +22,20 @@ Prefer a narrow matcher and the end of a turn over every call.
 | `answer-check.ts` | Stop (run by job-check.ts) | Proposal with no card | sends back once per prompt |
 | | | Thin last message, `<placeholder>` in a command, live-state claim with no read; minions: no or unreadable status line, title still the opening words, ship with no self-review | counts |
 | `grunt-model.ts` | PreToolUse on Agent | A Grunt's model or effort left to chance | sends back |
-| `big-read.ts` | PreToolUse on Read, Bash | A whole read of a big file | sends back |
-| `test-first.ts` | PostToolUse on edits, Bash | A source edit before any red test run | reminds, once per session |
-| `flail-brake.ts` | PostToolUse on edits, Bash | Same test red three times with no edit | reminds, once per streak |
+| `big-read.ts` | PreToolUse on Read, Bash (runs inside the turn's `hook-run.ts`; not in hooks.json) | A whole read of a big file | sends back |
+| `test-first.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | A source edit before any red test run | reminds, once per session |
+| `flail-brake.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | Same test red three times with no edit | reminds, once per streak |
 | `batch-nudge.ts` | PostToolUse on Read, Grep, Glob, Bash, edits (runs inside flail-brake.ts) | Third single read-only call in a row, even-numbered minions only; a one-week trial (#1278) | reminds, once per run |
-| `retro-log.ts` | PostToolUse on Bash, Stop, SubagentStop | Writes the retro log the other modes count into | counts |
+| `retro-log.ts` | PostToolUse on Bash (inside `run.ts`), Stop, SubagentStop | Writes the retro log the other modes count into | counts |
+| `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, flail-brake (with batch-nudge) and retro-log in one node process, in hooks.json's old order (#1296) | as each check |
 | `after-compact.sh` | SessionStart after a compaction | Puts back the branch, head and what to re-read | reminds |
 
 ## Citadel's turn hooks (`src/`, installed per turn by `src/turn-launch.ts`): every scheme
 
 | Hook | When | What it does | Mode |
 | --- | --- | --- | --- |
-| `tripwire.ts` | PreToolUse on Bash, file tools, Skill | Writes outside the turn's folders, live data, destructive git, kills by name | refuses (a few go to a person's card) |
+| `hook-run.ts` | PreToolUse on what its checks read | Runs the side guard, tripwire, wording, scheme-refs and the kit's big-read in one node process, each on its own matcher, in that order (#1296) | as each check; a hard check's crash blocks |
+| `tripwire.ts` | PreToolUse on Bash, file tools, Skill (inside `hook-run.ts`) | Writes outside the turn's folders, live data, destructive git, kills by name | refuses (a few go to a person's card) |
 | `link-check.ts` | Stop, minions and Taskmasters | A file link that won't open; a card mentioned without its link (`card-links.ts`); a choice asked in prose with no card; a choices page no card opens | sends back once |
 | `wording.ts` | PreToolUse on messages, cards, shared-folder writes; and in link-check | A retired or misused word ("fold", "merge" for main) | sends back once per sentence |
 | `scheme-refs.ts` | PreToolUse on messages and cards; and in link-check | A bare #N that likely means another scheme's minion | sends back once per number |

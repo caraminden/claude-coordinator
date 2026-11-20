@@ -228,6 +228,13 @@ async function judge(c: Case, ev: Event[], dir: string, tmp: string): Promise<st
   return r.error ? 'judge failed' : text.split('\n')[0].slice(0, 200);
 }
 
+/** The kit's big-read guard, which a real turn runs inside src/hook-run.ts and a side's kit no longer lists in its hooks.json (#1296); none when the side's kit still lists it itself. */
+function bigRead(sideDir: string): object[] {
+  const hooks = join(sideDir, 'kit', 'hooks');
+  if (!existsSync(join(hooks, 'big-read.ts')) || readFileSync(join(hooks, 'hooks.json'), 'utf8').includes('big-read.ts')) return [];
+  return [{ matcher: '^(Read|Bash)$', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(hooks, 'big-read.ts')}'`, timeout: 10 }] }];
+}
+
 async function runCase(c: Case, side: Side, i: number, work: string, budget: number, withJudge: boolean): Promise<Run> {
   const dir = join(work, 'runs', c.id, `${side.label}-${i}`);
   const tmp = join(dir, 'tmp');
@@ -241,7 +248,7 @@ async function runCase(c: Case, side: Side, i: number, work: string, budget: num
   writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { [server]: { command: process.execPath, args: [join(HERE, 'stub.ts')],
     env: { STUB_TOOLS: join(dir, 'tools.json'), STUB_FACTS: join(dir, 'facts.json'), STUB_ROLE: server } } } }));
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
-    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'guard.ts')}'`, timeout: 10 }] }] } }));
+    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'guard.ts')}'`, timeout: 10 }] }, ...bigRead(side.dir)] } }));
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
     '--append-system-prompt-file', join(dir, 'system.md'), '--settings', join(dir, 'settings.json'), '--setting-sources', 'project',
     '--plugin-dir', join(side.dir, 'kit'), '--model', side.model, '--effort', side.effort,
@@ -314,7 +321,7 @@ async function runBrief(b: Brief, side: Side, i: number, work: string, budget: n
   const trip = { home: homedir(), data: join(homedir(), '.local/share/claude-coordinator'), checkout: join(homedir(), 'claude-coordinator'), project: 2,
     claudeConfig: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), ask: false };
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$',
-    hooks: [{ type: 'command', command: [process.execPath, join(REPO, 'src/tripwire.ts'), JSON.stringify(trip)].map((s) => `'${s}'`).join(' '), timeout: 10 }] }] } }));
+    hooks: [{ type: 'command', command: [process.execPath, join(REPO, 'src/tripwire.ts'), JSON.stringify(trip)].map((s) => `'${s}'`).join(' '), timeout: 10 }] }, ...bigRead(side.dir)] } }));
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
     '--append-system-prompt-file', join(dir, 'system.md'), '--settings', join(dir, 'settings.json'), '--setting-sources', 'project',
     '--plugin-dir', join(side.dir, 'kit'), '--model', side.model, '--effort', side.effort,

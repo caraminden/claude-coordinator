@@ -1543,20 +1543,34 @@ export function explanation(toolInput: any): string | null {
   return d.length >= MIN_EXPLANATION ? d : null;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/** The hook's answer to one raw call and its config argument: what its process prints and how it exits (hook-run.ts runs it in one process with the others). */
+export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string; stderr?: string; code?: number } {
   // Fails open: a broken config or input lets the call through rather than wedging every turn.
   let v: Verdict | null = null;
   try {
-    const cfg = JSON.parse(process.argv[2]) as TripwireConfig;
-    v = tripwire(JSON.parse(readFileSync(0, 'utf8')), cfg);
+    const cfg = JSON.parse(cfgArg) as TripwireConfig;
+    v = tripwire(JSON.parse(stdin), cfg);
   } catch (err: any) {
-    process.stderr.write(`[tripwire] skipped: ${err.message}\n`);
+    return { stderr: `[tripwire] skipped: ${err.message}\n` };
   }
   if (v?.ask) {
     // Claude Code sends this call to the turn's permission-prompt tool, which shows the card.
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `[tripwire] ${v.reason}` } }));
-  } else if (v) {
-    process.stderr.write(`[tripwire] ${v.reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`);
-    process.exit(2);
+    return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `[tripwire] ${v.reason}` } }) };
   }
+  if (v) return { stderr: `[tripwire] ${v.reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`, code: 2 };
+  return {};
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  let stdin: string;
+  try {
+    stdin = readFileSync(0, 'utf8');
+  } catch (err: any) {
+    process.stderr.write(`[tripwire] skipped: ${err.message}\n`);
+    process.exit(0);
+  }
+  const r = tripwireResult(stdin, process.argv[2]);
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.code) process.exit(r.code);
 }

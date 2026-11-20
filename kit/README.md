@@ -38,7 +38,10 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     Grep, Glob, or a Bash that only reads) it adds one line saying to send independent lookups in one message. Only
     minions with an even number (the other half is the control); Grunts and Taskmasters never. A call sent with
     others in one message, an edit or a writing Bash ends the run. The trial's readout decides whether it stays.
-  - `big-read.ts` (PreToolUse on Read and Bash, every session, Grunts included): sends back a
+  - `run.ts` (PostToolUse and PostToolUseFailure): test-first, flail-brake (with batch-nudge) and retro-log's
+    after-call lines in one node process per call (#1296), each as it ran alone; one that throws says nothing.
+  - `big-read.ts` (PreToolUse on Read and Bash, every Citadel turn, Grunts included; not in hooks.json: it runs inside
+    the turn's one PreToolUse process, `src/hook-run.ts`, #1296): sends back a
     whole read of a big file (over 600 lines or 25k chars): a Read with no `limit`, or a plain
     `cat path` / `sed -n 'N,Mp' path` whose output isn't piped or redirected. The reason names the
     size and the cheaper way (grep -n, then offset/limit or a small sed range). `allow_large: true`

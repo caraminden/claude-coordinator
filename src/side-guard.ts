@@ -184,16 +184,26 @@ function ghWrites(args: string[]): string | null {
   return GH_READS[group]?.has(verb) ? null : `\`gh ${group ?? ''} ${verb ?? ''}\` isn't a read.`;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/** The hook's answer to one raw call: what its process prints and how it exits (hook-run.ts runs it in one process with the others). */
+export function sideGuardResult(stdin: string): { stdout?: string; stderr?: string; code?: number } {
   // Fails closed: a fork that can't be checked can't write either.
   let why: string | null;
   try {
-    why = sideGuard(JSON.parse(readFileSync(0, 'utf8')));
+    why = sideGuard(JSON.parse(stdin));
   } catch (err: any) {
     why = `${READ_ONLY}, and the guard could not read this call (${err.message}).`;
   }
-  if (why) {
-    process.stderr.write(`[side question] ${why}\n`);
-    process.exit(2);
+  return why ? { stderr: `[side question] ${why}\n`, code: 2 } : {};
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  let stdin: string;
+  try {
+    stdin = readFileSync(0, 'utf8');
+  } catch {
+    stdin = ''; // parses as nothing, so the guard blocks
   }
+  const r = sideGuardResult(stdin);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.code) process.exit(r.code);
 }

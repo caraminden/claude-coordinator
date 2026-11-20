@@ -327,7 +327,7 @@ test('rules and plugin folders reach the turn, and Stop expires a waiting card',
   assert.equal(t.args.filter((a: string) => a === '--settings').length, 1);
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge', 'Bash(gh pr merge:*)']);
-  assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /tripwire\.ts/);
+  assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /hook-run\.ts.*"tripwire":/, 'the tripwire runs inside the one PreToolUse process (#1296)');
   const plugins = t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir');
   assert.deepEqual(plugins.slice(1), [join(t.cwd, 'tools/mods/delve')], 'after the kit');
   assert.ok(plugins[0].endsWith('/pin/kit'));

@@ -57,25 +57,30 @@ export function flailBrakeHook(input: any, stateDir = join(tmpdir(), 'citadel-ki
   return say ? JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: FLAIL_LINE } }) : null;
 }
 
+/** What the hook prints for one call: the brake's line, the batch trial's (batch-nudge.ts) or both, or null. */
+export function flailBrakeOutput(input: any): string | null {
+  const out = flailBrakeHook(input);
+  // The batch-lookups trial (batch-nudge.ts) rides this hook: it already runs after Bash and edits.
+  let line: string | null = null;
+  try {
+    line = batchNudgeLine(input);
+  } catch {
+    // A broken trial never costs the brake its line.
+  }
+  if (line && out) {
+    const o = JSON.parse(out);
+    o.hookSpecificOutput.additionalContext += `\n${line}`;
+    return JSON.stringify(o);
+  }
+  if (line) return JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: line } });
+  return out;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Fails open: a nudge that can't run says nothing.
   try {
-    const input = JSON.parse(readFileSync(0, 'utf8'));
-    const out = flailBrakeHook(input);
-    // The batch-lookups trial (batch-nudge.ts) rides this process: it already runs after Bash and edits.
-    let line: string | null = null;
-    try {
-      line = batchNudgeLine(input);
-    } catch {
-      // A broken trial never costs the brake its line.
-    }
-    if (line && out) {
-      const o = JSON.parse(out);
-      o.hookSpecificOutput.additionalContext += `\n${line}`;
-      process.stdout.write(JSON.stringify(o));
-    } else if (line) {
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: line } }));
-    } else if (out) process.stdout.write(out);
+    const out = flailBrakeOutput(JSON.parse(readFileSync(0, 'utf8')));
+    if (out) process.stdout.write(out);
   } catch {
     // See above.
   }

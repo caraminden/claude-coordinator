@@ -163,8 +163,10 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
 
   // The fork's own hooks refuse a write, as Claude Code runs them; the minion's turns run without the guard.
   const fork = runs().find((r) => r.fork);
-  assert.ok(fork.hooks.some((c: string) => /side-guard/.test(c)), 'the fork runs with the side guard');
-  assert.ok(!runs().filter((r) => !r.fork).some((r) => r.hooks.some((c: string) => /side-guard/.test(c))));
+  // Every PreToolUse check runs in one process (src/hook-run.ts, #1296): the side guard is on when its config says side.
+  const side = /"side":true/;
+  assert.ok(fork.hooks.some((c: string) => side.test(c)), 'the fork runs with the side guard');
+  assert.ok(!runs().filter((r) => !r.fork).some((r) => r.hooks.some((c: string) => side.test(c))));
   const refused = (results: { status: number; stderr: string }[]) => results.find((r) => r.status === 2);
   assert.match(refused(fork.write)?.stderr ?? '', /\[side question\].*read-only/, JSON.stringify(fork.write));
   assert.ok(refused(fork.rm), JSON.stringify(fork.rm));

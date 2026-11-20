@@ -37,13 +37,39 @@ export function deny(reason: string) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
 }
 
+/** What one hook check answers: its stdout, its stderr and its exit code, as its own process would (hook-run.ts runs several in one). */
+export interface HookResult {
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+}
+
+/** Run `check` on the raw stdin call and the config argument, and turn its deny into the hook's answer. */
+export function hookResult(check: (input: any, cfg: any) => unknown, stdin: string, cfgArg: string): HookResult {
+  try {
+    const verdict = check(JSON.parse(stdin), JSON.parse(cfgArg));
+    return verdict ? { stdout: JSON.stringify(verdict) } : {};
+  } catch {
+    // A check that can't run never holds up the call.
+    return {};
+  }
+}
+
+/** Print a HookResult and exit as its process would. */
+export function emit(r: HookResult): void {
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.code) process.exit(r.code);
+}
+
 /** The main guard of a hook script: run `check` on the call from stdin and the config in argv[2], print its deny. */
 export function runHook(meta: ImportMeta, check: (input: any, cfg: any) => unknown): void {
   if (process.argv[1] !== fileURLToPath(meta.url)) return;
+  let stdin = '';
   try {
-    const verdict = check(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
-    if (verdict) process.stdout.write(JSON.stringify(verdict));
+    stdin = readFileSync(0, 'utf8');
   } catch {
-    // A check that can't run never holds up the call.
+    // An unreadable call parses as nothing, and so passes.
   }
+  emit(hookResult(check, stdin, process.argv[2]));
 }

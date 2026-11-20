@@ -10,6 +10,8 @@ import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.t
 import { flailBrakeHook, FLAIL_LINE } from '../kit/hooks/flail-brake.ts';
 import { bigReadHook } from '../kit/hooks/big-read.ts';
 import { gruntModelHook, jobTable } from '../kit/hooks/grunt-model.ts';
+import { BIG_READ_MATCHER } from '../src/hook-matchers.ts';
+import { hookRunMatcher } from '../src/hook-run.ts';
 
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
@@ -325,10 +327,61 @@ test('big-read guard: sends back whole reads and plain cat/sed of big files, let
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'big-read.ts')], { input, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read', cwd: dir, tool_input: { file_path: 'big.ts' } })).stdout, /"deny"/);
   assert.equal(run('not json').stdout, '');
-  // Wired for Read and Bash before they run.
+  // Wired for Read and Bash before they run: inside the turn's one PreToolUse process (src/hook-run.ts, #1296), not hooks.json.
   const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
-  const pre = (tool: string) => hooks.PreToolUse.some((m: any) => new RegExp(m.matcher).test(tool) && m.hooks.some((h: any) => h.command.includes('big-read.ts')));
-  assert.ok(pre('Read') && pre('Bash'));
+  assert.ok(!JSON.stringify(hooks).includes('big-read.ts'));
+  assert.ok(['Read', 'Bash'].every((t) => new RegExp(BIG_READ_MATCHER).test(t) && new RegExp(hookRunMatcher(false)).test(t)));
+});
+
+// The old hooks.json after-call entries, before run.ts took them over (#1296): the identity test below holds run.ts to them.
+const OLD_POST: Record<string, Record<string, string[]>> = {
+  PostToolUse: { Bash: ['retro-log.ts', 'test-first.ts', 'flail-brake.ts'], '^(Read|Grep|Glob)$': ['flail-brake.ts'], '^(Write|Edit|MultiEdit|NotebookEdit)$': ['test-first.ts', 'flail-brake.ts'] },
+  PostToolUseFailure: { Bash: ['retro-log.ts', 'test-first.ts', 'flail-brake.ts'] },
+};
+const exact = (m: string) => new RegExp(/^\w+$/.test(m) ? `^${m}$` : m);
+
+test('after-call runner: on a recorded session it says and logs exactly what the three hooks said and logged alone (#1296)', () => {
+  const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+  const side = (name: string) => {
+    const dir = mkdtempSync(join(tmpdir(), `kit-run-${name}-`));
+    return { tmp: join(dir, 'tmp'), shared: join(dir, 'shared') };
+  };
+  const old = side('old'), now = side('new');
+  const env = (s: { tmp: string; shared: string }) => ({ ...process.env, TMPDIR: s.tmp, COORDINATOR_SHARED_DIR: s.shared, COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '42' });
+  for (const s of [old, now]) mkdirSync(s.tmp, { recursive: true });
+  const script = (file: string, input: string, s: { tmp: string; shared: string }) => spawnSync(process.execPath, [join(HOOKS, file)], { input, env: env(s), encoding: 'utf8' }).stdout;
+  const lines = (outs: string[]) => outs.filter(Boolean).flatMap((o) => JSON.parse(o).hookSpecificOutput.additionalContext.split('\n'));
+  const red = { hook_event_name: 'PostToolUseFailure', error: 'Exit code 1' };
+  const calls: object[] = [
+    ...[1, 2, 3].map(() => ({ tool_name: 'Read', tool_input: { file_path: '/w/src/a.ts' } })),
+    { tool_name: 'Edit', tool_input: { file_path: '/w/src/a.ts' } },
+    ...[1, 2, 3].map(() => ({ tool_name: 'Bash', tool_input: { command: 'citadel-test test/a.test.ts' }, ...red })),
+    { tool_name: 'Grep', tool_input: { pattern: 'x' } },
+    { tool_name: 'Glob', tool_input: { pattern: '*.ts' } },
+    { tool_name: 'Bash', tool_input: { command: 'grep -n x src/a.ts' }, tool_response: { stdout: '', stderr: '' } },
+    { tool_name: 'Write', tool_input: { file_path: '/w/src/b.ts' } },
+    { tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' }, ...red },
+  ];
+  let said = 0;
+  for (const c of calls) {
+    const input = JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'rec', cwd: '/w', ...c });
+    const { hook_event_name: event, tool_name: tool } = JSON.parse(input);
+    const alone = Object.entries(OLD_POST[event]).filter(([m]) => exact(m).test(tool)).flatMap(([, files]) => files).map((f) => script(f, input, old));
+    // hooks.json starts run.ts on exactly the calls the old entries took.
+    const entries = (hooks[event] ?? []).filter((m: any) => exact(m.matcher).test(tool));
+    assert.equal(entries.length, 1, `${event} ${tool}`);
+    assert.match(entries[0].hooks[0].command, /hooks\/run\.ts/);
+    const got = script('run.ts', input, now);
+    if (alone.filter(Boolean).length <= 1) assert.equal(got, alone.find(Boolean) ?? '', `${event} ${tool}`);
+    else assert.deepEqual(lines([got]), lines(alone), `${event} ${tool}`);
+    said += lines(alone).length;
+  }
+  assert.ok(said >= 3, 'the session gave the batch, test-first and flail lines'); 
+  assert.deepEqual(logLines(now.shared), logLines(old.shared));
+  assert.ok(logLines(old.shared).length > 0, 'the red runs were logged');
+  // Calls no old entry took start nothing, and a broken input says nothing.
+  for (const [event, tool] of [['PostToolUse', 'Agent'], ['PostToolUseFailure', 'Read'], ['PostToolUseFailure', 'Edit']]) assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);
+  assert.equal(script('run.ts', 'not json', now), '');
 });
 
 test('grunt-model guard: sends back an Agent call with no deliberate model or effort, lets pinned ones and forks through', () => {

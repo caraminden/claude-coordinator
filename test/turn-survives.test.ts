@@ -208,8 +208,9 @@ test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no 
   const run = jsonLines(seen).at(-1);
   const settings = JSON.parse(readFileSync(run.argv[run.argv.indexOf('--settings') + 1], 'utf8'));
   const hook = settings.hooks.PreToolUse[0].hooks[0].command.split(' ')[2].slice(1, -1);
-  assert.equal(hook, join(dir, 'pin', 'tripwire.ts'));
-  assert.ok(existsSync(hook));
+  // The tripwire runs inside the one PreToolUse process (#1296), from the turn's own pinned copies.
+  assert.equal(hook, join(dir, 'pin', 'hook-run.ts'));
+  assert.ok(existsSync(hook) && existsSync(join(dir, 'pin', 'tripwire.ts')));
   const mcp = JSON.parse(readFileSync(run.argv[run.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.thread.args[0];
   assert.equal(mcp, join(dir, 'pin', 'mcp.ts'));
   assert.ok(run.env.includes('COORDINATOR_TOKEN'));

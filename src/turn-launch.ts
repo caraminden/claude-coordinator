@@ -14,7 +14,8 @@ import type { Project, Ticket } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { claudeConfigDir } from './sessions.ts';
 import type { TripwireConfig } from './tripwire.ts';
-import { SCHEME_REFS_MATCHER } from './scheme-refs.ts';
+import { hookRunMatcher, type HookRunConfig } from './hook-run.ts';
+import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATCHER } from './hook-matchers.ts';
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { advisedModel } from '../public/model-table.js';
@@ -46,6 +47,8 @@ export interface TurnPins {
   LINK_CHECK: string;
   WORDING: string;
   SCHEME_REFS: string;
+  /** Runs every PreToolUse check above in one node process (#1296, src/hook-run.ts). */
+  HOOK_RUN: string;
   TURN_WRAPPER: string;
   /**
    * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
@@ -96,6 +99,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const LINK_CHECK = pinnedCopy('link-check.ts');
   const WORDING = pinnedCopy('wording.ts');
   const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
+  const HOOK_RUN = pinnedCopy('hook-run.ts');
   const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
   const POOL = pinnedCopy('mcp-pool.ts');
   /** The pool's code and every local file it imports, so a deploy that changes any of it starts a new pool. */
@@ -143,7 +147,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     }
   };
   lock(MCP_DIR);
-  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
+  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
 }
 
 /**
@@ -211,12 +215,12 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
   const config = tripwireConfig(projectId, claudeConfig, ask, readOnly, envFiles);
   const command = hookCommand(script, JSON.stringify(config));
   // onFailure: a check that times out (or dies outside tripwire.ts's own fail-open catch) blocks the call; without it Claude Code lets it through.
-  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
+  return { PreToolUse: [{ matcher: TRIPWIRE_MATCHER, hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }] };
 }
 
 /** The PreToolUse hook a side question's fork gets (#932): every tool goes through src/side-guard.ts, which refuses writes. */
 export function sideGuardHook(script = turnPins().SIDE_GUARD) {
-  return { matcher: '.*', hooks: [{ type: 'command', command: hookCommand(script), timeout: 10, onFailure: 'block' }] };
+  return { matcher: SIDE_GUARD_MATCHER, hooks: [{ type: 'command', command: hookCommand(script), timeout: 10, onFailure: 'block' }] };
 }
 
 /**
@@ -230,8 +234,7 @@ export function linkCheckHooks(roots: string[], script = turnPins().LINK_CHECK, 
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
-/** The tools whose text the wording check reads before it goes out: messages, cards, notes and file writes. */
-export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$';
+export { WORDING_MATCHER };
 
 /**
  * The PreToolUse hook every turn gets (src/wording.ts): it refuses once a message, card, note or a
@@ -251,6 +254,16 @@ export function wordingHooks(shared: string[], sent: string, script = turnPins()
 export function schemeRefsHooks(refs: string, sent: string, script = turnPins().SCHEME_REFS) {
   const command = hookCommand(script, JSON.stringify({ refs, sent }));
   return { matcher: SCHEME_REFS_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
+}
+
+/**
+ * The one PreToolUse hook a turn gets (#1296, src/hook-run.ts): the side question's guard, the tripwire, the wording
+ * and scheme-refs checks and, when the turn loads the kit, its big-read guard, in one node process instead of one each.
+ * Each check runs only on its own matcher (hook-matchers.ts). The tripwire's 10 s and `onFailure: 'block'` (#817) hold for
+ * the whole runner: one that times out or dies blocks the call. `cfg` is each check's own config, as its old hook took it.
+ */
+export function hookRunHooks(cfg: HookRunConfig, script = turnPins().HOOK_RUN) {
+  return { matcher: hookRunMatcher(!!cfg.side), hooks: [{ type: 'command', command: hookCommand(script, JSON.stringify(cfg)), timeout: 10, onFailure: 'block' }] };
 }
 
 /**
@@ -627,7 +640,15 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? facts.everyScheme?.apps ?? [] : [];
   // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
   const envFiles = ticket.kind === 'coordinator' ? [facts.folders.data, ...readOnly] : [];
-  const tripwire = tripwireHooks(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE), readOnly, envFiles);
+  const kit = existsSync(pinned(pins.KIT)) ? pinned(pins.KIT) : null;
+  // Every PreToolUse check in one process (#1296); the kit's big-read guard rides it, so hooks.json leaves it out.
+  const preToolUse = hookRunHooks({
+    ...(facts.side ? { side: true } : {}),
+    tripwire: tripwireConfig(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', readOnly, envFiles),
+    wording: { shared: [filesDir, sharedDir].filter((d): d is string => !!d), sent: join(dir, 'wording-sent') },
+    schemeRefs: { refs: refsFile, sent: join(dir, 'scheme-refs-sent') },
+    ...(kit ? { kit } : {}),
+  }, pinned(pins.HOOK_RUN));
   // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
   // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
   // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
@@ -636,7 +657,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const codexTripwire = join(dir, 'codex-tripwire.json');
   files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-    hooks: { ...linkCheck, PreToolUse: [...(facts.side ? [sideGuardHook(pinned(pins.SIDE_GUARD))] : []), ...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+    hooks: { ...linkCheck, PreToolUse: [preToolUse] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
@@ -655,7 +676,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   files.push({ name: 'settings.json', text: settingsText });
   args.push('--settings', join(dir, 'settings.json'));
   if (addDirs.length) args.push('--add-dir', ...addDirs);
-  if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));
+  if (kit) args.push('--plugin-dir', kit);
   args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
   // The advisor trial (#817): `claude-sonnet-5-5+opus-advisor` runs Sonnet with Opus as its advisor. Never a Taskmaster's or Codex's
   // (codex-turn.ts maps the plain --model, so Sonnet's Codex pick).

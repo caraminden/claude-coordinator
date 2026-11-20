@@ -1099,7 +1099,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'kit-sync': {
-    about: "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed); within 20 s of boot (else the 10-minute look) one kit sync card lands in Seeded's Taskmaster chat",
+    about: "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed). A dev copy is a preview, whose kit sync timer is off (on copied data it would branch real schemes' repos): lift server.ts's guard on it in an edit you don't commit, start the copy, seed within 20 s, and one kit sync card lands in Seeded's Taskmaster chat",
     seed(c) {
       const kit = join(import.meta.dirname, '..');
       const template = 'kit/skills/scheme-setup/templates/land.sh';

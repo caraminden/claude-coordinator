@@ -81,13 +81,13 @@ export class RestartHolds {
     app.stopped = true;
   }
 
-  /** Whether the app was stopped on purpose and hasn't answered since: the proxy's retry (#1173) skips it, so it fails fast. */
+  /** Whether the app was stopped on purpose and hasn't run since: the proxy's retry (#1173) skips it, so it fails fast. */
   isStopped(name: string): boolean {
     return !!this.apps.get(name)?.stopped;
   }
 
-  /** The app answered a request: it's running, so a stop's mark is gone. */
-  answered(name: string) {
+  /** The app runs again (it answered a request, or a person started it), so a stop's mark is gone. */
+  running(name: string) {
     const app = this.apps.get(name);
     if (app) app.stopped = false;
   }
@@ -312,7 +312,7 @@ export class AppProxy {
       maxBody: MAX_BODY,
       // A contraption may set its own cookies, never a login, nor one for a wider domain (Citadel's, or the other apps').
       answer: (h) => {
-        this.restarts.answered(row.name);
+        this.restarts.running(row.name);
         if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].filter((c) => !/^\s*(cc_session|cc_app)=/.test(c) && !/;\s*domain\s*=/i.test(c));
         if (renewed) h['set-cookie'] = [...(h['set-cookie'] ?? []), renewed];
         // An open path's answer on Citadel's host can't open as a document there (an <object> asks with Accept */*).

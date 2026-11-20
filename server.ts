@@ -1315,7 +1315,7 @@ const incidents = new Incidents({
     return true;
   },
 });
-if (!BOOT_CHECK) {
+if (!BOOT_CHECK && !PREVIEW) {
   incidents.boot();
   setInterval(() => void safely('incidents', () => incidents.tick()), 60_000).unref();
 }
@@ -1534,6 +1534,9 @@ services.drain = async (row, stop) => {
     throw err;
   }
 };
+// A person's Start takes no drain: it ends a stop's mark here, so GETs during the app's boot get the proxy's retry (#1173).
+const act = services.act.bind(services);
+services.act = (row, action) => (action === 'start' && apps.restarts.running(row.name), act(row, action));
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,

@@ -171,4 +171,12 @@ test('through Citadel: a restart from Settings holds the app\'s requests, a stop
   const d = await get();
   assert.equal(d.status, 502);
   assert.ok(d.ms < 1000, `a stopped app took ${d.ms} ms to fail`);
+
+  // Started again: a GET while it boots waits for it (the proxy's retry), where a stopped one failed fast.
+  assert.equal((await srv.call('/api/contraptions/fixture/service', { action: 'start' })).status, 200);
+  const booting = get();
+  await new Promise((r) => setTimeout(r, 500));
+  fixture = await app(port);
+  assert.deepEqual([(await booting).status, (await booting).body], [200, 'got ']);
+  await stop(fixture);
 });

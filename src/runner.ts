@@ -566,8 +566,11 @@ export class Runner {
   limitFallbackMs = 60 * 60 * 1000;
   private limitTimer?: NodeJS.Timeout;
   private lastLimitResume = 0;
-  /** Limit waits whose resume is under way here (restoring the session, say): kept saved until a turn takes them, so a restart still resumes. */
-  private limitStarting = new Set<number>();
+  /**
+   * Limit waits whose resume is under way here (restoring the session, say), each with a token for that one resume:
+   * kept saved until a turn takes them, so a restart still resumes. An earlier resume's end can't touch a later one's wait.
+   */
+  private limitStarting = new Map<number, object>();
   /** Whether the model's API can be reached; one probe for the whole server while any thread waits on the network (#366). */
   netProbe: () => Promise<boolean> = apiReachable;
   /** The first wait before probing, doubling after each failed probe up to netProbeMaxMs. */
@@ -1508,9 +1511,10 @@ export class Runner {
    */
   private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false) {
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
-    const waited = this.limitStarting.has(ticketId);
+    const token = this.limitStarting.get(ticketId);
+    const ours = () => !!token && this.limitStarting.get(ticketId) === token;
     // Someone's message got in first; its turn took the queue, and that is resume enough.
-    if (this.isRunning(ticketId)) return void (waited && this.cancelLimitWait(ticketId));
+    if (this.isRunning(ticketId)) return void (ours() && this.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
     const ran = this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
@@ -1519,7 +1523,7 @@ export class Runner {
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
       // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
-      if (waited && !this.limitStarting.has(ticketId)) return;
+      if (token && !ours()) return;
       const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
@@ -1534,7 +1538,7 @@ export class Runner {
       return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
     }));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
-    if (waited) void ran.then(() => this.limitStarting.has(ticketId) && this.cancelLimitWait(ticketId));
+    if (token) void ran.then(() => ours() && this.cancelLimitWait(ticketId));
   }
 
   /**
@@ -1754,7 +1758,7 @@ export class Runner {
     this.lastLimitResume = Date.now();
     // The wait and its held messages stay saved until the resume's turn takes them (startTurn ends the wait), as a network
     // wait does: a restart while the resume restores the session still resumes (A2, #1286).
-    this.limitStarting.add(w.ticket);
+    this.limitStarting.set(w.ticket, {});
     this.armLimitTimer();
     this.resume(w.ticket, 0, w.tries, !!w.codex);
   }

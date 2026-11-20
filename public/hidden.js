@@ -73,7 +73,7 @@ function redrawHidden() {
 
 // quiet: no count or spinner, for the ones you hid and the ones you aren't in.
 const row = (p, button = null, quiet = p.hidden) => h('div', { class: 'scheme-row' },
-  h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: schemeSwitchHash(location.hash, p.id, !!account?.admin), title: p.name,
+  h('a', { class: `nav-item${p.id === view.projectId && !view.home ? ' active' : ''}`, href: schemeSwitchHash(location.hash, p.id, !!account?.admin), title: p.name,
     // The hash at the click, not at the draw: the page may have changed since the shelf was drawn.
     onclick: (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); location.hash = schemeSwitchHash(location.hash, p.id, !!account?.admin); } },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), quiet ? null : schemeCount(p)),

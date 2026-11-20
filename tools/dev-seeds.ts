@@ -576,6 +576,22 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  home: {
+    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each and three ships since yesterday, for #/home',
+    seed(c) {
+      SCENARIOS['waiting-on-you'].seed(c);
+      const delve = c.store.listProjects().find((x) => x.name === 'Delve')!;
+      const d: SeedCtx = { ...c, project: c.store.getProject(delve.id)! };
+      chat(d, taskmaster(d), 2).put('plan', { id: hex(), summary: 'Start the chapter 4 minions', plan: '1. Tiles\n2. Foes', status: 'pending' });
+      minion(c, 'Rail icons sweep', { status: 'running', last_activity: 'Running tests' });
+      minion(d, 'Foe sprites, round 2', { status: 'running', last_activity: 'Drawing' });
+      const shipped = (s: SeedCtx, title: string, text: string) => chat(s, minion(s, title, { status: 'closed' }), 1).put('note', { text });
+      shipped(c, 'Usage bar in the top bar', 'Shipped 1a2b3c4 "#1201: usage bar": the usage bar shows your week. Risk low: front end only. Live now.');
+      shipped(d, 'Chapter 2 balance', 'Shipped 5d6e7f8 "#240: chapter 2": foes hit 10% softer in chapter 2. Risk medium: numbers. Live now.');
+      shipped(d, 'Build 8 merge', 'Merged 9a8b7c6 into build/8: a feeder. Risk low: x.');
+      return '#/home';
+    },
+  },
   'taskmaster-chat': {
     about: 'the scheme page with a long Taskmaster chat and 30 minions, for scrolling every column',
     seed(c) {

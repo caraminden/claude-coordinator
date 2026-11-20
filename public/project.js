@@ -105,11 +105,8 @@ function renderCrumbs(main) {
   const filesLink = (to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
   // Orders pages (#1071) sit under Orders, the rest under Settings.
   const settingsLink = isOrdersPage(main.kind) ? h('a', { href: `#/p/${project.id}/orders` }, 'Orders') : h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
-  // Home (#1140): its own crumb, and a chat opened from it leads back to it.
-  const home = h('a', { href: '#/home', class: 'home-crumb' }, '‹ Home');
   crumbs.replaceChildren(...(
-    main.kind === 'home' ? [h('span', { class: 'home-crumb' }, 'Home')]
-      : main.home ? [home, ' · ', projectLink, ...(view.id !== view.coordinator.id ? [' / ', `#${view.ticket.number ?? view.ticket.id}`] : [])]
+    main.kind === 'home' ? ['Home'] // #1140
       : main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'settings' ? [projectLink, ' / ', 'Settings']
       : main.kind === 'orders' ? [projectLink, ' / ', 'Orders']

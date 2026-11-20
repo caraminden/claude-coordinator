@@ -47,7 +47,8 @@ export function homePanel() {
 export function homeOverview(list = null) {
   overview = h('div', { class: 'home-overview-body' });
   drawOverview();
-  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list, overview);
+  return h('section', { class: 'home-overview', 'data-part': 'home-overview' },
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, 'Home'), h('span', { class: 'spacer' }))), list, overview);
 }
 
 /** Fetch Home again (a burst of news fetches once). */
@@ -108,7 +109,6 @@ function drawPanel() {
   const shipped = data?.shipped?.total ?? 0;
   // One line, always there: the numbers change, the line doesn't move.
   const status = h('div', { class: 'home-status' },
-    h('b', { class: 'home-title' }, 'Home'),
     open ? toneChip('warn', `${open} need${open === 1 ? 's' : ''} you`) : toneChip('ok', 'Nothing needs you'),
     working ? toneChip('info', `${working} working`) : null,
     shipped ? toneChip('violet', `${shipped} shipped`) : null);

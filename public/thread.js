@@ -532,8 +532,9 @@ export function renderTicketHead() {
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);
   const phone = narrow.matches;
-  // Leaves the thread as it is and goes back to the project's coordinator.
-  const close = coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close'));
+  // Leaves the thread as it is and goes back to the project's coordinator, or to Home for a chat opened from it (#1140).
+  const close = view?.home ? h('a', { class: 'close-view', href: '#/home', title: 'Back to Home', 'aria-label': 'Back to Home' }, icon('close'))
+    : coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close'));
   const nav = h('span', { class: 'head-nav' },
     // Through the views opened in this tab, never off the site (public/navstack.js).
     h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),

@@ -321,7 +321,6 @@
 .home-mark { flex: none; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 4px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); font-size: 0.9em; line-height: 1; }
 .sidebar.home-mode > :not(summary, .home-panel) { display: none; }
 .home-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; min-height: 2rem; padding: 0.3rem 0.25rem; }
-.home-status .home-title { margin-right: 0.2rem; }
 .home-rows.inbox-rows { max-height: none; overflow: visible; }
 .home-rows .inbox-row .scheme-tag { margin-right: 0.3rem; }
 .home-rows .inbox-row.done { opacity: 0.6; }
@@ -337,4 +336,3 @@
 .home-line.quiet { opacity: 0.6; }
 .home-sub { display: block; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .home-more { padding: 0.35rem 0.65rem; font-size: 0.85em; }
-.home-crumb { font-weight: 600; }

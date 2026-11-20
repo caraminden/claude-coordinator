@@ -23,7 +23,7 @@ export const SAMPLE_EVERY_MS = 5 * 60_000;
 /** How long a built page is reused: every open page re-reads every 30 s. */
 const BUILD_KEEP_MS = 20_000;
 /** Citadel's own units (deploy/), whose state the page shows; one that isn't installed is listed as such, not as trouble. */
-export const CITADEL_UNITS = ['claude-coordinator.service', 'claude-coordinator-backup.timer', 'claude-coordinator-prune.timer', 'citadel-watchdog.timer', 'citadel-embed.service', 'citadel-android-adb.service'];
+export const CITADEL_UNITS = ['claude-coordinator.service', 'claude-coordinator-backup.timer', 'claude-coordinator-backup.service', 'claude-coordinator-prune.timer', 'citadel-watchdog.timer', 'citadel-embed.service', 'citadel-android-adb.service'];
 /** A stall at least this long, in the last day, turns Citadel's verdict to warn. */
 const STALL_WARN_S = 5;
 /** Seconds stalled at a memory limit in the last day (#1280) that turn Citadel's verdict to warn. Starting number; tune here. */

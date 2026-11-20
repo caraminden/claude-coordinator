@@ -13,13 +13,15 @@ const HOUR = 3_600_000;
 const NOW = Date.parse('2026-11-19T20:00:00Z');
 const apps = [{ name: 'mandate', title: 'Mandate' }, { name: 'voice', title: 'Voice' }, { name: 'quiet', title: 'Quiet' }];
 
-function world(dbAgeH: number | null, pulledAgoH: number | null, mandateDay: string | null, voiceDay: string | null) {
+function world(dbAgeH: number | null, pulledAgoH: number | null, mandateDay: string | null, voiceDay: string | null, setAgoH: number | null = pulledAgoH === null ? null : 5) {
   const dir = mkdtempSync(join(root, 'w-'));
   const data = join(dir, 'data');
   mkdirSync(join(data, 'backups'), { recursive: true });
   const age = (f: string, h: number) => utimesSync(f, new Date(NOW - h * HOUR), new Date(NOW - h * HOUR));
   if (dbAgeH !== null) { const f = join(data, 'backups', 'coordinator-2026-11-19.db'); writeFileSync(f, 'x'.repeat(2048)); age(f, dbAgeH); }
-  if (pulledAgoH !== null) { mkdirSync(join(data, 'offbox')); const f = join(data, 'offbox', '.pulled'); writeFileSync(f, ''); age(f, pulledAgoH); }
+  if (pulledAgoH !== null || setAgoH !== null) mkdirSync(join(data, 'offbox'));
+  if (pulledAgoH !== null) { const f = join(data, 'offbox', '.pulled'); writeFileSync(f, ''); age(f, pulledAgoH); }
+  if (setAgoH !== null) { const f = join(data, 'offbox', 'SHA256SUMS'); writeFileSync(f, ''); age(f, setAgoH); }
   for (const [name, day] of [['mandate', mandateDay], ['voice', voiceDay]] as const) {
     if (!day) continue;
     mkdirSync(join(dir, '.local/share', name, 'backups', day), { recursive: true });
@@ -40,6 +42,14 @@ test('a day-old database backup, a quiet off-box pull and a stopped app are each
   assert.deepEqual(backupProblems(world(5, 40, '2026-11-19', null), NOW), ['the off-box copy was last pulled 40 h ago']);
   assert.deepEqual(backupProblems(world(5, null, '2026-11-19', '2026-11-16'), NOW), ['Voice last wrote a backup on 2026-11-16'], 'never pulled is not a miss yet');
   assert.deepEqual(backupProblems(world(null, null, null, null), NOW), ['no database backup on disk']);
+});
+
+test('a fresh pull of an off-box set that stopped being made is a miss (B1): the list touches .pulled every night', () => {
+  // backup.sh's state-db check or offbox.sh exiting 1 leaves SHA256SUMS behind while the desktop keeps listing it.
+  assert.deepEqual(backupProblems(world(5, 6, '2026-11-19', null, 30), NOW), ['the off-box set was last made 30 h ago']);
+  assert.deepEqual(backupProblems(world(5, null, '2026-11-19', null, 30), NOW), ['the off-box set was last made 30 h ago'], 'made but never pulled still says the set is old');
+  assert.equal(world(5, 6, null, null, 7).setAt, NOW - 7 * HOUR);
+  assert.equal(world(5, null, null, null).setAt, null, 'no off-box folder: not set up here');
 });
 
 test('deploy/offbox-serve.sh list marks the pull', () => {

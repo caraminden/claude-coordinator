@@ -27,6 +27,7 @@ function setup(bootAt = T0 - 60 * MIN) {
   let line: InLine[] = [];
   let jobs: RedJob[] = [];
   let ci: CiRun[] = [];
+  let crash = false;
   const sources: Sources = {
     deploys: async () => [{ at: T0 - 20 * MIN, sha: 'abcdef1234567890', subject: '#866: kit upload zone', how: 'pull -q --ff-only' }],
     ci: async (from, to) => ci.filter((r) => r.updated >= from && r.updated <= to),
@@ -37,10 +38,10 @@ function setup(bootAt = T0 - 60 * MIN) {
     new Incidents({
       store, sources, bootAt, now: () => clock.now,
       line: () => line, jobs: () => jobs,
-      write: (name, text) => (files.push({ name, text }), `/shared/reports/${name}`),
+      write: (name, text) => { if (crash) throw new Error('the server stopped mid-write'); files.push({ name, text }); return `/shared/reports/${name}`; },
       tell: (text) => (told.push(text), true),
     });
-  return { store, clock, told, files, make, setLine: (l: InLine[]) => (line = l), setJobs: (j: RedJob[]) => (jobs = j), setCi: (c: CiRun[]) => (ci = c) };
+  return { store, clock, told, files, make, setLine: (l: InLine[]) => (line = l), setJobs: (j: RedJob[]) => (jobs = j), setCi: (c: CiRun[]) => (ci = c), setCrash: (c: boolean) => (crash = c) };
 }
 
 test('a two-hour storm of red runs makes one timeline and one ask, written once it goes quiet', async () => {
@@ -124,6 +125,50 @@ test("#1135's watchdog restart, recorded as a health event, opens an incident; o
   s.clock.now = T0 + 2 * MIN;
   await inc.tick();
   assert.match(s.store.getSetting<IncidentState>(STATE_KEY)!.open!.why[0], /systemd's watchdog restarted the hung server/);
+});
+
+test('an incident closing across a restart keeps its timeline and its ask (B2)', async () => {
+  const s = setup(T0);
+  const inc = s.make();
+  await inc.tick();
+  s.store.addHealthEvent('watchdog', T0 + MIN, null, 'restarted');
+  s.clock.now = T0 + 2 * MIN;
+  await inc.tick();
+  s.setCrash(true);
+  s.clock.now = T0 + MIN + QUIET_MS;
+  await assert.rejects(inc.tick(), /mid-write/);
+  assert.ok(s.store.getSetting<IncidentState>(STATE_KEY)!.open, 'the incident stays open until its timeline is written');
+  s.setCrash(false);
+  s.clock.now += MIN;
+  const after = s.make(); // the restart
+  after.boot();
+  assert.equal(await after.tick(), `/shared/reports/${s.files[0]?.name}`);
+  assert.equal(s.files.length, 1);
+  assert.equal(s.told.length, 1);
+  const st = s.store.getSetting<IncidentState>(STATE_KEY)!;
+  assert.equal(st.open, null);
+  assert.equal(st.done.length, 1);
+});
+
+test('a second watchdog restart while an incident is open joins it, not a new one (B3)', async () => {
+  const s = setup(T0);
+  const inc = s.make();
+  await inc.tick();
+  s.store.addHealthEvent('watchdog', T0 + MIN, null, 'first');
+  s.clock.now = T0 + 2 * MIN;
+  await inc.tick();
+  s.store.addHealthEvent('watchdog', T0 + 4 * MIN, null, 'second');
+  s.clock.now = T0 + 5 * MIN;
+  await inc.tick();
+  const open = s.store.getSetting<IncidentState>(STATE_KEY)!.open!;
+  assert.equal(open.last, T0 + 4 * MIN, 'the second restart widens the open incident');
+  assert.equal(open.why.length, 2);
+  s.clock.now = T0 + 4 * MIN + QUIET_MS;
+  await inc.tick();
+  s.clock.now += 40 * MIN;
+  await inc.tick();
+  assert.equal(s.files.length, 1, 'one incident, one timeline');
+  assert.equal(s.store.getSetting<IncidentState>(STATE_KEY)!.open, null);
 });
 
 test('the ship line standing still for 15 minutes is an incident; a moving one is not', async () => {

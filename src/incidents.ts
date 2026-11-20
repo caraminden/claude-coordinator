@@ -424,8 +424,8 @@ export class Incidents {
   /** The signs of trouble now. */
   triggers(state: IncidentState, now: number): Trigger[] {
     const out = this.pending.splice(0);
-    const dog = this.d.store.healthBetween(state.after + 1, now + 1, 1, ['watchdog'])[0];
-    if (dog) out.push({ from: dog.at, last: dog.at, why: `systemd's watchdog restarted the hung server (${pacific(dog.at)})` });
+    // Every restart since the last incident, not only the oldest, so a second one while this is open widens it (step dedupes).
+    for (const dog of this.d.store.healthBetween(state.after + 1, now + 1, 50, ['watchdog'])) out.push({ from: dog.at, last: dog.at, why: `systemd's watchdog restarted the hung server (${pacific(dog.at)})` });
     const line = this.d.line();
     const sig = line.map((t) => `${t.seq}:${t.got}:${t.phase}`).join(',');
     if (!sig) this.line = null;
@@ -449,8 +449,11 @@ export class Incidents {
     try {
       const before = this.state();
       const { state, close } = step(before, this.triggers(before, now), now);
-      if (JSON.stringify(state) !== JSON.stringify(before) || !this.d.store.getSetting(STATE_KEY)) this.d.store.setSetting(STATE_KEY, state);
-      if (!close) return null;
+      if (!close) {
+        if (JSON.stringify(state) !== JSON.stringify(before) || !this.d.store.getSetting(STATE_KEY)) this.d.store.setSetting(STATE_KEY, state);
+        return null;
+      }
+      // Write first, then save it closed: a restart mid-write leaves it open, and the next boot's tick writes it again.
       const file = await this.write(close, now);
       this.d.store.setSetting(STATE_KEY, { ...state, done: [...state.done, { from: close.from, to: close.last, file, at: now }].slice(-20) });
       return file;

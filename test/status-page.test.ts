@@ -234,6 +234,16 @@ test('health readings and host samples are kept a week and a day', () => {
   assert.deepEqual(store.hostSamples(0).map((r) => r.at), [1000 + 9 * DAY]);
 });
 
+test('a failed nightly backup run shows (B1): the backup service is read, not only its timer, which stays active', async () => {
+  const { store, josh, citadel } = setup('backup-unit');
+  const now = Date.now();
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
+    unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: unit === 'claude-coordinator-backup.service' ? 'failed' : 'active', sub: '', enabled: '' })) });
+  const c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.verdict.tone, 'bad');
+  assert.ok(c.verdict.reasons.includes('claude-coordinator-backup.service failed'), c.verdict.reasons.join('; '));
+});
+
 test('a failed read of the units warns and is asked again, not cached as "none running"', async () => {
   const { store, josh, citadel } = setup('units');
   let fail = true;

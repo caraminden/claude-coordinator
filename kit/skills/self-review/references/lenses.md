@@ -70,10 +70,10 @@ same case. Two places that answer one question differently are a finding even wh
 right alone. Keep it to a few targeted greps per addition. A finding names the twin's file:line
 and the case it now gets wrong.
 
-Example: #795's writer queues only the `Store` methods named in `WRITES` and `VALUE_WRITES`
-(`src/db-writer.ts`). Later diffs added `touch`, `addHostSample` and eight more writes to `Store`
-without listing them, so they ran on the server's thread behind every queued write, and `touch`
-held the loop 1.5 s on a stalled disk.
+Example: #795's writer sends the `Store` writes named in `WRITES` to its worker and runs those in
+`VALUE_WRITES` on the server's thread after the queue (`src/db-writer.ts`). Later diffs added
+`touch`, `addHostSample` and eight more writes to `Store` in neither list, so they ran on the
+server's thread waiting on the worker's lock, and `touch` held the loop 1.5 s on a stalled disk.
 
 ### Always: no check-gaming
 

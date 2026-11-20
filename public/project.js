@@ -44,7 +44,7 @@ const DESKTOP_APP = 'api/desktop/2/citadel/install.zip';
 export const offersApp = (nav = navigator, desktop = window.citadelDesktop) =>
   !desktop && /Windows/.test(nav.userAgentData?.platform ?? nav.userAgent ?? '');
 const getApp = () => offersApp()
-  ? h('a', { class: 'get-app', href: DESKTOP_APP, download: '', title: 'Citadel in its own window on this PC: unzip it and run citadel.exe' }, 'Download app')
+  ? h('a', { class: 'get-app', href: DESKTOP_APP, download: '', title: 'Download the Citadel app: Citadel in its own window on this PC. Unzip it and run citadel.exe', 'aria-label': 'Download the Citadel app' }, 'Get app')
   : null;
 
 export async function showReleases(projectId, scope, hl) {

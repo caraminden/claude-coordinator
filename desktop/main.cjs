@@ -21,7 +21,9 @@ const ICON = join(__dirname, 'icon.ico');
 const AUMID = 'Citadel.Desktop';
 
 // One copy at a time: starting a second (the shortcut again) brings the first one's window forward (second-instance).
-if (!app.requestSingleInstanceLock()) app.quit();
+// It still says it started, or #1148's launcher would count the build as failed on this PC and never run it again.
+const first = app.requestSingleInstanceLock();
+if (!first) { started(); app.quit(); }
 app.setAppUserModelId(AUMID);
 Menu.setApplicationMenu(null);
 let win = null;
@@ -84,6 +86,8 @@ function open(url = START.href) {
   });
   wc.on('context-menu', (_e, p) => contextMenu(wc, p));
   win.on('close', (e) => { remember(); if (!quitting) { e.preventDefault(); win.hide(); } });
+  // Windows logging off or shutting down: no before-quit then, and a close held back would stall it.
+  win.on('session-end', () => { remember(); quitting = true; });
   win.on('closed', () => { win = null; });
   win.loadURL(url);
 }
@@ -147,4 +151,5 @@ function shortcuts() {
 ipcMain.on('citadel:show', show);
 app.on('second-instance', show);
 app.on('before-quit', () => { remember(); quitting = true; });
-app.whenReady().then(() => { open(); makeTray(); shortcuts(); });
+// The second copy only hands over (second-instance above): it quits before making a window or a tray icon.
+if (first) app.whenReady().then(() => { open(); makeTray(); shortcuts(); });

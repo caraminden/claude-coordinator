@@ -97,8 +97,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), and citadel-test, a few test files with only the failures shown (#641), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it.
-  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'citadel-android-mic.ts']) {
+  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), and who-touches, which other worktrees change a path (#1159), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it.
+  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'citadel-android-mic.ts']) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
@@ -501,6 +501,11 @@ export interface LaunchPlan {
   spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
 }
 
+/** Schemes (project ids) whose turns run with Claude Code's --exclude-dynamic-system-prompt-sections (#1188): the per-machine
+ * parts of the system prompt (cwd, git status, auto-memory path) move into the first user message, so new minions share one
+ * cached prefix. Citadel's own scheme only while we measure it (reports/shared-prompt-cache-2026-11.md); add an id to widen, empty it to turn off. */
+export const EXCLUDE_DYNAMIC_PROMPT_SCHEMES: readonly number[] = [2];
+
 /** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnv) and, for a container turn, where claude is (resolveClaude, which throws when it isn't on the server's PATH). */
 export function launchPlan(facts: TurnFacts): LaunchPlan {
   const { project, ticket, dir, pins, place, machines, model, effort, codex } = facts;
@@ -524,6 +529,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
     // Taskmaster's prompts, so those are denied instead of waiting.
     ...permissionArgs(ticket.kind !== 'coordinator'),
+    ...(EXCLUDE_DYNAMIC_PROMPT_SCHEMES.includes(project.id) ? ['--exclude-dynamic-system-prompt-sections'] : []),
   ];
   // Lets edit-only sessions write there too, not just in their working directory. The temp folder too:
   // Claude Code asks before `cd <dir> && rm <glob>` outside the working directories, even in bypassPermissions.

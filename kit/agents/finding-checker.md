@@ -32,4 +32,9 @@ findings, each with its file:line.
 
 ## What you hand back
 
-One line per finding, nothing else: `N: CONFIRMED|REFUTED: <evidence, with file:line>`.
+One line per finding, nothing else: `N: CONFIRMED|REFUTED: <evidence, with file:line>`. A
+REFUTED line ends with ` · kind: <the kind of mistake, a few words> · why: <the reason it was
+wrong, as a fact about this repo>`, such as `kind: missing build step · why: the repo has no build
+step, Node runs the TypeScript directly`. The kind names the mistake, not this diff's file, so the
+same mistake on another change gets the same words; the why is a fact, never "don't check X". The
+session records them, and a kind refuted in three minions' reviews becomes a lesson the reviewer reads.

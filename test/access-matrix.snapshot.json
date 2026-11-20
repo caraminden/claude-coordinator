@@ -2053,6 +2053,26 @@
   "m1": "404 No entry named nope",
   "m2": "404 No entry named nope"
  },
+ "DELETE /api/projects/:p/reviews/pre-ship-review/lessons": {
+  "anon": "401 Not logged in",
+  "person": "400 Name the lesson by its kind",
+  "member": "400 Name the lesson by its kind",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Name the lesson by its kind",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/reviews/pre-ship-review/refutes": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion that ran the finding checker records what it refuted",
+  "member": "403 Only the minion that ran the finding checker records what it refuted",
+  "outsider": "403 Only the minion that ran the finding checker records what it refuted",
+  "tmA": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding",
+  "m2": "400 refuted is a list of 1 to 25 {kind, why}, one per refuted finding"
+ },
  "GET /api/projects/:p/schedule-audits": {
   "anon": "401 Not logged in",
   "person": "200",

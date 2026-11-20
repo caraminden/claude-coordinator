@@ -23,7 +23,8 @@ line: everything is on, as written here.
 - **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
 - **Finding checker off:** skip it on deep reviews.
 - **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (see "Fresh eyes" in 2). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
-- **Additions:** add `Also read <file>, this scheme's additions to the review` to the brief.
+- **Additions** (the scheme's own lines, people's verdicts, and the lessons its finding checker
+  taught the reviewer): add `Also read <file>, this scheme's additions to the review` to the brief.
 
 ## Facts at load
 
@@ -76,8 +77,14 @@ the triggers miss. Give it the code, not your view of it: no summary of what you
 
 **Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (its pinned Opus at medium; on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a
 real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
-and worktree, and the numbered Must and Should findings, without the reviewer's reasoning. It
-returns `N: CONFIRMED|REFUTED: <evidence>`. Drop what it refutes.
+and worktree, and the numbered Must and Should findings, without the reviewer's reasoning (and
+without the lessons: it judges from the code alone). It returns `N: CONFIRMED|REFUTED: <evidence>`,
+each REFUTED line with a kind and a why. Drop what it refutes, and record the refutes in the same
+message: `review_set` with slug `pre-ship-review` and `refuted`, one `{kind, why}` each. Read
+`review_set` slug `pre-ship-review` first: it lists the kinds this scheme is counting, and a refute
+that is the same mistake as one of them takes its words. A kind refuted in three minions'
+reviews becomes a lesson in the scheme's additions file for later reviews. A refute you think the checker got wrong
+(you fix the finding anyway) isn't recorded.
 
 **Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`
 (the turn's person has signed in to Codex in their container, or for the server login's host

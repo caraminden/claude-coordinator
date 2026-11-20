@@ -3506,6 +3506,12 @@ export class Store {
     return { count: Number(count), first: first ?? null, top: rows.map((r) => ({ detail: r.detail, n: Number(r.n) })) };
   }
 
+  /** The readings in [from, to), oldest first, at most `limit`, of `kinds` only if given: an incident's timeline (#1145). */
+  healthBetween(from: number, to: number, limit: number, kinds?: string[]): { at: number; kind: string; commit_sha: string | null; detail: string }[] {
+    const only = kinds?.length ? ` AND kind IN (${kinds.map(() => '?').join(', ')})` : '';
+    return this.db.prepare(`SELECT at, kind, commit_sha, detail FROM health_events WHERE at >= ? AND at < ?${only} ORDER BY at, id LIMIT ?`).all(from, to, ...(kinds ?? []), limit) as any;
+  }
+
   /** The newest `kind` reading before `before` (#1135: the last stall before a watchdog restart), or null. */
   lastHealthEvent(kind: string, before: number): { at: number; detail: string } | null {
     return (this.db.prepare('SELECT at, detail FROM health_events WHERE kind = ? AND at < ? ORDER BY at DESC LIMIT 1').get(kind, before) as { at: number; detail: string } | undefined) ?? null;

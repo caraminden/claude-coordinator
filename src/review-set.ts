@@ -225,7 +225,7 @@ const unquote = (v: string) => {
 const quote = (v: string) => (/: |^[\s"'[{>|*&!%@`#-]|:$|\s$/.test(v) ? JSON.stringify(v) : v);
 
 /** The keys the columns own, as they appear in a rubric file's frontmatter. */
-const LIFTED = ['name', 'extends', 'when', 'model', 'effort'];
+const LIFTED = ['name', 'kind', 'extends', 'when', 'model', 'effort'];
 const OWNED = /^(name|kind|extends|when|model|effort|trial)\s*:/;
 
 /**
@@ -245,6 +245,7 @@ export function splitRubric(text: string): { fields: Partial<EntryFields>; body:
     }
     const v = unquote(kv[2]);
     if (kv[1] === 'name') fields.slug = v;
+    else if (kv[1] === 'kind') { if ((KINDS as readonly string[]).includes(v)) fields.kind = v; }
     else if (kv[1] === 'extends') fields.extends = v.replace(/^citadel:critique\/rubrics\//, '').replace(/\.md$/, '') || null;
     else if (kv[1] === 'when') fields.triggers = v === 'set by the extending rubric' ? {} : parseWhen(v);
     else fields[kv[1] as 'model' | 'effort'] = v || null;
@@ -271,7 +272,7 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     // A teacher is read by citadel:critique's hand-off (step 5), not run on a `when:`: the file says so.
     e.kind === 'teacher' ? 'kind: teacher' : '',
     e.extends ? `extends: citadel:critique/rubrics/${e.extends}` : '',
-    `when: ${quote(whenText(e.triggers) || (e.kind === 'teacher' ? 'only when a critic hands off to it' : 'ask'))}`,
+    `when: ${quote(whenText(e.triggers) || (e.kind === 'teacher' ? 'set by the extending rubric' : 'ask'))}`,
     e.model ? `model: ${e.model}` : '',
     e.effort ? `effort: ${e.effort}` : '',
     // On trial (Q12) it only advises, whatever its own gate says.

@@ -125,13 +125,12 @@ its second round. A plain blocker on a first fail is yours to fix.
    write it in `critic.md` with the fix, and skip the professor for that round. The skip holds only if the
    next round passes. A fail on that round calls the professor, with your named cause as one more
    thing it checks.
-2. **Brief it:** "Follow `<kit>/agents/professor.md`." When the rubric's `on_fail:` step that fired
-   names a teacher entry, add "Teacher rubric: `<path of its file in the review set>`": the
-   professor reads it before the fix and keeps to what it allows. A teacher on trial still teaches
-   (it only advises). With the cause quoted, per item the brief,
+2. **Brief it:** "Follow `<kit>/agents/professor.md`." with the cause quoted, per item the brief,
    every critic report so far and your line on what changed between them, the latest artifacts and
    checks' output, the source paths that made it, the rubric, its `playbook:` and `<kit>`. At most 3
-   items a call; when the next round is the last, say so.
+   items a call; when the next round is the last, say so. When the `on_fail:` step that fired names
+   a teacher entry, add "Teacher rubric: `<path>`", its file in the review set folder (the
+   "Review set:" line names it; the file says `kind: teacher`). A teacher on trial still teaches.
 3. **Apply fix 1,** remake the artifacts and run the next critic round as usual.
 4. **Playbook:** when the rubric has one, write the entry once the next round is judged: the
    finding's kind, the fix, before and after, the critic's verdict; the person's verdict makes it

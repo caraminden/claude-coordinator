@@ -969,7 +969,7 @@ const REVIEW_SET = {
       effort: { type: ['string', 'null'], description: 'Taskmaster only: low, medium or high; empty for the format\'s default' },
       panel: { type: ['string', 'null'], description: 'Taskmaster only: a panel name (up to 40 characters); empty for none' },
       on_fail: {
-        type: ['array', 'null'], description: 'Taskmaster only: hand-offs after failed rounds, up to 4, rising: [{after: 2, to: "art-teacher"}, {after: 3, to: "person"}]. `to` is professor, person, or the slug of another entry in this scheme. [] clears them',
+        type: ['array', 'null'], description: 'Taskmaster only: hand-offs after failed rounds, up to 4, rising: [{after: 2, to: art-professor}, {after: 3, to: person}]. `to` is professor, person, or the slug of another entry in this scheme. [] clears them',
         items: { type: 'object', properties: { after: { type: 'integer' }, to: { type: 'string' } }, required: ['after', 'to'] },
       },
       context: {

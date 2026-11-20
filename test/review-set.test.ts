@@ -418,7 +418,7 @@ test('a critic hands a second fail to its teacher entry: the file keeps the step
   assert.equal(renderSet(set.list(9), dir), 2);
   assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: art-teacher after 2 fails, person after 3 fails\n/);
   const t = readFileSync(join(dir, 'art-teacher.md'), 'utf8');
-  assert.match(t, /^---\nname: art-teacher\nkind: teacher\nwhen: only when a critic hands off to it\n/);
+  assert.match(t, /^---\nname: art-teacher\nkind: teacher\nwhen: set by the extending rubric\n/);
   assert.equal(orderLine(set.list(9)), '', 'a teacher is in no column order');
   // Switched off, the step drops out instead of sending the critic nowhere.
   set.save(9, 'art-teacher', { enabled: false }, 'Cara', 'off');

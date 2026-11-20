@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { git, setup } from './land-fixture.ts';
+import { spawnSync } from 'node:child_process';
+import { ci, env, git, setup } from './land-fixture.ts';
 
 type R = ReturnType<typeof setup>;
 const OK = 'test/ok.test.mjs';
@@ -93,6 +94,7 @@ test("a feeder whose numbers the build took gets the next ones as it merges into
   assert.equal(res.status, 0, res.stderr);
   assert.equal(show(r, 'build/3', 'src/db.ts'), db([...BASE, [96, 'theirs (#2)'], [97, 'mine (#1)']], check(97, 'mine')));
   assert.equal(show(r, 'build/3', 'docs/adr/0003-mine.md'), '# ADR 0003: mine');
+  assert.match(res.stderr, /ADR 0002 → 0003: build\/3 took 0002/, 'it names the build, not a commit');
 });
 
 test("a build whose numbers main took keeps main's and takes the next ones when it lands", () => {
@@ -128,4 +130,69 @@ test('the hand-off check (--check) passes a branch whose schema number main took
   const res = r.run({}, ['--check']);
   assert.equal(res.status, 0, res.stderr);
   assert.ok(!readFileSync(join(r.wt, 'src/db.ts'), 'utf8').includes('theirs'), 'the check moves nothing');
+});
+
+test("a version check main added too, word for word, still moves with the branch's line", () => {
+  const r = start();
+  write(r.wt, { 'src/db.ts': db([...BASE, [96, 'mine (#1)']], check(96, 'same')) }, '#1: mine');
+  write(r.source, { 'src/db.ts': db([...BASE, [96, 'theirs (#2)']], undefined, check(96, 'same')) }, '#2: theirs');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(show(r, 'main', 'src/db.ts'), db([...BASE, [96, 'theirs (#2)'], [97, 'mine (#1)']], check(97, 'same'), check(96, 'same')));
+});
+
+test("an ADR renumber reaches a file with a space in its name, and leaves a mention beside a link to main's ADR of that number", () => {
+  const r = start();
+  write(r.wt, { 'docs/adr/0002-mine.md': '# ADR 0002: mine\n', 'my notes.md': 'Per ADR 0002.\nUnlike ADR 0002 ([theirs](docs/adr/0002-theirs.md)).\n' }, '#1: ADR 0002 mine');
+  write(r.source, { 'docs/adr/0002-theirs.md': '# ADR 0002: theirs\n' }, '#2: ADR 0002 theirs');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(show(r, 'main', 'my notes.md'), 'Per ADR 0003.\nUnlike ADR 0002 ([theirs](docs/adr/0002-theirs.md)).');
+});
+
+test("the build minion's own merge of main (ship-numbers take) moves the build's schema lines after main's", () => {
+  const r = start();
+  git(r.source, 'branch', 'build/3', 'main');
+  git(r.wt, 'reset', '-q', '--hard', 'build/3');
+  write(r.wt, { 'src/db.ts': db([...BASE, [96, 'build (#1)']], check(96, 'build')) }, '#1: build');
+  write(r.source, { 'src/db.ts': db([...BASE, [96, 'main (#2)']], undefined, check(96, 'main')) }, '#2: main');
+  const res = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'tools', 'ship-numbers.ts'), 'take', 'main'], { cwd: r.wt, env, encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(readFileSync(join(r.wt, 'src/db.ts'), 'utf8'), db([...BASE, [96, 'main (#2)'], [97, 'build (#1)']], check(97, 'build'), check(96, 'main')));
+});
+
+test('a --build stopped by a red gate after renumbering an ADR says how to go on', () => {
+  const r = start();
+  const c = ci(r);
+  git(r.source, 'branch', 'build/3', 'main');
+  git(r.wt, 'reset', '-q', '--hard', 'build/3');
+  write(r.wt, { 'docs/adr/0002-build.md': '# ADR 0002: build\n' }, '#1: build');
+  assert.equal(c.run({}, ['--into', 'build/3', OK]).status, 0);
+  const bwt = worktree(r, 'ticket/9-build', 'build/3');
+  write(r.source, { 'docs/adr/0002-main.md': '# ADR 0002: main\n' }, '#2: main');
+  assert.equal(c.run({ FAKE_CI: 'red' }, ['--build'], bwt).status, 1);
+  const res = c.run({}, ['--build'], bwt);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /one merge ahead of build\/3 .*run tools\/land\.sh --into build\/3 --full first/s);
+  assert.equal(c.run({}, ['--into', 'build/3', '--full'], bwt).status, 0);
+  assert.equal(c.run({}, ['--build'], bwt).status, 0);
+  assert.equal(show(r, 'main', 'docs/adr/0003-build.md'), '# ADR 0003: build');
+});
+
+test("a feeder whose ADR renumber would rewrite a file another feeder claimed is refused, and the build doesn't move", () => {
+  const r = start();
+  git(r.source, 'branch', 'build/3', 'main');
+  const boss = worktree(r, 'ticket/9-build', 'build/3');
+  write(boss, { 'build-claims.md': '# Build 3\nbuild: #9\n#1: docs/adr/\n#2: docs/x.md\n', 'docs/adr/0002-boss.md': '# ADR 0002: boss\n' }, 'claims');
+  git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
+  const two = worktree(r, 'ticket/2-y', 'build/3');
+  write(two, { 'docs/x.md': 'Waits on docs/adr/0002-mine.md.\n' }, '#2: x');
+  assert.equal(r.run({}, ['--into', 'build/3', OK], two).status, 0);
+  git(r.wt, 'reset', '-q', '--hard', 'build/3');
+  write(r.wt, { 'docs/adr/0002-mine.md': '# ADR 0002: mine\n' }, '#1: mine');
+  const before = git(r.source, 'rev-parse', 'build/3');
+  const res = r.run({}, ['--into', 'build/3', OK]);
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /docs\/x\.md is #2's in the claims/);
+  assert.equal(git(r.source, 'rev-parse', 'build/3'), before);
 });

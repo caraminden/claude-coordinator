@@ -9,14 +9,16 @@
 //     other side has too) merges as git would, so it conflicts and land.sh names the number to take.
 //     shortcut: a check moves only on a line that says schema_version and only in src/db.ts, not a test that sets
 //     schema_version to the old number; widen it if a renumbered check ever misses.
-//   adr <onto>
+//   take <ref>
+//     git merge <ref> with the driver above, <ref> kept: how a build minion takes main in by hand (src/prompts.ts).
+//   adr <onto> [<name>]
 //     After the rebase or merge: each docs/adr/NNNN-*.md this branch adds whose number <onto> already has gets the next
 //     free number. Links to its file name are rewritten everywhere; "ADR NNNN" only on lines this branch added. Prints
-//     one line per rename ("ADR 0016 → 0020: main took 0016") and stages what it changed; land.sh commits it.
+//     one line per rename ("ADR 0016 → 0020: main took 0016", <name> in place of <onto>) and stages what it changed; land.sh commits it.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 << 20 });
 
@@ -37,18 +39,30 @@ function history(text: string): History | null {
   return { lines, start, end, entries };
 }
 
-/** git's own three-way merge of the files' texts into `out`: 0 when clean. */
-function mergeFile(out: string, base: string, ours: string, theirs: string): number {
+/** Runs git on the texts, written to files in a scratch folder: `args` gets their paths. */
+function onTexts(texts: string[], args: (paths: string[]) => string[]) {
   const dir = mkdtempSync(join(tmpdir(), 'ship-numbers-'));
   try {
-    const [o, a, b] = ['base', 'ours', 'theirs'].map((f, i) => (writeFileSync(join(dir, f), [base, ours, theirs][i]), join(dir, f)));
-    const r = spawnSync('git', ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b], { encoding: 'utf8', maxBuffer: 64 << 20 });
-    if (r.status === null || r.status < 0 || r.status > 127) return 2;
-    writeFileSync(out, r.stdout);
-    return r.status === 0 ? 0 : 1;
+    const paths = texts.map((t, i) => (writeFileSync(join(dir, String(i)), t), join(dir, String(i))));
+    return spawnSync('git', args(paths), { encoding: 'utf8', maxBuffer: 64 << 20 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+/** git's own three-way merge of the files' texts into `out`: 0 when clean. */
+function mergeFile(out: string, base: string, ours: string, theirs: string): number {
+  const r = onTexts([base, ours, theirs], ([o, a, b]) => ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b]);
+  if (r.status === null || r.status < 0 || r.status > 127) return 2;
+  writeFileSync(out, r.stdout);
+  return r.status === 0 ? 0 : 1;
+}
+/** The indexes of the lines `to` adds over `from`, by git's diff: by place, so a line main added too still counts. */
+function addedLines(from: string, to: string): Set<number> {
+  const out = new Set<number>();
+  for (const m of onTexts([from, to], ([a, b]) => ['diff', '--no-index', '--no-color', '-U0', a, b]).stdout.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {
+    for (let i = 0; i < Number(m[2] ?? 1); i++) out.add(Number(m[1]) - 1 + i);
+  }
+  return out;
 }
 
 function merge(mainSide: string, basePath: string, oursPath: string, theirsPath: string): number {
@@ -57,6 +71,7 @@ function merge(mainSide: string, basePath: string, oursPath: string, theirsPath:
   const [o, a, b] = [O, A, B].map(history);
   if (!o || !a || !b) return plain();
   const [keep, move] = mainSide === 'theirs' ? [b, a] : [a, b];
+  const moveText = mainSide === 'theirs' ? A : B;
   // The moving side only appended: the base's lines are its first lines, numbers and all.
   if (move.entries.length < o.entries.length || o.entries.some((e, i) => move.entries[i].n !== e.n || move.entries[i].desc !== e.desc)) return plain();
   const kept = new Map(keep.entries.map((e) => [e.desc, e.n]));
@@ -69,14 +84,14 @@ function merge(mainSide: string, basePath: string, oursPath: string, theirsPath:
   added.forEach((e, i) => to.set(e.n, last + 1 + i));
   const merged = [...keep.entries, ...added.map((e, i) => ({ n: last + 1 + i, desc: e.desc }))].map((e) => `  [${e.n}, ${e.desc}],`);
   const withHistory = (h: History) => [...h.lines.slice(0, h.start + 1), ...merged, ...h.lines.slice(h.end)];
-  // Lines the moving side added (neither side's base has them) that check schema_version get the new numbers.
-  const old = new Set([...o.lines, ...keep.lines]);
-  const moved = withHistory(move).map((l) => (old.has(l) || !l.includes('schema_version') ? l : l.replace(/\b\d+\b/g, (d) => String(to.get(Number(d)) ?? d))));
+  // Lines the moving side added over the base that check schema_version get the new numbers.
+  const mine = addedLines(O, moveText);
+  const moved = withHistory({ ...move, lines: move.lines.map((l, i) => (!mine.has(i) || !l.includes('schema_version') ? l : l.replace(/\b\d+\b/g, (d) => String(to.get(Number(d)) ?? d)))) });
   const [ours, theirs] = mainSide === 'theirs' ? [moved, withHistory(keep)] : [withHistory(keep), moved];
   return mergeFile(oursPath, O, ours.join('\n'), theirs.join('\n'));
 }
 
-function adr(onto: string): void {
+function adr(onto: string, name = onto.replace(/^refs\/heads\//, '')): void {
   const list = (ref: string) => git('ls-tree', '--name-only', `${ref}:docs/adr/`).split('\n').filter(Boolean);
   let ontoFiles: string[];
   try {
@@ -93,8 +108,8 @@ function adr(onto: string): void {
   // The lines this branch added, by file, as they read before any rewrite here.
   const addedLines = new Map<string, Set<string>>();
   let file = '';
-  for (const line of git('diff', '-U0', '--no-renames', '--no-color', onto, 'HEAD').split('\n')) {
-    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6) : '';
+  for (const line of git('-c', 'core.quotePath=false', 'diff', '-U0', '--no-renames', '--no-color', onto, 'HEAD').split('\n')) {
+    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6).replace(/\t$/, '') : ''; // git ends a name with a space in a tab
     else if (line.startsWith('+') && file) (addedLines.get(file) ?? addedLines.set(file, new Set()).get(file)!).add(line.slice(1));
   }
   const renames: [string, string, string, string][] = []; // old number, new number, old name, new name
@@ -103,13 +118,14 @@ function adr(onto: string): void {
     const m = String(next++).padStart(4, '0');
     renames.push([n, m, f, m + f.slice(4)]);
   }
-  // "ADR NNNN" on the branch's own added lines, then links to the old file names anywhere.
+  // "ADR NNNN" on the branch's own added lines (not one that links <onto>'s ADR of that number: that mention is its),
+  // then links to the old file names anywhere.
   const touched = new Set<string>();
   for (const [path, lines] of addedLines) {
     const text = readFileSync(path, 'utf8');
     const out = text.split('\n').map((l) => {
       if (!lines.has(l)) return l;
-      for (const [n, m] of renames) l = l.replace(new RegExp(`\\bADR([- ])${n}\\b`, 'g'), `ADR$1${m}`);
+      for (const [n, m] of renames) if (!ontoFiles.some((f) => num(f) === n && l.includes(f))) l = l.replace(new RegExp(`\\bADR([- ])${n}\\b`, 'g'), `ADR$1${m}`);
       return l;
     }).join('\n');
     if (out !== text) writeFileSync(path, out), touched.add(path);
@@ -121,14 +137,21 @@ function adr(onto: string): void {
     touched.add(join('docs/adr', from)).add(join('docs/adr', to));
   }
   git('add', '-A', '--', ...touched); // only these: an untracked file in the worktree stays out of the commit
-  const name = onto.replace(/^refs\/heads\//, '');
   for (const [n, m] of renames) console.log(`ADR ${n} → ${m}: ${name} took ${n}`);
+}
+
+function take(ref: string): number {
+  const me = import.meta.filename;
+  const driver = `'${process.execPath}' --no-warnings '${me}' merge theirs %O %A %B`;
+  const attrs = join(dirname(me), 'ship-numbers.attributes');
+  return spawnSync('git', ['-c', `core.attributesFile=${attrs}`, '-c', `merge.citadel-numbers.driver=${driver}`, 'merge', '--no-edit', ref], { stdio: 'inherit' }).status ?? 1;
 }
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === 'merge' && args.length === 4) process.exit(merge(args[0], args[1], args[2], args[3]));
-else if (cmd === 'adr' && args.length === 1) adr(args[0]);
+else if (cmd === 'take' && args.length === 1) process.exit(take(args[0]));
+else if (cmd === 'adr' && (args.length === 1 || args.length === 2)) adr(args[0], args[1]);
 else {
-  console.error('usage: ship-numbers.ts merge <ours|theirs> <base> <ours> <theirs> | adr <onto>');
+  console.error('usage: ship-numbers.ts merge <ours|theirs> <base> <ours> <theirs> | take <ref> | adr <onto> [<name>]');
   process.exit(2);
 }

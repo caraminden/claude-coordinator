@@ -260,7 +260,7 @@ conflict_fix() {
   case $mode in
     land) echo "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
     into) echo "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again" ;;
-    build) echo "Take main in on your branch by hand (git merge main), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again" ;;
+    build) echo "Take main in on your branch by hand (tools/citadel-node tools/ship-numbers.ts take main: git merge main that renumbers the build's schema lines main took), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again" ;;
   esac
 }
 # The early check (#770): <onto> <when>. Whether the rebase onto <onto> (--build's merge of it) would stop on a conflict,
@@ -290,9 +290,11 @@ if [ "$mode" = build ]; then
   # The rebased copy is past the merge of main, so HEAD is no longer at the build's tip: the copy that merged names it.
   if [ -n "$resumed" ]; then build=${LAND_BUILD:-}; else build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/'); fi
   if ! [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]]; then
-    # One merge ahead of a build: a --build that stopped after merging main (a red gate, a failed deploy), or a merge by hand.
-    ahead=
-    [ -n "$build" ] || ! git rev-parse -q --verify HEAD^2 >/dev/null || ahead=$(git for-each-ref --points-at HEAD^1 --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
+    # One merge ahead of a build: a --build that stopped after merging main (a red gate, a failed deploy), or a merge by
+    # hand; with the commit that renumbered its ADRs (below) on top of that merge, if it made one.
+    ahead= tip=HEAD
+    ! grep -qF 'Numbered at ship time by tools/land.sh' <<<"$(git log -1 --format=%b HEAD)" || tip=HEAD^ # not a pipe: #646
+    [ -n "$build" ] || ! git rev-parse -q --verify "$tip^2" >/dev/null || ahead=$(git for-each-ref --points-at "$tip^1" --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
     [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a --build that stopped after merging main, or a merge of main by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
     refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
   fi
@@ -450,7 +452,7 @@ case $mode in
       # A rebase would flatten the build minion's merge of main.
       [ "$mode" = into ] || refuse "$build has commits this branch doesn't: run git merge $build (not a rebase), re-test, then run this again. Nothing merged"
       say "rebasing $branch onto $build ($(git log -1 --format='%h "%s"' "$base"))"
-      numbers_git ours rebase -q "$base" || conflict "$base" rebase "the rebase onto $build failed (see git's output above), so $build is untouched"
+      numbers_git ours rebase -q "$base" || conflict "refs/heads/$build" rebase "the rebase onto $build failed (see git's output above), so $build is untouched"
     fi
     claims_check main ;; # again under the lock: a feeder that merged while this waited may own a file now
   build)
@@ -479,13 +481,14 @@ esac
 # ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
 # while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
 adr_onto=
-case $mode in land | build) adr_onto=main ;; into) adr_onto=$base ;; esac
+case $mode in land | build) adr_onto=main ;; into) adr_onto=refs/heads/$build ;; esac # the build's lock holds it at $base
 if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
   renamed=$("$tools/citadel-node" --no-warnings "$tools/ship-numbers.ts" adr "$adr_onto") || refuse "renumbering this branch's ADRs failed (see above), so nothing landed. Run git status, put back what it left, then this again"
   if [ -n "$renamed" ]; then
     sed 's/^/land: /' <<<"$renamed" >&2
     n=${branch#ticket/} n=${n%%-*}
     git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed"
+    [ "$mode" != into ] || claims_check main # its link rewrites may reach a file another feeder claims
   fi
 fi
 

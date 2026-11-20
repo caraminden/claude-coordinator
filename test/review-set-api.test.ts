@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -370,4 +370,44 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   rmSync(join(agents, 'art-critic.md'));
   const gone = (await call(url)).data.entries.find((e: any) => e.slug === 'art-critic');
   assert.deepEqual([gone.file, gone.agent, gone.body], ['.claude/agents/art-critic.md', null, 'Pixel art at whole scales.']);
+});
+
+test("the page at a glance (#1094): judged this week, the last run, unwatched folders, review skills, and the Every scheme rows", async () => {
+  // Not Citadel: a scheme with a repo whose last month touched src/ and game/logic/, and one critic on src/**.
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Glance Grove' } });
+  const repo = join(root, 'glance-repo');
+  mkdirSync(join(repo, 'game', 'logic'), { recursive: true });
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  mkdirSync(join(repo, '.claude', 'skills', 'level-review'), { recursive: true });
+  writeFileSync(join(repo, '.claude', 'skills', 'level-review', 'SKILL.md'), '---\nname: level-review\ndescription: Reviews a new level against the level rules\n---\nReview it.\n');
+  writeFileSync(join(repo, 'src', 'a.ts'), '1');
+  writeFileSync(join(repo, 'game', 'logic', 'b.ts'), '1');
+  writeFileSync(join(repo, 'game', 'logic', 'c.ts'), '1');
+  writeFileSync(join(repo, 'README.md'), 'docs are left out');
+  const git = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  execFileSync('git', ['init', '-q', repo]);
+  git('add', '.'); git('commit', '-qm', 'first');
+  const url = `/api/projects/${p.id}/reviews`;
+  assert.equal((await call(url, { method: 'POST', body: { slug: 'src-critic', name: 'Src critic', kind: 'critic', when: 'diff: src/**', body: '## Rules\nTidy.' } })).status, 201);
+  const a = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'one', properties: { type: 'chore' } } })).data;
+  const b = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'two', properties: { type: 'chore' } } })).data;
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(repo, p.id);
+  db.prepare("UPDATE tickets SET status = 'closed', closed_at = ? WHERE id IN (?, ?)").run(Date.now(), a.id, b.id);
+  const entry = db.prepare("SELECT id FROM review_entries WHERE project_id = ? AND slug = 'src-critic'").get(p.id) as { id: number };
+  const at = Date.now() - 60_000;
+  db.prepare('INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at) VALUES (?, ?, ?, 1, ?, ?)').run(entry.id, a.id, `#${a.number}`, 'pass', at);
+  db.close();
+
+  const { data } = await call(url);
+  assert.deepEqual([data.glance.closed, data.glance.judged, data.glance.last, data.glance.days], [2, 1, at, 30]);
+  assert.deepEqual(data.glance.coverage, { changes: 3, watched: 1, gaps: [{ folder: 'game/logic', changes: 2 }] });
+  assert.deepEqual(data.glance.skills, [{ name: 'level-review', what: 'Reviews a new level against the level rules' }]);
+
+  const { status, data: every } = await call('/api/reviews/schemes');
+  assert.equal(status, 200);
+  const row = every.schemes.find((s: any) => s.id === p.id);
+  assert.deepEqual([row.name, row.opened, row.critics, row.trial, row.preship, row.rate, row.last, row.closed, row.judged],
+    ['Glance Grove', true, 1, 1, true, 100, at, 2, 1]);
+  assert.deepEqual(row.coverage, { changes: 3, watched: 1, gap: { folder: 'game/logic', changes: 2 } });
 });

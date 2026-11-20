@@ -183,7 +183,11 @@ function everyTable() {
   if (!every.rows.length) return h('p', { class: 'muted' }, "You aren't a member of any scheme yet.");
   const rows = [...every.rows].sort((a, b) => (b.last ?? 0) - (a.last ?? 0) || a.name.localeCompare(b.name));
   const open = (r) => { every.tab = 'scheme'; if (r.id === state.projectId) draw(); else location.hash = `#/p/${r.id}/reviews`; };
-  const n = (v, tone) => (v ? toneChip(tone, String(v)) : none());
+  const judges = (r) => {
+    const parts = [[r.critics, 'ok', 'critic'], [r.trial, 'warn', 'on trial'], [r.teachers, 'violet', 'teacher'], [r.repo, 'info', 'repo agent']]
+      .filter(([v]) => v).map(([v, tone, word]) => toneChip(tone, word === 'on trial' ? `${v} on trial` : plural(v, word)));
+    return parts.length ? h('span', { class: 'rv-mx-judges' }, ...parts) : none();
+  };
   const watched = (r) => {
     if (!r.coverage?.changes) return none(r.coverage ? 'no changes' : 'no repo');
     const f = r.coverage.watched / r.coverage.changes;
@@ -191,8 +195,8 @@ function everyTable() {
   };
   const cells = (r) => [
     ['Scheme', h('span', { class: 'rv-mx-name' }, schemeTag(r.name), r.opened ? null : toneChip('neutral', 'never opened'), r.preship ? null : toneChip('danger', 'pre-ship off'))],
-    ['Critics', n(r.critics, 'ok')], ['On trial', n(r.trial, 'warn')], ['Teachers', n(r.teachers, 'violet')], ['Repo agents', n(r.repo, 'info')],
-    ['Last run', r.last ? h('span', {}, ago(r.last)) : toneChip('warn', 'never')],
+    ['Judges', judges(r)],
+    ['Last run', r.last ? h('span', { class: 'rv-mx-when' }, ago(r.last)) : toneChip('warn', 'never')],
     ['Passed', r.rate === null ? none() : toneChip(r.rate >= 70 ? 'ok' : r.rate >= 40 ? 'warn' : 'danger', `${r.rate}%`)],
     ['Judged this week', r.closed ? toneChip(r.judged === r.closed ? 'ok' : r.judged ? 'warn' : 'danger', `${r.judged} of ${r.closed}`) : none()],
     ['Watched', watched(r)],
@@ -325,9 +329,8 @@ function lensesCard(lenses) {
   const open = state.lenses || lenses.some((e) => e.slug === state.selected);
   return h('div', { class: `rv-card rv-lenses${open ? ' open' : ''}` },
     h('button', { type: 'button', class: 'rv-lens-row', 'aria-expanded': String(open), onclick: () => { state.lenses = !open; if (!state.lenses && lenses.some((e) => e.slug === state.selected)) state.selected = null; draw(); } },
-      h('span', { class: 'rv-card-name' }, "The pre-ship review's lenses"),
-      h('span', { class: 'rv-lens-count' }, toneChip(on ? 'info' : 'neutral', `${on} on`), on < lenses.length ? toneChip('neutral', `${lenses.length - on} off`) : null),
-      h('span', { class: 'rv-caret', 'aria-hidden': 'true' }, '▸')),
+      h('span', { class: 'rv-card-name' }, h('span', { class: 'rv-caret', 'aria-hidden': 'true' }, '▸'), " The pre-ship review's lenses"),
+      h('span', { class: 'rv-lens-count' }, toneChip(on ? 'info' : 'neutral', `${on} on`), on < lenses.length ? toneChip('neutral', `${lenses.length - on} off`) : null)),
     open ? h('div', { class: 'rv-card-when' }, 'Each read when the diff has its kind of change') : null,
     open ? h('ul', { class: 'rv-lens-list' }, lenses.map((e) => h('li', { class: `${e.slug === state.selected ? 'on' : ''}${e.enabled ? '' : ' off'}` },
       h('button', { type: 'button', class: 'rv-lens-name', 'aria-pressed': String(e.slug === state.selected), onclick: () => select(e.slug) }, e.name.replace(/^Lens: /, '')),

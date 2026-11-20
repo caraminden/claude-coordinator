@@ -130,15 +130,6 @@
   .rv-title-short { display: inline; }
   .rv-tabs { display: flex; align-self: stretch; }
   .rv-tabs button { flex: 1; }
-  /* The table's rows become cards: a cell a line, its column's name before it. */
-  .rv-mx thead { display: none; }
-  .rv-mx, .rv-mx tbody, .rv-mx tr, .rv-mx td { display: block; }
-  .rv-mx tr { margin-bottom: 0.6rem; padding: 0.55rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-  .rv-mx td { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.25rem 0; border: 0; }
-  .rv-mx td::before { content: attr(data-label); color: var(--muted); font-size: 0.85em; }
-  .rv-mx td:first-child { padding-bottom: 0.4rem; }
-  .rv-mx td:first-child::before { content: none; }
-  .rv-mx td .meter { flex: 0 1 12rem; }
   .rv-body, .rv-body:has(.rv-form) { grid-template-columns: minmax(0, 1fr); }
   .rv-board { grid-template-columns: minmax(0, 1fr); }
   .rv-detail { position: static; }
@@ -182,20 +173,36 @@
 .rv-lens-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; width: 100%; min-height: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .rv-lens-row .rv-card-name { flex: 1 1 8rem; }
 .rv-lens-count { display: inline-flex; gap: 0.3rem; }
-.rv-caret { color: var(--muted); transition: transform var(--citadel-motion, 120ms); }
+.rv-caret { display: inline-block; color: var(--muted); transition: transform var(--citadel-motion, 120ms); }
 .rv-lenses.open .rv-caret { transform: rotate(90deg); }
 .rv-repo { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.6rem 0.7rem; border: 1px solid color-mix(in srgb, var(--citadel-ok) 30%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--citadel-ok) 4%, transparent); }
 .rv-repo-head { display: flex; align-items: baseline; gap: 0.75rem; }
 .rv-repo-head h3 { flex: 1; margin: 0; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .rv-repo-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.5rem; }
 .rv-skill { cursor: default; }
-.rv-every { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+.rv-every { container: every / inline-size; display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
 .rv-every-note { margin: 0; font-size: 0.9em; }
 .rv-mx { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-variant-numeric: tabular-nums; }
-.rv-mx th { padding: 0.55rem 0.6rem; text-align: left; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--ink) 4%, var(--panel)); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rv-mx th { padding: 0.55rem 0.6rem; text-align: left; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--ink) 4%, var(--panel)); border-bottom: 1px solid var(--line); vertical-align: bottom; }
 .rv-mx td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .rv-mx tbody tr:last-child td { border-bottom: 0; }
 .rv-mx tbody tr { cursor: pointer; transition: background-color var(--citadel-motion, 120ms); }
 .rv-mx tbody tr:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); outline: none; }
-.rv-mx td .meter { min-width: 7rem; }
+.rv-mx td .meter { min-width: 5rem; }
+/* A narrow pane (a phone, or rails open on a small screen): the table's rows become cards, a cell a line, its column's name before it. */
+@container every (max-width: 40rem) {
+  .rv-mx thead { display: none; }
+  .rv-mx { border: 0; background: none; }
+  .rv-mx-judges { justify-content: flex-end; }
+  .rv-mx, .rv-mx tbody, .rv-mx tr, .rv-mx td { display: block; }
+  .rv-mx tr { margin-bottom: 0.6rem; padding: 0.55rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .rv-mx td { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.25rem 0; border: 0; }
+  .rv-mx td::before { content: attr(data-label); color: var(--muted); font-size: 0.85em; }
+  .rv-mx td:first-child { padding-bottom: 0.4rem; }
+  .rv-mx td:first-child::before { content: none; }
+  .rv-mx td .meter { flex: 0 1 12rem; }
+}
+
+.rv-mx-judges { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 16rem; }
+.rv-mx-when { white-space: nowrap; }
 .rv-mx-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }

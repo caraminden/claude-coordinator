@@ -329,6 +329,11 @@ test("a teacher's record counts every round after its fix, not just first rounds
   set.create(3, { slug: 'critic', name: 'Critic' }, 'Josh');
   set.recordRun(3, 'critic', { ticketId: 90, minion: '#90', round: 3, verdict: 'pass' });
   assert.equal(set.record(3).get(set.get(3, 'critic')!.id)!.firsts, 0, "a critic's later rounds still don't count");
+  // A teacher's pass is one fixed item's next round, not a verdict on the work: it doesn't lift its critic's ship hold.
+  set.save(3, 'critic', { gate: 'block', on_fail: [{ after: 2, to: 'prof' }] }, 'Josh', 'x');
+  set.recordRun(3, 'critic', { ticketId: 91, minion: '#91', round: 3, verdict: 'fail' });
+  set.recordRun(3, 'prof', { ticketId: 91, minion: '#91', round: 3, verdict: 'pass' });
+  assert.deepEqual(set.holds(3, 91).map((x) => x.slug), ['critic']);
 });
 
 test("a blocking entry's fail is lifted by a later pass from what judges in its place: its panel's referee or its hand-off", () => {

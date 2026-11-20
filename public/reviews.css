@@ -118,7 +118,7 @@
 /* A critic and the teachers it hands stubborn fails to (#1089, take A): a violet strip under the card, so the chain reads
    top to bottom. A teacher no critic uses sits dashed at the foot of While working. */
 .rv-chain { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
-.rv-teach { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.45rem; width: auto; min-height: 0; margin: 0 0 0 0.75rem; padding: 0.4rem 0.6rem; border: 1px solid color-mix(in srgb, var(--held) 35%, var(--line)); border-left: 3px solid var(--held); border-radius: 8px; background: color-mix(in srgb, var(--held) 7%, var(--panel)); color: var(--ink); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer; transition: border-color 0.12s, background-color 0.12s; }
+.rv-teach { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.45rem; width: auto; min-height: 0; margin: 0 0 0 0.75rem; padding: 0.4rem 0.6rem; border: 1px solid color-mix(in srgb, var(--held) 35%, var(--line)); border-left: 3px solid var(--held); border-radius: 8px; background: color-mix(in srgb, var(--held) 7%, var(--panel)); color: var(--ink); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer; transition: border-color var(--citadel-motion, 120ms), background-color var(--citadel-motion, 120ms); }
 .rv-teach:is(:hover, :focus-visible) { border-color: var(--held); background: color-mix(in srgb, var(--held) 12%, var(--panel)); }
 .rv-teach.on { border-color: var(--held); box-shadow: 0 0 0 1px var(--held); }
 .rv-teach.off { opacity: 0.6; }

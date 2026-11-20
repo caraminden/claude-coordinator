@@ -140,7 +140,7 @@ function panelBox(name, members) {
   const ref = refs.some((x) => x.enabled);
   return h('div', { class: 'rv-panel', role: 'group', 'aria-label': `Panel ${name}` },
     h('div', { class: 'rv-panel-head' }, h('b', {}, name), h('span', { class: 'muted' }, ref ? ': judge together, referee merges' : ': judge together')),
-    ...judges.map(withTeachers), ...refs.map(card),
+    ...judges.map(withTeachers), ...refs.map(withTeachers),
     ref ? h('p', { class: 'muted rv-panel-cost' }, `${on} judge${on === 1 ? '' : 's'} + referee: ${on + 1} model calls a run`)
       : h('p', { class: 'rv-warn rv-panel-cost', role: 'note' }, `No referee on: each judge's verdict stands on its own (${on} model call${on === 1 ? '' : 's'} a run). Add a referee to the panel to merge them.`));
 }
@@ -171,7 +171,7 @@ function teachersOf(e) {
 /** The entries that hand off to a teacher, with after how many fails. */
 const handsTo = (t) => state.entries.flatMap((e) => teachersOf(e).filter((x) => x.t.slug === t.slug).map((x) => ({ e, after: x.after })));
 /** "fix held 3 of 4", or that it has none yet: a teacher's record is whether the critic passed the work after its fix. */
-const heldText = (t) => (t.firsts ? `fix held ${t.passes} of ${t.firsts}` : 'no fixes yet');
+const heldText = (t) => (t.firsts ? `fix held ${t.passes} of ${t.firsts === 20 ? 'the last 20' : t.firsts}` : 'no fixes yet');
 
 /** A card with a strip under it per teacher it hands off to, so the chain reads top to bottom (take A, #1089). */
 function withTeachers(e) {

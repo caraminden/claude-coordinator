@@ -116,6 +116,7 @@ running every rubric at once:
 
 A **stubborn fail** is an item that failed on its score alone (no blocker, under the mark), or failed
 its second round. A plain blocker on a first fail is yours to fix.
+When the turn's "Kit reviewers:" line says the professor is off, skip the call to `professor` in this step and go to the hand-off's next step; a teacher entry of the scheme's own still runs.
 
 1. **Group by cause.** Stubborn fails whose findings name the same cause (the same rule broken the
    same way) are one cause. Call `citadel:professor` once per cause, with the two or three plainest

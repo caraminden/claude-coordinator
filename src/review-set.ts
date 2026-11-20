@@ -612,7 +612,7 @@ export class ReviewSet {
   /**
    * The page's record by entry id (Q4): the last 10 runs oldest first, the first-round pass rate over the last 20 first
    * rounds, and whether it always passes or always fails (5 first rounds or more, all the same). A teacher's rate is over
-   * all its runs, each a fix and whether it held (#1089), with `passes` the fixes that held.
+   * its last 20 runs of any round, each a fix and whether it held (#1089), with `passes` the fixes that held.
    */
   record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }> {
     const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }>();
@@ -645,8 +645,9 @@ export class ReviewSet {
       if (!e.enabled || e.trial || e.gate !== 'block') continue;
       const r = last(e.id);
       if (!r || r.verdict === 'pass') continue;
-      // Its panel's referee, or an entry its hand-offs name, judges in its place: a later pass there lifts it too.
-      const inPlace = all.filter((x) => x.id !== e.id && x.enabled && ((e.panel && x.panel === e.panel && x.stage === e.stage && x.kind === 'referee') || e.on_fail?.some((s) => s.to === x.slug)));
+      // Its panel's referee, or an entry its hand-offs name, judges in its place: a later pass there lifts it too. A teacher
+      // doesn't: its run is one fixed item's next round (#1089), not a verdict on the work.
+      const inPlace = all.filter((x) => x.id !== e.id && x.enabled && x.kind !== 'teacher' && ((e.panel && x.panel === e.panel && x.stage === e.stage && x.kind === 'referee') || e.on_fail?.some((s) => s.to === x.slug)));
       if (inPlace.some((x) => { const y = last(x.id); return y && y.id > r.id && y.verdict === 'pass'; })) continue;
       out.push({ slug: e.slug, name: e.name, verdict: r.verdict });
     }

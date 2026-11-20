@@ -170,7 +170,7 @@ export function memoryPage() {
       statTiles([kb(n.bytes), 'size', 'accent'], [day(n.modified), 'last changed', 'done']),
       unlisted, past, soon, closed, body, edit,
       h('div', { class: 'memory-actions' }, editBtn, save, cancel, del),
-      h('p', { class: 'muted small look-prose' }, `${n.file}. ${n.inIndex ? 'Listed in MEMORY.md; sessions read it when it matters.' : ''}`));
+      h('p', { class: 'muted small look-prose' }, `${n.file}. ${n.inIndex ? 'Reached from MEMORY.md; sessions read it when it matters.' : ''}`));
     row.querySelector('summary').insertBefore(dot, row.querySelector('.settings-row-chev'));
     const mark = () => {
       const why = tidyReason(n);

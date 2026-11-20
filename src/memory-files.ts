@@ -86,8 +86,13 @@ export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, no
     let st; let text;
     try { if (!plain(path)) continue; st = lstatSync(path); text = readFileSync(path, 'utf8'); } catch { continue; }
     const fm = frontmatter(text);
-    notes.push({ file, name: fm.name || file.replace(/\.md$/, ''), description: fm.description, type: fm.type, text, bytes: st.size, modified: st.mtimeMs, inIndex: index.includes(`](${file})`), flags: staleFlags(text, isClosed, now) });
+    notes.push({ file, name: fm.name || file.replace(/\.md$/, ''), description: fm.description, type: fm.type, text, bytes: st.size, modified: st.mtimeMs, inIndex: false, flags: staleFlags(text, isClosed, now) });
   }
+  // Listed: MEMORY.md links it, as `](file)` or `[[name]]`, or links a note that does (a topic index): what a session can reach.
+  const links = (text: string, n: MemoryNote) => text.includes(`](${n.file})`) || text.includes(`[[${n.name}]]`) || text.includes(`[[${n.file.replace(/\.md$/, '')}]]`);
+  for (const n of notes) n.inIndex = links(index, n);
+  const hubs = notes.filter((n) => n.inIndex);
+  for (const n of notes) if (!n.inIndex) n.inIndex = hubs.some((h) => links(h.text, n));
   const at = (n: MemoryNote) => { const i = index.indexOf(`](${n.file})`); return i < 0 ? Infinity : i; };
   notes.sort((a, b) => at(a) - at(b) || b.modified - a.modified);
   return { id: f.id, label: f.label, reachable: true, bytes: notes.reduce((s, n) => s + n.bytes, 0), notes, index };

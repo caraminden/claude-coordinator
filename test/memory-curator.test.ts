@@ -29,7 +29,7 @@ test('checkChanges refuses bad changes and keeps what each note was', () => {
     [[], /at least one/],
     [[{ action: 'zap', file: 'a.md', reason: 'r' }], /action/],
     [[{ action: 'flag', file: '../a.md', reason: 'r' }], /file name/],
-    [[{ action: 'flag', file: 'MEMORY.md', reason: 'r' }], /file name/],
+    [[{ action: 'delete', file: 'MEMORY.md', reason: 'r' }], /MEMORY\.md only with flag/],
     [[{ action: 'flag', file: 'a.md', reason: '' }], /reason/],
     [[{ action: 'flag', file: 'a.md', reason: 'r' }, { action: 'delete', file: 'a.md', reason: 'r' }], /two changes/],
     [[{ action: 'delete', file: 'zz.md', reason: 'r' }], /no note/],
@@ -49,6 +49,8 @@ test('checkChanges refuses bad changes and keeps what each note was', () => {
   assert.equal(ok[0].line, null, 'an edit that keeps the line changes only the text');
   assert.equal(ok[0].was, A);
   assert.equal(ok[1].wasLine, null);
+  const [flag] = checkChanges(v, [{ action: 'flag', file: 'MEMORY.md', reason: 'line 2 is prose over 150 characters' }]);
+  assert.equal(flag.was, v.index, 'a flag on MEMORY.md itself keeps the index it judged, so the page sees it drift');
 });
 
 test('withLine replaces in place, drops duplicates, appends or removes', () => {

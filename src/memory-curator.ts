@@ -89,13 +89,14 @@ export function checkChanges(folder: FolderView, raw: unknown): Change[] {
   return raw.map((c: any, i): Change => {
     const action = c?.action as Action;
     if (!ACTIONS.includes(action)) throw fail(`Change ${i + 1}: action must be one of ${ACTIONS.join(', ')}`);
-    const file = noteFile(c.file);
-    if (!file) throw fail(`Change ${i + 1}: file must be a note's file name, like some-note.md (not MEMORY.md)`);
+    // MEMORY.md itself can only be flagged (a long or stale line no note owns): its lines change through each note's change.
+    const file = action === 'flag' && c.file === 'MEMORY.md' ? c.file : noteFile(c.file);
+    if (!file) throw fail(`Change ${i + 1}: file must be a note's file name, like some-note.md (MEMORY.md only with flag)`);
     if (seen.has(file)) throw fail(`Change ${i + 1}: ${file} has two changes; make it one (an edit can change its text and its line)`);
     seen.add(file);
     const reason = typeof c.reason === 'string' ? c.reason.trim() : '';
     if (!reason || reason.length > 500) throw fail(`Change ${i + 1} (${file}) needs a reason under 500 characters: people decide from it`);
-    const was = notes.get(file) ?? null;
+    const was = file === 'MEMORY.md' ? folder.index : notes.get(file) ?? null;
     if (action === 'add' ? was !== null : was === null) throw fail(action === 'add' ? `Change ${i + 1}: ${file} already exists; edit it instead` : `Change ${i + 1}: there is no note ${file}`);
     const wasLine = lineFor(folder.index, file);
     let text: string | null = null;

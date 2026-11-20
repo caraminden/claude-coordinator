@@ -36,22 +36,47 @@
 #
 # Exits with the command's status. Nested calls (a wrapped script that wraps its own step) run straight
 # away in the outer call's slot. When the lock folder or flock is missing, it warns and runs unlocked.
+#
+# Elsewhere (#1160): `citadel-heavy --on <machine> <command...>` runs it on a lent machine instead (--on desktop: the
+# machine agent in Cara's desktop's WSL distro, once installed; reports/desktop-headroom-2026-11-20.md in the shared
+# folder), through that machine's
+# workspace tools, and streams its output back (tools/heavy-remote.ts beside this file). It builds the pushed HEAD
+# of a clean checkout. When it can't run there (machine off or busy, not lent, branch not pushed, no workspace), it
+# says why and takes a slot here as usual. A remote job's history line has reason on:<machine> and no wait.
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
-[ $# -gt 0 ] || { say "usage: citadel-heavy <command> [args...]"; exit 2; }
+on=
+case ${1:-} in
+  --on) on=${2:-}; shift; [ $# -eq 0 ] || shift ;;
+  --on=*) on=${1#--on=}; shift ;;
+esac
+[ $# -gt 0 ] || { say "usage: citadel-heavy [--on <machine>|desktop] <command> [args...]"; exit 2; }
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || exec "$@"
 
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
-if ! command -v flock >/dev/null || ! mkdir -p "$dir" 2>/dev/null || ! : 2>/dev/null >>"$dir/queue"; then
-  say "no lock folder at $dir (or no flock), so this runs without waiting for a slot"
-  exec "$@"
-fi
-
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
 what=${CITADEL_HEAVY_WHAT:-$*}
 first=${CITADEL_HEAVY_PRIORITY:+1}
 [ ${#what} -le 100 ] || what="${what:0:97}..."
+
+if [ -n "$on" ]; then
+  started=$(date +%s) ran=$SECONDS fell=$(mktemp)
+  CITADEL_HEAVY_FALLBACK_FILE=$fell "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-remote.ts" "$on" "$@"
+  status=$?
+  # The file, not the status, says nothing ran there: a remote command may exit 120 itself.
+  [ -s "$fell" ] && status=fallback
+  rm -f "$fell"
+  if [ "$status" != fallback ]; then
+    { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t0\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${on//[$'\t\n']/ }" "$((SECONDS - ran))" "$status" >>"$dir/history"; } 2>/dev/null
+    exit "$status"
+  fi
+fi
+
+if ! command -v flock >/dev/null || ! mkdir -p "$dir" 2>/dev/null || ! : 2>/dev/null >>"$dir/queue"; then
+  say "no lock folder at $dir (or no flock), so this runs without waiting for a slot"
+  exec "$@"
+fi
 psi=${CITADEL_HEAVY_PRESSURE:-/proc/pressure/cpu}
 max_pressure=${CITADEL_HEAVY_MAX_PRESSURE:-50}
 load_wait=${CITADEL_HEAVY_LOAD_WAIT:-300}

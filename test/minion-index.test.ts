@@ -182,3 +182,21 @@ test('the route and search_minions: the server fills the index itself, and a min
     rmSync(boot, { recursive: true, force: true });
   }
 });
+
+test('a re-close in the same millisecond as the first close is indexed again', () => {
+  const store = new Store(join(root, 'same-ms.db'));
+  const p = store.createProject('Same ms', null);
+  const t = store.createTicket({ project_id: p.id, title: 'Quick', permission_mode: 'default', created_by: 'Cara' });
+  const realNow = Date.now;
+  const frozen = realNow();
+  Date.now = () => frozen;
+  try {
+    store.updateTicket(t.id, { status: 'closed' });
+    assert.equal(store.minionIndex.indexClosed(p.id), 1);
+    store.updateTicket(t.id, { status: 'idle' });
+    store.updateTicket(t.id, { status: 'closed' });
+    assert.equal(store.minionIndex.indexClosed(p.id), 1);
+  } finally {
+    Date.now = realNow;
+  }
+});

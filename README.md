@@ -570,6 +570,8 @@ a run (the defaults are set for perigee; each script's comments say more):
 | `DEPLOY_UNKNOWN_WAIT` | 60 s | the queued restart: a server that is up but doesn't answer, before it restarts anyway |
 | `CITADEL_HEAVY_MAX_WAIT` | 3600 s | `citadel-heavy`: give up (exit 75) when no slot has changed hands for this long |
 | `CITADEL_HEAVY_HEAD_STALE` | 60 s | `citadel-heavy`: a head of the line silent this long is stopped, and jobs go past it |
+| `CITADEL_HEAVY_DESKTOP` | `cara-desktop-heavy` | `citadel-heavy --on desktop`: the lent machine that `desktop` means |
+| `CITADEL_HEAVY_WORKSPACE` | the repo's folder name | `citadel-heavy --on`: the machine workspace a build runs in, or its first free twin `<name>-2`, `<name>-3`… |
 
 ## Permissions
 

@@ -817,7 +817,6 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     res.end('png');
   });
   await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
-  const wait = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((x) => setTimeout(x, 50)); };
   try {
     const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     const icons: string[] = [], todos: string[][] = [], notes: string[] = [];
@@ -828,7 +827,7 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     assert.equal(d.state, 'deployed');
     assert.deepEqual([d.todo, todos], [[], []]);
     assert.ok(!d.said.some((l) => /^To do|rail icon/.test(l)), d.said.join('\n'));
-    await wait(() => notes.length > 0);
+    await until('the unchecked line', () => notes.length > 0, 5000);
     assert.deepEqual(notes, [`Couldn't check how ${name} installs: ${home} answered 503. Nothing to do unless it repeats.`]);
     // The retry gets through: the icon is filled from the manifest and nothing is said about lacking.
     notes.length = 0;
@@ -839,7 +838,9 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     svc.on('request', (q, s) => { if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x'); orig(q, s); });
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
     await done(name);
-    await wait(() => icons.length > 0);
+    // The to-do hook is the last thing the retry does (after the icon and a log line), so wait for it, not the icon:
+    // a poll between the two saw todos still empty under load.
+    await until('the retry to finish', () => todos.length > 0, 5000);
     assert.deepEqual([icons, notes, todos], [['/icon-192.png'], [], [[]]]);
   } finally {
     svc.close();

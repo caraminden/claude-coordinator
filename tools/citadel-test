@@ -73,13 +73,24 @@ start=$SECONDS
 # The spec output goes to the log, the short version to stdout, and node's own stderr (the leak guard says its
 # piece there) to a file read after. --test-force-exit as in tools/run-tests.sh, so a local run matches the gate's.
 # The per-test limit too (CITADEL_TEST_TIMEOUT seconds, #999).
-timeout -k 10 "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
+# At the limit only node's runner gets SIGTERM (--foreground), so it names the tests still running before it stops
+# its files; a TERM to the whole group could kill a file first, reported as the file failing (#1198). Then the rest
+# of the group (what the files started) gets its TERM; the outer timeout KILLs the group if the runner outlasts 10 s.
+stop_at() {
+  local s=$((10#$1)) pg status
+  timeout -s KILL $((s ? s + 10 : 0)) timeout --foreground "$s" "${@:2}" &
+  pg=$!
+  wait "$pg"; status=$?
+  [ $status -eq 124 ] && kill -TERM -- "-$pg" 2>/dev/null
+  return $status
+}
+stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
   --test-reporter=spec --test-reporter-destination="$log" --test-reporter="$reporter" --test-reporter-destination=stdout \
   "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
 status=$?
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
   out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2"' EXIT
-  timeout -k 10 "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
+  stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
     --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
     "${second[@]}" >"$out2" 2>>"$err"
   s2=$?; cat "$log.2" >>"$log"; rm -f "$log.2"

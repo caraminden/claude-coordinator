@@ -259,13 +259,14 @@ createServer((req, res) => {
   let failed: unknown;
   const boot = previews.start(s5.getTicket(t.id)!).then(() => void (booted = Date.now()), (e) => void (failed = e ?? new Error('failed')));
   const seen = () => (existsSync(hits) ? readFileSync(hits, 'utf8').trim().split('\n').map((x) => `+${Number(x) - t0} ms`) : []);
-  const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}`;
+  const alive = () => { try { return process.kill(Number(readFileSync(join(wt, 'pid'), 'utf8')), 0) && 'running'; } catch { return 'gone'; } };
+  const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}; the server is ${alive()}`;
   try {
     // Timed from the hung request, not from start(): copying the data and starting the server aren't what this checks (#973).
     await until('the first health check to reach the preview', () => seen().length || failed, 30_000, what);
     // The 3 s abort and one more ask: well under 10 s. Without the abort fetch waits 5 minutes.
     await until('the preview to boot after its first health check hung', () => booted || failed, 10_000, what);
-    if (failed) throw failed;
+    if (failed) throw new Error(`The boot failed: ${what()}`, { cause: failed });
     assert.ok(seen().length >= 2, what());
   } finally {
     // A boot still going (this test failed) would outlive it with its server running: end the server, and the boot with it.

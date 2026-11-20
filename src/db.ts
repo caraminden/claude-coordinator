@@ -2678,6 +2678,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
+  private lastClosedAt = 0;
   updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because' | 'goal'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
@@ -2685,9 +2686,11 @@ export class Store {
     const values = keys.map((k) => fields[k] ?? null);
     const before = fields.status ? this.getTicket(id)?.status : undefined;
     const now = Date.now();
+    // Strictly after every earlier close, so a quick reopen and re-close never lands on the minion index's cursor mark.
+    const closedAt = fields.status === 'closed' ? (this.lastClosedAt = Math.max(now, this.lastClosedAt + 1)) : now;
     // The dismissal's time (#1072): stamped when it goes closed, cleared when it opens again.
     const closing = fields.status === 'closed' ? (before === 'closed' ? '' : ', closed_at = ?') : fields.status ? ', closed_at = NULL' : '';
-    this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [now] : []), now, id);
+    this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [closedAt] : []), now, id);
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
   }

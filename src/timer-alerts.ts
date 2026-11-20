@@ -7,6 +7,7 @@
 import type { ContraptionRow, Project, Store, User } from './db.ts';
 import type { TimerRun } from './app-services.ts';
 import { clock } from './ci-health.ts';
+import { every, type Job } from './every.ts';
 
 const POLL_MS = 5 * 60_000;
 /** Settings key: the alerts out, by unit → who the item came from, its key and title, and who has it. */
@@ -47,7 +48,7 @@ export class TimerAlerts {
   private store: Store;
   private deps: TimerAlertDeps;
   private busy = false;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: Job | null = null;
 
   constructor(store: Store, deps: TimerAlertDeps) {
     this.store = store;
@@ -55,12 +56,11 @@ export class TimerAlerts {
   }
 
   start() {
-    this.timer ??= setInterval(() => void this.tick().catch((err) => console.error(`Timer alerts: ${err?.message ?? err}`)), POLL_MS);
-    this.timer.unref?.();
+    this.timer ??= every('timer alerts', POLL_MS, () => this.tick());
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 

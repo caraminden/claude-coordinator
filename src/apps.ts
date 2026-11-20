@@ -28,6 +28,7 @@ import { answerRaw, forward, forwardUpgrade, type ForwardOptions } from './proxy
 import { place, type ChunkedUploads, type Meta } from './chunked-uploads.ts';
 import { capped } from './contraption-read.ts';
 import { safeFileName } from './uploads.ts';
+import { every } from './every.ts';
 
 export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
 export const MAX_BODY = 20 * 1024 * 1024;
@@ -233,7 +234,7 @@ export class AppProxy {
     this.auth = auth;
     this.domain = domain;
     this.uploads = uploads;
-    setInterval(() => this.sweep(), SWEEP_MS).unref();
+    every('apps sweep', SWEEP_MS, () => this.sweep());
   }
 
   /**

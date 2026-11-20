@@ -4,6 +4,7 @@
 // agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts it (runner-agent.mjs).
 import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
+import { every, type Job } from './every.ts';
 
 export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -32,7 +33,7 @@ export class ShipWatch {
   private last = new Map<string, { ships: Ship[]; at: number }>();
   private pausedUntil = 0;
   private busy = false;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: Job | null = null;
   private said = '';
 
   constructor(deps: ShipWatchDeps) {
@@ -41,12 +42,11 @@ export class ShipWatch {
   }
 
   start() {
-    this.timer ??= setInterval(() => void this.tick(), SHIP_POLL_MS);
-    this.timer.unref?.();
+    this.timer ??= every('ci ships', SHIP_POLL_MS, () => this.tick());
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 

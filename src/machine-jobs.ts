@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, MachineJob, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { ZONE } from './pacific.ts';
+import { every, type Job } from './every.ts';
 
 export const JOB_STATES = ['needs-go', 'queued', 'starting', 'running', 'paused', 'uploading', 'done', 'failed', 'stopped', 'refused'] as const;
 export type JobState = (typeof JOB_STATES)[number];
@@ -272,7 +273,7 @@ const tokenHash = (t: string) => createHash('sha256').update(t).digest('hex');
 
 export class MachineJobs {
   private d: JobDeps;
-  private timers: NodeJS.Timeout[] = [];
+  private timers: Job[] = [];
 
   constructor(deps: JobDeps) {
     this.d = deps;
@@ -283,13 +284,11 @@ export class MachineJobs {
 
   /** Every minute: open or close job hours, enforce limits; every 6 hours: sweep old results. */
   start() {
-    this.timers.push(setInterval(() => this.tickAll(), 60_000), setInterval(() => void this.sweep().catch((err) => console.warn(`Sweeping old job results failed: ${err.message}`)), 6 * 3600_000));
-    for (const t of this.timers) t.unref();
-    setTimeout(() => void this.sweep().catch(() => {}), 5 * 60_000).unref();
+    this.timers.push(every('machine jobs', 60_000, () => this.tickAll()), every('machine job results sweep', 6 * 3600_000, () => this.sweep(), 5 * 60_000));
   }
 
   stop() {
-    for (const t of this.timers) clearInterval(t);
+    for (const t of this.timers) t.stop();
   }
 
   /** The person whose go a machine's jobs need: its owner, or for one from before owners, the person who added it. */

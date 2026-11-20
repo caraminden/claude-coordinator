@@ -10,6 +10,7 @@ import { median } from './waits.ts';
 import type { PrSnapshot } from './github.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
+import { every } from './every.ts';
 
 export const POLL_MS = 20_000;
 /** Past this many runs in flight, each is looked at every SLOW_MS instead. */
@@ -155,7 +156,7 @@ export class CiRuns {
   private now = () => (this.d.now ?? Date.now)();
 
   start() {
-    setInterval(() => void this.tick(), POLL_MS).unref();
+    every('ci wait', POLL_MS, () => this.tick());
   }
 
   /** What the PR watcher saw of a minion's PR: its runs in flight are watched; a closed PR or one without is let go. */

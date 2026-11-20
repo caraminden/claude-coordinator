@@ -7,6 +7,7 @@
 // the seconds stalled and its largest unit. The Status page shows them. Read-only, and quiet where there is no such cgroup.
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { every, type Job } from './every.ts';
 
 export const STORM_EVERY_MS = 15_000;
 /**
@@ -134,7 +135,7 @@ export class MemoryStorms {
   private last = new Map<string, GroupReading>();
   private lastAt = 0;
   private open = new Map<string, Open>();
-  private timer: NodeJS.Timeout | null = null;
+  private timer: Job | null = null;
   private dir: string | null | undefined;
   private busy = false;
   private stopped = false;
@@ -212,15 +213,13 @@ export class MemoryStorms {
   }
 
   start() {
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), STORM_EVERY_MS);
-    this.timer.unref();
+    this.timer = every('memory storms', STORM_EVERY_MS, () => this.tick(), 0);
   }
 
   /** Stops reading and records the storms still open, so a restart mid-storm doesn't lose them. */
   stop() {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
     for (const [path, o] of [...this.open]) this.close(path, o);
   }

@@ -21,6 +21,7 @@ import { HttpError } from './http.ts';
 import { freePort } from './ports.ts';
 import { forward } from './proxy.ts';
 import { projectDir } from './workspace.ts';
+import { every } from './every.ts';
 
 /** The setting that says a minion offers a preview (its view shows the Open preview button). */
 export const previewKey = (ticketId: number) => `preview:${ticketId}`;
@@ -153,7 +154,7 @@ export class Previews {
     this.root = join(dataDir, 'previews');
     // Previews die with the server that started them (same service, same cgroup), so any folder here is stale.
     rmSync(this.root, { recursive: true, force: true });
-    setInterval(() => this.sweep(), SWEEP_MS).unref();
+    every('previews sweep', SWEEP_MS, () => this.sweep());
     process.on('exit', () => {
       for (const r of this.running.values()) r.proc.kill();
     });

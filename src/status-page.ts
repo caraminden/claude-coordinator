@@ -15,6 +15,7 @@ import { appBackup, readBackups, backupProblems, type BackupInfo } from './backu
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
+import { every, type Job } from './every.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -180,7 +181,7 @@ export type HostPoint = [number, number, number, number, number | null, number |
 export class StatusPage {
   private built = new Map<string, { at: number; data: Promise<StatusData> }>();
   private units: { at: number; rows: UnitState[] } | null = null;
-  private timer: NodeJS.Timeout | null = null;
+  private timer: Job | null = null;
   readonly deps: StatusDeps;
   constructor(deps: StatusDeps) {
     this.deps = deps;
@@ -212,14 +213,11 @@ export class StatusPage {
   }
 
   start() {
-    const tick = () => void this.sample().then(() => this.nudgeSlowShips());
-    tick();
-    this.timer = setInterval(tick, SAMPLE_EVERY_MS);
-    this.timer.unref();
+    this.timer = every('status sample', SAMPLE_EVERY_MS, () => this.sample().then(() => this.nudgeSlowShips()), 0);
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
   }
 
   /**

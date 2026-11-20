@@ -10,6 +10,7 @@ import type { ContraptionErrorRow, ContraptionRow, Store } from './db.ts';
 import { afterAllWrites } from './http.ts';
 import { pacific, pacificDay, ZONE } from './pacific.ts';
 import { redact } from './timer-alerts.ts';
+import { every, type Job } from './every.ts';
 
 const POLL_MS = 10 * 60_000;
 const DAY_MS = 86_400_000;
@@ -75,7 +76,7 @@ export class ErrorDigest {
   /** Days with errors not yet in their files. */
   private dirty = new Set<string>();
   private busy = false;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: Job | null = null;
 
   constructor(store: Store, deps: DigestDeps) {
     this.store = store;
@@ -104,10 +105,7 @@ export class ErrorDigest {
   }
 
   start() {
-    const run = () => void this.tick().catch((err) => console.error(`Contraption errors: ${err?.message ?? err}`));
-    this.timer ??= setInterval(run, POLL_MS);
-    this.timer.unref?.();
-    setTimeout(run, 60_000).unref?.();
+    this.timer ??= every('contraption errors', POLL_MS, () => this.tick(), 60_000);
   }
 
   /**

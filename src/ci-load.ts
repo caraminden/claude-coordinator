@@ -10,6 +10,7 @@ import { clock, type Job } from './ci-health.ts';
 import type { Project, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
+import { every, type Job } from './every.ts';
 
 const MIN = 60_000;
 export const KEEP_MS = 14 * 24 * 3600_000;
@@ -320,9 +321,8 @@ export class CiLoad {
   private recent: { machine: number; at: number; s: Sample }[] | null = null;
   // Samples not yet in runner_load: written together every FLUSH_MS, not one commit per agent's request (#791).
   private pending: { machine: number; at: number; data: string }[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private flusher: ReturnType<typeof setInterval> | null = null;
-  private first: ReturnType<typeof setTimeout> | null = null;
+  private timer: Job | null = null;
+  private flusher: Job | null = null;
   private busy = false;
   // Each agent's newest sample since the server started: which repos have runners on its PC (runnerRepos).
   private latest = new Map<number, Sample>();
@@ -333,20 +333,15 @@ export class CiLoad {
   }
 
   start() {
-    this.timer ??= setInterval(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), 5 * MIN);
-    this.timer.unref?.();
     // A deploy restarts the server several times a day: waiting a full 5 minutes for the first look let the held verdict go stale (#1085).
-    this.first ??= setTimeout(() => void this.tick().catch((err) => console.error(`CI load: ${err?.message ?? err}`)), FIRST_TICK_MS);
-    this.first.unref?.();
-    this.flusher ??= setInterval(() => this.flush(), FLUSH_MS);
-    this.flusher.unref?.();
+    this.timer ??= every('ci load', 5 * MIN, () => this.tick(), FIRST_TICK_MS);
+    this.flusher ??= every('ci load flush', FLUSH_MS, () => this.flush());
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer);
-    if (this.flusher) clearInterval(this.flusher);
-    if (this.first) clearTimeout(this.first);
-    this.timer = this.flusher = this.first = null;
+    this.timer?.stop();
+    this.flusher?.stop();
+    this.timer = this.flusher = null;
     this.flush();
   }
 

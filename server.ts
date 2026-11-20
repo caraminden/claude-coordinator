@@ -54,6 +54,7 @@ import { addAppTurnsChecks, addMemoryCurators, backfillStandardAudits } from './
 import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
+import { every, type Job } from './src/every.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
@@ -200,7 +201,7 @@ const BOOT_CHECK = process.env.BOOT_CHECK === '1' || PREVIEW;
 const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 // A preview goes with the server that started it, however that one goes (it is reparented then).
 const PARENT = process.ppid;
-if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
+if (PREVIEW) every('preview parent check', 2000, () => process.ppid !== PARENT && process.exit(0));
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
 // The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.
@@ -356,8 +357,7 @@ async function checkUnitDrift() {
   if (now.length) console.warn(`${unitSummary(rows)}; Settings > Units has the install commands.`);
 }
 if (!BOOT_CHECK && !PREVIEW && runner.units) {
-  setTimeout(() => void safely('unit drift', checkUnitDrift), 90_000).unref();
-  setInterval(() => void safely('unit drift', checkUnitDrift), 6 * 3600_000).unref();
+  every('unit drift', 6 * 3600_000, checkUnitDrift, 90_000);
 }
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
@@ -506,7 +506,7 @@ const sideAsks = new SideAsks(store, runner, broadcast);
 if (!BOOT_CHECK) sideAsks.recover();
 // Who is in which chat (#695): in memory, swept for late heartbeats and old writes.
 const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
-setInterval(() => presence.sweep(), 15_000).unref();
+every('presence sweep', 15_000, () => presence.sweep());
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
@@ -549,15 +549,13 @@ const kitSync = new KitSync({
 if (!BOOT_CHECK && !PREVIEW) {
   // The templates are looked at every 10 minutes (a kit-only deploy may not restart the server), and a running round every 20 s.
   let lastLook = 0;
-  setInterval(() => {
+  every('kit sync', 20_000, async () => {
     if (!kitSync.active() && Date.now() - lastLook < 10 * 60_000) return;
     // A running round goes on; only the idle template look waits while the box is starved (#1301).
-    void (async () => {
-      if (!kitSync.active() && !(await pressure.gate('kit-sync template look'))) return;
-      lastLook = Date.now();
-      await safely('kit sync', () => kitSync.poll());
-    })();
-  }, 20_000).unref();
+    if (!kitSync.active() && !(await pressure.gate('kit-sync template look'))) return;
+    lastLook = Date.now();
+    await kitSync.poll();
+  });
 }
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running() + kitSyncJobs.running() + hostToolInstalls();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
@@ -685,13 +683,13 @@ try {
 } catch (err) {
   console.error('Review run backfill (#1095) failed; it tries again at the next start:', err);
 }
-if (!BOOT_CHECK) setInterval(() => void safely('schedules', () => scheduledRuns.runDue()), 30_000).unref();
+if (!BOOT_CHECK) every('schedules', 30_000, () => scheduledRuns.runDue());
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());
 // Waiting minions' prompt caches stay warm in working hours (#862, src/keepalive.ts).
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('keepalives', () => runner.keepaliveSweep()), 60_000).unref();
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('cold mail', () => runner.coldSweep()), 60_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('keepalives', 60_000, () => runner.keepaliveSweep());
+if (!BOOT_CHECK && !PREVIEW) every('cold mail', 60_000, () => runner.coldSweep());
 // Dismissed minions' build output (#336) and worktrees (#660): those dismissed before clearing on dismissal, or whose clearing
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
 if (!BOOT_CHECK && !PREVIEW) {
@@ -702,37 +700,29 @@ if (!BOOT_CHECK && !PREVIEW) {
     console.error('Could not write the Gradle build cache init script (#1153):', err);
   }
   // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
-  const sweepBuild = () => void safely('build output sweep', async () => {
+  const sweepBuild: Job = every('build output sweep', 24 * 60 * 60_000, async () => {
     // Daily, so a skipped pass tries again in a minute; the gate lets it through after 10 minutes of skips.
-    if (!(await pressure.gate('worktree sweep'))) { setTimeout(sweepBuild, 60_000).unref(); return; }
+    if (!(await pressure.gate('worktree sweep'))) { setTimeout(() => void sweepBuild.run(), 60_000).unref(); return; }
     await runner.sweepBuildOutput();
     await runner.sweepWorktrees();
     // The shared Gradle build cache (#1153) under its cap.
     const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
     if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
-  });
-  setTimeout(sweepBuild, 10 * 60_000).unref();
-  setInterval(sweepBuild, 24 * 60 * 60_000).unref();
+  }, 10 * 60_000);
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
-  const sweepContraptionMedia = () => void safely('contraption media sweep', async () => void sweepMedia(join(DATA_DIR, 'contraption-media')));
-  setTimeout(sweepContraptionMedia, 10 * 60_000).unref();
-  setInterval(sweepContraptionMedia, 24 * 60 * 60_000).unref();
+  every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);
   // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
-  const sweepReplay = () => void safely('kept chats sweep', async () => sweepKept(DATA_DIR));
-  setTimeout(sweepReplay, 10 * 60_000).unref();
-  setInterval(sweepReplay, 24 * 60 * 60_000).unref();
+  every('kept chats sweep', 24 * 60 * 60_000, async () => sweepKept(DATA_DIR), 10 * 60_000);
 }
 // Contraption turns' audit rows past AUDIT_DAYS (#844), soon after boot and then daily. Previews and dev copies (BOOT_CHECK) don't sweep: they live hours and are deleted when stopped.
 if (!BOOT_CHECK) {
-  const sweepTurnAudit = () => void safely('turn audit sweep', () => store.sweepTurnAudit(Date.now() - AUDIT_DAYS * 24 * 60 * 60_000));
-  setTimeout(sweepTurnAudit, 5 * 60_000).unref();
-  setInterval(sweepTurnAudit, 24 * 60 * 60_000).unref();
+  every('turn audit sweep', 24 * 60 * 60_000, () => store.sweepTurnAudit(Date.now() - AUDIT_DAYS * 24 * 60 * 60_000), 5 * 60_000);
 }
 
 // The ideas ledger (#1150): each scheme's pages, handoffs and starts re-read hourly, and the weekly held note to its
 // Taskmaster of Later ideas waiting over two weeks (never a wake). Not in previews or dev copies: their Taskmasters aren't real.
 if (!BOOT_CHECK && !PREVIEW) {
-  const ideasPass = () => void safely('ideas ledger', async () => {
+  every('ideas ledger', 60 * 60_000, async () => {
     if (!(await pressure.gate('ideas pass'))) return;
     for (const p of store.listProjects()) {
       await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
@@ -740,9 +730,7 @@ if (!BOOT_CHECK && !PREVIEW) {
       const note = tm && store.ideas.laterNote(p.id);
       if (note) runner.leaveMail(tm.id, 'Ideas', note);
     }
-  });
-  setTimeout(ideasPass, 15 * 60_000).unref();
-  setInterval(ideasPass, 60 * 60_000).unref();
+  }, 15 * 60_000);
 }
 
 // Steps' times from before step_times (#571), once, a minute after boot.
@@ -750,10 +738,10 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
-if (!BOOT_CHECK) setInterval(() => void safely('memory', async () => { if (await pressure.gate('memory index')) await memoryIndexer.run(); }), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+if (!BOOT_CHECK) every('memory', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => { if (await pressure.gate('memory index')) await memoryIndexer.run(); });
 // Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
 const minionIndexer = new MinionIndexer(store, DATA_DIR);
-if (!BOOT_CHECK) setInterval(() => void safely('minion index', async () => { if (await pressure.gate('minion index')) await minionIndexer.run(); }), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
+if (!BOOT_CHECK) every('minion index', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => { if (await pressure.gate('minion index')) await minionIndexer.run(); });
 
 // ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 
@@ -1131,22 +1119,20 @@ const SHIP_POLL_MS = 15_000;
 // Only git reads, so a preview shows the badges too.
 if (!BOOT_CHECK || PREVIEW) {
   void safely('branch sweep', () => ships.sweep());
-  setInterval(() => void safely('ship poll', () => ships.poll()), SHIP_POLL_MS).unref();
-  void safely('builds', () => builds.poll());
-  setInterval(() => void safely('builds', () => builds.poll()), 2 * SHIP_POLL_MS).unref();
+  every('ship poll', SHIP_POLL_MS, () => ships.poll());
+  every('builds', 2 * SHIP_POLL_MS, () => builds.poll(), 0);
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
-  setInterval(() => void safely('waits', () => {
+  every('waits', 2_000, () => {
     waits.poll();
     releases.poll();
-  }), 2_000).unref();
+  });
   // Release targets' git reads every 15 s, and finding every scheme's targets again every 5 minutes (#627).
-  void safely('release targets', () => releases.refresh(true));
-  setInterval(() => void safely('release reads', async () => {
+  every('release reads', SHIP_POLL_MS, async () => {
     await releases.refresh();
     await autoDeploy.tick();
     releases.poll(); // a due time it just noted shows on the cards
-  }), SHIP_POLL_MS).unref();
-  setInterval(() => void safely('release targets', () => releases.refresh(true)), 20 * SHIP_POLL_MS).unref();
+  });
+  every('release targets', 20 * SHIP_POLL_MS, () => releases.refresh(true), 0);
   ciRuns.start();
 }
 
@@ -1172,7 +1158,7 @@ const alertWakes = new AlertWakes(store, {
     return true;
   },
 });
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('alert wakes', async () => alertWakes.tick()), 20_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('alert wakes', 20_000, async () => alertWakes.tick());
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log; `parts`, an alert's problems for its Taskmaster's wake. */
 async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false, parts?: AlertPart[]): Promise<boolean> {
   const c = store.getContraption('mandate');
@@ -1260,7 +1246,7 @@ const fastMode = new FastMode({
       .then(() => releases.poll(), (err) => console.error(`Last green of ${p.name} failed:`, err));
   },
 });
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fast mode', () => fastMode.tick()), 30_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
 // A flake fix has to prove it held (#1120, src/flake-fixes.ts): the retro log's flake lines counted, the third sighting in 7 days
 // starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
 const flakeFixes = new FlakeFixes({
@@ -1276,7 +1262,7 @@ const flakeFixes = new FlakeFixes({
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
 });
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('flake fixes', () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir))), 5 * 60_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir)));
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
@@ -1342,10 +1328,9 @@ const landHandoffs = new LandHandoffs({
 const serverWork = serverWorkWatch(() => landings.handoffs(), (id) => runner.broadcastTicket(id));
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
 runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
-if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync())), 5_000).unref();
+if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
 if (!BOOT_CHECK) {
-  void safely('deploy watch', () => deployWatch!.tick());
-  setInterval(() => void safely('deploy watch', () => deployWatch!.tick()), 60_000).unref();
+  every('deploy watch', 60_000, () => deployWatch!.tick(), 0);
 }
 // Incident timelines (#1145): the server down, the ship line still 15 min, a burst of red CI runs make one read-only
 // timeline per incident in Citadel's shared reports/, and an ask to the Taskmaster to start a research minion on it.
@@ -1388,11 +1373,11 @@ const incidents = new Incidents({
 });
 if (!BOOT_CHECK && !PREVIEW) {
   incidents.boot();
-  setInterval(() => void safely('incidents', () => incidents.tick()), 60_000).unref();
+  every('incidents', 60_000, () => incidents.tick());
 }
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
-if (!BOOT_CHECK) setInterval(() => void pressure.gate('artifact sweep').then((go) => go && artifactSweep.tick()).catch((err) => console.error(`Artifact sweep: ${err?.message ?? err}`)), 60 * 60_000).unref();
+if (!BOOT_CHECK) every('artifact sweep', 60 * 60_000, async () => { if (await pressure.gate('artifact sweep')) await artifactSweep.tick(); });
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.
 const ciLoad = new CiLoad(store, {
@@ -1457,9 +1442,7 @@ ciStore.onFull = (project, text) => {
   if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
 if (!BOOT_CHECK && !PREVIEW) {
-  const sweepCi = () => void safely('ci store sweep', () => ciStore.sweep(true));
-  setTimeout(sweepCi, 15 * 60_000).unref();
-  setInterval(sweepCi, 24 * 60 * 60_000).unref();
+  every('ci store sweep', 24 * 60 * 60_000, () => ciStore.sweep(true), 15 * 60_000);
 }
 runnerJobs.onNote = (project, text, detail) => {
   const coordinator = store.getOverlord(project.id);
@@ -1582,9 +1565,7 @@ const app: App = {
 };
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
-  const sweepDecisions = () => void safely('decisions sweep', async () => { for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {}); });
-  setTimeout(sweepDecisions, 15 * 60_000).unref();
-  setInterval(sweepDecisions, 24 * 60 * 60_000).unref();
+  every('decisions sweep', 24 * 60 * 60_000, async () => { for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {}); }, 15 * 60_000);
 }
 // A reply's status trailer (#711) goes through set_thread_status's checks; one they refuse is noted, and the state stays cleared.
 runner.onStatusTrailer = (id, fields) => {
@@ -1780,7 +1761,7 @@ process.on('SIGTERM', () => {
   // A kept-alive connection (Caddy's) stays open after answering a request that was running at close(),
   // until its keep-alive timeout: close each one as soon as it goes idle.
   server.closeIdleConnections();
-  setInterval(() => server.closeIdleConnections(), 50).unref();
+  every('close idle connections', 50, () => server.closeIdleConnections());
   setTimeout(() => {
     server.getConnections((_err, n) => {
       console.log(`SIGTERM: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s`);

@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { frontmatter } from './catalogue.ts';
 import type { Project, SkillEvent, SkillTicket, SkillTimeline, Store } from './db.ts';
+import { every } from './every.ts';
 
 /** The kit's plugin name (kit/.claude-plugin/plugin.json): its skills and agents are `citadel:<name>` in a turn. */
 export const KIT_PLUGIN = 'citadel';
@@ -468,10 +469,9 @@ export function warmUsage(store: Store): void {
   if (store.path === ':memory:') return;
   const warm = () => {
     for (const p of store.listProjects()) wanted.add(keyOf(p.id));
-    refreshUsage(store, null).catch((err) => console.error('skill usage warm-up:', err.message));
+    return refreshUsage(store, null);
   };
-  setTimeout(warm, 5_000).unref();
-  setInterval(warm, CACHE_MS / 2).unref();
+  every('skill usage warm', CACHE_MS / 2, warm, 5_000);
 }
 
 if (!isMainThread && workerData?.skillUsage) {

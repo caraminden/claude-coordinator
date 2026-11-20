@@ -17,6 +17,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { lendsMachine } from './access.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
+import { every } from './every.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -288,7 +289,7 @@ export class MachineRelay {
     this.store = store;
     this.onChange = onChange;
     // A status also changes with time alone (offline 5 minutes is Down): say so when one does.
-    setInterval(() => this.statuses(), 60_000).unref();
+    every('machine statuses', 60_000, () => this.statuses());
   }
 
   /** Every machine's status, telling the stream when one changed since last asked. */

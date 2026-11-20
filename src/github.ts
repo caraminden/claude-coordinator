@@ -6,6 +6,7 @@ import type { Store, Ticket } from './db.ts';
 import { asData } from './quote.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
+import { every, type Job } from './every.ts';
 
 const run = promisify(execFile);
 
@@ -382,7 +383,7 @@ export class GithubWatcher {
   private repos = new Map<number, { at: number; repo: Promise<string | null> }>();
   private pausedUntil = 0;
   private busy = false;
-  private timer: NodeJS.Timeout | null = null;
+  private timer: Job | null = null;
   /** A ticket's PR was seen merged (or already merged at first look): its scheme's main can catch up (#208). */
   onMerged: (repoDir: string) => void = () => {};
   /** Red CI on a minion's PR, once per head (new, not the first look's baseline): a failed ship in a PR scheme (#1139). */
@@ -401,8 +402,7 @@ export class GithubWatcher {
   }
 
   start() {
-    this.timer ??= setInterval(() => this.tick().catch((err) => console.error('GitHub poll failed:', err)), TICK_MS);
-    this.timer.unref();
+    this.timer ??= every('github poll', TICK_MS, () => this.tick());
   }
 
   /** Look at a ticket's PR soon, at the open-PR pace: its turn just ended and may have pushed or opened one. */

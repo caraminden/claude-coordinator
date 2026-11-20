@@ -11,7 +11,7 @@ import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { directCards, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason } from '../../public/model-table.js';
 import { inOrder } from '../../public/reorder.js';
@@ -1319,9 +1319,9 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; then cards addressed to them from their other schemes (#687).
+  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; only this scheme's (a card another scheme addressed to them stays out: Josh, 2026-11-19, docs/adr/0015).
   { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, {
-      items: [...inboxItems(app.store, app.runner.approvals, project.id, session.name), ...directCards(app.store, project.id, session.name)],
+      items: inboxItems(app.store, app.runner.approvals, project.id, session.name),
     }) },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },

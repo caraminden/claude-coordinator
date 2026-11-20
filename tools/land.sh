@@ -666,6 +666,15 @@ fi
 # may land: a branch that changes a file that deploy changed, or one the lander vouches for with LAND_FIX=1.
 bad_check() {
   local bad good rest
+  # <state>/rolling-back: "<from> <to> <when>", while a Roll back to last green's restart waits (deploy.sh --to, #1271).
+  # Its deploy would refuse after main moved, so refuse now, the fix too: its own deploy would undo the roll back.
+  if [ -s "$state/rolling-back" ]; then
+    read -r _ good _ <"$state/rolling-back" || true
+    if systemctl --user is-active -q "${DEPLOY_UNIT:-cc-restart-when-idle}" 2>/dev/null; then
+      refuse "a member pressed Roll back to last green, and its restart onto $(git log -1 --format='%h "%s"' "$good" 2>/dev/null || echo "${good:0:7}") waits to go live (for running turns a restart would cut off). Nothing landed. Ship again once it is live (the Releases page shows it)"
+    fi
+    rm -f "$state/rolling-back" # left by a roll back that was killed
+  fi
   [ -s "$state/bad" ] || return 0
   read -r bad good rest <"$state/bad" || true
   git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }

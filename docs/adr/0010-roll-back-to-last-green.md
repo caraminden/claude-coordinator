@@ -17,7 +17,9 @@ turns on for no scheme until it is live (Cara, 2026-11-18: "No build, rollback f
   then auto-deploy ships it. A person's Deploy overrides and clears the hold; a minion's or Taskmaster's deploy call is refused while it
   holds. Citadel's server, whose fast mode is still off: a land that touches none of the files the rolled-back commits
   changed is refused until the fix lands (as after a failed restart's own rollback; LAND_FIX=1 for a fix that doesn't);
-  the fix's healthy deploy clears it.
+  the fix's healthy deploy clears it. Until the roll back's own restart is live (it waits for running turns, up to 2 h),
+  every land and deploy is refused, the fix too, so none can move the checkout under it (#1271); the roll back's job
+  ends only with that restart's verdict, failed if it didn't go live.
 - **Last green only** (Q2: "Last green only"): no Roll back to this on earlier releases. A break no test notices passes
   the suite, so last green can be the broken version itself; that one isn't what this button is for.
 - **Migrations** (Q3: "App lists its migrations"): a contraption's `citadel-app.json` may list `migrations`, paths in its

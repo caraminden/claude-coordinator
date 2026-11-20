@@ -21,6 +21,9 @@
 # 5. --to <commit> (Roll back to last green, #1016): the same boot check and restart for an older commit of main, which
 #    passed the full suite in CI, so no tests. Main stays as it is and nothing is pushed. Once it is live, <state>/bad
 #    holds the commit it rolled back from, so tools/land.sh lands only a fix for it until the fix's own deploy clears it.
+#    While its restart waits (for turns, up to 2 h), <state>/rolling-back has every deploy and landing refuse, and --to
+#    waits for that restart's verdict, so it exits 0 only once last green is live (#1271). deploy.sh --now then only
+#    lets that restart go at once.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
 set -euo pipefail
 
@@ -39,6 +42,7 @@ UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server t
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 TO='' # --to <commit>: roll back to it (#1016)
 PIN=${DEPLOY_PIN:-} # the queued restart of a roll back: the commit it rolls back from, for <state>/bad once it is live
+WANT=${DEPLOY_TARGET:-} # and the commit it rolls back to (#1271)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
@@ -49,6 +53,7 @@ BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
 # (scriptEnv drops every DEPLOY_* a person exports), and the queued restart unit is never handed them.
 HEALTH_TIMEOUT=${DEPLOY_TEST_HEALTH_TIMEOUT:-3} # seconds one /api/health ask waits for its answer
 HEALTH_POLL=${DEPLOY_TEST_HEALTH_POLL:-1} # seconds before each of healthy()'s HEALTHY_WAIT asks
+LIVE_GRACE=${DEPLOY_TEST_LIVE_GRACE:-15} # seconds a deploy watches for live past its restart's own waits
 REPORT_PAUSE=${DEPLOY_TEST_REPORT_PAUSE:-} # set: every pause between a report's tries, in place of the 1, 2, 4 s backoff
 
 say() { echo "deploy: $*" >&2; }
@@ -345,7 +350,7 @@ restart() {
   # Its timing line (#565): epoch seconds of each step, and how it ended (any exit not given one was cut off).
   unset R_FIRST
   R_START=$(date +%s) R_LOCK='' R_BACKUP='' R_RESTART='' R_UP='' R_SETTLED='' R_COMMIT='' R_TARGET='' R_OUT=stopped
-  trap 'restart_timing || true; rm -f "$STATE/restart"' EXIT
+  trap 'restart_timing || true; rm -f "$STATE/restart"; [ -z "$PIN" ] || rm -f "$STATE/rolling-back"' EXIT
   local i=0 n unknown='' told=''
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
@@ -394,6 +399,13 @@ restart() {
   local target good saved
   restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
+  # A roll back restarts on the commit it was queued for (#1271): deploy refuses while this waits, so only a hand on
+  # the checkout moves it, and the restart must not take that live as the roll back, nor hold lands on its files.
+  if [ -n "$PIN" ] && [ -n "$WANT" ] && [ "$target" != "$WANT" ]; then
+    say "the checkout moved to $(short "$target") while this roll back's restart waited; putting it back on $(short "$WANT")"
+    git_live reset -q --hard "$WANT"
+    target=$WANT
+  fi
   R_COMMIT=${target:0:7} R_TARGET=$target
   # The copy's own error goes in the report (#553 F12e), not only the journal.
   if ! saved=$(backup_db "$target" 2>"$STATE/backup.err"); then
@@ -419,6 +431,7 @@ restart() {
     rotate_backups
     if [ -n "$PIN" ]; then
       echo "$PIN $target $(date +%s) $PIN rollback" >"$STATE/bad" # the hold until the fix (#1016), as after a rolled-back restart
+      echo "$target" >"$STATE/rolled-back" # the roll back's verdict (#1271): last-good moves on once the fix lands
       report ok "Rolled back to $(short "$target"): the server restarted and is healthy. Lands wait for the fix to ${PIN:0:7}."
       return 0
     fi
@@ -491,6 +504,22 @@ deploy() {
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then
     say "$LIVE has local changes; refusing to deploy over them"
     exit 1
+  fi
+  # A Roll back to last green waiting for its restart (#1271): a deploy now would move the checkout under it, and that
+  # restart would take this commit live as the roll back, or a SIGHUP would before it woke. Left by a killed one: gone.
+  if [ -s "$STATE/rolling-back" ]; then
+    local rb_to=''
+    read -r _ rb_to _ <"$STATE/rolling-back" || true
+    if systemctl --user is-active -q "$UNIT" 2>/dev/null && [ -n "$NOW" ]; then
+      touch "$STATE/now"
+      say "a Roll back to last green ($(short "$rb_to" 2>/dev/null || echo "${rb_to:0:7}")) waits for its restart as $UNIT; with --now it goes ahead at once. Nothing else deployed: deploy again once it is live"
+      exit 1
+    fi
+    if systemctl --user is-active -q "$UNIT" 2>/dev/null; then
+      say "a Roll back to last green ($(short "$rb_to" 2>/dev/null || echo "${rb_to:0:7}")) waits for its restart as $UNIT; nothing deployed. Deploy once it is live (the Releases page shows it)"
+      exit 1
+    fi
+    rm -f "$STATE/rolling-back"
   fi
   if [ -n "$TO" ]; then
     # A landing's note first, with both locks (deploy-queue.sh): a roll back moves the checkout off the commit it names.
@@ -633,14 +662,17 @@ deploy() {
   }
   # The unit runs a private copy of the version just pulled, so a later pull or a rollback can't
   # rewrite the script under it.
+  # A roll back's checkout holds an older deploy.sh: its unit runs this one (#1271), which knows DEPLOY_TARGET.
   local copy="$STATE/restart-$new-$$.sh"
-  cp "$LIVE/tools/deploy.sh" "$copy"
+  if [ -n "$TO" ]; then cp "${BASH_SOURCE[0]}" "$copy"; else cp "$LIVE/tools/deploy.sh" "$copy"; fi
+  # Before the unit can start, under both locks: deploys and lands refuse while it is there and the unit runs.
+  [ -z "$TO" ] || { echo "$prev $new $(date +%s)" >"$STATE/rolling-back"; rm -f "$STATE/rolled-back"; }
   local out
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
-    --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" --setenv=DEPLOY_PIN="${TO:+$prev}" \
+    --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" --setenv=DEPLOY_PIN="${TO:+$prev}" --setenv=DEPLOY_TARGET="${TO:+$new}" \
     bash "$copy" restart 2>&1 9>&- 7>&-); then
     reporter
     mark queued
@@ -648,6 +680,7 @@ deploy() {
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
+    [ -z "$TO" ] || rm -f "$STATE/rolling-back"
     if [ -n "$TO" ]; then # that restart would deploy it as a plain deploy, with no hold: put the checkout back
       git_live reset -q --hard "$prev"
       say "a restart was queued as $UNIT meanwhile, so nothing rolled back; try again once it has gone live"
@@ -662,6 +695,7 @@ deploy() {
     return 0
   else
     rm -f "$copy"
+    [ -z "$TO" ] || rm -f "$STATE/rolling-back"
     say "could not queue the restart ($(grep -v '^[[:space:]]*$' <<<"$out" | head -n 1 | cut -c1-200)), so nothing restarted: the live checkout is at $(short "$new"), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue it"
     exit 1
   fi
@@ -672,22 +706,22 @@ deploy() {
   flock -u 7
   # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
-  local bad was limit=$((HEALTHY_WAIT * 2 + ${SETTLE%.*} + 15)) # whole seconds: a test's SETTLE can be a fraction
+  local bad was limit=$((HEALTHY_WAIT * 2 + ${SETTLE%.*} + LIVE_GRACE)) # whole seconds: a test's SETTLE can be a fraction
   was=$(cat "$STATE/bad" 2>/dev/null || true)
   for _ in $(seq "$limit"); do
     sleep 1
-    # A roll back's commit is older than last-good until its own restart tags it.
-    if { [ -n "$TO" ] && [ "$(git_live rev-parse -q --verify 'last-good^{commit}')" = "$new" ]; } || { [ -z "$TO" ] && git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; }; then
+    # A roll back's verdict is its own restart's, read below (#1271): the checkout and last-good move once that lets go.
+    if [ -n "$TO" ]; then
+      systemctl --user is-active -q "$UNIT" 2>/dev/null || break
+      continue
+    fi
+    if git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; then
       mark live
       say "live now: the server restarted on $(short "$new") and stayed healthy"
       return 0
     fi
-    if [ -n "$TO" ] && [ "$(git_live rev-parse HEAD)" != "$new" ]; then
-      say "the restart on $(short "$new") failed, so it went back to $(short "$(git_live rev-parse HEAD)") (see journalctl --user -u $UNIT)"
-      exit 1
-    fi
     bad=$(cat "$STATE/bad" 2>/dev/null || true)
-    if [ -z "$TO" ] && [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
+    if [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
       say "the restart on $(short "${bad##* }") failed and was rolled back; its report in this chat says why (see journalctl --user -u $UNIT)"
       exit 1
     fi
@@ -695,11 +729,26 @@ deploy() {
   # The usual reason (#553): the restart waits for running turns, up to 2 h, and this line was all the landing heard.
   local n
   n=$(interruptible)
-  if [ -z "$NOW" ] && [[ $n =~ ^[1-9][0-9]*$ ]]; then
+  if [ -n "$TO" ] && ! systemctl --user is-active -q "$UNIT" 2>/dev/null; then :
+  elif [ -z "$NOW" ] && [[ $n =~ ^[1-9][0-9]*$ ]]; then
     say "not live yet: the restart is waiting for $(turns "$n") a restart would cut off to finish (at most $((IDLE_TRIES * 10 / 60)) min more), and reports here when it is live. To restart without waiting: tools/deploy.sh --now (see journalctl --user -u $UNIT)"
   else
     say "not live yet after $limit s; the restart reports here when it is (see journalctl --user -u $UNIT)"
   fi
+  # A roll back waits for its restart's verdict (#1271): the Releases card reads this exit, so "not live yet" can't end it.
+  [ -n "$TO" ] || return 0
+  while systemctl --user is-active -q "$UNIT" 2>/dev/null; do sleep "$IDLE_POLL"; done
+  if [ "$(cat "$STATE/rolled-back" 2>/dev/null)" = "$new" ]; then
+    mark live
+    say "live now: the server restarted on $(short "$new") and stayed healthy"
+    return 0
+  fi
+  if [ "$(git_live rev-parse HEAD)" != "$new" ]; then
+    say "the restart on $(short "$new") failed, so it went back to $(short "$(git_live rev-parse HEAD)") (see journalctl --user -u $UNIT)"
+  else
+    say "the restart on $(short "$new") ended without going live; its report says why (see journalctl --user -u $UNIT)"
+  fi
+  exit 1
 }
 
 case "${1:-}" in

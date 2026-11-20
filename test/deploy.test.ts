@@ -607,7 +607,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
 });
 
 // The queued restart against a stand-in server and systemctl: commits good (last-good) and target (HEAD).
-async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>, extra: Record<string, string> = {}) {
+async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>, extra: Record<string, string> | ((c: { good: string; target: string }) => Record<string, string>) = {}) {
   const live = join(root, `${name}-live`);
   const git = (...args: string[]) => execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
@@ -651,7 +651,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   try {
     const r = await promisify(execFile)('bash', [copy, 'restart'], {
       encoding: 'utf8',
-      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_TEST_HEALTH_POLL: '0.1', DEPLOY_SETTLE: '0.5', ...extra },
+      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_TEST_HEALTH_POLL: '0.1', DEPLOY_SETTLE: '0.5', ...(typeof extra === 'function' ? extra({ good, target }) : extra) },
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
@@ -735,4 +735,18 @@ test('a roll back\'s healthy restart holds lands until the fix, and a failed one
   assert.equal(failed.status, 1, failed.stderr);
   assert.equal(failed.head, failed.good);
   assert.equal(existsSync(bad('pinned-failed')), false);
+});
+
+// #1271: a roll back's restart that finds the checkout moved off the commit it was queued for (a deploy that came while it
+// waited) goes back to that commit, so it never calls another commit "Rolled back" or holds lands on the wrong files.
+test("a roll back's restart goes back to the commit it was queued for when the checkout moved under it", { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  const from = 'f'.repeat(40);
+  const r = await restartWith('pinned-moved', (_restarts, _n, { good }) => health(good), ({ good }) => ({ DEPLOY_PIN: from, DEPLOY_TARGET: good }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /the checkout moved to [0-9a-f]{7} "target" while this roll back's restart waited; putting it back on [0-9a-f]{7} "good"/);
+  assert.equal(r.head, r.good);
+  assert.equal(r.lastGood, r.good);
+  assert.match(r.reports[0].text, /^Rolled back to [0-9a-f]{7} "good": the server restarted and is healthy\./);
+  assert.match(readFileSync(join(root, 'pinned-moved-live', '.git', 'cc-deploy', 'bad'), 'utf8'), new RegExp(`^${from} ${r.good} \\d+ ${from} rollback\\n$`));
 });

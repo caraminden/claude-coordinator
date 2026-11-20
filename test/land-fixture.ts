@@ -1,8 +1,10 @@
-// The throwaway repos and helpers land.test.ts, land-deploy.test.ts and land-queue.test.ts share.
-import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// The throwaway repos and helpers land.test.ts, land-deploy.test.ts, land-queue.test.ts and land-handoff.test.ts share.
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { after } from 'node:test';
 import { scriptEnv } from './script-env.ts';
 import { git } from './git.ts';
@@ -155,4 +157,53 @@ esac
     localRuns: () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n').length : 0),
     refs: () => git(hub, 'for-each-ref', '--format=%(refname)'),
   };
+}
+
+// The real deploy.sh and run-tests.sh on main, a boot check that passes, and stand-ins for systemd: the
+// queued "restart" waits for the lock, then counts as live and checked (it tags last-good, and a roll back's writes its
+// verdict, as the real one does; systemctl calls the unit active meanwhile). run() runs a script with them; runs() lists
+// where the tests ran.
+// health: more for /api/health to say, a function asked on each request with whether a SIGHUP came yet (reload: 'sighup'
+// has the systemctl stand-in take one, noting it in <dir>/sighups; after it the stand-in reports the live checkout's HEAD,
+// as the real server does).
+export async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>, args?: string[]) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
+  const r = setup();
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real deploy.sh');
+  git(r.live, 'pull', '-q', '--ff-only');
+  git(r.wt, 'rebase', '-q', 'main');
+  const base = git(r.source, 'rev-parse', 'main');
+  const bin = join(r.dir, 'bin');
+  const restarted = join(r.dir, 'restarted');
+  const testRuns = join(r.dir, 'test-runs');
+  mkdirSync(bin);
+  const active = JSON.stringify(join(r.dir, 'unit-active'));
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\ncase "$*" in *' kill -s HUP '*) echo "$*" >>${JSON.stringify(join(r.dir, 'sighups'))}; exit 0 ;;\n*'is-active -q cc-restart-when-idle'*) [ -e ${active} ]; exit ;; esac\nexit 1\n`);
+  writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
+state=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy
+echo "$*" >>${JSON.stringify(join(r.dir, 'systemd-run.args'))}
+want=$(grep -o -- '--setenv=DEPLOY_TARGET=[0-9a-f]*' <<<"$*" | cut -d= -f3)
+touch ${active}
+(flock -w 20 "$state/restart.lock" true && echo got >${JSON.stringify(restarted)} && git -C "$DEPLOY_LIVE" tag -f last-good HEAD && { [ -z "$want" ] || echo "$want" >"$state/rolled-back"; }; rm -f ${active}) 7>&- >/dev/null 2>&1 &
+`);
+  for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
+  const sighups = join(r.dir, 'sighups');
+  const server = createServer((_, res) => {
+    const hup = existsSync(sighups);
+    res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : hup ? git(r.live, 'rev-parse', 'HEAD') : base, ...health(hup) }));
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const url = `http://127.0.0.1:${(server.address() as any).port}`;
+    const run = (script: string, cwd: string, extra: Record<string, string> = {}, args: string[] = []) => promisify(execFile)('bash', [script, ...args], {
+      cwd, encoding: 'utf8',
+      env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', TEST_RUNS: testRuns, ...extra },
+    });
+    const runs = () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n') : []);
+    await body(r, run, runs);
+  } finally {
+    server.close();
+  }
 }

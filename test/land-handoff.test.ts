@@ -7,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
+import { withRealDeploy } from './land-fixture.ts';
 
 // #706: a minion hands its land to the server and ends its turn. The server runs land.sh, and on a clean land posts
 // the shipped line and dismisses or parks the minion with no model call; on a failure it wakes the minion with the
@@ -432,6 +433,39 @@ test('deployApps counts a deploy of a newer main as shipped, and skips an app al
   (await after.ops.last('app'))!.state = 'rolled back';
   await deployApps(5, ['app'], 'abc1234', after.ops);
   assert.deepEqual(after.started, ['app for 1', 'app for 5']);
+});
+
+// #1271: the lines above are copies; these are what the real tools/deploy.sh says, so a reworded line there that the
+// server would read as merely landed (no live, no restart) fails here.
+test("landResult reads the real deploy.sh's lines: live, already live, and a restart still to come", { timeout: 120_000 }, () => {
+  let running = '';
+  return withRealDeploy(async (r, run) => {
+    const deploy = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
+    // Each status line on its own too, so one regex alternative can't stand in for another.
+    const as = async (what: string, bin: string | null, lines: RegExp[], kind: string, extra: Record<string, string> = {}) => {
+      r.commit(r.source, `${what}.txt`, `${what}\n`);
+      const res = await run(deploy, r.source, { ...(bin && { PATH: `${bin}:${join(r.dir, 'bin')}:${process.env.PATH}` }), ...extra });
+      assert.equal(landResult(res.stderr, 0).kind, kind, `${what}: ${res.stderr}`);
+      for (const re of lines) {
+        const line = res.stderr.split('\n').find((l) => re.test(l));
+        assert.ok(line, `${what}: no line like ${re}: ${res.stderr}`);
+        assert.equal(landResult(`${line}\n`, 0).kind, kind, `${what}: ${line}`);
+      }
+    };
+    await as('restarted', null, [/^deploy: live now: the server restarted on/], 'live');
+    const again = await run(deploy, r.source);
+    assert.match(again.stderr, /^deploy: nothing to deploy: the server already runs/m);
+    assert.equal(landResult(again.stderr, 0).kind, 'live');
+    running = git(r.live, 'rev-parse', 'HEAD'); // from here the server stays on it, so each deploy has a change
+    const fake = (name: string, script: string) => {
+      const bin = join(r.dir, name);
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+      return bin;
+    };
+    await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after 1 s/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
+    await as('joined', fake('joined-bin', 'echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1'), [/^deploy: a restart is already queued as/], 'restart');
+  }, () => (running ? { commit: running } : {}));
 });
 
 test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () => {

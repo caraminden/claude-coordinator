@@ -1,7 +1,7 @@
 // Streaming a request to a service on a local port and its answer back, for previews (src/previews.ts)
 // and contraptions (src/apps.ts). Answers stream as they come (event streams arrive event by event), a
 // closed tab ends the upstream request, and websocket upgrades are tunnelled both ways.
-import { request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
+import { request, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 export interface ForwardOptions {
@@ -13,32 +13,51 @@ export interface ForwardOptions {
   answer?: (headers: IncomingHttpHeaders) => void;
   /** Told of a 5xx answer, or a 502 with `note` when the service didn't answer (the error digest, #835). */
   failed?: (status: number, note?: string) => void;
+  /** How long a GET or HEAD is asked again (RETRY_MS); tests shorten it. */
+  retryMs?: number;
 }
+
+/** How long a GET or HEAD keeps asking an app that refuses or drops it, as a restart does (#1173). */
+export const RETRY_MS = 5000;
 
 export function forward(req: IncomingMessage, res: ServerResponse, port: number, path: string, headers: OutgoingHttpHeaders, opts: ForwardOptions) {
   const max = opts.maxBody ?? Infinity;
   if (Number(req.headers['content-length'] ?? 0) > max) return void tooBig(req, res, max);
   let ended = false;
-  const upstream = request({ host: '127.0.0.1', port, method: req.method, path, headers }, (up) => {
-    const out = { ...up.headers };
-    opts.answer?.(out);
-    res.writeHead(up.statusCode ?? 502, out);
-    if ((up.statusCode ?? 502) >= 500) opts.failed?.(up.statusCode ?? 502);
-    // An event stream's headers go out now, not with its first event.
-    res.flushHeaders();
-    up.pipe(res);
-    // The service dropped its answer part way (a restart): end the browser's too, so an EventSource reconnects.
-    up.on('close', () => up.complete || res.destroy());
-  });
-  upstream.on('error', () => {
-    if (ended) return;
-    if (!res.headersSent) {
-      opts.failed?.(502, 'not answering');
+  // Only a GET or HEAD with no body is asked again: never a POST, so a snap can't post twice.
+  const again = (req.method === 'GET' || req.method === 'HEAD') && !req.headers['content-length'] && !req.headers['transfer-encoding'];
+  const until = Date.now() + (opts.retryMs ?? RETRY_MS);
+  let gone = false;
+  let upstream: ClientRequest;
+  const send = () => {
+    upstream = request({ host: '127.0.0.1', port, method: req.method, path, headers }, (up) => {
+      const out = { ...up.headers };
+      opts.answer?.(out);
+      res.writeHead(up.statusCode ?? 502, out);
+      if ((up.statusCode ?? 502) >= 500) opts.failed?.(up.statusCode ?? 502);
+      // An event stream's headers go out now, not with its first event.
+      res.flushHeaders();
+      up.pipe(res);
+      // The service dropped its answer part way (a restart): end the browser's too, so an EventSource reconnects.
+      up.on('close', () => up.complete || res.destroy());
+    });
+    upstream.on('error', (err: NodeJS.ErrnoException) => {
+      // An asker who left (a reload, a closed tab) saw no 502: ending its request is what errored here.
+      if (ended || gone) return;
+      if (res.headersSent) return void res.destroy();
+      // Refused (not listening yet) or dropped (stopping, or a kept-alive socket it closed): a restart, so ask again.
+      if (again && Date.now() < until && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) return void setTimeout(() => gone || send(), 200);
+      opts.failed?.(502, err.code ? `not answering: ${err.code}` : 'not answering');
       res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`${opts.what} is not answering`);
-    } else res.destroy();
-  });
+    });
+    if (again) upstream.end();
+    else req.pipe(upstream);
+  };
   // A closed tab ends its long-lived stream on the service too.
-  res.on('close', () => upstream.destroy());
+  res.on('close', () => {
+    gone = !res.writableFinished;
+    upstream.destroy();
+  });
   if (max !== Infinity) {
     let n = 0;
     req.on('data', (chunk: Buffer) => {
@@ -49,7 +68,8 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
       tooBig(req, res, max);
     });
   }
-  req.pipe(upstream);
+  if (again) req.resume();
+  send();
 }
 
 function tooBig(req: IncomingMessage, res: ServerResponse, max: number) {

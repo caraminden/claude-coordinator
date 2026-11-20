@@ -19,6 +19,11 @@ const STUB = `<script>
     const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
     if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
     if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }]);
+    let m;
+    if ((m = path.match(/^api\\/projects\\/(\\d+)$/))) {
+      const id = Number(m[1]);
+      return reply({ project: { id, name: id === 1 ? 'Alpha' : 'Beta', instructions: '' }, coordinator: { id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 }, tickets: tickets.filter((t) => t.project_id === id), seen: {}, person_notes: {}, pins: [] });
+    }
     if (path === 'api/home') return reply({
       items: window.waiting.map((ticketId, i) => ({ id: i + 1, ticketId, kind: 'question', at: now })),
       tickets: tickets.filter((t) => window.waiting.includes(t.id)),
@@ -48,8 +53,6 @@ const heads = `[...document.querySelectorAll('.home-panel .home-group > h3')].ma
 
 test('a row that leaves Home goes at once, its scheme heading with the last one, and nothing is ticked off', { skip }, async () => {
   const page = await browser.page(`${app.base}#/home`, { width: 1280, height: 800 });
-  await new Promise((r) => setTimeout(r, 2000));
-  console.log('DBG', await page.eval(`document.body.innerText.slice(0,300) + ' / ' + (document.querySelector('.home-panel')?.outerHTML.slice(0,300))`));
   await waitFor(page, 'three rows', `document.querySelectorAll('.home-panel .thread-row').length === 3`);
   assert.equal(await page.eval(heads), 'Alpha|Beta');
   const redraw = `import('/home.js').then((m) => m.refreshHome())`;

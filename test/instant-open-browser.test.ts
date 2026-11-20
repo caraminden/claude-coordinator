@@ -102,11 +102,14 @@ test('with the server there, the kept chat shows first and the live one replaces
   assert.equal(await page.eval(`[...document.querySelectorAll('#log .msg.user')].filter((m) => m.textContent.includes('hello from before')).length`), 1, 'nothing drawn twice');
 });
 
-test('signing out forgets the kept chat', { skip }, async () => {
-  const { srv, hash } = await server();
+test('signing out forgets the kept chat, and what was asked, so the next person signing in on that page keeps none of it', { skip }, async () => {
+  const { srv, hash, ticket } = await server();
   const page = await openOnce(srv, hash);
+  const asked = `import(new URL('base.js', location.href)).then((m) => Object.keys(m.keptAnswers(${ticket.project_id}, ${ticket.id})).length)`;
+  assert.ok(await page.eval(asked) > 0);
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
   assert.equal(await page.eval(`localStorage.getItem('cc-last-chat')`), null);
+  assert.equal(await page.eval(asked), 0);
 });
 
 test('a ship reaches an open app by itself: the worker keeps the new version\'s files and the page reloads into it', { skip }, async () => {

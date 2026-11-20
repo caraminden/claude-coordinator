@@ -453,7 +453,11 @@ export async function reloadNow() {
   if (document.activeElement?.matches('.composer textarea')) {
     try { sessionStorage.setItem('cc-refocus', '1'); } catch {}
   }
-  await freshShell(typeof reloadPending === 'string' ? reloadPending : null).catch(() => {});
+  // Only a ship waits on the worker; a ↻ reloads at once (the stream's hello catches a ship it missed).
+  if (typeof reloadPending === 'string') {
+    await freshShell(reloadPending).catch(() => {});
+    if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it
+  }
   location.reload();
 }
 
@@ -467,8 +471,8 @@ async function freshShell(to) {
   if (!reg) return;
   let again = false;
   try {
-    again = !!to && sessionStorage.getItem('cc-stale') === to;
-    if (to) sessionStorage.setItem('cc-stale', to);
+    again = sessionStorage.getItem('cc-stale') === to;
+    sessionStorage.setItem('cc-stale', to);
   } catch {}
   if (again) return Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-')).map((k) => caches.delete(k)));
   const settled = () => new Promise((done) => {

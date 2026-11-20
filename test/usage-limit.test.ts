@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
@@ -449,6 +450,76 @@ test('a turn that hits its account\'s limit carries on at once with the next rea
   } finally {
     noAccounts();
   }
+});
+
+test('a restart after a switch to the next account, before its resume starts, still resumes it there (A1)', async () => {
+  const pat = store.findUser('name', 'Pat')!;
+  const s = accountsFor(pat.id, 'ok');
+  try {
+    const id = minion();
+    const before = turnsRun();
+    // The old server's save after the limited turn never finishes: the account switch's resume waits behind it when the server dies.
+    runner.saveSession = () => new Promise(() => {});
+    setRelease(LIMIT);
+    runner.send(id, 'Pat', 'go');
+    await until('the switch to account 2', () => events(id, 'note').some((n) => n.includes('Carrying on with two@x')) && !runner.isRunning(id));
+    assert.equal(turnsRun(), before + 1);
+    // Nothing was queued behind the turn, so no waiting messages restart it.
+    const old = runner;
+    runner = makeRunner();
+    for (const k of ['personOf', 'placeFor', 'claudeAccounts', 'onLimit', 'onCleared'] as const) (runner as any)[k] = old[k];
+    runner.recover();
+    await until('the resume on account 2 after the restart', () => turnsRun() === before + 2 && !runner.isRunning(id), 5_000);
+    assert.equal(s.inUse, 2);
+    assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
+    assert.equal(store.getTicket(id)!.status, 'idle');
+    assert.equal(store.getSetting(`resume-owed:${id}`), null, 'the debt is paid once the resume starts');
+  } finally {
+    noAccounts();
+  }
+});
+
+test('a restart while a limit resume restores the session keeps the resume and its held messages (A2)', async () => {
+  const id = minion();
+  await turn(id, "You've hit your session limit");
+  setRelease('ok');
+  runner.send(id, 'Cara', 'held through the restore');
+  // A stored session file this login's folder lacks: the resume restores it off the event loop before its turn starts.
+  store.putClaudeState({ path: `projects/a2/${id}.jsonl`, project_id: project.id, ticket_id: id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
+  const list = store.getSetting<any[]>('limit-resumes')!;
+  store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
+  const before = turnsRun();
+  const old = runner;
+  (old as any).limitResumeNext();
+  // The old server dies mid-restore: nothing it would do after that happens.
+  old.detachAll();
+  clearTimeout((old as any).limitTimer);
+  for (const k of ['startTurn', 'next', 'cancelLimitWait']) (old as any)[k] = () => false;
+  runner = makeRunner();
+  runner.recover();
+  await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id), 5_000);
+  assert.match(lines(prompts).at(-1)!, /held through the restore/);
+  assert.match(lines(prompts).at(-1)!, /usage limit, which has now reset/);
+  assert.equal(runner.limitWait(id), null, 'the wait ends with the turn that took it');
+});
+
+test('a limit resume that starts no turn still ends its wait, though it is kept until a turn takes it (A2)', async () => {
+  const id = minion();
+  await turn(id, "You've hit your session limit");
+  const list = store.getSetting<any[]>('limit-resumes')!;
+  store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
+  const before = turnsRun();
+  // Its person's Claude can't run a turn now: the resume says so and starts nothing.
+  runner.placeFor = () => ({ refused: 'Link Claude again.' });
+  (runner as any).armLimitTimer();
+  try {
+    await until('the refused resume to end its wait', () => runner.limitWait(id) === null && events(id, 'note').includes('Link Claude again.'), 5_000);
+  } finally {
+    runner.placeFor = undefined;
+  }
+  await sleep(100);
+  assert.equal(turnsRun(), before);
+  assert.equal(runner.limitWait(id), null);
 });
 
 test('a minion\'s turn names its session to the account pick once it has one, and says where it ran (#793)', async () => {

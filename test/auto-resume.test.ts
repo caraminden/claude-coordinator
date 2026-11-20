@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -99,6 +99,28 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
   assert.match(prompt, /\[Josh\]: also add a test/);
   await finish(after, id);
   assert.equal(store.getSetting(`turn:${id}`), null);
+});
+
+test('a container turn still starting when the server restarts is resumed, not written off as killed (#468 S03-5)', async () => {
+  const id = newTicket();
+  // The last server was starting it in its person's container: its start chain beat for it moments ago, then died
+  // with that server before podman ran the wrapper. No pid.json, no exit.json, no process for its folder.
+  const dir = join(root, 'starting', `${id}-${Date.now()}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'container'), 'citadel-claude-test');
+  writeFileSync(join(dir, 'beat'), '');
+  store.setSetting(`turn:${id}`, { resumes: 0, dir, container: 'citadel-claude-test', startedAt: Date.now() - 2_000, queued: [{ author: 'Josh', text: 'and the readme', images: [] }] });
+  store.updateTicket(id, { status: 'running' });
+  writeFileSync(prompts, '');
+
+  const after = server();
+  after.recover();
+  await until("the resume's prompt", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the readme'), 5_000);
+  assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
+  assert.ok(notes(id).includes('Resumed after a server restart'));
+  assert.ok(!existsSync(dir), "the dead start's folder is cleared");
+  await finish(after, id);
+  assert.equal(store.getTicket(id)!.status, 'idle');
 });
 
 test('a stopped turn is not resumed, even if the server restarts before it ends', async () => {

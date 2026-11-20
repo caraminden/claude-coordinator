@@ -88,7 +88,11 @@ const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
 
 /** The line at the top of each turn (Josh, "Yes, each turn"): the usual cost, spend so far, and that it isn't a cap. */
 export function turnLine(b: Budget, spent: number): string {
-  return `Budget: ${b.basis} has usually cost about ${usd(b.usd)} (the median of ${b.n} minions in the last 4 weeks, every scheme); this minion has used ${usd(spent)} so far. It is not a cap and quality comes first. Past ${usd(markOf(b, ASK))} you'll be asked to say why or split the work; past ${usd(markOf(b, WAKE))} your Taskmaster hears of it.`;
+  const head = `Budget: ${b.basis} has usually cost about ${usd(b.usd)} (the median of ${b.n} minions in the last 4 weeks, every scheme); this minion has used ${usd(spent)} so far. It is not a cap and quality comes first.`;
+  // Past the mark, the line carries the ask too: a turn that ended before it could read the ask still gets it.
+  return spent >= markOf(b, ASK)
+    ? `${head} It is past ${ASK.times}x: if you haven't yet, say in one line why it is costing more, and split off what's left for a fresh minion (citadel:briefing, sent to your Taskmaster) if it splits cleanly.`
+    : `${head} Past ${usd(markOf(b, ASK))} you'll be asked to say why or split the work; past ${usd(markOf(b, WAKE))} your Taskmaster hears of it.`;
 }
 
 /** The one ask past the first mark (Josh, "Say why, or split"), passed into the running turn or opening the next. */
@@ -96,11 +100,9 @@ export function askText(b: Budget, spent: number): string {
   return `Budget: this minion has now used about ${usd(spent)}, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. In your next reply, say in one line why it is costing more. If the rest of the work splits off cleanly, write a handoff for a fresh minion (citadel:briefing) and send it to your Taskmaster instead of carrying on here. Nothing stops you: finish what needs finishing, and quality still comes first.`;
 }
 
-/** What people read in the chat when a mark is passed. */
-export function chatNote(b: Budget, spent: number, mark: 'ask' | 'wake'): string {
-  return mark === 'ask'
-    ? `Budget: about ${usd(spent)} used, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. Asked the minion to say why or split the work.`
-    : `Budget: about ${usd(spent)} used, over ${WAKE.times}x the usual ${usd(b.usd)} for ${b.basis}. Told its Taskmaster.`;
+/** What people read in the chat past the first mark (the second's is tellTaskmaster's "Sent the Taskmaster" line). */
+export function chatNote(b: Budget, spent: number): string {
+  return `Budget: about ${usd(spent)} used, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. Asked the minion to say why or split the work.`;
 }
 
 /** The Taskmaster's wake past the second mark. */

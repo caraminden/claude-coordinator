@@ -22,7 +22,7 @@ import { SideAsks } from './src/side-ask.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
-import { ciFinished, postCard } from './src/ci-armed.ts';
+import { ciFinished, postCard, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
@@ -1412,6 +1412,11 @@ github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
 // A scheme that ships by pull request fails a ship when CI goes red on the PR; land.sh schemes count theirs in LandHandoffs.
 github.onCiFailed = (t) => {
   if (store.getProject(t.project_id)?.ship_path !== 'citadel') stallWatch.shipFailed(t.id, 'red CI on its PR');
+};
+// A minion past four times its budget (#1114): its Taskmaster hears, waking unless cold (no one's around to act on it then).
+runner.onBudgetWake = (ticketId, text) => {
+  const ticket = store.getTicket(ticketId);
+  if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask').catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 

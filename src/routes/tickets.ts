@@ -1164,7 +1164,8 @@ export const ticketRoutes: Route[] = [
       const target = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(ticket.project_id, n) : undefined;
       if (!target || target.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
       const v = runner.view(target);
-      const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), ...(target.cwd ? { worktree: target.cwd } : {}) };
+      // Its spend against its budget too (#1114), which list_tickets' lines leave out.
+      const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), cost: v.cost, budget: v.budget, ...(target.cwd ? { worktree: target.cwd } : {}) };
       const events = store.listEvents(target.id).flatMap((e) => {
         const d = JSON.parse(e.data);
         const keep = e.kind === 'user_message' ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }

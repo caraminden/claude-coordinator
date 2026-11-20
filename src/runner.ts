@@ -49,6 +49,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
+import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
@@ -680,7 +681,9 @@ export class Runner {
   /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
   /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
-  private spends = new Map<number, { startedAt: number; meter: SpendMeter }>();
+  private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
+  /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
+  onBudgetWake: (ticketId: number, text: string) => void = () => {};
   /** Applies a turn's status trailer (src/status-trailer.ts) as set_thread_status would; the server wires it to the PATCH route's checks. */
   onStatusTrailer: (ticketId: number, fields: StatusFields) => void = () => {};
   /** The running turn's last status trailer, applied when its result comes in. */
@@ -821,6 +824,8 @@ export class Runner {
       server_work: closed ? null : this.serverWork(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
+      // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
+      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
@@ -2781,6 +2786,9 @@ export class Runner {
       const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
       // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
       parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts)].filter(Boolean);
+      // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
+      const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
+      if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
       const context = promptText(parts.turn);
       // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
@@ -3395,6 +3403,9 @@ export class Runner {
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
       this.recordGrunts(ticketId, turn.id, state, ev.session_id);
+      // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
+      const ticket = this.store.getTicket(ticketId);
+      if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
@@ -3419,11 +3430,17 @@ export class Runner {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     if (!turn?.startedAt || turn.codex) return;
     let spend = this.spends.get(ticketId);
-    if (spend?.startedAt !== turn.startedAt) this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend) });
+    if (spend?.startedAt !== turn.startedAt) {
+      const ticket = this.store.getTicket(ticketId);
+      // Earlier turns' cost and the budget once a turn: this runs on every assistant message.
+      const budget = ticket?.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
+      this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget });
+    }
     const { meter } = spend;
     if (!meter.add(ev)) return;
     const stage = meter.crossed(stagesFrom(this.store.getSetting(STAGES_SETTING)));
     this.saveTurn(ticketId, { spend: meter.state });
+    this.checkBudget(ticketId, spend.budget, spend.prior + meter.usd, true);
     if (stage === null) return;
     const text = spendText(meter.usd, Date.now() - turn.startedAt);
     console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
@@ -3432,6 +3449,46 @@ export class Runner {
     this.saveTurn(ticketId, { spend: meter.state });
     this.broadcastTicket(ticketId); // the list row's badge and Needs you
     this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
+  }
+
+  /**
+   * Tell the minion and its Taskmaster when its spend passes a budget mark (#1114), each mark once per minion. The ask goes
+   * into the running turn (`steer`) when it can take one; otherwise the next turn's budget line carries it. Never stops anything.
+   */
+  private checkBudget(ticketId: number, budget: Budget | null, spent: number, steer: boolean) {
+    if (!budget) return;
+    const state = this.store.getSetting<BudgetState>(budgetKey(ticketId)) ?? {};
+    const marks = passed(budget, spent, state);
+    if (!marks.length) return;
+    const now = this.now();
+    this.store.setSetting(budgetKey(ticketId), { ...state, ...(marks.includes('ask') ? { asked: now } : {}), ...(marks.includes('wake') ? { woke: now } : {}) });
+    console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
+    if (marks.includes('ask')) {
+      const row = this.emit(ticketId, 'note', { text: chatNote(budget, spent) });
+      if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
+    }
+    // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
+    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent));
+  }
+
+  /**
+   * Pass a line from Citadel into the running turn, as a steer is, when it can take one. Not kept in `steered`: one the
+   * turn never reads is dropped rather than queued to start a turn of its own.
+   */
+  private steerSystem(ticketId: number, text: string, id: number): boolean {
+    const live = this.turns.get(ticketId);
+    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!live || !turn || turn.result || turn.fresh || turn.keepalive || turn.stopped || turn.light) return false;
+    const file = join(live.dir, 'steer.jsonl');
+    if (!existsSync(file)) return false;
+    appendFileSync(file, promptMessage([{ author: 'System', text, images: [], id }]));
+    return true;
+  }
+
+  /** What the minion page shows of its budget (#1114), or null with too little history. */
+  private budgetView(ticket: Ticket) {
+    const b = budgetFor(this.store, ticket);
+    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE) };
   }
 
   /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */

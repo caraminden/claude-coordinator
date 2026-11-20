@@ -102,7 +102,7 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 
 Cara, 2026-11-09: "a big wall of white/black text is never going to be what we want out of our
 UIs"; 2026-11-14, picking the "Moderate" take of #683 for every minion's UI: "a lot of the UI that is
-made by our minions by default is pretty bland and colorless". A new page or view meets all ten
+made by our minions by default is pretty bland and colorless". A new page or view meets all twelve
 before its first screenshot; a view that is only a chat needs 1, 8 and 9, as the chat's parts carry
 their own look. A scheme with its own style guide (a design-system home, a theme) follows that
 instead. The code for each, and the picked take:
@@ -144,6 +144,13 @@ instead. The code for each, and the picked take:
     gradient, one animated or glowing moment) and keep everything around it quiet. Rules 1 to 9 are
     the floor, not decoration to stack. Optional, and always one: your own radius set or heading face,
     named with its reason in your first reply, like the accent.
+11. **Summary first.** A view with more than a screen of detail opens on what each part is for: a
+    card or row whose head answers its question with a toned chip and the one or two numbers that
+    matter, its list, table or settings closed inside it (`<details>`). With every part closed, the
+    view still tells its state. Josh, 2026-11-19 (#1068): "make them collapse into summary views".
+12. **Long lists start short.** More than about six items shows the first five, worst or newest
+    first, with a "Show all N" button under them that keeps focus and survives the view's redraws.
+    Each group of rule 6 starts short the same way.
 
 The check: squint at the phone and desktop shots in both modes. Name the view's one standout; if you name two, take one off. Before you can read a word you
 should see the accent, the cards and where each status sits, and count at least three hues besides

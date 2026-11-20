@@ -207,3 +207,22 @@ h1, h2, h3, .cui-topbar-title { font-family: "Fraunces", var(--citadel-font); }
 Load a face from your own app (never a CDN), with a fallback to `--citadel-font`. Body text, sizes
 and spacing stay Citadel's. The token names are pinned by the contract; their values were always
 yours to set.
+
+## 11. Summary first
+
+```html
+<details class="card part">
+  <summary><span class="part-icon" aria-hidden="true">◆</span> Orders
+    <span class="cui-chip" data-tone="warn">3 late</span> <span class="muted">41 this week</span></summary>
+  <!-- the table, the list, the settings -->
+</details>
+```
+
+The closed line is the answer (a chip and a number); the body is the evidence. Open the one part a
+person most likely came for and leave the rest closed. A view that redraws keeps what was opened.
+
+## 12. Long lists start short
+
+Draw the first five, worst or newest first, and a `cui-btn` "Show all 23 orders" under them. Its
+click redraws the list and puts focus back on the button, now "Show the first 5 only". Six or fewer
+items show whole: never hide just one.

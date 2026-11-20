@@ -183,9 +183,9 @@ test('--build after a landing killed mid-way: the worktree goes back on its bran
 
 test("claims (#1159): a feeder that writes another feeder's claimed file is refused, at --check too; --build refuses while the claims are on the build", () => {
   const b = buildSetup();
-  // The build minion (#3) puts its plan on the build: #1 writes f1.txt, #2 writes f2.txt.
+  // The build minion (#3) puts its plan on the build: #1 writes f1.txt, #2 writes f2.txt and f3.txt.
   git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
-  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt\n');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt f3.txt\n');
   git(b.main, 'branch', '-f', 'build/1', 'ticket/3-x');
   assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 0);
   b.commit(b.wts[0], 'f2.txt', 'one wrote it\n');
@@ -198,6 +198,24 @@ test("claims (#1159): a feeder that writes another feeder's claimed file is refu
   assert.equal(res.status, 1);
   assert.match(res.stderr, why);
   assert.equal(b.at('build/1'), build, 'the build did not move');
+  // "Claimed: ask": #1 needs f3.txt instead, so the build minion moves that claim and merges the claims in (docs
+  // only); then #1's merge passes.
+  git(b.wts[0], 'reset', '-q', '--hard', 'HEAD~1');
+  b.commit(b.wts[0], 'f3.txt', 'one needs it\n');
+  assert.match(b.run(1, '--into', 'build/1', 'f1.txt').stderr, /f3\.txt is #2's in the claims/);
+  git(b.wts[2], 'merge', '-q', '--ff-only', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt f3.txt\n#2: f2.txt\n');
+  assert.equal(b.run(3, '--into', 'build/1').status, 0);
+  git(b.wts[0], 'rebase', '-q', 'build/1');
+  const moved = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(moved.status, 0, moved.stderr);
   git(b.wts[2], 'merge', '-q', '--ff-only', 'build/1');
   assert.match(b.run(3, '--build').stderr, /build-claims\.md, the build's claims, is still on ticket\/3-x and would ship to main: git rm it/);
+});
+
+test('claims (#1159): the template and Citadel\'s land.sh carry the same claims_check, so the rules tested on Citadel\'s hold here', () => {
+  const fn = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf8').match(/^claims_check\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
+  const kit = fn('kit/skills/scheme-setup/templates/land.sh');
+  assert.ok(kit);
+  assert.equal(kit, fn('tools/land.sh'));
 });

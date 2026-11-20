@@ -1,0 +1,436 @@
+// Restart anywhere (#1290, R6 of the code-review research #1265): a restart at any saved step of a minion's turn leaves
+// it running, waiting on a named timer, or idle with nothing owed, and loses no message a person or minion sent it.
+//
+// How it works. Each flow in FLOWS runs once, uncut, on a real Runner and the fake claude. A restart (a deploy's SIGTERM)
+// can only land between two event-loop tasks, never inside one, so at the start of every task the harness looks at
+// whether the one before it wrote to the database; if it did, the store is copied there (a "cut"). After the flow, each
+// cut gets a fresh Runner on its copy, as a server started on that database would, and recover(). Its turns died with
+// the old server (reattach finds nothing: the crash case; a turn its unit kept alive is test/auto-resume's) and its
+// turns don't run (startTurn only records what it was handed). Then, for that cut:
+// - Owed: if the uncut run started a turn later in the same step (nothing outside the runner asked for it), the restarted
+//   runner starts one too or waits on a named timer (the usage-limit resume, the network probe, the cold-mail sweep).
+// - Held: every message sent before the cut and not yet handed to a turn is in the turn it starts, its queue, a wait's
+//   held messages or its held mail.
+// - Idle: with nothing started or waiting, no `running` status, no queue, and no turn:, saving:, waiting: or
+//   resume-owed: record left that nothing acts on.
+// A failure names the flow, the cut, its step and what the task before it wrote, so it can be found again by hand.
+//
+// To cover a new flow, add one entry to FLOWS: a name, an optional setup (accounts, say), and steps. Each step does one
+// thing from outside the runner (a message, a turn's end, a timer firing) and waits for the runner to go quiet.
+// RESTART_ANYWHERE_ONLY=<flow name> runs one flow; RESTART_ANYWHERE_DEBUG=1 prints each flow's cuts and what it sent.
+// On the server the write worker drains its queue before a restart exits (src/db-writer.ts), so a task's writes land
+// whole there too; only a hard crash (power, the OOM killer) can stop between two writes of one task, which this skips.
+import assert from 'node:assert/strict';
+import { createHook } from 'node:async_hooks';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { after, test } from 'node:test';
+import { Store } from '../src/db.ts';
+import { coldKey, mailKey } from '../src/minion-relay.ts';
+import { Runner } from '../src/runner.ts';
+import { lines, stopTurns, testPins } from './helpers.ts';
+import { until } from './wait.ts';
+testPins();
+
+// The copies are many and small: on tmpfs a copy and a reopen take ~25 ms, on a busy disk ~125 ms.
+const root = mkdtempSync(join(existsSync('/dev/shm') ? '/dev/shm' : tmpdir(), 'restart-anywhere-'));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
+process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
+
+// A stand-in for `claude -p`, as usage-limit.test.ts's: it waits for the release file, ends with its words as its result
+// (an error unless they are "ok"; FAKE_RESULT, a second account's, wins), and logs the prompt it got.
+const fake = join(root, 'claude-fake');
+const release = join(root, 'release');
+const prompts = join(root, 'prompts.log');
+writeFileSync(
+  fake,
+  `#!${process.execPath}
+const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => (input += d));
+const wait = setInterval(() => {
+  if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
+  clearInterval(wait);
+  appendFileSync(${JSON.stringify(prompts)}, input);
+  const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result }));
+  process.exit(0);
+}, 10);
+`,
+);
+chmodSync(fake, 0o755);
+/** Sets the release file whole (a fake polling for it would otherwise read it empty); null holds turns running. */
+function setRelease(words: string | null) {
+  if (words === null) return rmSync(release, { force: true });
+  writeFileSync(`${release}.tmp`, words);
+  renameSync(`${release}.tmp`, release);
+}
+const turnsRun = () => lines(prompts).length;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Two hours from now, in Claude's words.
+const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' }).replace(' ', '').toLowerCase()} (America/Los_Angeles)`;
+
+type Msg = { text: string };
+/** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
+type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
+type Flow = {
+  name: string;
+  /** Hooks both the flow's runner and every restarted one get (a person's Claude accounts, say). */
+  setup?: (store: Store, projectId: number) => (r: Runner) => void;
+  steps: { name: string; run: (c: Ctx) => Promise<void> }[];
+};
+
+const FLOWS: Flow[] = [
+  {
+    name: 'a plain turn with a message queued behind it',
+    steps: [
+      { name: 'Cara asks for a turn', run: async (c) => {
+        setRelease(null);
+        c.say('Cara', 'build it');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+      } },
+      { name: 'Josh queues a message behind it', run: async (c) => {
+        c.say('Josh', 'also add a test');
+        await sleep(50);
+      } },
+      { name: 'the turn ends and the queued message runs', run: async (c) => {
+        const before = turnsRun();
+        setRelease('ok');
+        await c.quiet('the queued turn', () => turnsRun() === before + 2);
+      } },
+    ],
+  },
+  {
+    name: 'a usage-limit wait and its resume',
+    steps: [
+      { name: 'the turn hits the usage limit', run: async (c) => {
+        setRelease(LIMIT);
+        c.say('Cara', 'go');
+        await c.quiet('the limit wait', () => !!c.runner.limitWait(c.id));
+      } },
+      { name: 'a message is held for the resume', run: async (c) => {
+        c.say('Cara', 'held through the wait');
+        await sleep(30);
+      } },
+      { name: 'the limit resets and the resume restores the session, then runs', run: async (c) => {
+        // A stored session file this login's folder lacks: the resume restores it off the event loop first (A2's gap).
+        c.store.putClaudeState({ path: `projects/ra/${c.id}.jsonl`, project_id: c.store.getTicket(c.id)!.project_id, ticket_id: c.id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
+        setRelease('ok');
+        c.store.setSetting('limit-resumes', c.store.getSetting<any[]>('limit-resumes')!.map((w) => ({ ...w, at: Date.now() })));
+        const before = turnsRun();
+        (c.runner as any).limitResumeNext();
+        await c.quiet('the resume', () => turnsRun() === before + 1 && !c.runner.limitWait(c.id));
+      } },
+    ],
+  },
+  {
+    name: 'a switch to the other Claude account',
+    setup: (store, projectId) => {
+      const pat = store.createUser({ name: 'Pat', login: 'pat1290' });
+      store.addMember(projectId, pat.id);
+      const labels = [{ n: 1, label: 'one@x' }, { n: 2, label: 'two@x' }];
+      const s = { inUse: 1, limited: new Map<number, number>() };
+      return (r) => {
+        r.personOf = (author) => (author === 'Pat' ? pat.id : null);
+        r.placeFor = () => (s.inUse === 1 ? { host: true } : { host: true, account: 2, configDir: join(root, 'acct-2'), env: { CLAUDE_CONFIG_DIR: join(root, 'acct-2'), FAKE_RESULT: 'ok' } });
+        r.claudeAccounts = () => ({ inUse: s.inUse, accounts: labels });
+        r.onLimit = (_p, n, until) => {
+          s.limited.set(n, until);
+          const next = labels.find((a) => !s.limited.has(a.n)) ?? null;
+          if (next) s.inUse = next.n;
+          return { next, resetAt: Math.min(...s.limited.values()), limits: labels.filter((a) => s.limited.has(a.n)).map((a) => ({ ...a, until: s.limited.get(a.n)! })) };
+        };
+        r.onCleared = () => {};
+      };
+    },
+    steps: [
+      { name: 'the turn hits its account\'s limit and carries on with the next account', run: async (c) => {
+        setRelease(LIMIT);
+        const before = turnsRun();
+        c.say('Pat', 'go');
+        await c.quiet('the turn on account 2', () => turnsRun() === before + 2);
+      } },
+    ],
+  },
+  {
+    name: 'held mail released',
+    steps: [
+      { name: 'a relay is held as mail for the cold session', run: async (c) => {
+        c.runner.relays.mail(c.id, 'Taskmaster', 'held: build 3 merged', undefined, true);
+        await sleep(30);
+      } },
+      { name: 'the cold sweep releases it into a turn', run: async (c) => {
+        setRelease('ok');
+        const before = turnsRun();
+        c.runner.coldSweep();
+        await c.quiet('the mail\'s turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
+    name: 'a turn cut off by a restart, and its resume',
+    steps: [
+      { name: 'Cara asks for a turn', run: async (c) => {
+        setRelease(null);
+        c.say('Cara', 'build it');
+        c.say('Josh', 'and the readme');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+      } },
+      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
+        await crash(c.runner, c.id);
+        setRelease('ok');
+        const before = turnsRun();
+        const next = c.restart();
+        next.recover();
+        await c.quiet('the resume', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+];
+
+/** The server dies mid-turn and its turn goes with it, as in auto-resume.test.ts. */
+async function crash(r: Runner, id: number) {
+  const dir: string = (r as any).turns.get(id).dir;
+  await until('the turn\'s pid.json', () => existsSync(join(dir, 'pid.json')));
+  r.detachAll();
+  clearTimeout((r as any).limitTimer);
+  const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
+  for (const pid of [wrapper, -claude]) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+  await until('the killed wrapper to go', () => !existsSync(`/proc/${wrapper}`) || !readFileSync(`/proc/${wrapper}/cmdline`, 'utf8').includes(dir));
+}
+
+function makeRunner(store: Store, hooks?: (r: Runner) => void) {
+  const r = new Runner(store, () => {}, () => ({}), fake);
+  r.resumeGapMs = 1;
+  r.pollMs = 10;
+  r.limitDelayMs = 0;
+  r.limitGapMs = 0;
+  r.limitProvenGapMs = 0;
+  hooks?.(r);
+  return r;
+}
+
+/** A point a restart could land on: the store's copy there, and what the uncut run had done by then. */
+type Cut = { n: number; dir: string; step: number; what: string };
+type Logged = { kind: 'sent' | 'start'; texts: string[]; at: number; step: number };
+
+/**
+ * Copies the store at every event-loop task boundary after a task that wrote to it. A restart lands between tasks
+ * (the server's SIGTERM handler is itself one), so a cut inside a task would test a state no restart can leave.
+ */
+class Recorder {
+  cuts: Cut[] = [];
+  log: Logged[] = [];
+  step = 0;
+  error: unknown = null;
+  private changes: () => number;
+  private last: number;
+  private settings = new Map<string, string>();
+  private lastEvent = 0;
+  private status = '';
+  private micro = new Set<number>();
+  private hook = createHook({
+    init: (id, type) => void (['PROMISE', 'TickObject', 'Microtask'].includes(type) && this.micro.add(id)),
+    before: (id) => void (!this.micro.has(id) && this.boundary()),
+    destroy: (id) => void this.micro.delete(id),
+  });
+
+  private store: Store;
+  private id: number;
+  private dir: string;
+
+  constructor(store: Store, id: number, dir: string) {
+    this.store = store;
+    this.id = id;
+    this.dir = dir;
+    const q = store.db.prepare('SELECT total_changes() AS n');
+    this.changes = () => Number((q.get() as { n: number }).n);
+    this.last = this.changes();
+    this.describe(); // the starting point, so the first cut's label says only what changed
+  }
+
+  start() {
+    this.hook.enable();
+  }
+
+  stop() {
+    this.boundary();
+    this.hook.disable();
+  }
+
+  boundary() {
+    try {
+      const n = this.changes();
+      if (n === this.last) return;
+      this.last = n;
+      const dir = join(this.dir, `cut-${this.cuts.length}`);
+      mkdirSync(dir);
+      this.store.db.exec(`VACUUM main INTO '${join(dir, 'test.db')}'; VACUUM state INTO '${join(dir, 'state.db')}'`);
+      this.cuts.push({ n: this.cuts.length, dir, step: this.step, what: this.describe() });
+    } catch (err) {
+      // An async hook that throws ends the process: kept, and the flow fails on it.
+      this.error ??= err;
+    }
+  }
+
+  /** What changed since the last cut: settings keys, the minion's status, and the events added. */
+  private describe(): string {
+    const parts: string[] = [];
+    const now = new Map((this.store.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]).map((r) => [r.key, r.value]));
+    const set = [...now].filter(([k, v]) => this.settings.get(k) !== v).map(([k]) => k);
+    const gone = [...this.settings.keys()].filter((k) => !now.has(k));
+    if (set.length) parts.push(`set ${set.join(', ')}`);
+    if (gone.length) parts.push(`deleted ${gone.join(', ')}`);
+    this.settings = now;
+    const t = this.store.getTicket(this.id);
+    const status = `${t?.status}${t?.state ? `/${t.state}` : ''}`;
+    if (this.status && status !== this.status) parts.push(`status ${this.status} → ${status}`);
+    this.status = status;
+    const events = this.store.db.prepare('SELECT id, kind, data FROM events WHERE id > ? ORDER BY id').all(this.lastEvent) as { id: number; kind: string; data: string }[];
+    for (const e of events) {
+      const text = String(JSON.parse(e.data)?.text ?? '').replace(/\s+/g, ' ');
+      if (['note', 'user_message', 'error'].includes(e.kind)) parts.push(`${e.kind} "${text.length > 50 ? `${text.slice(0, 50)}…` : text}"`);
+      else parts.push(e.kind);
+    }
+    if (events.length) this.lastEvent = Number(events.at(-1)!.id);
+    return parts.join('; ') || 'other rows';
+  }
+
+  /** Messages sent before cut `n` and not yet handed to a turn that started. */
+  held(n: number): string[] {
+    const handed = new Set(this.log.filter((l) => l.kind === 'start' && l.at <= n).flatMap((l) => l.texts));
+    return this.log.filter((l) => l.kind === 'sent' && l.at <= n).flatMap((l) => l.texts).filter((t) => !handed.has(t));
+  }
+
+  /** The turn the uncut run started after cut `n` in the same step, which a restart there still owes. */
+  owed(n: number): Logged | undefined {
+    return this.log.find((l) => l.kind === 'start' && l.at > n && l.step === this.cuts[n].step);
+  }
+}
+
+/** Run `flow` uncut, copying the store at every cut; returns the recorder and the hooks restarted runners get. */
+async function record(flow: Flow) {
+  const dir = join(root, flow.name.replace(/\W+/g, '-'));
+  mkdirSync(dir);
+  const store = new Store(join(dir, 'test.db'));
+  const project = store.createProject('Test', null);
+  const hooks = flow.setup?.(store, project.id);
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, root, null);
+  store.updateTicket(t.id, { status: 'idle' });
+  const rec = new Recorder(store, t.id, dir);
+  const watch = (r: Runner) => {
+    const start = (r as any).startTurn.bind(r);
+    (r as any).startTurn = (p: unknown, ticket: { id: number }, batch: Msg[], ...rest: unknown[]) => {
+      const out = start(p, ticket, batch, ...rest);
+      // Handed over once its turn is saved (startTurn writes turn: before it returns); a turn that didn't start hands nothing.
+      if (ticket.id === t.id && r.isRunning(t.id)) rec.log.push({ kind: 'start', texts: batch.map((m) => m.text), at: rec.cuts.length, step: rec.step });
+      return out;
+    };
+    return r;
+  };
+  const runners = [watch(makeRunner(store, hooks))];
+  const ctx: Ctx = {
+    runner: runners[0], store, id: t.id,
+    say: (author, text) => {
+      rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
+      ctx.runner.send(t.id, author, text);
+    },
+    quiet: async (what, also = () => true) => {
+      await until(what, () => !ctx.runner.isRunning(t.id) && !(ctx.runner as any).lanes.busy(t.id) && also(), 15_000);
+      await sleep(30); // anything it set off on its way out
+    },
+    restart: () => {
+      ctx.runner = watch(makeRunner(store, hooks));
+      runners.push(ctx.runner);
+      return ctx.runner;
+    },
+  };
+  rec.start();
+  try {
+    for (const [i, step] of flow.steps.entries()) {
+      rec.step = i;
+      await step.run(ctx);
+    }
+  } finally {
+    rec.stop();
+    for (const r of runners) {
+      r.detachAll();
+      clearTimeout((r as any).limitTimer);
+    }
+  }
+  if (rec.error) throw rec.error;
+  // Each held message the flow sent reached a turn in the end: otherwise the flow, not a restart, lost it.
+  assert.deepEqual(rec.held(rec.cuts.length), [], `${flow.name}: the uncut run left messages unsent`);
+  store.db.close();
+  return { rec, hooks, id: t.id };
+}
+
+/** A server started on cut `cut`'s copy: what it does for the minion, and what that breaks. */
+async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?: (r: Runner) => void): Promise<string[]> {
+  const store = new Store(join(cut.dir, 'test.db'));
+  const r = makeRunner(store, hooks);
+  const started: Msg[][] = [];
+  (r as any).startTurn = (_p: unknown, ticket: { id: number }, batch: Msg[]) => void (ticket.id === id && started.push(batch));
+  (r as any).reattach = () => false; // its turn died with the old server
+  const problems: string[] = [];
+  try {
+    r.recover();
+    // Settled: a turn started, or its lane stayed free past recover's spaced starts.
+    const t0 = Date.now();
+    for (let free = 0; !started.length && free < 3;) {
+      await sleep(5);
+      free = (r as any).lanes.busy(id) || Date.now() - t0 < 20 ? 0 : free + 1;
+      if (Date.now() - t0 > 5_000) {
+        problems.push('it never settled: its lane stayed busy for 5 s');
+        break;
+      }
+    }
+    const t = store.getTicket(id)!;
+    const limit = r.limitWait(id);
+    const net = r.netWait(id);
+    const mail = store.getSetting<Msg[]>(mailKey(id)) ?? [];
+    const queue: Msg[] = (r as any).queues.get(id) ?? [];
+    const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && store.getSetting(coldKey(id)) ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : null;
+    const carried = new Set([...started.flat(), ...queue, ...(limit?.queued ?? []), ...(net?.queued ?? []), ...mail].map((m) => m.text));
+    for (const text of rec.held(cut.n)) if (!carried.has(text)) problems.push(`lost "${text}": no turn, queue, wait or held mail has it`);
+    if (!started.length && !waiting) {
+      const owed = rec.owed(cut.n);
+      if (owed) problems.push(`owed a turn (the uncut run started one next, with ${JSON.stringify(owed.texts.map((x) => x.slice(0, 40)))}) but it sits idle`);
+      if (t.status === 'running') problems.push('its status says running, with no turn');
+      if (queue.length) problems.push(`${queue.length} message(s) queued with nothing to run them`);
+      if (mail.length) problems.push('held mail with no cold time and not parked: nothing will release it');
+      for (const key of [`turn:${id}`, `resume-owed:${id}`, `waiting:${id}`, `saving:${id}`]) if (store.getSetting(key) !== null) problems.push(`${key} is left with nothing acting on it`);
+    }
+  } finally {
+    r.detachAll();
+    clearTimeout((r as any).limitTimer);
+    await sleep(0);
+    store.db.close();
+    rmSync(cut.dir, { recursive: true, force: true });
+  }
+  return problems.map((p) => `${flow.name}, cut ${cut.n + 1} of ${rec.cuts.length} (step "${flow.steps[cut.step].name}", after: ${cut.what}): ${p}`);
+}
+
+for (const flow of FLOWS) {
+  test(`a restart at any saved step of "${flow.name}" strands nothing`, { skip: !!process.env.RESTART_ANYWHERE_ONLY && process.env.RESTART_ANYWHERE_ONLY !== flow.name }, async () => {
+    const { rec, hooks, id } = await record(flow);
+    assert.ok(rec.cuts.length > 1, 'the flow wrote at more than one step');
+    const problems: string[] = [];
+    if (process.env.RESTART_ANYWHERE_DEBUG) console.log(rec.cuts.map((c) => `${c.n} [${c.step}] ${c.what}`).join('\n'), JSON.stringify(rec.log));
+    for (const cut of rec.cuts) problems.push(...(await restartAt(flow, rec, cut, id, hooks)));
+    assert.deepEqual(problems, []);
+  });
+}

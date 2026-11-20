@@ -324,6 +324,7 @@ export class KitSync {
         plan = planScheme(this.d.kitDir, kit, histories, dir);
       } catch (err) {
         console.error(`Kit sync: planning ${name}:`, err);
+        round.schemes.push({ project, name, state: 'failed', files: [], repo: dir });
         continue;
       }
       const merged = plan.filter((f) => f.status === 'merged');

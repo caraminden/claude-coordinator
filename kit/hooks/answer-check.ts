@@ -12,7 +12,8 @@
  * how many were false alarms; refusal turns on only for a check with under one false alarm in five.
  * Refusing is on for one shape, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106): the
  * stop is sent back once per prompt, never twice, and logs a `refused stop` line instead. The other
- * shapes only count. (A choice asked in prose is refused by src/link-check.ts, a different hook.) A `Process:` line in the final text (self-review's, not `none`) is also
+ * shapes only count. (A choice asked in prose is refused by src/link-check.ts, a different hook.)
+ * A `Process:` line in the final text (self-review's, not `none`) is also
  * logged, as a `process` line. A turn a person's message reached mid-turn (a steer) is skipped:
  * its short end may be the steer cutting it off, not a broken rule (#280).
  */

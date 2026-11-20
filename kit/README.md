@@ -13,7 +13,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     background Bash job runs, at most twice per prompt. A running Grunt doesn't block it:
     `claude -p` holds the turn for the Grunt and wakes it with the result (#1031).
   - `answer-check.ts` (Stop, minions and Taskmasters; job-check.ts runs it on each stop it lets
-    through): a trial that refuses nothing. It writes a
+    through): it sends back a proposal with no card, once per prompt (#1106); the other shapes only
+    count. It writes a
     `would refuse` retro-log line when a turn of five or more tool calls ends on a thin last
     message (under 200 characters, or ending in a colon), or when its final text proposes work
     and it made no ask_question, propose_plan or message to the Taskmaster or a minion. A turn a

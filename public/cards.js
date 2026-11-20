@@ -192,7 +192,7 @@ function notesBody(card) {
   ];
 }
 
-/** A revised plan (#907): what changed against the plan it replaces, the unchanged stretches behind a toggle, the whole plan one tap away. */
+/** A revised plan (#907): what changed against the plan it replaces, the whole plan as the body, the changes one tap away. */
 function revisionBody(card, prev, ticketId) {
   const c = planChanges(prev.plan, card.plan, prev.summary, card.summary);
   const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
@@ -201,9 +201,10 @@ function revisionBody(card, prev, ticketId) {
     : row(r.op, r.text));
   return [
     h('div', { class: 'rev-head' }, h('b', {}, 'Changed since the last version'), ` · ${changesLine(c)}`),
-    c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null,
-    h('div', { class: 'instructions-diff rev-diff' }, ...runs),
-    h('details', {}, h('summary', {}, 'The whole plan'), h('div', {}, markdown(card.plan, ticketId))),
+    h('details', { class: 'rev-changes' }, h('summary', {}, 'Show what changed'),
+      c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null,
+      h('div', { class: 'instructions-diff rev-diff' }, ...runs)),
+    h('div', {}, markdown(card.plan, ticketId)),
   ];
 }
 

@@ -152,6 +152,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 }
 /* A revised plan: what changed (#907) */
 .pcard .rev-head { margin-bottom: 0.3rem; }
+.pcard .rev-changes { margin-bottom: 0.6rem; }
 .pcard .rev-summary { margin-bottom: 0.3rem; color: var(--muted); }
 .pcard .rev-diff .same { color: var(--muted); }
 .pcard .rev-diff .add, .pcard .rev-diff .del { padding-block: 0.1rem; }

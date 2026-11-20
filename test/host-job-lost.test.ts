@@ -3,16 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { HostJobs, jobLost } from '../src/host-job.ts';
+import { HostJobs, jobLost, oomKilled } from '../src/host-job.ts';
 
 // #1325: a ship's unit killed from outside (systemd-oomd, on Nov 20) left no record but the journal; now the server hears it once.
 const root = mkdtempSync(join(tmpdir(), 'host-job-lost-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 test('a job that ended with no exit code is heard once, and keeps reading as code -1', () => {
-  const heard: string[] = [];
+  const heard: string[] = [], details: string[] = [];
   const before = jobLost.hear;
-  jobLost.hear = (dir) => heard.push(dir);
+  jobLost.hear = (dir, detail) => (heard.push(dir), details.push(detail));
   try {
     const jobs = new HostJobs(() => false);
     const dir = join(root, 'land-1');
@@ -23,6 +23,7 @@ test('a job that ended with no exit code is heard once, and keeps reading as cod
     assert.equal(jobs.state(dir, 100)!.code, -1);
     assert.equal(jobs.state(dir, 100)!.code, -1);
     assert.deepEqual(heard, [dir]);
+    assert.deepEqual(details, [`${dir}: ended with no exit code (killed from outside, stopped, or cut off by a restart)`]);
     assert.equal(readFileSync(join(dir, 'code'), 'utf8'), '-1');
     // A job that ended with its code is never heard.
     const done = join(root, 'land-2');
@@ -37,4 +38,13 @@ test('a job that ended with no exit code is heard once, and keeps reading as cod
   } finally {
     jobLost.hear = before;
   }
+});
+
+test("a lost unit's own journal says whether memory killed it: systemd-oomd, the kernel's OOM killer or its result", async () => {
+  const says = (text: string) => oomKilled('citadel-land-1', async () => text);
+  assert.equal(await says('citadel-land-1.service: systemd-oomd killed 12 process(es) in this unit.'), true);
+  assert.equal(await says('citadel-land-1.service: The kernel OOM killer killed some processes in this unit.'), true);
+  assert.equal(await says("citadel-land-1.service: Failed with result 'oom-kill'."), true);
+  assert.equal(await says("citadel-land-1.service: Failed with result 'signal'."), false);
+  assert.equal(await oomKilled('citadel-land-1', async () => { throw new Error('no journalctl'); }), false);
 });

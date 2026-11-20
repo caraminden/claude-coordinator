@@ -2,6 +2,7 @@
 // src/turn-wrapper.ts in a transient systemd unit of its own (or, without units, a detached child),
 // with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
 import { execFile, spawn } from 'node:child_process';
+import { oomKilled } from './host-job.ts';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -3196,7 +3197,12 @@ export class Runner {
         ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${live.container ? 'container' : live.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
         : null;
     // A row that outlives the chat's (#1325): kill waves (systemd-oomd's, most often) are counted from these.
-    if (killed) this.store.addHealthEvent('turn-killed', Date.now(), null, `minion ${ticketId}${live.unit ? ` (${live.unit})` : ''}: ${exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted')}`);
+    if (killed) {
+      const at = Date.now(), how = exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted');
+      const row = (oom: boolean) => this.store.addHealthEvent('turn-killed', at, null, `minion ${ticketId}${live.unit ? ` (${live.unit})` : ''}: ${oom ? 'out of memory, says the journal: ' : ''}${how}`);
+      if (live.unit) void oomKilled(live.unit).then(row, () => row(false));
+      else row(false);
+    }
     if (stopped || (signal && !killed)) {
       // Stopped by the user; leave it waiting for the next message.
     } else if (killed || !sawResult || code !== 0 || resultIsError) {

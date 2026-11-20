@@ -61,7 +61,7 @@ export function takeMark(dataDir: string): number | null {
   }
 }
 
-/** The mark ExecStopPost leaves for every stop (#1325): how systemd says the last run ended, read once at the next boot. */
+/** The mark ExecStopPost leaves for every stop (#1325): how systemd says the last run ended, read at the next boot. */
 export const STOP_MARK = 'last-stop.json';
 
 /** systemd's word on one stop (ExecStopPost's SERVICE_RESULT, EXIT_CODE and EXIT_STATUS) and when. */
@@ -74,16 +74,16 @@ export function markStop(env: Env, dataDir: string, now = Date.now()): StopMark 
   return mark;
 }
 
-/** At boot: the last stop's mark (removed, so it counts once), or null when none was left. */
-export function takeStop(dataDir: string): StopMark | null {
-  const file = join(dataDir, STOP_MARK);
+/**
+ * At boot: the last stop's mark, or null when none was left. It stays on disk until the next stop overwrites it: the
+ * boot skips a mark it has recorded already (recordBoot), so a boot killed before its row was written reads it again.
+ */
+export function readStop(dataDir: string): StopMark | null {
   try {
-    const m = JSON.parse(readFileSync(file, 'utf8'));
+    const m = JSON.parse(readFileSync(join(dataDir, STOP_MARK), 'utf8'));
     return Number(m?.at) > 0 ? { at: Number(m.at), result: String(m.result ?? ''), code: String(m.code ?? ''), status: String(m.status ?? '') } : null;
   } catch {
     return null;
-  } finally {
-    rmSync(file, { force: true });
   }
 }
 

@@ -137,7 +137,9 @@ export function recordBoot(store: Store, commit: string, at: number, stop?: Stop
     : newCode ? `a ship: new code ${commit.slice(0, 8)}`
     : 'a restart on the same code: a crash, the watchdog or by hand';
   if (last && stop !== undefined) {
-    const s = stopEvent(stop, newCode, at);
+    // A mark already recorded is an old one: this stop left none (ExecStopPost didn't run, e.g. the box went down).
+    const fresh = stop && store.healthEventsSince(['stop'], stop.at).some((e) => e.at === stop.at) ? null : stop;
+    const s = stopEvent(fresh, newCode, at);
     store.addHealthEvent('stop', s.at, last.commit_sha, s.detail);
   }
   store.addHealthEvent('boot', at, commit || null, reason);

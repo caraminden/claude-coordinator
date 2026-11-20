@@ -321,16 +321,27 @@ test('replay 10:44 to 10:47 on Nov 20: systemd-oomd stopped the server 11 times,
 test('replay 11:10 to 11:30 on Nov 20: three ships are planned stops, but the stalls between them are one incident', async () => {
   const s = setup(pst('11:00:00'));
   for (const at of ['11:12:01', '11:17:07', '11:21:19']) stopRow(s, pst(at), 'success', true);
-  // The journal's 38 stalls of 0.5 to 2 s in 2 minutes before 11:27, the first ones in a boot's quiet minutes (#1295's kind).
-  for (let i = 0; i < 38; i++) stall(s, pst('11:25:00') + i * 3000, 0.5 + (i % 4) * 0.5, i < 10 ? 'loop-lag-boot' : 'loop-lag');
+  // A reconstruction of the journal's stalls: 113 s of them from 11:22:23 to 11:27:23, all in the 11:21:19 boot's quiet
+  // minutes, so #1295 records them as boot stalls; spaced 4 s apart with lengths cycling 0.5 to 2 s (75 of them, 93.8 s).
+  for (let i = 0; i < 75; i++) stall(s, pst('11:22:23') + i * 4000, 0.5 + (i % 4) * 0.5, 'loop-lag-boot');
   const inc = s.make();
   s.clock.now = pst('11:30:00');
   await inc.tick();
   const open = s.store.getSetting<IncidentState>(STATE_KEY)!.open!;
-  assert.deepEqual(open.why, ['repeated stalls: the event loop was held more than 5% of 5 min']);
+  assert.deepEqual(open.why, ['repeated stalls: the event loop was held more than 10% of 5 min']);
   s.clock.now = open.last + QUIET_MS;
   await inc.tick();
   assert.equal(s.files.length, 1);
+});
+
+test('three unplanned stops before a long outage still open an incident at the first tick after it', async () => {
+  const s = setup(pst('09:00:00'));
+  for (const at of ['10:00:00', '10:03:00', '10:06:00']) stopRow(s, pst(at), 'oom-kill');
+  const inc = s.make();
+  s.clock.now = pst('12:30:00'); // the server was down two and a half hours; its boot wrote the stop rows with their own times
+  await inc.tick();
+  // Long quiet already, so it is written at once.
+  assert.equal(s.files.length, 1, JSON.stringify(s.store.getSetting(STATE_KEY)));
 });
 
 test('stopsTrigger and stallTrigger: below the line, and planned stops, open nothing', () => {
@@ -340,10 +351,11 @@ test('stopsTrigger and stallTrigger: below the line, and planned stops, open not
   assert.equal(stopsTrigger([row(0, 'crash: x'), row(12 * MIN, 'crash: x'), row(24 * MIN, 'crash: x')]), null);
   assert.equal(stopsTrigger([row(0, 'deploy: x'), row(MIN, 'by-hand: x'), row(2 * MIN, 'deploy: x'), row(3 * MIN, 'watchdog: x')]), null);
   assert.deepEqual(stopsTrigger([row(0, 'watchdog: x'), row(4 * MIN, 'unknown: x'), row(9 * MIN, 'killed: x')])?.from, 0);
-  // Nov 18's worst window: 5.1 s of stalls in 5 minutes (1.7%). 15 s exactly is 5%, not more than it.
+  // Nov 18's worst window: 5.1 s of stalls in 5 minutes (1.7%); a deploy's boot stalls on Nov 20, 19.7 s (6.6%). 30 s exactly is 10%, not more than it.
   const held = (s: number) => `The event loop was held for ${s.toFixed(1)} s: the server answered nobody meanwhile.`;
   assert.equal(stallTrigger([row(0, held(2.0)), row(MIN, held(1.6)), row(2 * MIN, held(1.5))]), null);
-  assert.equal(stallTrigger([row(0, held(7.5)), row(4 * MIN, held(7.5))]), null);
-  assert.equal(stallTrigger([row(0, held(8)), row(6 * MIN, held(8))]), null, 'more than 5 minutes apart');
-  assert.deepEqual(stallTrigger([row(0, held(0.5)), row(MIN, held(8)), row(2 * MIN, held(8))]), { from: 0, last: 2 * MIN, why: 'repeated stalls: the event loop was held more than 5% of 5 min' });
+  assert.equal(stallTrigger([row(0, held(9.8)), row(MIN, held(9.9)), row(2 * MIN, held(1.6)), row(3 * MIN, held(0.7))]), null);
+  assert.equal(stallTrigger([row(0, held(15)), row(4 * MIN, held(15))]), null);
+  assert.equal(stallTrigger([row(0, held(16)), row(6 * MIN, held(16))]), null, 'more than 5 minutes apart');
+  assert.deepEqual(stallTrigger([row(0, held(0.5)), row(MIN, held(15)), row(2 * MIN, held(15))]), { from: 0, last: 2 * MIN, why: 'repeated stalls: the event loop was held more than 10% of 5 min' });
 });

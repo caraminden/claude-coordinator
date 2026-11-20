@@ -32,15 +32,18 @@ export const STOPS_COUNT = 3;
 export const STOPS_WINDOW_MS = 10 * MIN;
 /**
  * Stalls adding up to more than this share of any STALL_WINDOW_MS are an incident (#1325). Picked from Nov 17 to 20's
- * rows: every window on Nov 17 to 19 stayed at or under 1.7% (5 s of 5 min); Nov 20 passed 5% only at 01:30, 13:06 (the
- * memory storm) and, from the journal, 11:12 to 11:27 (about 38 stalls of 0.5 to 2 s in 2 minutes).
+ * rows: every window on Nov 17 to 19 stayed at or under 1.7% (5 s of 5 min); on Nov 20, 11:22 to 11:27 held 38% (113 s,
+ * from the journal) and 01:30 14.3%. Not 5%: the first boot with #1295's boot stalls (15:43 PST Nov 20) held 6.6% in its
+ * quiet minutes, which would make most deploys an incident; the 13:06 memory storm (5.0%) has its own memory-high row.
  */
-export const STALL_SHARE = 0.05;
+export const STALL_SHARE = 0.1;
 export const STALL_WINDOW_MS = 5 * MIN;
 /** The stall kinds counted: loop-lag, and #1295's loop-lag-boot (stalls in the 10 quiet minutes after a boot). */
 export const STALL_KINDS = ['loop-lag', 'loop-lag-boot'];
-/** How far back the stop and stall triggers look each tick: a cluster older than this was seen by an earlier tick. */
+/** How far back the stall trigger looks each tick: stalls are recorded as they happen, so an earlier tick saw older ones. */
 const LOOK_BACK_MS = 60 * MIN;
+/** Stops are recorded at the next boot with the stop's own time, which can be long ago after an outage: they look back further. */
+const STOPS_LOOK_BACK_MS = 24 * 60 * MIN;
 /** An open incident is written once this long passes with no trigger. */
 export const QUIET_MS = 30 * MIN;
 /** The timeline reads this long before the first trigger, and this long after the last. */
@@ -481,7 +484,7 @@ export class Incidents {
       out.push({ from: this.line.since, last: now, why: `the ship line stood still from ${pacific(this.line.since)} (${head.label || `#${head.seq}`}${head.phase ? `, ${head.phase}` : ''})` });
     }
     const since = Math.max(state.after + 1, now - LOOK_BACK_MS);
-    const stops = stopsTrigger(this.d.store.healthBetween(since, now + 1, 500, ['stop']));
+    const stops = stopsTrigger(this.d.store.healthBetween(Math.max(state.after + 1, now - STOPS_LOOK_BACK_MS), now + 1, 500, ['stop']));
     if (stops) out.push(stops);
     const stalls = stallTrigger(this.d.store.healthBetween(since, now + 1, 2000, STALL_KINDS));
     if (stalls) out.push(stalls);

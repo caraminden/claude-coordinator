@@ -454,9 +454,10 @@ test('a boot records why the last process ended (#1325): a ship, by hand, out of
   recordBoot(store, 'bbbb2222', 3000, { at: 2000, result: 'success', code: 'exited', status: '0' });
   recordBoot(store, 'bbbb2222', 5000, { at: 4000, result: 'success', code: 'exited', status: '0' });
   recordBoot(store, 'bbbb2222', 7000, { at: 6000, result: 'oom-kill', code: 'killed', status: 'KILL' });
+  recordBoot(store, 'bbbb2222', 8000, { at: 6000, result: 'oom-kill', code: 'killed', status: 'KILL' }); // recorded already: this stop left none
   recordBoot(store, 'bbbb2222', 9000, null);
   recordBoot(store, 'bbbb2222', 11000); // a caller that can't read marks (a preview) records no stop
-  assert.deepEqual(stops(), [[2000, 'deploy', 'aaaa1111'], [4000, 'by-hand', 'bbbb2222'], [6000, 'out-of-memory', 'bbbb2222'], [9000, 'unknown', 'bbbb2222']]);
+  assert.deepEqual(stops(), [[2000, 'deploy', 'aaaa1111'], [4000, 'by-hand', 'bbbb2222'], [6000, 'out-of-memory', 'bbbb2222'], [8000, 'unknown', 'bbbb2222'], [9000, 'unknown', 'bbbb2222']]);
 });
 
 test('the last stall says its cause in words, and a stall just after a boot is shown, marked (P2)', async () => {

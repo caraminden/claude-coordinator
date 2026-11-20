@@ -6,5 +6,5 @@ import { join } from 'node:path';
 import { markExit, markStop } from '../src/sd-watchdog.ts';
 
 const dataDir = process.env.DATA_DIR || join(homedir(), '.local/share/claude-coordinator');
-markStop(process.env, dataDir);
+try { markStop(process.env, dataDir); } catch (err: any) { console.error(`Stop mark failed: ${err?.message ?? err}`); } // never at the cost of the watchdog mark below
 if (markExit(process.env, dataDir)) console.log('Watchdog stop: marked for the next boot.');

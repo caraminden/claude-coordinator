@@ -38,8 +38,25 @@ const SKIP = /^(BASH.*|SHELLOPTS|UID|EUID|PPID|ENV|_|__job)$/;
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-/** Hears each job that ended with no exit code (killed from outside, stopped, or cut off by a restart), once; the server records it. */
-export const jobLost = { hear: (_dir: string) => {} };
+/** Hears each job that ended with no exit code, once, with what happened in words; the server records it (#1325). */
+export const jobLost = { hear: (_dir: string, _detail: string) => {} };
+
+/** systemd's lines for a unit killed for memory: systemd-oomd's kill, the kernel's OOM killer, and the unit's result. */
+const OOM_LINE = /Failed with result 'oom-kill'|systemd-oomd killed|OOM killer killed/;
+const userJournal = (unit: string) => new Promise<string>((done) =>
+  execFile('journalctl', ['--user', '-u', unit, '-n', '50', '-o', 'cat', '--no-pager', '-q'], { timeout: 10_000 }, (err, out) => done(err ? '' : String(out))));
+
+/** Whether this account's own journal says `unit` was killed for memory (never another user's or the system journal). */
+export async function oomKilled(unit: string, journal: (unit: string) => Promise<string> = userJournal): Promise<boolean> {
+  return OOM_LINE.test(await journal(unit).catch(() => ''));
+}
+
+async function heardLost(dir: string) {
+  let unit: string | null = null;
+  try { unit = readFileSync(join(dir, 'unit'), 'utf8').trim() || null; } catch { /* ran as the server's child */ }
+  const oom = unit ? await oomKilled(unit) : false;
+  jobLost.hear(dir, `${dir}${unit ? ` (${unit})` : ''}: ${oom ? 'killed for memory (out of memory, says the journal)' : 'ended with no exit code (killed from outside, stopped, or cut off by a restart)'}`);
+}
 
 export class HostJobs {
   /** Jobs running as the server's child (no units, or systemd-run failed): a restart would cut them off. */
@@ -74,6 +91,7 @@ export class HostJobs {
     writeFileSync(join(dir, 'started'), String(Date.now()));
     const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', join(dir, 'wrapper.sh'), dir, job.cwd];
     if (!this.units()) return this.child(wrapper, dir, job.onChildEnd);
+    writeFileSync(join(dir, 'unit'), job.unit); // for jobLost's journal look (#1325)
     this.starting.add(dir);
     execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', ...this.props, `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
@@ -119,7 +137,7 @@ export class HostJobs {
         // Noted once per job, as its code, so the hook hears it once (#1325): ships cut off by systemd-oomd were only in the journal.
         try {
           writeFileSync(join(dir, 'code'), '-1', { flag: 'wx' });
-          jobLost.hear(dir);
+          void heardLost(dir);
         } catch {
           // Noted already.
         }

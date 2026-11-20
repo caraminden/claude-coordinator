@@ -21,7 +21,7 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { StatusPage, recordBoot } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
-import { restartDetail, startWatchdog, takeMark, takeStop } from './src/sd-watchdog.ts';
+import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -335,6 +335,8 @@ if (previews) {
   previews.buildScheme = ownScheme;
 }
 if (!BOOT_CHECK) {
+  // Before any recover() below, so a job lost across the restart is recorded too (#1325).
+  jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
   void runner.warmCards();
   runner.recover();
 }
@@ -1558,8 +1560,7 @@ const status = new StatusPage({
   tell: (projectId, text) => tellHome(projectId, text),
 });
 if (!BOOT_CHECK && !PREVIEW) {
-  recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, takeStop(DATA_DIR));
-  jobLost.hear = (dir) => store.addHealthEvent('job-killed', Date.now(), null, `${dir}: ended with no exit code (killed from outside, stopped, or cut off by a restart)`);
+  recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));
   status.start();
   memoryStorms.start();
 }

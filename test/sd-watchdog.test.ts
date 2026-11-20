@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MARK, markExit, markStop, pingEvery, restartDetail, startWatchdog, stopEvent, takeMark, takeStop } from '../src/sd-watchdog.ts';
+import { MARK, markExit, markStop, pingEvery, restartDetail, startWatchdog, stopEvent, takeMark, readStop } from '../src/sd-watchdog.ts';
 import { Store } from '../src/db.ts';
 import { until } from './wait.ts';
 
@@ -102,13 +102,15 @@ test('the restart names the last stall recorded before it', () => {
   }
 });
 
-test('every stop leaves a mark of how systemd says it ended, taken once at the next boot (#1325)', () => {
+test('every stop leaves a mark of how systemd says it ended, read at the next boot and kept until the next stop (#1325)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sd-stop-'));
   try {
-    assert.equal(takeStop(dir), null);
+    assert.equal(readStop(dir), null);
     markStop({ SERVICE_RESULT: 'oom-kill', EXIT_CODE: 'killed', EXIT_STATUS: 'KILL' }, dir, 1234);
-    assert.deepEqual(takeStop(dir), { at: 1234, result: 'oom-kill', code: 'killed', status: 'KILL' });
-    assert.equal(takeStop(dir), null, 'counted once');
+    assert.deepEqual(readStop(dir), { at: 1234, result: 'oom-kill', code: 'killed', status: 'KILL' });
+    assert.equal(readStop(dir)?.at, 1234, 'kept: a boot killed before its row was written reads it again');
+    markStop({ SERVICE_RESULT: 'success', EXIT_CODE: 'exited', EXIT_STATUS: '0' }, dir, 5678);
+    assert.equal(readStop(dir)?.result, 'success', 'the next stop overwrites it');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

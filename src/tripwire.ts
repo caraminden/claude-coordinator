@@ -629,7 +629,7 @@ const SQL_WRITE = /\b(insert|update|delete|drop|alter|create|replace|vacuum|rein
 // Commands that look at a path without showing what's in it; fine even for keys.
 const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei', 'realpath', 'readlink', 'getfacl', 'lsattr', 'chmod', 'chown']);
 // Prefixes that run the next word as the command.
-const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run']);
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run', 'setsid', 'citadel-heavy']);
 // systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`, `--uni x`: getopt takes a
 // long option's prefix; one that's ambiguous makes systemd-run refuse, so skipping a word for it is harmless; #513).
 const SYSTEMD_RUN_LONG = ['host', 'machine', 'capsule', 'unit', 'property', 'description', 'slice', 'expand-environment', 'service-type', 'uid', 'gid', 'nice', 'working-directory', 'root-directory', 'setenv', 'output', 'json', 'job-mode', 'background', 'path-property', 'socket-property', 'timer-property', 'on-active', 'on-boot', 'on-startup', 'on-unit-active', 'on-unit-inactive', 'on-calendar'];
@@ -637,6 +637,8 @@ const systemdRunValue = (opt: string) => /^-[^-HMCupE]*[HMCupE]$/.test(opt) || (
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 // node, tsx, bun and deno options known to take no value; any other may take the next word as its value (#468 S01-11 review).
+// Commands that run another one named among their words (`npm exec -- tsx x.ts`, `mise exec -- node x.ts`).
+const LAUNCHERS = /^(npx|pnpx|bunx|npm|pnpm|yarn|bun|mise|rtx|corepack|volta|fnm|asdf)$/;
 const RUNNER_FLAG = /^(-|--|-A|-i|--interactive|--test|--watch|--experimental-strip-types|--enable-source-maps|--expose-gc|--trace-warnings|--trace-uncaught|--trace-deprecation|--inspect|--inspect-brk|--inspect-wait|--test-only|--test-force-exit|--experimental-test-coverage|--no-[\w-]+)$/;
 // ssh and friends take key paths and remote paths; their arguments are not local reads or writes.
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'mosh']);
@@ -904,6 +906,25 @@ function schemeFolder(p: string, cfg: TripwireConfig): boolean {
 const ENV_WHY = "Check one variable with `[ -n \"$NAME\" ] && echo set`, list the names alone with `env | cut -d= -f1`, or print a harmless one with `echo \"$PATH\"`: a turn's environment can hold its tokens.";
 const ENV_ALL = `\`env\` with no command prints the whole environment, values and all. ${ENV_WHY}`;
 
+/**
+ * Why `export`, `declare`, `typeset`, `local` or `set` would print variables' values, or null. With no
+ * name they list every variable (`export -p`, `declare -x`, bare `set`; zsh's bare `local` too), as `env` does;
+ * `-p` prints the named ones, and so does zsh's `typeset NAME` with no flags, so a named token, a name the
+ * tripwire can't read, or a `-m` pattern is refused too. `declare -f` and `-F` list functions, not variables.
+ */
+function envDump(name: string, args: Word[]): string | null {
+  const shown = [name, ...args.map((w) => w.text)].join(' ');
+  const flags = args.filter((w) => /^[-+]/.test(w.text)).map((w) => w.text).join('');
+  const names = args.filter((w) => !/^[-+]/.test(w.text));
+  if (/[fF]/.test(flags)) return null;
+  if (!names.length) return `\`${shown}\` with no name prints every variable, values and all. ${ENV_WHY}`;
+  const prints = /[pm]/.test(flags) || (!flags && (name === 'declare' || name === 'typeset'));
+  if (!prints) return null;
+  const read = names.filter((w) => !/^[A-Za-z_]\w*=/.test(w.text));
+  const risky = read.find((w) => w.unknown || SECRET_VAR.test(w.text) || GH_VARS.test(w.text) || (/m/.test(flags) && /[*?[]/.test(w.text)));
+  return risky ? `\`${shown}\` would print ${risky.unknown ? 'a variable the tripwire can\'t read' : risky.text}, which may hold a token. ${ENV_WHY}` : null;
+}
+
 /** A filter that keeps only the names of `env`'s NAME=value lines: `cut -d= -f1`, `awk -F= '{print $1}'`, `sed 's/=.*//'` (#485). */
 function namesOnly(ws: string[]): boolean {
   const [name, ...a] = ws;
@@ -1074,6 +1095,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const blind = words.find((w) => w.unknown);
     if (blind) return hard(`\`claude\` with ${shown(blind)}, a word the tripwire can't read, is blocked: it could launch an ultra review. Write the arguments out. ${ULTRAREVIEW_WHY}`);
   }
+  const dump = /^(export|declare|local|typeset)$/.test(name) || (name === 'set' && !args.length) ? envDump(name, args) : null;
+  if (dump) return hard(dump);
   if (/^(export|declare|local|readonly|typeset|unset)$/.test(name)) {
     const gh = args.map((w) => w.text.split('=')[0]).find((v) => GH_VARS.test(v));
     if (gh) return hard(`${name === 'unset' ? 'Unsetting' : 'Setting'} ${gh} is blocked. ${GH_ENV_WHY}`);
@@ -1210,7 +1233,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     if (sysctl === i) return null;
   }
 
-  const runner = words.findIndex((w, k) => k >= i && /^(node|tsx|bun|deno|ts-node)$/.test(basename(w.text)));
+  // The runner is the command itself, or the one a launcher runs (`npx tsx server.ts`): a search that names
+  // node (`grep -n node src/server.ts`, `git log -S node -- server.ts`) doesn't run it (#1317).
+  const runner = words.findIndex((w, k) => k >= i && /^(node|tsx|bun|deno|ts-node)$/.test(basename(w.text)) && (k === i || LAUNCHERS.test(name)));
   const npmStart = /^(npm|pnpm|yarn)$/.test(name) && (args[0]?.text === 'start' || (args[0]?.text === 'run' && args[1]?.text === 'start'));
   // The runner's own words: its options, their values (--import ./x.ts) and its script, not the script's arguments
   // (`node tools/count.ts src/server.ts`, #468 S01-11). With -e or -p there's no script file, so every word counts.

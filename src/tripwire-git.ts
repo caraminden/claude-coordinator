@@ -162,7 +162,8 @@ function pushReason(args: Word[], dir: string | null): Verdict | null {
     const colon = r.indexOf(':');
     let dst = colon < 0 ? r : r.slice(colon + 1) || r.slice(0, colon);
     if (dst === 'HEAD' || dst === '@') dst = current();
-    dst = dst.replace(/^refs\/heads\//, '');
+    // git completes heads/main to refs/heads/main, as guard.sh knows.
+    dst = dst.replace(/^refs\/heads\//, '').replace(/^heads\//, '');
     if (PROTECTED.test(dst)) return hard(`Pushing to ${dst} is blocked. ${MAIN_WHY}`);
     if (dst.includes('*')) return hard(`The wildcard refspec \`${r}\` could push main. Push your minion branch by name.`);
   }

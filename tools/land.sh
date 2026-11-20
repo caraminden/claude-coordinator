@@ -28,7 +28,7 @@
 # For a restart that cuts off running turns (only with a person's OK), land first, then run
 # tools/deploy.sh --now: it joins the restart this one queued.
 #
-# The ship train (#1166, docs/adr/0012-ship-train.md): at step 2 the landing at the front of the line stacks up to
+# The ship train (#1166, docs/adr/0020-ship-train.md): at step 2 the landing at the front of the line stacks up to
 # LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
 # main and deploy once for them all. A red train is bisected by its prefixes: the green part ships, the first ship
 # that turned it red is refused with its own failure, and the ships after it stay in line. Each rider waits in line

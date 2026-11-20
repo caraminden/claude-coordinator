@@ -17,12 +17,13 @@ const STRIP = 33;
 /** index.html's theme colours for the title bar overlay, used until the page reports its own (preload.cjs). */
 const PLAIN = { light: '#f6f5f2', dark: '#161514' };
 
+const ICON = join(__dirname, 'icon.ico');
+const AUMID = 'Citadel.Desktop';
+
+// One copy at a time: starting a second (the shortcut again) brings the first one's window forward (second-instance).
 if (!app.requestSingleInstanceLock()) app.quit();
 app.setAppUserModelId(AUMID);
 Menu.setApplicationMenu(null);
-
-const ICON = join(__dirname, 'icon.ico');
-const AUMID = 'Citadel.Desktop';
 let win = null;
 let tray = null;
 let quitting = false;

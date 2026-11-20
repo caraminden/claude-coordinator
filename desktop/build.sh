@@ -3,8 +3,6 @@
 # its app (resources/app) and electron.exe renamed Citadel.exe. The zip is what #1148's feed takes (publish_desktop,
 # exe "Citadel.exe", started "file"). Runs on Linux with curl, unzip and zip; nothing is compiled.
 #   desktop/build.sh [out.zip]     (default: $TMPDIR/citadel-desktop.zip)
-# shortcut: Citadel.exe keeps Electron's icon in Explorer (the window, tray and shortcuts use icon.ico); changing the exe's own
-# icon needs rcedit, a Windows tool, so do it if people mind the icon on the shortcut.
 set -euo pipefail
 VERSION=45.4.1
 SHA256=2ba6223afa9121f42831fefe92c434334907540165294fc56697449d12e7cfe9
@@ -21,7 +19,12 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 unzip -q "$dist" -d "$work/Citadel"
-mv "$work/Citadel/electron.exe" "$work/Citadel/Citadel.exe"
+# Citadel's icon and name on the exe itself (Explorer, the taskbar, Task Manager), by resedit-cli, a pure-JS resource editor.
+# It drops Electron's signature, which no longer matches once the exe changes.
+npm exec --yes --package=resedit-cli@3.1.1 -- resedit --in "$work/Citadel/electron.exe" --out "$work/Citadel/Citadel.exe" \
+  --ignore-signed --icon "1,$here/icon.ico" --product-name Citadel --file-description Citadel --internal-name Citadel \
+  --original-filename Citadel.exe --product-version "$VERSION.0" --file-version "$VERSION.0"
+rm "$work/Citadel/electron.exe"
 rm -f "$work/Citadel/resources/default_app.asar"
 mkdir "$work/Citadel/resources/app"
 cp "$here"/{main.cjs,route.cjs,preload.cjs,package.json,icon.ico} "$work/Citadel/resources/app/"

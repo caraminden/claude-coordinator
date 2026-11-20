@@ -4,6 +4,7 @@
 // another run's or build's live work is left alone (#1223).
 import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { procsUnder } from './helpers.ts';
 
@@ -20,22 +21,35 @@ function parentOf(pid: number): [number, string] | undefined {
     return [Number(stat.slice(close + 2).split(' ')[1]), stat.slice(open + 1, close)];
   } catch {}
 }
+const ENV = 'CITADEL_LEAK_RUN';
+let runId = '';
+/** Whether the process's environment holds this run's id. Unreadable counts as no. */
+function carriesId(pid: number, id: string): boolean {
+  if (!id) return false;
+  try {
+    return readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`${ENV}=${id}`);
+  } catch {
+    return false;
+  }
+}
 /**
  * Whether a process is this run's own: a descendant of `root` (the runner), or one whose parent has gone and left it to init or
  * systemd (a detached fake claude outliving its server, #271). Another run's or build's live process has a parent of its own
- * outside this run and is left alone, even if its command line names a temp folder this run can't see.
+ * outside this run and is left alone, even if its command line names a temp folder this run can't see. A leftover with no parent
+ * counts only if its environment carries this run's id (globalSetup puts one in process.env, so everything the run spawns
+ * inherits it): two runs on one box each own only their own orphans.
  */
-export function ownedByRun(pid: number, root = process.pid): boolean {
+export function ownedByRun(pid: number, root = process.pid, id = runId): boolean {
   let cur = pid;
   for (let i = 0; i < 64; i++) {
     const p = parentOf(cur);
     if (!p) return false;
     const [ppid] = p;
     if (ppid === root) return true;
-    if (ppid <= 1) return cur === pid; // reparented to init: ours only if it is the leftover itself
+    if (ppid <= 1) return cur === pid && carriesId(pid, id); // reparented to init: ours only if it is the leftover itself and has our id
     if (cur === pid) {
       const parent = parentOf(ppid);
-      if (parent && /^(systemd|init)$/.test(parent[1])) return true;
+      if (parent && /^(systemd|init)$/.test(parent[1])) return carriesId(pid, id);
     }
     cur = ppid;
   }
@@ -44,6 +58,8 @@ export function ownedByRun(pid: number, root = process.pid): boolean {
 let before = new Set<number>();
 
 export async function globalSetup() {
+  runId = randomUUID();
+  process.env[ENV] = runId;
   before = new Set(scratch().keys());
 }
 

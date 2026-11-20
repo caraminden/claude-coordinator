@@ -26,11 +26,29 @@ test('a child of this run, and an orphan it left behind, are this run\'s (#271)'
   const marker = `child-${process.pid}`;
   const kid = spawn('sh', ['-c', `sleep 30; : ${marker} ${gone}`], { stdio: 'ignore' });
   const marker2 = `orphan-${process.pid}`;
-  spawn('sh', ['-c', `(sh -c 'sleep 30; : ${marker2} ${gone}' &) ; sleep 0.1`], { stdio: 'ignore' }).unref();
+  spawn('sh', ['-c', `(sh -c 'sleep 30; : ${marker2} ${gone}' &) ; sleep 0.1`], { stdio: 'ignore', env: { ...process.env, CITADEL_LEAK_RUN: 'mine' } }).unref();
   await new Promise((r) => setTimeout(r, 500));
   const orphan = pidOf(`sleep 30; : ${marker2}`);
   try {
     assert.equal(ownedByRun(kid.pid!), true);
-    assert.equal(ownedByRun(orphan), true);
+    assert.equal(ownedByRun(orphan, process.pid, 'mine'), true);
   } finally { stop(kid.pid!); stop(orphan); }
+});
+
+test('two runs on one box each own only the orphan that carries their own id', async () => {
+  // Detached leftovers (reparented to init), one per run; each has its run's id in its environment, as globalSetup's does.
+  const left = (id: string) => {
+    spawn('sh', ['-c', `(sh -c 'sleep 30; : orphan-${id}-${process.pid} ${gone}' &) ; sleep 0.1`], { stdio: 'ignore', env: { ...process.env, CITADEL_LEAK_RUN: id } }).unref();
+  };
+  left('runA');
+  left('runB');
+  await new Promise((r) => setTimeout(r, 500));
+  const [a, b] = [`orphan-runA-${process.pid}`, `orphan-runB-${process.pid}`].map((m) => pidOf(`sleep 30; : ${m}`));
+  try {
+    assert.ok(a > 0 && b > 0, 'both leftovers started');
+    assert.equal(ownedByRun(a, process.pid, 'runA'), true);
+    assert.equal(ownedByRun(b, process.pid, 'runA'), false, "run A must not claim run B's leftover");
+    assert.equal(ownedByRun(b, process.pid, 'runB'), true);
+    assert.equal(ownedByRun(a, process.pid, 'runB'), false);
+  } finally { stop(a); stop(b); }
 });

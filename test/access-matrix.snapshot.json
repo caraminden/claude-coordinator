@@ -4012,6 +4012,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/units": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /apps/cx/link": {
   "anon": "200",
   "person": "200",

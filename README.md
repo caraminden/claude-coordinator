@@ -285,6 +285,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator-prune.timer
 ```
 
+**Installed or not.** Every unit and drop-in in `deploy/` is checked against `~/.config/systemd/user/` at boot and every 6 hours (read-only, `src/unit-drift.ts`): Settings > Units (admins) lists each as installed, missing or different with its fish install command, and Citadel's members get one push when one newly goes missing or different. A unit kept out on purpose goes in `deploy/not-installed.txt`.
+
 **Down alerts.** Every 5 minutes `deploy/citadel-watchdog.timer` runs
 `tools/watchdog.ts` (`src/watchdog.ts`): it checks `claude-coordinator.service`
 and `/api/health`, and each contraption's `citadel-app-<name>.service` while it is

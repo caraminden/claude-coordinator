@@ -394,7 +394,7 @@ const SETTINGS_GROUPS = [
   ['Scheme', 'running', [['members', 'Members', 'users', 'Who works in this scheme'], ['orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions']]],
   ['You', 'held', [['my-instructions', 'My instructions', 'pen', 'Yours, in every scheme'], ['account', 'Your account', 'user', 'Password, Claude and GitHub logins'],
     ['machines', 'Machines', 'monitor', 'Computers you lend to minions'], ['notifications', 'Notifications', 'bell', 'Push, and what pings you'], ['usage', 'Usage', 'chart', 'Claude and Codex spend']]],
-  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel']], true],
+  ['Admin', 'teal', [['app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows'], ['people', 'People', 'people', 'Who can sign in'], ['contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel'], ['units', 'Units', 'shield', 'Which deploy/ units are installed on this host']], true],
 ];
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
 const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');

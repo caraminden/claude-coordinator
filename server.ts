@@ -57,6 +57,9 @@ import { CiMirror, ghDownload } from './src/ci-mirror.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
+import { unitRoutes } from './src/routes/units.ts';
+import { DEPLOY_DIR } from './src/routes/units.ts';
+import { checkUnits, problemKeys, summary as unitSummary } from './src/unit-drift.ts';
 import { Credentials } from './src/credentials.ts';
 import { Secrets } from './src/secrets.ts';
 import { OpenRouter } from './src/openrouter.ts';
@@ -312,6 +315,26 @@ if (runner.units && !BOOT_CHECK) {
   execFile('systemctl', ['--user', 'show', '-p', 'MemoryMax', '--value', 'citadel.slice'], (err, out) => {
     if (err || out.trim() === 'infinity') console.warn('citadel.slice has no MemoryMax, so turns run uncapped: install deploy/citadel.slice (see README).');
   });
+}
+// Units in deploy/ not installed here, or different (#1216): checked at boot and every 6 h; Citadel's members get one push when a
+// unit newly goes missing or different, and one again if it is fixed and then breaks again. Read-only: it installs nothing.
+async function checkUnitDrift() {
+  const rows = checkUnits(DEPLOY_DIR);
+  const now = problemKeys(rows);
+  const seen = new Set(store.getSetting<string[]>('unit_drift_seen') ?? []);
+  const fresh = now.filter((k) => !seen.has(k));
+  if (fresh.length) {
+    const home = ownScheme();
+    const bad = rows.filter((r) => fresh.includes(`${r.name}:${r.state}`));
+    if (home) await pusher.broadcast(home.id, { title: 'Units not installed on perigee', body: `${bad.map((r) => `${r.name} (${r.state})`).join(', ')}. Install commands: Settings > Units.`.slice(0, 280), tag: 'unit-drift', url: '/c/#/p/' + home.id + '/units' });
+    else return; // no scheme to tell yet: ask again next time
+  }
+  store.setSetting('unit_drift_seen', now);
+  if (now.length) console.warn(`${unitSummary(rows)}; Settings > Units has the install commands.`);
+}
+if (!BOOT_CHECK && !PREVIEW && runner.units) {
+  setTimeout(() => void safely('unit drift', checkUnitDrift), 90_000).unref();
+  setInterval(() => void safely('unit drift', checkUnitDrift), 6 * 3600_000).unref();
 }
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
@@ -1470,7 +1493,7 @@ runner.onBudgetWake = (ticketId, text) => {
   const ticket = store.getTicket(ticketId);
   if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;

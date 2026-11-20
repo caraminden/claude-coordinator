@@ -887,7 +887,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|memory|decisions|ideas|people|contraptions|account|usage|notifications|skills|reviews)$/))) await showProject(Number(m[1]), { kind: m[2] });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|memory|decisions|ideas|people|contraptions|units|account|usage|notifications|skills|reviews)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health))?$/))) await showProject(Number(m[1]), { kind: 'ci', tab: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });

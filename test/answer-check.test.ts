@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { answerCheck, answerHook, placeholderInCommand, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
+import { answerCheck, answerHook, liveClaimCheck, liveClaims, placeholderInCommand, processLine, proposalLine, readTurn } from '../kit/hooks/answer-check.ts';
 
 // Fixture transcripts in Claude Code's JSONL shape: the prompt carries promptId, assistant entries don't.
 const prompt = (text: string, promptId = 'p1') => ({ type: 'user', promptId, message: { role: 'user', content: [{ type: 'text', text }] } });
@@ -193,4 +193,66 @@ test('a proposal without a card is sent back once per prompt; the other shapes o
   assert.equal(stop('Done: it is teal now.', { prompt_id: 'p4' }), undefined);
   assert.equal(stop('Run:\n\n```fish\nssh <host>\n```\n', { prompt_id: 'p5' }), undefined, 'a placeholder only counts');
   assert.equal(stop(PROPOSAL, { session_id: 'r2', prompt_id: undefined, stop_hook_active: true }), undefined, 'no prompt id: only a first stop');
+});
+
+// The live-claim check (#1113): the live-state sentences struck in the week to 2026-11-19, and look-alikes that aren't.
+const STRUCK = [
+  "Every land's desktop job waits its turn there, so each one sits queued for minutes.",
+  'Its last four lands all failed on the same test, `busy_cara.rs:196`, which needs fixing in Peek itself.',
+  "So it's not a flaky runner.",
+  "The Windows runner machine (`cara-desktop-ci-runners`) isn't lent to TWIReader.",
+  `Citadel's 4:40 PM PST "no login needed" change for Mandate's install file and icons isn't actually taking effect.`,
+  "#993's test job never got a runner.",
+  'Yes, you can reorder it: #1002 has been live since 20:18 PST.',
+  "The runs from landings that already finished shouldn't still be in the queue; the landing tool is meant to cancel them.",
+  "Josh's Taskmaster started that build and Build 6 (#1105), so it starts their feeders.",
+  'Still waiting on you: [#334\'s card](#/p/3/t/334?e=1).',
+];
+const NOT_LIVE = [
+  'land.sh comes from the Citadel kit, so the fix belongs to Citadel.',
+  'Moving more work to Sonnet wouldn\'t save much: Sonnet\'s cache reads cost the same as Opus\'s.',
+  'The overlay is click-through and never takes focus, so the game keeps your mouse.',
+  'With a Library this big, I think the 500 cap is the wrong design.',
+  "#1002 is probably live by now.",
+  'Is #1002 live?',
+  "I started #630 for the two bars.",
+  'It shows #1073 instead of the closed #1066.',
+  'The relay goes out after Build 4 is live.',
+  '```bash\ngh run list # the run failed\n```',
+  '> #12 is live',
+];
+
+test('live claims: the struck live-state sentences are claims; hedges, questions, own acts, code and quotes are not', () => {
+  for (const s of STRUCK) assert.equal(liveClaims(s).length, 1, s);
+  for (const s of NOT_LIVE) assert.deepEqual(liveClaims(s), [], s);
+});
+
+const bash = (command: string) => [
+  { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command } }] } },
+  { type: 'user', promptId: 'p1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ok' }] } },
+];
+
+test('live-claim check: a claim in a turn that read nothing is a hit; a read, a run of gh or git, or the prompt\'s own report grounds it', () => {
+  const claim = 'Yes: #1002 has been live since 20:18 PST.';
+  const hit = liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is #1002 live yet?'), calls(['Edit']), say(claim)), 'p1'));
+  assert.deepEqual(hit, [`live-state claim without a read · "${claim}"`], "a person's question names #1002 but doesn't ground it");
+  assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), calls(['mcp__coordinator__live_facts']), say(claim)), 'p1')), []);
+  assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), bash('gh run list --branch main'), say(claim)), 'p1')), []);
+  assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), bash('npm test'), say(claim)), 'p1')).length, 1, 'a Bash call that reads no live state grounds nothing');
+  // A minion's report or Citadel's shipped line in the prompt passes the fact on.
+  assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[#1002 Fix the thing]: #1002 is live (abc123).'), say(claim)), 'p1')), []);
+  assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[GitHub]: CI passed on d21a82a in PR #241 (6 checks).'), say('CI passed on PR #241, all 6 checks.')), 'p1')), []);
+  assert.equal(liveClaimCheck(readTurn(jsonl(prompt('[#1003 Other]: #1003 is live.'), say(claim)), 'p1')).length, 1, "another minion's report doesn't ground #1002");
+});
+
+test('live-claim check only counts: a hit is logged as a would-refuse line and never sends the stop back', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
+  const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
+  writeFileSync(path, jsonl(prompt('[Josh]: anything for me?'), say('Still waiting on you: [#441\'s card](#/p/2/t/441?e=3), about citadel.zip.')));
+  const out: { block?: string } = {};
+  const hits = answerHook({ session_id: 's9', prompt_id: 'p1', transcript_path: path }, { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared }, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out });
+  assert.deepEqual(hits, ['live-state claim without a read · "Still waiting on you: [#441\'s card](#/p/2/t/441?e=3), about citadel.zip."']);
+  assert.equal(out.block, undefined);
+  const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  assert.match(log, /would refuse · live-state claim without a read/);
 });

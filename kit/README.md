@@ -17,7 +17,9 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     count. It writes a
     `would refuse` retro-log line when a turn of five or more tool calls ends on a thin last
     message (under 200 characters, or ending in a colon), or when its final text proposes work
-    and it made no ask_question, propose_plan or message to the Taskmaster or a minion. A turn a
+    and it made no ask_question, propose_plan or message to the Taskmaster or a minion, or when
+    it states live state (another minion's, CI's, a deploy's, or a card waiting on a person) without
+    a call that reads it, such as live_facts, gh or git, or a report of it in its prompt (#1113). A turn a
     steer reached is skipped. The weekly process digest counts the lines to decide on refusal.
   - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
     runs, counted from that runner's own summary), failed push, refused stop, would-refuse stop (answer-check.ts) or `process` line (a self-review's `Process:` line, also answer-check.ts) in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) and `smoke` lines (a land its quick checks refused before the line) to `<date>/land.md`.

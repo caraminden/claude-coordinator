@@ -275,7 +275,7 @@ createServer((req, res) => {
     await until('the first health check to reach the preview', () => seen().length || failed, 30_000, what);
     // The 3 s abort and one more ask: well under 10 s. Without the abort fetch waits 5 minutes.
     await until('the preview to boot after its first health check hung', () => booted || failed, 10_000, what);
-    if (failed) throw failed;
+    if (failed) throw new Error(`The boot failed: ${what()}`, { cause: failed });
     assert.ok(seen().length >= 2, what());
   } finally {
     // A boot still going (this test failed) would outlive it with its server running: end the server, and the boot with it.

@@ -55,10 +55,10 @@ const listed = async (who: string, id: number) => (await call(who, '/api/project
 test('a hide is the hider\'s own: it flags the scheme and zeroes its badge for them only, and Unhide restores it', async () => {
   const { data: obsidian } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Obsidian' } });
   assert.equal((await call('Cara', `/api/projects/${obsidian.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
-  // A minion waiting on people gives the scheme a Needs-you count.
+  // A minion waiting on people's answer (one-tap replies; ready and try don't count since #1121) gives the scheme a Needs-you count.
   const store = new Store(join(root, 'data', 'coordinator.db'));
-  const t = store.createTicket({ project_id: obsidian.id, kind: 'ticket', title: 'Ready one', permission_mode: 'default', created_by: 'Josh' });
-  store.updateTicket(t.id, { state: 'ready', note: 'done' });
+  const t = store.createTicket({ project_id: obsidian.id, kind: 'ticket', title: 'Asking one', permission_mode: 'default', created_by: 'Josh' });
+  store.updateTicket(t.id, { replies: JSON.stringify(['Ship it']) });
   store.db.close();
   assert.equal((await listed('Cara', obsidian.id)).inbox, 1);
 
@@ -122,9 +122,10 @@ test('fresh: something waits that wasn\'t waiting when you last opened the schem
   const { data: quartz } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Quartz' } });
   assert.equal((await call('Cara', `/api/projects/${quartz.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   const store = new Store(join(root, 'data', 'coordinator.db'));
-  const minion = (title: string, state: string) => {
+  // Each waits on an answer through one-tap replies (ready and try don't count since #1121); clearing them is it going away.
+  const minion = (title: string) => {
     const t = store.createTicket({ project_id: quartz.id, kind: 'ticket', title, permission_mode: 'default', created_by: 'Cara' });
-    store.updateTicket(t.id, { state, note: 'done' });
+    store.updateTicket(t.id, { replies: JSON.stringify(['Go']) });
     return t.id;
   };
   const pill = (who: string) => listed(who, quartz.id).then((p) => [p.inbox, p.fresh]);
@@ -133,25 +134,25 @@ test('fresh: something waits that wasn\'t waiting when you last opened the schem
     const { data } = await call(who, `/api/projects/${quartz.id}/inbox`);
     assert.equal((await call(who, `/api/projects/${quartz.id}/seen-items`, { method: 'PUT', body: { keys: data.items.map((i: any) => i.key) } })).status, 200);
   };
-  const a = minion('A', 'ready');
-  const b = minion('B', 'try');
+  const a = minion('A');
+  const b = minion('B');
   // First sight: today's items count as seen, so nothing is marked on day one.
   assert.deepEqual(await pill('Cara'), [2, false]);
-  const c = minion('C', 'ready');
+  const c = minion('C');
   assert.deepEqual(await pill('Cara'), [3, true], 'up: new');
   await open('Cara');
   assert.deepEqual(await pill('Cara'), [3, false], 'opening the scheme saw it');
-  store.updateTicket(a, { state: null });
+  store.updateTicket(a, { replies: null });
   assert.deepEqual(await pill('Cara'), [2, false], 'only gone away: plain');
-  const d = minion('D', 'ready');
-  store.updateTicket(b, { state: null });
+  const d = minion('D');
+  store.updateTicket(b, { replies: null });
   assert.deepEqual(await pill('Cara'), [2, true], 'one came, one went: same count, still new (Josh, 2026-11-11)');
-  store.updateTicket(c, { state: null });
+  store.updateTicket(c, { replies: null });
   assert.deepEqual(await pill('Cara'), [1, true], 'one came, two went: down, still new');
-  store.updateTicket(d, { state: null });
+  store.updateTicket(d, { replies: null });
   assert.deepEqual(await pill('Cara'), [0, false], 'the new one went too: nothing at zero');
   // Josh's first look takes today's items, and Cara's marks never were his.
-  minion('E', 'ready');
+  minion('E');
   assert.deepEqual(await pill('Josh'), [1, false]);
   assert.deepEqual(await pill('Cara'), [1, true], 'Josh\'s look is his own');
   await open('Josh');

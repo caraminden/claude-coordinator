@@ -289,7 +289,7 @@ let running: Promise<void> | null = null;
  */
 export function cachedUsage(store: Store, projectId: number | null, now = Date.now()): UsageReport | null {
   const hit = reports.get(keyOf(projectId));
-  if (!hit || now - hit.at >= CACHE_MS) void refreshUsage(store, projectId, now).catch(() => {});
+  if (!hit || now - hit.at >= CACHE_MS) void refreshUsage(store, projectId, now).catch((err) => console.error('skill usage refresh:', err.message));
   return hit?.report ?? null;
 }
 

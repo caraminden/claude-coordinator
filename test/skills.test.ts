@@ -207,6 +207,13 @@ test('the page lists the skills, and a member turns a kit skill off and on, with
   assert.equal(page.status, 200);
   assert.ok(page.data.items.some((i: any) => i.name === 'citadel:self-review'));
   assert.deepEqual(page.data.off, []);
+  // The list never carries a scan's wait: its usage is the last report or null, and /skills/usage is where the counts come from.
+  assert.ok(page.data.usage === null || typeof page.data.usage.skills === 'object');
+  const counts = await call(`/api/projects/${p.id}/skills/usage`);
+  assert.equal(counts.status, 200);
+  assert.equal(typeof counts.data.usage.skills, 'object');
+  assert.equal(typeof counts.data.since, 'number');
+  assert.equal(counts.data.all, false);
   assert.match(page.data.warnings['self-review'], /every ship in this scheme waits for a person's go/);
   assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: ['not-a-skill'] } })).status, 400);
   assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: 'grilling' } })).status, 400);

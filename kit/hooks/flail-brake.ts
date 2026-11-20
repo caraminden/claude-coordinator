@@ -2,15 +2,15 @@
  * The flail brake (PostToolUse and PostToolUseFailure, never blocks): when the same test command goes red three
  * times in a row with no file edited in between, adds one line to Claude's context pointing at
  * citadel:diagnosing-bugs (Josh, 2026-11-19, "Repeat-failure nudge"; from Peek Auras #637, idea Z4). Once per
- * streak. An edit (Edit, Write, MultiEdit, NotebookEdit: the hook sees them, as test-first.ts does), a green run
- * or a different test command resets the count. A file changed by a Bash command (sed -i, git checkout) is
+ * streak. An edit (Edit, Write, MultiEdit, NotebookEdit: the hook sees them, as test-first.ts does), a green test run
+ * or a different test command resets (other Bash calls, like a grep of the output, do not) the count. A file changed by a Bash command (sed -i, git checkout) is
  * invisible here, so such a run counts as unedited. State: one file per session in the turn's temp folder.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testRuns } from './retro-log.ts';
+import { mask, testRuns } from './retro-log.ts';
 import { redRun } from './test-first.ts';
 
 /** Reds in a row that earn the line: a starting value. */
@@ -36,7 +36,8 @@ export function flailBrakeHook(input: any, stateDir = join(tmpdir(), 'citadel-ki
   const raw = String(input?.tool_input?.command ?? '');
   if (input?.tool_input?.run_in_background) return null;
   if (!redRun(input)) {
-    write(null);
+    // Only a green test run ends a streak: reading the output (grep, git status) between reds is the flail itself.
+    if (testRuns(raw).length || /(?:^|[\s;&|(])(?:\S*\/)?citadel-test\b/.test(mask(raw))) write(null);
     return null;
   }
   // redRun knows what a test command is (citadel-test too); the runs only name it.

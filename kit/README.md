@@ -28,8 +28,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     saying to write the failing test first. Once per session; a red run first keeps it quiet.
   - `flail-brake.ts` (PostToolUse on edits and Bash, never blocks): when the same test command goes
     red three times in a row with no Edit, Write, MultiEdit or NotebookEdit between, it adds one
-    line pointing at `citadel:diagnosing-bugs`. Once per streak; a green run, another command or an
-    edit resets it. A file changed from Bash (`sed -i`) is invisible to it.
+    line pointing at `citadel:diagnosing-bugs`. Once per streak; a green test run, another test command or an
+    edit resets it; other Bash calls don't. A file changed from Bash (`sed -i`) is invisible to it.
   - `big-read.ts` (PreToolUse on Read and Bash, every session, Grunts included): sends back a
     whole read of a big file (over 600 lines or 25k chars): a Read with no `limit`, or a plain
     `cat path` / `sed -n 'N,Mp' path` whose output isn't piped or redirected. The reason names the

@@ -259,6 +259,12 @@ test('flail brake: three identical red runs with no edit between give the line o
   run(cmd, true, 'd');
   assert.equal(run('node --test test/b.test.ts', true, 'd'), null);
   assert.equal(run(cmd, true, 'd'), null);
+  // Reading the output between reds doesn't reset it.
+  run(cmd, true, 'r');
+  run('grep -n fail out.log', false, 'r');
+  run(cmd, true, 'r');
+  run('git status', true, 'r');
+  assert.ok(run(cmd, true, 'r'), 'a grep or git status in between is not an edit');
   // Sessions don't share a count; a non-test command or a red run in the background counts for nothing.
   run(cmd, true, 'x');
   run(cmd, true, 'y');

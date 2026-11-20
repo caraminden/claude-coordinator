@@ -243,11 +243,15 @@ ln -s ~/claude-coordinator/deploy/claude-coordinator.socket ~/.config/systemd/us
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/resources.conf ~/.config/systemd/user/claude-coordinator.service.d/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/socket.conf ~/.config/systemd/user/claude-coordinator.service.d/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/priority.conf ~/.config/systemd/user/claude-coordinator.service.d/
+ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/watchdog.conf ~/.config/systemd/user/claude-coordinator.service.d/
 systemctl --user daemon-reload
 ```
 
 The socket takes effect at the next restart after that; until then the server
 binds the port itself.
+`watchdog.conf` (#1135) restarts a hung server: link it only once the live server pings
+(`src/sd-watchdog.ts`), then restart, since the server reads the watchdog's limit at start;
+`tools/watchdog-trial.sh` tries it on a scratch unit first.
 
 **Backups.** `deploy/backup.sh` takes an online copy (`VACUUM INTO`, one read transaction) at 04:00 into
 `$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core

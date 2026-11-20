@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,34 +30,39 @@ test("takes systemd's variables out of the environment, so children can't ping f
   assert.deepEqual(off, {});
 });
 
-test('a hung event loop stops the pings; they resume when it frees', async () => {
+test('the pings come from the event loop: none while it is held, and they resume after', async () => {
+  const at: number[] = [];
+  const env = { NOTIFY_SOCKET: '@/test', WATCHDOG_USEC: '400000' };
+  const w = startWatchdog(env, { pid: 1, log: () => {}, notify: (_s, done) => (at.push(Date.now()), done(null)) })!;
+  try {
+    await new Promise((r) => setTimeout(r, 450));
+    const from = Date.now();
+    while (Date.now() < from + 1000); // a hang: synchronous work on the loop
+    const to = Date.now();
+    await new Promise((r) => setTimeout(r, 450));
+    assert.ok(at.filter((t) => t < from).length >= 3, `pinged every 100 ms before: ${at}`);
+    assert.deepEqual(at.filter((t) => t >= from && t < to), [], 'no ping while the loop was held');
+    assert.ok(at.filter((t) => t >= to).length >= 2, `pinged again after: ${at}`);
+  } finally {
+    w.stop();
+  }
+});
+
+test('each ping is a systemd-notify WATCHDOG=1 on the socket systemd gave', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sd-watchdog-'));
+  const path = process.env.PATH;
   try {
     const log = join(dir, 'pings');
     // A stand-in systemd-notify on PATH: each ping is a line, with the socket it was sent to.
-    writeFileSync(join(dir, 'systemd-notify'), `#!/bin/sh\necho "$NOTIFY_SOCKET $1 $(date +%s%3N)" >> ${log}\n`);
+    writeFileSync(join(dir, 'systemd-notify'), `#!/bin/sh\necho "$NOTIFY_SOCKET $1" >> ${log}\n`);
     chmodSync(join(dir, 'systemd-notify'), 0o755);
-    const script = `import { startWatchdog } from ${JSON.stringify(new URL('../src/sd-watchdog.ts', import.meta.url).href)};
-      startWatchdog(process.env, { log: () => {} });
-      setInterval(() => {}, 1000);
-      setTimeout(() => { const end = Date.now() + 1500; while (Date.now() < end); }, 600);`;
-    // WATCHDOG_USEC 400 ms: a ping every 100 ms.
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, NOTIFY_SOCKET: '@/test', WATCHDOG_USEC: '400000' },
-      stdio: 'ignore',
-    });
-    try {
-      await until('25 pings', () => existsSync(log) && readFileSync(log, 'utf8').split('\n').length > 25, 10_000);
-    } finally {
-      child.kill();
-    }
-    const lines = readFileSync(log, 'utf8').trim().split('\n');
-    assert.ok(lines.every((l) => l.startsWith('@/test WATCHDOG=1 ')), lines[0]);
-    const at = lines.map((l) => Number(l.split(' ')[2]));
-    const gaps = at.slice(1).map((t, i) => t - at[i]);
-    assert.ok(Math.max(...gaps) >= 1200, `the 1.5 s hang left a gap in the pings: ${gaps}`);
-    assert.ok(gaps.filter((g) => g >= 1200).length === 1, `only the hang did: ${gaps}`);
+    process.env.PATH = `${dir}:${path}`;
+    const w = startWatchdog({ NOTIFY_SOCKET: '@/test', WATCHDOG_USEC: '60000000' }, { pid: 1, log: () => {} })!;
+    w.stop();
+    await until('the first ping', () => existsSync(log) && readFileSync(log, 'utf8'), 10_000);
+    assert.equal(readFileSync(log, 'utf8'), '@/test WATCHDOG=1\n');
   } finally {
+    process.env.PATH = path;
     rmSync(dir, { recursive: true, force: true });
   }
 });

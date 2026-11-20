@@ -271,7 +271,7 @@ export function statusPage(projectId, all = false) {
     list.replaceChildren(row('citadel', 'Citadel', citadel.verdict),
       h('div', { class: 'ci-list-head' }, 'Your apps'),
       ...(sorted.length ? sorted.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, all ? 'No app in a scheme you\'re in.' : 'No app in this scheme.')]),
-      ...(all ? [] : [h('a', { class: 'ci-more', href: `#/p/${projectId}/status/all` }, h('span', { class: 'ci-li-name' }, 'All schemes\' apps'))]));
+      ...(all ? [] : [h('a', { class: 'ci-li ci-all-link', href: `#/p/${projectId}/status/all` }, h('span', { class: 'ci-li-name' }, 'All schemes\' apps'))]));
     const v = app ? app.verdict : citadel.verdict;
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, app ? app.title : 'Citadel'), toneChip(CHIP[v.tone], WORD[v.tone]),

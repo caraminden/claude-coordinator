@@ -281,7 +281,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
     list.replaceChildren(...why, ...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
       h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
       h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '', ...pcRows);
-    if (scoped) list.prepend(h('a', { class: 'ci-more', href: `#/p/${projectId}/ci/all` }, h('span', { class: 'ci-li-name' }, 'All schemes')));
+    if (scoped) list.prepend(h('a', { class: 'ci-li ci-all-link', href: `#/p/${projectId}/ci/all` }, h('span', { class: 'ci-li-name' }, 'All schemes')));
     if (pcPicked) {
       detail.replaceChildren(
         h('div', { class: 'ci-head' }, h('h3', {}, pcPicked.host), h('span', { class: 'muted small' }, 'CI desktop load')),

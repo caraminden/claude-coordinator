@@ -477,6 +477,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-li { display: grid; grid-template-columns: 0.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
+.ci-all-link { display: block; text-decoration: none; color: var(--accent); }
 .ci-more { display: none; }
 .ci-runs-on { margin: var(--space-3) 0 0; }
 .ci-runs-on button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }

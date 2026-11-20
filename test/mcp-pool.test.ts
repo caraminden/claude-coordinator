@@ -295,3 +295,47 @@ test('a turn whose pool starts gets its port, and its wrapper registers it', asy
   assert.deepEqual(out.argv, ['--mcp-config', join(dir, 'mcp.json')]);
   assert.ok(app.calls.some((c) => c.path === '/api/tickets/44' && c.token === 'tok-w'));
 });
+
+// #1272: the runner once left the pool out of spec.json, and Claude Code ran the turn with no Citadel tools at all.
+// A pooled config naming a variable the turn's env lacks gives way to the stdio config beside it, when there is one.
+/** Run the wrapper on a turn whose `mcp.json` is `mcp` (none if null), with `mcp-stdio.json` beside it if `stdio`; returns the stand-in claude's argv and the turn's stderr. */
+async function wrapperWith(mcp: object | null, stdio: boolean, env: Record<string, string> = {}) {
+  const r = root();
+  const dir = join(r, 'turn');
+  mkdirSync(dir);
+  const fake = join(r, 'fake-claude.mjs');
+  writeFileSync(fake, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(join(r, 'argv.json'))}, JSON.stringify(process.argv.slice(2))); console.log(JSON.stringify({ type: 'result' }));`);
+  writeFileSync(join(dir, 'prompt.jsonl'), '{}\n');
+  if (mcp) writeFileSync(join(dir, 'mcp.json'), JSON.stringify(mcp));
+  if (stdio) writeFileSync(join(dir, 'mcp-stdio.json'), JSON.stringify({ mcpServers: { thread: { type: 'stdio', command: 'node', args: ['mcp.ts'] } } }));
+  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json'), '-p'], cwd: r, env: { PATH: process.env.PATH, ...env } }));
+  const { spawn } = await import('node:child_process');
+  const w = spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.ts'), dir], { stdio: 'ignore' });
+  await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 20_000);
+  w.kill();
+  assert.equal(JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')).code, 0);
+  return { argv: JSON.parse(readFileSync(join(r, 'argv.json'), 'utf8')), stderr: readFileSync(join(dir, 'stderr.log'), 'utf8'), dir };
+}
+const pooledConfig = { mcpServers: { thread: { type: 'http', url: 'http://127.0.0.1:${CITADEL_POOL_PORT}/mcp', headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' } } } };
+
+test('a turn whose mcp.json names a variable its env lacks runs its own helpers, and says so', async () => {
+  const { argv, stderr, dir } = await wrapperWith(pooledConfig, true, { COORDINATOR_TOKEN: 'tok' });
+  assert.deepEqual(argv, ['--mcp-config', join(dir, 'mcp-stdio.json'), '-p']);
+  assert.match(stderr, /names CITADEL_POOL_PORT, which its env lacks; it runs its own helpers/);
+});
+
+test('an unreadable mcp.json with the stdio config beside it runs the stdio config rather than failing the turn', async () => {
+  const { argv, stderr, dir } = await wrapperWith(null, true);
+  assert.deepEqual(argv, ['--mcp-config', join(dir, 'mcp-stdio.json'), '-p']);
+  assert.match(stderr, /can't be read .*; it runs its own helpers/);
+});
+
+test('a filled-in mcp.json, or one with nothing better beside it, is passed to Claude as it is', async () => {
+  const filled = await wrapperWith(pooledConfig, true, { COORDINATOR_TOKEN: 'tok', CITADEL_POOL_PORT: '1234' });
+  assert.deepEqual(filled.argv, ['--mcp-config', join(filled.dir, 'mcp.json'), '-p']);
+  assert.equal(filled.stderr, '');
+  const defaulted = await wrapperWith({ mcpServers: { x: { type: 'http', url: 'http://${HOST:-127.0.0.1:1}/mcp' } } }, true);
+  assert.deepEqual(defaulted.argv, ['--mcp-config', join(defaulted.dir, 'mcp.json'), '-p']);
+  const alone = await wrapperWith(pooledConfig, false);
+  assert.deepEqual(alone.argv, ['--mcp-config', join(alone.dir, 'mcp.json'), '-p']);
+});

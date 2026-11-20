@@ -524,6 +524,11 @@ function settingsTooBig(bytes: number, allow: string[], facts: TurnFacts): strin
     + 'Closing finished minions shrinks it; for good, the per-folder git rules need a hook in their place (shared handoffs/taskmaster-settings-2mib.md, follow-up 4).';
 }
 
+/** What the runner writes to a turn's spec.json for its wrapper, from every path that starts one: one place, so the pool can't go missing from one (#1272). */
+export function wrapperSpec(plan: Pick<LaunchPlan, 'command' | 'args' | 'env' | 'pool'>, cwd: string | null) {
+  return { command: plan.command, args: plan.args, cwd, env: plan.env, ...(plan.pool ? { pool: plan.pool } : {}) };
+}
+
 /** A turn's launch as plain data: nothing here is written or started. The runner writes `files` into the turn's folder, puts command, args and env in its spec.json and spawns the wrapper as `spawn` says. */
 export interface LaunchPlan {
   command: string;

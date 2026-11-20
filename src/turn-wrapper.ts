@@ -11,8 +11,9 @@
 //   exit.json     out: { code, signal, error? } once claude has exited
 //   beat          out: touched every 5 s while this runs
 //   mcp-stdio.json in: the turn's own-helpers tool config, used instead of mcp.json when spec.pool won't start (#1259)
+//                 or mcp.json names a variable the env lacks (#1272)
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { keepTurn, type PoolSpec } from './pool-client.ts';
 
@@ -53,6 +54,22 @@ if (spec.pool) {
     }, 2_000).unref();
   } catch (err: any) {
     appendFileSync(file('stderr.log'), `The shared tool server didn't start (${err.message}); this turn runs its own helpers.\n`);
+    spec.args = spec.args.map((a: string) => (a === file('mcp.json') ? file('mcp-stdio.json') : a));
+  }
+}
+
+// Claude Code leaves an unset ${VAR} in an http server's url as written, refuses the server and runs the turn with no
+// Citadel tools (#1272). A config naming one this env lacks gives way to the turn's own helpers, when it has them.
+if (spec.args.includes(file('mcp.json')) && existsSync(file('mcp-stdio.json'))) {
+  let why = '';
+  try {
+    const unset = new Set([...readFileSync(file('mcp.json'), 'utf8').matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/g)].filter((m) => !m[2] && spec.env[m[1]] === undefined).map((m) => m[1]));
+    if (unset.size) why = `names ${[...unset].join(', ')}, which its env lacks`;
+  } catch (err: any) {
+    why = `can't be read (${err.message})`;
+  }
+  if (why) {
+    appendFileSync(file('stderr.log'), `This turn's tool config ${why}; it runs its own helpers.\n`);
     spec.args = spec.args.map((a: string) => (a === file('mcp.json') ? file('mcp-stdio.json') : a));
   }
 }

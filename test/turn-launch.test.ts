@@ -76,7 +76,7 @@ function scrub(value: unknown): any {
   return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-'));
 }
 
-interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string) => void }
+interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string) => void | Promise<void> }
 /** Start one turn and return everything it was launched with, then end it. */
 async function launch(c: Case) {
   const project = c.project ? store.getProject(c.project)! : store.createProject(`P${store.listProjects().length + 1}`, null);
@@ -99,7 +99,7 @@ async function launch(c: Case) {
   const files = readdirSync(dir).filter((f) => f !== 'pin').sort().map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
   const got = { launched: true, notes, spec: read('spec.json'), settings: read('settings.json'), mcp: read('mcp.json'), codexTripwire: read('codex-tripwire.json'), files, pinned: readdirSync(join(dir, 'pin')).length > 0,
     spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
-  c.peek?.(dir);
+  await c.peek?.(dir);
   // End it: the wrapper that would have run it never started.
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
@@ -274,4 +274,88 @@ test("a turn gets its scheme's review set as files, named in its turn message, w
   assert.match(message, /This scheme switched off: Lens: Tests, Fresh eyes\./);
   assert.match(message, /review-kit\/finding-checker\.md` \(Finding checker\)/);
   assert.match(added, /Check the migration claims twice\./);
+});
+
+// #1272: from #1259 going live, every turn under the service had no Citadel tools: the runner's spec.json left out the
+// pool, so the wrapper never set CITADEL_POOL_PORT and Claude Code refused mcp.json's url as written. The real CLI can't
+// run in CI (the runner may lack it, and a skip there is red), so a stand-in does what Claude Code does with the config:
+// fill in ${VAR} and ${VAR:-default} from its env, leaving an unset one as written, refuse a server whose url doesn't
+// parse, and list each server's tools over HTTP with its headers. The turn runs through the runner's own wrapper and pool.
+test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Claude Code can reach it from mcp.json', async () => {
+  const { createServer } = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const { readPool } = await import('../src/pool-client.ts');
+  // The pool's calls back to the app go here, never to the live server the runner's env names.
+  const app = createServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'));
+  await new Promise<void>((r) => app.listen(0, '127.0.0.1', r));
+  const standIn = join(root, 'stand-in-claude.mjs');
+  const out = join(root, 'stand-in-claude.json');
+  writeFileSync(standIn, `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const fill = (s) => s.replace(/\\$\\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\\}/g, (m, k, d) => process.env[k] ?? d ?? m);
+    const config = JSON.parse(readFileSync(process.argv[process.argv.indexOf('--mcp-config') + 1], 'utf8'));
+    const servers = {};
+    for (const [name, s] of Object.entries(config.mcpServers)) {
+      if (s.type !== 'http') { servers[name] = { status: 'stdio' }; continue; }
+      const url = fill(s.url);
+      try { new URL(url); } catch { servers[name] = { status: 'failed', error: "'url' is not a valid URL: " + url }; continue; }
+      const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+      for (const [k, v] of Object.entries(s.headers ?? {})) headers[k] = fill(v);
+      const rpc = async (id, method) => {
+        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id, method, params: method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'stand-in', version: '1' } } : {} }) });
+        const text = await res.text();
+        if (!res.ok) throw new Error(res.status + ' ' + text);
+        const data = text.split('\\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());
+        return JSON.parse(data.length ? data[data.length - 1] : text);
+      };
+      try {
+        await rpc(1, 'initialize');
+        servers[name] = { status: 'connected', tools: (await rpc(2, 'tools/list')).result.tools.map((t) => t.name) };
+      } catch (e) { servers[name] = { status: 'failed', error: e.message }; }
+    }
+    writeFileSync(${JSON.stringify(out)}, JSON.stringify(servers));
+    console.log(JSON.stringify({ type: 'result' }));`);
+  let pool: { pid: number } | null = null;
+  let seen: any = null;
+  let exit: { code: number | null } | null = null;
+  runner.pool = true;
+  try {
+    await launch({
+      peek: async (dir) => {
+        // The turn as the runner launched it, with the stand-in in claude's place and the app swapped for the fake.
+        const spec = JSON.parse(readFileSync(join(dir, 'spec.json'), 'utf8'));
+        spec.command = process.execPath;
+        spec.args = [standIn, ...spec.args];
+        spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${(app.address() as any).port}` };
+        writeFileSync(join(dir, 'spec.json'), JSON.stringify(spec), { mode: 0o600 });
+        const [node, ...wrapper] = spawned[0].wrapper;
+        const w = spawn(node, wrapper, { stdio: 'ignore' });
+        for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
+        w.kill();
+        exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
+        if (spec.pool) pool = readPool(spec.pool.dir);
+        seen = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
+      },
+    });
+  } finally {
+    runner.pool = false;
+    if (pool) try { process.kill(pool!.pid, 'SIGKILL'); } catch {}
+    app.close();
+  }
+  assert.equal(exit?.code, 0, 'the wrapper saw the stand-in exit cleanly');
+  assert.ok(seen, 'the stand-in claude ran');
+  assert.equal(seen.thread.status, 'connected', `the thread server: ${seen.thread.error}`);
+  assert.ok(seen.thread.tools.includes('set_thread_status'), `its tools: ${seen.thread.tools}`);
+});
+
+test('a pooled turn in a unit hands its wrapper the pool too, to start in a unit of its own', async () => {
+  runner.pool = true;
+  try {
+    const got = await launch({ units: true });
+    assert.match(got.spec.pool.script, /\/mcp-pool\.ts$/);
+    assert.ok(got.spec.pool.systemdRun.some((a: string) => a.startsWith('--unit=citadel-mcp-pool-')), JSON.stringify(got.spec.pool));
+    assert.match(got.mcp.mcpServers.thread.url, /\$\{CITADEL_POOL_PORT\}/);
+  } finally {
+    runner.pool = false;
+  }
 });

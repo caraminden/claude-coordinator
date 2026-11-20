@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { projectSharedDir } from '../src/workspace.ts';
+import { bootServer } from './helpers.ts';
 import { derive, handoffIn, laterCollections, LATER_STALE_MS, parseHandoff, sendTitles } from '../src/ideas.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ideas-'));
@@ -176,4 +178,23 @@ test('sendsOf finds a Send in any chat of the scheme by the page path, and the m
   const s = store.ideas.sendsOf(p.id, page);
   assert.match(s.text, /A1 One: Go/);
   assert.equal(s.source, t.number);
+});
+
+test('starting a minion through the API from a handoff marks its idea started at once', async () => {
+  const s = await bootServer();
+  try {
+    const { data: p } = await s.call('/api/projects', { name: 'Peek Auras' });
+    const shared = projectSharedDir(s.data, p.id);
+    mkdirSync(join(shared, 'handoffs'), { recursive: true });
+    const abs = join(shared, 'handoffs', 'handoff-footsteps.md');
+    writeFileSync(abs, '# Handoff: quieter footsteps\n\nFrom #3.\n');
+    assert.equal((await s.call(`/api/projects/${p.id}/ideas`)).data.ideas[0].status, 'proposed');
+    const t = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Footsteps', message: `Start from the handoff \`${abs}\`.`, properties: { type: 'feature' } });
+    assert.equal(t.status, 201);
+    const row = (await s.call(`/api/projects/${p.id}/ideas`)).data.ideas[0];
+    assert.equal(row.status, 'started');
+    assert.equal(row.minion.number, t.data.number);
+  } finally {
+    await s.stop();
+  }
 });

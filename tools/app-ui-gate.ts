@@ -74,7 +74,7 @@ export function wordFindings(texts: Record<string, string>, allow: Allow[]) {
 /** The string literals of a script that read as prose (they hold a space), comments cut out. */
 function scriptStrings(js: string) {
   const t = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
-  return [...t.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2] ?? (m[3] ?? '').replace(/\$\{[^}]*\}/g, ' ')).filter((x) => /\s/.test(x.trim()));
+  return [...t.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2] ?? (m[3] ?? '').replace(/\$\{[^}]*(?:\}|$)/g, " ")).filter((x) => /\s/.test(x.trim()));
 }
 
 function args(argv: string[]) {

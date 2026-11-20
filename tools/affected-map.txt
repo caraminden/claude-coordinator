@@ -35,3 +35,11 @@ tools/skill-evals/**: test/skill-evals.test.ts
 
 # Test code: the guards over every test file.
 test/**: test/one-until.test.ts test/raw-log-read.test.ts
+
+# The test tooling's own tests.
+tools/citadel-test: test/citadel-test.test.ts test/affected.test.ts
+tools/affected.ts: test/affected.test.ts
+tools/affected-map.txt: test/affected.test.ts
+tools/always-tests.txt: test/citadel-test.test.ts
+src/backup.html: test/backup.test.ts
+src/backup.ts: test/backup.test.ts

@@ -47,7 +47,7 @@ if [ -n "$affected" ]; then
     esac
   done <<<"$alist"
 fi
-[ ${#files[@]} -gt 0 ] || { say "name the test files your change touches; $full_suite"; exit 2; }
+[ ${#files[@]} -gt 0 ] || [ -n "$affected" ] || { say "name the test files your change touches; $full_suite"; exit 2; }
 for f in "${files[@]}"; do
   [ -d "$f" ] && { say "$f is a folder; $full_suite"; exit 2; }
   [ -f "$f" ] || { say "no such file: $f"; exit 2; }
@@ -61,6 +61,7 @@ while IFS= read -r line; do
   dup=; for f in "${files[@]}"; do [ "$(realpath "$f")" = "$(realpath "$root/$line")" ] && dup=1; done
   [ -n "$dup" ] || extra+=("$root/$line")
 done <"${CITADEL_TEST_ALWAYS:-$root/tools/always-tests.txt}"
+[ ${#files[@]} -gt 0 ] || [ ${#extra[@]} -gt 0 ] || { say "affected: nothing to run"; exit 0; }
 # With --name the pattern would skip the repo-wide files' tests, so they run apart; otherwise they join the run.
 second=(); export CITADEL_TEST_EXTRA=0
 if [ ${#opts[@]} -gt 0 ]; then second=("${extra[@]}"); else files+=("${extra[@]}"); export CITADEL_TEST_EXTRA=${#extra[@]}; fi

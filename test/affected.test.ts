@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { affected, globRe, parseMap } from '../tools/affected.ts';
@@ -65,9 +66,25 @@ test('the command prints which rule picked each test', () => {
   assert.match(r.stdout, /^unmapped\tNOTES\.txt$/m);
 });
 
-test('the command reads a real diff: a committed change and an untracked file', () => {
-  const r = spawnSync('node', ['tools/affected.ts', '--base', 'HEAD'], { cwd: repo, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
+test('the command reads a real diff: committed, uncommitted and untracked changes, and a rename as both paths', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'affected-'));
+  const g = (...a: string[]) => { const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  try {
+    mkdirSync(join(dir, 'tools')); mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'tools', 'affected-map.txt'), '@tests t/*.test.ts\nsrc/a.ts: t/a.test.ts\nsrc/b.ts: t/b.test.ts\nsrc/c.ts: t/c.test.ts\nsrc/d.ts: t/d.test.ts\nsrc/old.ts: t/o.test.ts\n');
+    for (const f of ['a', 'b', 'c', 'old']) writeFileSync(join(dir, 'src', `${f}.ts`), f);
+    g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'base');
+    g('checkout', '-qb', 'work');
+    writeFileSync(join(dir, 'src', 'a.ts'), 'changed'); g('commit', '-qam', 'committed');
+    writeFileSync(join(dir, 'src', 'b.ts'), 'edited'); // uncommitted
+    writeFileSync(join(dir, 'src', 'd.ts'), 'new'); // untracked
+    g('mv', 'src/old.ts', 'src/new.ts'); // a rename: old.ts's rule fires too
+    const r = spawnSync('node', [join(repo, 'tools', 'affected.ts'), '--root', dir], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const ran = r.stdout.split('\n').filter((l) => l.startsWith('run\t')).map((l) => l.split('\t')[1]);
+    assert.deepEqual(ran, ['t/a.test.ts', 't/b.test.ts', 't/d.test.ts', 't/o.test.ts']);
+    assert.match(r.stdout, /^unmapped\tsrc\/new\.ts$/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
   const bad = spawnSync('node', ['tools/affected.ts', '--base', 'no-such-ref'], { cwd: repo, encoding: 'utf8' });
   assert.equal(bad.status, 2);
 });

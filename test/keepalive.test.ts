@@ -115,7 +115,8 @@ process.stdin.on('data', (d) => {
   input += d;
   if (!input.includes('\\n')) return;
   const prompt = JSON.parse(input.split('\\n')[0]).message.content;
-  appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, prompt }) + '\\n');
+  const system = readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
+  appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, prompt, system }) + '\\n');
   const usageFile = ${JSON.stringify(join(root, 'usage.json'))};
   const usage = existsSync(usageFile) ? JSON.parse(readFileSync(usageFile, 'utf8')) : { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 20000, cache_creation_input_tokens: 0 };
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: session }));
@@ -226,6 +227,30 @@ test('a prompt change marks the series dirty: no keepalive, and none after', asy
   await idle(id);
   assert.equal(callCount(), before);
   assert.equal(store.getTicket(id)!.status, 'idle');
+});
+
+test('a Settings edit keeps the series: the keepalive runs on the prompt its warm session holds (#1276)', async () => {
+  const id = minion();
+  const end = pst(15);
+  await realTurn(id, end);
+  const real = jsonLines(calls).at(-1) as { system: string };
+  store.setAppInstructions('## A new rule\nSay times in Pacific.', 'Cara');
+  const before = callCount();
+  // The hold reads the runner's clock: the ping comes 55 minutes after the turn, inside the cache's hour.
+  runner.now = () => end + KEEPALIVE_AFTER_MS;
+  try {
+    runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+    await until('the keepalive to run', () => callCount() > before);
+    await idle(id);
+  } finally {
+    runner.now = () => Date.now();
+    store.setAppInstructions('', 'Cara');
+  }
+  const ping = jsonLines(calls).at(-1) as { system: string; prompt: any };
+  assert.ok(promptText(ping.prompt).includes(KEEPALIVE_TEXT));
+  assert.equal(ping.system, real.system, 'the system prompt its session cached, not the edited one');
+  assert.doesNotMatch(ping.system, /Say times in Pacific/);
+  assert.equal(series(id)!.stopped, undefined);
 });
 
 test('a real wake that arrives while a keepalive waits goes first, and the keepalive is dropped', async () => {

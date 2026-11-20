@@ -211,8 +211,9 @@ const SHIP = /(?:^|__)(?:hand_off_land|land)$/;
 
 /** A final reply with no status line, or one src/status-trailer.ts would ignore. */
 export function statusLineCheck(turn: Turn): string[] {
-  if (turn.steered) return [];
   const text = turn.finalText.trimEnd();
+  // No closing text at all is the thin-message check's to count, not a missing line's.
+  if (turn.steered || !text) return [];
   const m = STATUS_TRAILER.exec(text);
   if (!m) return [`no status line · "…${text.replace(/\s+/g, ' ').slice(-80)}"`];
   try {

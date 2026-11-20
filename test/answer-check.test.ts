@@ -281,6 +281,7 @@ test('status line check: none, or one Citadel would ignore, is a hit; a readable
   assert.deepEqual(statusLineCheck(turn('Shipped it.')), ['no status line · "…Shipped it."']);
   assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {state: ready} -->')), ['unreadable status line · "{state: ready}"']);
   assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {"colour":"red"} -->')), ['unreadable status line · "{"colour":"red"}"']);
+  assert.deepEqual(statusLineCheck(turn('')), [], 'a turn with no closing text is the thin-message check\'s');
   assert.match(statusLineCheck(turn('Quoted `<!-- status: {"state":"ready"} -->` mid-reply, then more words.'))[0], /^no status line/, 'only a trailer at the very end counts');
   for (const ok of ['Done.\n<!-- status: {"state":"ready","note":"shipped"} -->', 'Card below.\n<!-- status: null -->', 'Done.\n`<!-- status: {"note":"x"} -->`\n'])
     assert.deepEqual(statusLineCheck(turn(ok)), [], ok);

@@ -279,7 +279,10 @@ const stallWatch = new StallWatch({
   store,
   tell: (t, text) => {
     const tm = store.ownerCoordinator(t);
-    return !!tm && runner.relay(t.id, tm.id, APP_NAME, text, false, true, 'decision') !== true;
+    if (!tm) return false;
+    // A loop-held relay still reaches the Taskmaster once a person continues it, so it counts as told.
+    runner.relay(t.id, tm.id, APP_NAME, text, false, true, 'decision');
+    return true;
   },
   note: (id, text) => runner.emit(id, 'note', { text }),
 });
@@ -1355,6 +1358,10 @@ runner.onStatusTrailer = (id, fields) => {
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
 github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
+// A scheme that ships by pull request fails a ship when CI goes red on the PR; land.sh schemes count theirs in LandHandoffs.
+github.onCiFailed = (t) => {
+  if (store.getProject(t.project_id)?.ship_path !== 'citadel') stallWatch.shipFailed(t.id, 'red CI on its PR');
+};
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...pushRoutes, ...contraptionRoutes, ...skillRoutes]);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.

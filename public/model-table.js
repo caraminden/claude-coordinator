@@ -93,9 +93,10 @@ export function pickReason(by, type, model, effort) {
 }
 
 /**
- * The step-up for a stalled minion (#1139), read from the tiers' `then` and the advisor row: Sonnet → (the advisor, during its
+ * The step-up for a stalled minion (#1139), following the tiers' `then` and the advisor row (test/stall-signals.test.ts
+ * checks each step it names is a TIERS model): Sonnet → (the advisor, during its
  * trial) → Opus medium → Opus high → Fable medium → Fable xhigh ("xhigh stays for a Fable run that failed twice"). Null at the
- * top, or with no model set. `fable` false: the scheme has Fable off, so Opus high is the top.
+ * top, with no model set, or a model outside the Claude families. `fable` false: the scheme has Fable off, so Opus high is the top.
  */
 export function nextStep(model, effort, fable = true, today = new Date().toISOString().slice(0, 10)) {
   const rank = EFFORT_LEVELS.indexOf(effort ?? 'medium');

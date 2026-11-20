@@ -386,6 +386,8 @@ export class GithubWatcher {
   private timer: NodeJS.Timeout | null = null;
   /** A ticket's PR was seen merged (or already merged at first look): its scheme's main can catch up (#208). */
   onMerged: (repoDir: string) => void = () => {};
+  /** Red CI on a minion's PR, once per head (new, not the first look's baseline): a failed ship in a PR scheme (#1139). */
+  onCiFailed: (ticket: Ticket) => void = () => {};
   /** The GitHub login a scheme's PRs are read as (#321: its owner's, for a private repo); undefined is the box's. */
   as: (repoDir: string) => GithubEnv = () => undefined;
   /** What each poll saw of a minion's PR (null: none), read as `as`: its CI runs in flight become its wait (#546). */
@@ -506,6 +508,7 @@ export class GithubWatcher {
     let { fyi, quiet } = decision;
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
+    if (decision.ci?.result === 'failed' && decision.ci.line >= 0) try { this.onCiFailed(ticket); } catch (e) { console.error('[github] onCiFailed:', e); }
     const armed = decision.ci && (await this.onCi(ticket, pr, decision.ci.result));
     if (armed?.fired) {
       // Its card or message is out, so the CI line is news for the next turn, not a wake.

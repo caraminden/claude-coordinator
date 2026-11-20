@@ -2,7 +2,7 @@
 // its turns stream: the same test red three times, the same file edited after four failed checks in a row, two failed ships.
 // On a signal the minion's Taskmaster gets one message with the evidence and the step-up the model table names
 // (nextStep in public/model-table.js). It suggests; it changes nothing. One suggestion per minion per tier.
-// The parsing half (testCommand, checkCommand, failingTests, editedFile) is pure and shared: the third-fix flag (B4) reads
+// The parsing half (testCommand, checkCommand, failingTests, editedFiles) is pure and shared: the third-fix flag (B4) reads
 // the same signals across minions.
 import type { Store, Ticket } from './db.ts';
 import { nextStep, tierLabel } from '../public/model-table.js';
@@ -12,10 +12,12 @@ export const RED_TIMES = 3;
 export const CHURN_ROUNDS = 4;
 export const SHIP_FAILS = 2;
 
-// A tool name only counts in a command's place (start, or after a space, ;, &, | or a bracket) and as a whole word, so
-// `cat $TMPDIR/citadel-test.log` is no test run.
-const words = (alts: string) => new RegExp(`(?:^|[\\s;&|(\`])(?:${alts})(?=$|[\\s;&|)\`])`, 'i');
-const TESTS = words(String.raw`citadel-test|node\s+--test|(?:npm|pnpm|yarn)\s+(?:run\s+)?test|cargo\s+(?:test|nextest)|pytest|vitest|jest|go\s+test|\S*run-tests(?:\.sh)?|\S*gradlew\s+\S*[tT]est|deno\s+test|bun\s+test|dotnet\s+test`);
+// A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any
+// VAR=value, cd, timeout or wrapper (citadel-heavy, npx), and as a whole word: `cat $TMPDIR/citadel-test.log` and
+// `grep -rn pytest pyproject.toml` are no test runs.
+const PREFIX = String.raw`(?:(?:\w+=\S*|citadel-heavy|npx|env|time|nice|timeout\s+\S+|(?:pnpm|yarn)\s+exec)\s+)*`;
+const words = (alts: string) => new RegExp(`(?:^|[;&|(\`\n]|\\$\\()\\s*${PREFIX}(?:${alts})(?=$|[\\s;&|)\`])`, 'i');
+const TESTS = words(String.raw`citadel-test|node\s+--test|(?:npm|pnpm|yarn)\s+(?:run\s+)?test|cargo\s+(?:test|nextest)|pytest|vitest|jest|go\s+test|\S*run-tests(?:\.sh)?|\S*gradlew\s+\S*[tT]est\w*|deno\s+test|bun\s+test|dotnet\s+test`);
 const CHECKS = words(String.raw`cargo\s+(?:build|check|clippy)|tsc|(?:npm|pnpm|yarn)\s+run\s+(?:build|lint|check|typecheck)|eslint|\S*gradlew\s+\S*(?:build|assemble)\w*|dotnet\s+build|go\s+(?:build|vet)`);
 const LAND = /(?:^|[\s;&|(])\S*tools\/land\.sh(?=$|\s)/;
 const SHIP = 'ship';
@@ -24,10 +26,10 @@ export const testCommand = (cmd: string) => TESTS.test(cmd);
 /** A shell command that checks the code: a test run, a build, type check or lint. */
 export const checkCommand = (cmd: string) => testCommand(cmd) || CHECKS.test(cmd);
 
-// One pattern per runner's way of naming a failed test; group 1 is the name kept. citadel-test names the file (its line
-// number and test name move as a test gets fixed), the others the test.
+// One pattern per runner's way of naming a failed test; group 1 (and 2) the name kept. citadel-test's line is
+// `✖ test/x.test.ts:91 › name`: the file and name are kept, the line number moves as the test is edited.
 const FAILED: RegExp[] = [
-  /^\s*✖ (test\/[^\s:]+)/gm, // citadel-test
+  /^\s*✖ (test\/[^\s:]+)(?::\d+)?(?: (› .+?))?\s*$/gm, // citadel-test
   /^\s*not ok \d+ - (.+?)\s*(?:#.*)?$/gm, // node --test (TAP)
   /^test (\S+) \.\.\. FAILED$/gm, // cargo
   /^FAILED (\S+)/gm, // pytest
@@ -38,15 +40,17 @@ const FAILED: RegExp[] = [
 /** The failed tests a test run's output names, deduped, at most 20. */
 export function failingTests(output: string): string[] {
   const names = new Set<string>();
-  for (const re of FAILED) for (const m of output.matchAll(re)) names.add(m[1].trim().slice(0, 200));
+  for (const re of FAILED) for (const m of output.matchAll(re)) names.add((m[2] ? `${m[1]} ${m[2]}` : m[1]).trim().slice(0, 200));
   return [...names].slice(0, 20);
 }
 
-/** The file an edit tool call writes, or null for anything else. */
-export function editedFile(block: any): string | null {
-  if (block?.type !== 'tool_use' || !['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(block.name)) return null;
+/** The files an edit tool call writes (Claude's edit tools, or a Codex turn's apply_patch: `files: ['update <path>']`). */
+export function editedFiles(block: any): string[] {
+  if (block?.type !== 'tool_use') return [];
+  if (block.name === 'apply_patch') return (Array.isArray(block.input?.files) ? block.input.files : []).map((f: unknown) => String(f).replace(/^\S+ /, '')).filter(Boolean);
+  if (!['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(block.name)) return [];
   const p = block.input?.file_path ?? block.input?.notebook_path;
-  return typeof p === 'string' && p ? p : null;
+  return typeof p === 'string' && p ? [p] : [];
 }
 
 export type SignalKind = 'red-test' | 'file-churn' | 'failed-ships';
@@ -91,12 +95,13 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
         changed = true;
         continue;
       }
-      const file = editedFile(b);
-      if (!file || !s.failing || s.touched.includes(file)) continue;
-      s.touched.push(file);
-      s.rounds[file] = (s.rounds[file] ?? 0) + 1;
-      changed = true;
-      if (s.rounds[file] === CHURN_ROUNDS) signals.push({ kind: 'file-churn', what: `${base(file)} edited after ${CHURN_ROUNDS} failed checks in a row`, evidence: [file] });
+      for (const file of s.failing ? editedFiles(b) : []) {
+        if (s.touched.includes(file)) continue;
+        s.touched.push(file);
+        s.rounds[file] = (s.rounds[file] ?? 0) + 1;
+        changed = true;
+        if (s.rounds[file] === CHURN_ROUNDS) signals.push({ kind: 'file-churn', what: `${base(file)} edited after ${CHURN_ROUNDS} failed checks in a row`, evidence: [file] });
+      }
     } else if (ev.type === 'user' && b?.type === 'tool_result' && b.tool_use_id in s.pending) {
       const cmd = s.pending[b.tool_use_id];
       delete s.pending[b.tool_use_id];
@@ -126,7 +131,7 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
   return { signals, changed };
 }
 
-/** A failed ship (src/land.ts settle, or a land.sh run in the minion's own turn); `kind` is classifyLandFailure's, or what ran it. */
+/** A failed ship (src/land.ts settle, a land.sh run in the minion's own turn, or red CI on a PR scheme's PR); `kind` is classifyLandFailure's, or what failed. */
 export function shipFailed(s: StallState, kind: string): Signal[] {
   s.ships.push(kind);
   return s.ships.length === SHIP_FAILS ? [{ kind: 'failed-ships', what: `${SHIP_FAILS} failed ships`, evidence: [`kinds: ${s.ships.join(', ')}`] }] : [];
@@ -139,7 +144,7 @@ export interface Suggestion { ticket: number; project: number; number: number; a
 
 export interface StallDeps {
   store: Store;
-  /** Message the minion's Taskmaster (runner.relay to ownerCoordinator); false when it has none. */
+  /** Message the minion's Taskmaster (runner.relay to ownerCoordinator; a held relay still counts as told); false when it has none. */
   tell: (ticket: Ticket, text: string) => boolean;
   /** A note in the minion's own chat, so people see what the server suggested. */
   note: (ticketId: number, text: string) => void;
@@ -174,17 +179,20 @@ export class StallWatch {
     const [model, effort] = [t.model ?? t.last_model, t.effort ?? t.last_effort];
     const tier = `${model ?? 'none'} ${effort ?? 'none'}`;
     if (s.sent.includes(tier)) return;
-    s.sent.push(tier);
-    this.d.store.setSetting(stallKey(ticketId), s);
     const fable = this.d.store.getProject(t.project_id)?.fable_ok !== 'off';
     const next = nextStep(model, effort, fable);
     const now = tierLabel(model, effort);
     const step = next
       ? `The model table's next step from ${now} is ${tierLabel(next.model, next.effort)}: update_ticket with model ${next.model}, effort ${next.effort}.`
-      : model ? `It already runs on ${now}, the top of the model table${fable ? '' : ' with Fable off'}: a step-up isn't there; diagnosis (citadel:diagnosing-bugs) or a person is.` : `It runs with no model set, so the table names no step: set one by its kind of work.`;
+      : !model ? `It runs with no model set, so the table names no step: set one by its kind of work.`
+      : /opus|fable/.test(model) ? `It already runs on ${now}, the top of the model table${fable ? '' : ' with Fable off'}: a step-up isn't there; diagnosis (citadel:diagnosing-bugs) or a person is.`
+      : `The model table names no step from ${now}: pick one by hand, or try diagnosis (citadel:diagnosing-bugs).`;
     const lines = signals.map((g) => `- ${g.what} (${g.evidence.join('; ')})`);
     const text = `Stall signal on #${t.number} ${t.title}:\n${lines.join('\n')}\n${step} A suggestion only: nothing was changed. Skip it when the cause isn't the model (a flake, CI or a runner, a merge conflict, a person's answer it waits on), and say which you did in one line.`;
-    this.d.tell(t, text);
+    // No Taskmaster to tell (a scheme without one yet): nothing is recorded, so the minion's next tier isn't spent.
+    if (!this.d.tell(t, text)) return;
+    s.sent.push(tier);
+    this.d.store.setSetting(stallKey(ticketId), s);
     this.d.note(ticketId, `Stall signal: ${signals.map((g) => g.what).join('; ')}. Suggested ${next ? tierLabel(next.model, next.effort) : 'a look'} to the Taskmaster; nothing changed.`);
     const list = this.d.store.getSetting<Suggestion[]>(SUGGESTIONS_KEY) ?? [];
     for (const g of signals) list.push({ ticket: t.id, project: t.project_id, number: t.number, at: (this.d.now ?? Date.now)(), kind: g.kind, what: g.what, from: tier, to: next ? `${next.model} ${next.effort}` : null });

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, type StallState } from '../src/stall-signals.ts';
-import { nextStep } from '../public/model-table.js';
+import { nextStep, TIERS } from '../public/model-table.js';
+import { editedFiles, testCommand } from '../src/stall-signals.ts';
 
 // The server notices a stall (#1139, G5; Josh, 2026-11-19): the same test red three times, the same file edited after four
 // failed checks in a row, two failed ships; one suggestion to the Taskmaster per tier, changing nothing.
@@ -24,7 +25,8 @@ function feed(s: StallState, events: any[]) {
 }
 
 test('failingTests reads each runner it knows', () => {
-  assert.deepEqual(failingTests(RED), ['test/land.test.ts']);
+  assert.deepEqual(failingTests(RED), ['test/land.test.ts › keeps the queue']);
+  assert.deepEqual(failingTests('✖ test/a.test.ts:3 › one\n✖ test/a.test.ts:9 › two\n✖ test/b.test.ts'), ['test/a.test.ts › one', 'test/a.test.ts › two', 'test/b.test.ts']);
   assert.deepEqual(failingTests('TAP version 13\nnot ok 3 - parses the header # time=2ms\nok 4 - other'), ['parses the header']);
   assert.deepEqual(failingTests('test snaps::crop_keeps_field ... FAILED\ntest a::b ... ok'), ['snaps::crop_keeps_field']);
   assert.deepEqual(failingTests('FAILED tests/test_api.py::test_login - AssertionError'), ['tests/test_api.py::test_login']);
@@ -40,7 +42,7 @@ test('the same test red three times fires once, on the third', () => {
   const third = feed(s, [run('citadel-test test/land.test.ts'), result(RED, true)]);
   assert.equal(third.length, 1);
   assert.equal(third[0].kind, 'red-test');
-  assert.match(third[0].what, /test\/land\.test\.ts red 3 times/);
+  assert.match(third[0].what, /test\/land\.test\.ts › keeps the queue red 3 times/);
   assert.deepEqual(feed(s, [run('citadel-test test/land.test.ts'), result(RED, true)]), [], 'a fourth red does not fire again');
 });
 
@@ -51,6 +53,19 @@ test('a red run with no names it can read counts by its command; output from oth
   assert.match(got[0].what, /exit: cargo test -p harness/);
   // Reading a log full of failures (cat, grep) is no test run.
   assert.deepEqual(feed(emptyState(), [1, 2, 3].flatMap(() => [run('cat $TMPDIR/citadel-test.log'), result(RED)])), []);
+});
+
+test('a test command counts only as the command a segment runs', () => {
+  for (const yes of ['citadel-test test/a.test.ts', 'cd /w && npx tsc --noEmit', 'citadel-heavy cargo test --workspace', 'FOO=1 npm test', 'timeout 300 node --test test/', 'make x; pytest -q', './gradlew :app:testDebug'])
+    assert.ok(testCommand(yes) || /tsc/.test(yes), yes);
+  for (const no of ['cat $TMPDIR/citadel-test.log', 'grep -rn pytest pyproject.toml', 'rg jest package.json', 'echo "npm test"', 'git log --grep cargo test'])
+    assert.ok(!testCommand(no), no);
+});
+
+test('Codex edits count too: apply_patch lists its files', () => {
+  assert.deepEqual(editedFiles({ type: 'tool_use', name: 'apply_patch', input: { files: ['update /w/src/a.ts', 'add /w/src/b.ts'] } }), ['/w/src/a.ts', '/w/src/b.ts']);
+  assert.deepEqual(editedFiles({ type: 'tool_use', name: 'Edit', input: { file_path: '/w/a.ts' } }), ['/w/a.ts']);
+  assert.deepEqual(editedFiles({ type: 'tool_use', name: 'Read', input: { file_path: '/w/a.ts' } }), []);
 });
 
 test('file churn: the same file edited after four failed checks, with no green run between, fires once', () => {
@@ -109,9 +124,17 @@ test('nextStep follows the tiers: Sonnet up to Opus medium, then high, then Fabl
   assert.deepEqual(nextStep('claude-fable-5-2', 'medium'), { model: 'claude-fable-5-2', effort: 'xhigh' });
   assert.equal(nextStep('claude-fable-5-2', 'xhigh'), null);
   assert.equal(nextStep(null, null), null);
+  assert.equal(nextStep('gpt-6-astra', 'high'), null);
+  // Every step it names is a model the table uses, so renaming one in TIERS fails here.
+  const models = new Set(TIERS.map((t) => t.model));
+  for (const [m, e] of TIERS.map((t) => [t.model, t.effort]).concat([['claude-haiku-5-5', 'low'], ['claude-opus-5-5', 'high'], ['claude-fable-5-2', 'medium']]))
+    for (const day of ['2026-11-20', '2026-12-01']) {
+      const next = nextStep(m, e, true, day);
+      if (next) assert.ok(models.has(next.model), `${m} ${e} → ${next.model}`);
+    }
 });
 
-function world(fable: 'on' | 'off' = 'on') {
+function world(fable: 'on' | 'off' = 'on', taskmaster = true) {
   const store = new Store(join(root, `db-${++ids}.db`));
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const p = store.createProject('Peek Auras', null);
@@ -120,7 +143,7 @@ function world(fable: 'on' | 'off' = 'on') {
   store.updateTicket(t.id, { model: 'claude-opus-5-5', effort: 'medium' });
   const told: string[] = [];
   const notes: string[] = [];
-  const watch = new StallWatch({ store, tell: (_t, text) => (told.push(text), true), note: (_id, text) => notes.push(text) });
+  const watch = new StallWatch({ store, tell: (_t, text) => taskmaster && (told.push(text), true), note: (_id, text) => notes.push(text) });
   return { store, t, told, notes, watch };
 }
 
@@ -132,7 +155,7 @@ test('a stalled minion gets exactly one suggestion to its Taskmaster, with the e
   w.watch.shipFailed(w.t.id, 'conflict');
   assert.equal(w.told.length, 1);
   assert.match(w.told[0], /Stall signal on #\d+ Crop keeps its field/);
-  assert.match(w.told[0], /test\/land\.test\.ts red 3 times/);
+  assert.match(w.told[0], /test\/land\.test\.ts › keeps the queue red 3 times/);
   assert.match(w.told[0], /Opus 5\.5 medium is Opus 5\.5 high: update_ticket with model claude-opus-5-5, effort high/);
   assert.match(w.told[0], /nothing was changed/);
   assert.equal(w.notes.length, 1);
@@ -161,4 +184,18 @@ test('at the top with Fable off it names no step-up; Taskmasters and closed mini
   w.watch.shipFailed(closed.id, null);
   w.watch.shipFailed(closed.id, null);
   assert.equal(w.told.length, 1);
+});
+
+test('no Taskmaster to tell: nothing is recorded and the tier is not spent; an unknown model gets no false "top of the table"', () => {
+  const w = world('on', false);
+  w.watch.shipFailed(w.t.id, null);
+  w.watch.shipFailed(w.t.id, null);
+  assert.deepEqual(w.notes, []);
+  assert.equal(w.store.getSetting<any[]>(SUGGESTIONS_KEY) ?? null, null);
+  assert.deepEqual(w.store.getSetting<StallState>(stallKey(w.t.id))?.sent, []);
+  const v = world();
+  v.store.updateTicket(v.t.id, { model: 'gpt-6-astra' });
+  v.watch.shipFailed(v.t.id, null);
+  v.watch.shipFailed(v.t.id, null);
+  assert.match(v.told[0], /The model table names no step from gpt-6-astra/);
 });

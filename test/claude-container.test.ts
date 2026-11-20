@@ -89,7 +89,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     process.exit(0);
   };
   // 'hold <file>': runs until that file appears, as a long turn does.
-  const hold = /hold (\S+)/.exec(input)?.[1];
+  const hold = /hold ([^\\s"\\\\]+)/.exec(input)?.[1];
   if (hold) setInterval(() => existsSync(hold) && finish(), 20);
   else finish();
 });
@@ -289,8 +289,10 @@ test('a container turn frozen past its heartbeat keeps running and keeps its pin
     const old = new Date(Date.now() - 60_000);
     utimesSync(join(dir, 'beat'), old, old);
     assert.equal(wrapperAlive(dir), true, 'its wrapper process is there, only stalled');
-    // pollMs 10: the gone check runs every 20 ticks, so this spans several.
-    await new Promise((res) => setTimeout(res, 800));
+    // The gone check runs every 20th poll tick: wait out three of them.
+    const ticks = () => (r as unknown as { turns: Map<number, { ticks: number }> }).turns.get(id)?.ticks ?? 0;
+    const from = ticks();
+    await until('three gone checks have run', () => ticks() >= from + 60 || status(id) !== 'running');
     assert.equal(status(id), 'running');
     assert.ok(existsSync(join(dir, 'pin', 'tripwire.ts')), 'the pin folder stays under a running turn');
     assert.ok(!errors(id).some((e) => /killed before it finished/.test(e)));

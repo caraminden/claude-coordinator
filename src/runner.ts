@@ -320,7 +320,9 @@ export function wrapperInProc(dir: string): boolean {
   try {
     pids = readdirSync('/proc').filter((n) => /^\d+$/.test(n));
   } catch {
-    return false; // no /proc: the heartbeat's word stands
+    // /proc fails to list only where it isn't mounted, not for a moment: the heartbeat's word stands, as before #1255.
+    // (Unknown would be no kinder: running() reads it as gone once the turn is past its start grace.)
+    return false;
   }
   for (const pid of pids) {
     let argv: string[];
@@ -330,7 +332,8 @@ export function wrapperInProc(dir: string): boolean {
       continue; // ended meanwhile
     }
     if (argv.at(-1) === '') argv.pop();
-    if (argv.at(-1) === dir && argv.some((a) => a.endsWith('/turn-wrapper.ts'))) return true;
+    // `<node> <pin>/turn-wrapper.ts <dir>` exactly: a podman exec or conmon whose argv also ends in dir isn't the wrapper.
+    if (argv.at(-1) === dir && argv.at(-2)?.endsWith('/turn-wrapper.ts')) return true;
   }
   return false;
 }
@@ -2965,7 +2968,7 @@ export class Runner {
    * wrapper, which ignores it), waits out the stop timeout and SIGKILLs it (#258). So with units,
    * `podman exec` runs in a transient scope under the turns slice, which the restart leaves alone and
    * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
-   * tells wrapperAlive to go by its heartbeat instead.
+   * tells wrapperAlive to go by its heartbeat instead, and on a stale one by whether the wrapper is still in /proc.
    */
   private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string[], ticketId: number) {
     writeFileSync(join(dir, 'container'), place.container);

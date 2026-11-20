@@ -322,14 +322,14 @@ every copied file has its row.
 
 ### 8. Week-one basics: icon, live deploy, top bar, backups
 
-Nearly every scheme spent its first week on follow-up minions for these (onboarding review, 2026-11-19, section 3). Each sub-step ends in a line for the done note: done, or "not this kind of scheme".
+Nearly every scheme spent its first week on follow-up minions for these (onboarding review, 2026-11-19, section 3). The gaps are from Citadel's onboarding review (`reports/scheme-onboarding-review-2026-11.md` in Citadel's shared folder, section 3). Each sub-step ends in a line for the done note: done, or "not this kind of scheme".
 
 **8a. Icon** (closes the review's "icon done again after setup": about 14 minions across 10 schemes). One icon, drawn with code (no image generator), serves as the scheme's icon and the app's.
-1. Draw `assets/icon/icon.svg` (a simple mark in the scheme's accent colour; under 256 KB, no scripts). Citadel reads a scheme's favicon from the first existing of the paths in `ICON_PATHS` in its `src/scheme-icon.ts`, `assets/icon/icon.svg` first; commit it to the scheme's main, so shipping step 9 sets the scheme icon.
+1. Draw `assets/icon/icon.svg` (a simple mark in the scheme's accent colour; under 256 KB, no scripts). Citadel takes a scheme's favicon from the first of `assets/icon/icon.svg`, `assets/icon/favicon.svg`, `web/public/icon.svg`, `public/icon.svg`, `public/favicon.svg` or `favicon.svg` in the repo's main (so use the first); commit it to the scheme's main, so shipping step 9 sets the scheme icon.
 2. A contraption also uses the same drawing as its `icon.svg`, renders the 192 and 512 PNGs and a maskable PNG from it (`citadel:contraption-ui`, `references/installing.md`), and its `manifest.webmanifest` lists them.
-*Done when* the scheme's icon shows (fetch it from the scheme's page after step 9) and, for a contraption, the manifest's icons are the same drawing.
+*Done when* the SVG is committed at that path, and, for a contraption, the manifest's icons are the same drawing. Step 9's ship puts it on main, which is when the scheme's icon shows; check that after step 9.
 
-**8b. Contraption: registered and live** (closes TripPresenter #6, about 15 h with nothing live, and Mandate #23). Skip 8b to 8d's contraption parts when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`). The onboarding plan's contraption answer says whether it is one.
+**8b. Contraption: registered and live** (closes TripPresenter #6, about 15 h with nothing live, and Mandate #23). Skip 8a's contraption half and 8b to 8d when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`). The onboarding plan's contraption answer says whether it is one.
 1. Call `deploy_contraption` for the app. A refusal that names the app as unknown means it is not registered.
 2. Not registered: message your own Taskmaster (`message_coordinator`) to get it registered. Registration is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon` (`/icon.svg`), `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: ship it before you ask.
 3. Registration waits on the Citadel Taskmaster, and you wait with it: park on the relay, or call `wake_when_live`, and carry on to the first deploy when it answers. Don't close with the deploy open.
@@ -339,11 +339,11 @@ Nearly every scheme spent its first week on follow-up minions for these (onboard
 
 **8c. Top bar** (closes VA #57 and #66, ToC #139, Mandate #117). The contraption's page header is the kit's `<header class="cui-topbar">`, first in the page (`citadel:contraption-ui`, rule 24). *Done when* the live screenshot shows it.
 
-**8d. Nightly backup** (closes VA #51), for a contraption that keeps data (a database or files). The convention: the app writes `$DATA_DIR/backups/<day>/` before 04:00 PST, from a timer in `citadel-app.json` (`timers`, `on_calendar` before 04:00 PST; `kit/skills/contraption-ui/references/api.md`). Citadel ships them off the box and never snapshots app data itself. *Done when* the timer is in `citadel-app.json` and one run wrote a `backups/<day>/` folder, or the app keeps no data.
+**8d. Nightly backup** (closes VA #51), for a contraption that keeps data (a database or files). The convention: the app writes `$DATA_DIR/backups/<day>/` before 04:00 PST, from a timer in `citadel-app.json` (`timers`, see `references/api.md` of `citadel:contraption-ui`). `on_calendar` is systemd time on the server, which runs UTC, so "before 04:00 PST" is a UTC time of 11:00 or earlier the same day in PDT-free winter terms: use `*-*-* 10:30:00` (03:30 PST, 02:30 PDT). Citadel ships them off the box and never snapshots app data itself. *Done when* the timer is in `citadel-app.json` and one run wrote a `backups/<day>/` folder, or the app keeps no data.
 
-### 8e. Pin every agent you wrote
+**8e. Pin every agent you wrote**
 
-(Closes TWI #52, TP #26, VA #65, Trans #75, Delve #125.) Every agent file you adapted or wrote in step 5 or 6 (`.claude/agents/*.md`) has `model:` and `effort:` lines, never `inherit`, picked by its job from the table in `citadel:subagents` ("Model and effort per job"). *Done when* `grep -L '^model:' .claude/agents/*.md` and the same for `effort:` list nothing.
+(Closes TWI #52, TP #26, VA #65, Trans #75, Delve #125.) Every agent file you adapted in step 5 (`.claude/agents/*.md`) has `model:` and `effort:` lines, never `inherit`, picked by its job from the table in `citadel:subagents` ("Model and effort per job"). *Done when* `grep -L '^model:' .claude/agents/*.md` and the same for `effort:` list nothing, and `grep -l '^\(model\|effort\): *inherit' .claude/agents/*.md` lists nothing.
 
 ### 9. Commit and ship
 

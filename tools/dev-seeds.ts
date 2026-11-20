@@ -577,7 +577,7 @@ mock.boards('#takes', { boards: [
     },
   },
   home: {
-    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each and three ships since yesterday, for #/home',
+    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each and three ships since yesterday; open #/home',
     seed(c) {
       SCENARIOS['waiting-on-you'].seed(c);
       const delve = c.store.listProjects().find((x) => x.name === 'Delve')!;
@@ -589,7 +589,7 @@ mock.boards('#takes', { boards: [
       shipped(c, 'Usage bar in the top bar', 'Shipped 1a2b3c4 "#1201: usage bar": the usage bar shows your week. Risk low: front end only. Live now.');
       shipped(d, 'Chapter 2 balance', 'Shipped 5d6e7f8 "#240: chapter 2": foes hit 10% softer in chapter 2. Risk medium: numbers. Live now.');
       shipped(d, 'Build 8 merge', 'Merged 9a8b7c6 into build/8: a feeder. Risk low: x.');
-      return '#/home';
+      return `#/p/${c.project.id}`;
     },
   },
   'taskmaster-chat': {

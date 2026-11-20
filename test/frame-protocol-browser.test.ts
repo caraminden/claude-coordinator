@@ -143,7 +143,9 @@ test("the frame carries the allow list, so the mic works on the contraption's ow
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
   const allow = await page.eval(`document.querySelector('#frames iframe').allow`) as string;
-  for (const f of ['microphone', 'camera', 'clipboard-read', 'clipboard-write', 'fullscreen']) assert.match(allow, new RegExp(`(^|; )${f} \\*(;|$)`));
+  for (const f of ['microphone', 'camera', 'fullscreen']) assert.match(allow, new RegExp(`(^|; )${f} \\*(;|$)`));
+  // No clipboard unless the app's citadel-app.json asks (#1086): this one doesn't.
+  for (const f of ['clipboard-read', 'clipboard-write']) assert.match(allow, new RegExp(`(^|; )${f} 'none'(;|$)`));
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentWindow.document`).catch(() => 'cross'), 'cross');
 });
 

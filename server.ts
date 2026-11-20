@@ -1335,7 +1335,8 @@ const landHandoffs = new LandHandoffs({
 // The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a
 // land sends its row before the hand-off is marked settled.
 const serverWork = serverWorkWatch(() => landings.handoffs(), (id) => runner.broadcastTicket(id));
-runner.serverWork = serverWork.of;
+// A turn's start asks fresh: one stat on that minion's own folder, not the list.
+runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
 if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('land hand-offs', async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync())), 5_000).unref();
 if (!BOOT_CHECK) {
   void safely('deploy watch', () => deployWatch!.tick());
@@ -1554,7 +1555,7 @@ runner.onStatusTrailer = (id, fields) => {
   const ticket = store.getTicket(id);
   if (!ticket) return;
   // A handed-off land's state and note are the server's until it is reported (#962): the closing "set no state" line can't clear them.
-  if (landings.handoffs().includes(id)) fields = { replies: fields.replies };
+  if (landings.hasHandoff(id)) fields = { replies: fields.replies };
   try {
     setLabels(app, ticket, fields, AGENT_NAME, id);
   } catch (err: any) {

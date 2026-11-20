@@ -177,6 +177,11 @@ export class Landings {
     return [...this.waiting];
   }
 
+  /** Whether this one minion's hand-off is unreported: one stat on its own folder, never a scan. */
+  hasHandoff(ticketId: number): boolean {
+    return this.waiting.has(ticketId) || existsSync(join(this.dir(ticketId), HANDOFF));
+  }
+
   handoff(ticketId: number): (Handoff & { args: string[] }) | null {
     try {
       return JSON.parse(readFileSync(join(this.dir(ticketId), HANDOFF), 'utf8'));

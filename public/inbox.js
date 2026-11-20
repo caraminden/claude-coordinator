@@ -3,7 +3,7 @@
 import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
-import { askWhy } from './threadstate.js';
+import { askWhy, mentions } from './threadstate.js';
 import { homeEvent, refreshHomeSoon } from './home.js';
 import { mountTips } from './ui/tip.js';
 
@@ -18,6 +18,14 @@ const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view
 const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))
   || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
 
+/** The newest mention of you in each minion's chat, as its row shows it (#1149). */
+function mentionMap(items) {
+  const out = new Map();
+  for (const i of items) if (i.kind === 'mention' && !(out.get(i.ticketId)?.at > i.at)) out.set(i.ticketId, { by: i.card.by, at: i.at });
+  return out;
+}
+const mentionKeys = (map) => [...map].map(([id, m]) => `${id}:${m.at}`).sort().join();
+
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
@@ -27,7 +35,10 @@ export async function refreshInbox() {
   const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
-  renderInbox();
+  // A new or gone mention changes its minion's row (#1149), so the whole list redraws; renderSidebar draws the strip too.
+  // Imported when needed: sidebar.js imports this module, and loads browser-only code the Node tests can't.
+  if (mentionKeys(mentions) !== mentionKeys(mentionMap(items))) import('./sidebar.js').then((m) => m.renderSidebar());
+  else renderInbox();
 }
 
 /** A scheme's items, kept for its next first paint; null when the fetch failed. Showing a scheme waits on this (project.js). */
@@ -169,6 +180,8 @@ export function renderInbox() {
     if (!seen) return;
     Object.assign(inbox, { projectId: view.projectId, items: seen });
   }
+  mentions.clear();
+  for (const [id, m] of mentionMap(inbox.items)) mentions.set(id, m);
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
   // Cards addressed to you from your other schemes (`from`, #687) show here too, though only their own scheme's pill counts them.
   const items = inbox.items.filter((i) => i.from || (ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed'));

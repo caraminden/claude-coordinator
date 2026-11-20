@@ -242,11 +242,12 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
 
   // Someone not in the scheme, and an email address, mention no one.
   let n = received.length;
-  await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Nobody mail josh@example.com' } });
+  await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Nobody mail josh@example.com, and @Cara: a note to self' } });
   await idle();
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(received.length, n);
   assert.deepEqual(await inbox('Josh'), []);
+  assert.deepEqual(await inbox('Cara'), [], 'nor does the sender themself');
 
   n = received.length;
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@josh can you look at this' } });
@@ -266,4 +267,17 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   assert.deepEqual(await inbox('Cara'), []);
   await call('Josh', `/api/tickets/${t.id}/seen`, { method: 'POST', body: {} });
   assert.deepEqual(await inbox('Josh'), []);
+
+  // An agent's message mentions no one (Josh, 2026-11-20: "People only for now"), and the agent still reads it as typed.
+  n = received.length;
+  const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
+  // The Taskmaster's words to a minion go through the relay, which never mentions.
+  await call(`agent:${coordinator.id}`, `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Josh and @Cara, a look please' } });
+  await idle();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(received.length, n);
+  assert.deepEqual([await inbox('Josh'), await inbox('Cara')], [[], []]);
+  const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message').at(-1);
+  assert.equal(JSON.parse(last.data).text, '@Josh and @Cara, a look please');
+  assert.equal(JSON.parse(last.data).mentions, undefined);
 });

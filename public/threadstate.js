@@ -1,6 +1,6 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
-import { isCoordinator, me, STATES } from './base.js';
+import { isCoordinator, me, STATES, view } from './base.js';
 import { waitFam, waitShows, waitWords } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
@@ -71,6 +71,14 @@ const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCas
 /** The minion's open cards that wait on you, oldest first. */
 export const cardsYours = (t) => (t.open_cards ?? []).filter((c) => isYou(cardFor(c, t)));
 
+/** The open scheme's mentions of you (#1149), ticket id -> the newest's { by, at }: inbox.js fills it from your Needs you. */
+export const mentions = new Map();
+/** A mention of you in this minion's chat that you haven't opened it since. */
+const mentionOf = (t) => {
+  const m = mentions.get(t.id);
+  return m && (view?.seen?.[t.id] ?? 0) < m.at ? m : null;
+};
+
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
@@ -94,6 +102,9 @@ function baseState(t, usage, now) {
   if ((t.status === 'closed' || t.state === 'pending-deploy') && rel?.stuck) return { rank: 2, fam: 'broken', cell: 'stuck', label: `Stuck: ${relLabel}` };
   if (t.status === 'closed' && rel) return { rank: 2, fam: 'wait', cell: rel.name, label: `On its way: ${relLabel}` };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
+  // A mention of you (#1149) is yours to see to until you open its chat, as your Needs you counts it; a card of yours says more.
+  const m = mentionOf(t);
+  if (m && !(t.pending_card_at && cardsYours(t).length)) return { rank: 0, fam: 'you', cell: `@ ${shortAgo(m.at, now)}`, label: `${m.by} mentioned you`, since: m.at, mention: m };
   const state = STATES[t.state];
   // Parked until something wakes it by itself (start_after, wake_when_live, runners back) reads as waiting, not grey (Cara, 2026-11-14).
   if (t.state === 'parked' && t.wakes_on) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.wakes_on}` : t.wakes_on}` };
@@ -333,6 +344,7 @@ function yourMove(t, st, now) {
     const more = yours.length > 1 ? ` (+${yours.length - 1} more)` : '';
     return { text: `Answer the ${cardWord(card)} card${more}${waiting}`, fam: 'you', href: card.href, title: card.label };
   }
+  if (st.mention) return { text: `Read ${st.mention.by}'s message: it mentions you`, fam: 'you' };
   if (st.rank === 0 && st.fam === 'you') return { text: 'Answer: pick a reply over the message box, or write one', fam: 'you' };
   if (st.fam === 'broken' && t.status === 'error') return { text: 'Read why its last turn failed, then send a message to carry on', fam: 'broken' };
   if (st.quiet) return nothing('it is working, though quiet for a while');

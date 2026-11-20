@@ -2,8 +2,8 @@
 // kind of minion gets, the usage-limit countdowns, and the list's order.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setAccount } from '../public/base.js';
-import { askWhy, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, standsLines, workingBy } from '../public/threadstate.js';
+import { setAccount, setView } from '../public/base.js';
+import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, standsLines, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -419,6 +419,26 @@ test('askWhy: every kind of Needs-you item says why it is there and since when (
     assert.doesNotMatch(why, /^Waiting on you since/, `${item.kind} has its own words`);
   }
   assert.match(askWhy({ kind: 'question', at, card: { doc: 'x.html' } }, null, NOW), /^A choices page card/);
+  assert.equal(askWhy({ kind: 'mention', at, card: { by: 'Cara', text: '@Josh look' } }, null, NOW), 'Cara mentioned you at 3:50 AM PST: "@Josh look". It leaves once you open its chat.');
+});
+
+test('rowState: a mention of you is yours until you open its chat; a card of yours says more (#1149)', () => {
+  mentions.set(7, { by: 'Cara', at: NOW - HOUR });
+  setAccount({ name: 'Josh' });
+  try {
+    setView({ seen: {} });
+    assert.deepEqual(pill({ id: 7, state: 'ready' }), [0, 'you', '@ 1h']);
+    assert.equal(rowState(t({ id: 7, state: 'parked' }), null, NOW).label, 'Cara mentioned you');
+    assert.equal(standsLines(t({ id: 7, state: 'ready' }), null, NOW).move.text, "Read Cara's message: it mentions you");
+    assert.deepEqual(pill({ id: 8, state: 'ready' }), [LOOK, 'done', 'ready 5m'], 'another minion is as it was');
+    assert.equal(rowState(t({ id: 7, pending_card_at: NOW - MIN, open_cards: [{ kind: 'question', to: 'Josh' }] }), null, NOW).label, 'Answer needed');
+    setView({ seen: { 7: NOW - MIN } });
+    assert.deepEqual(pill({ id: 7, state: 'ready' }), [LOOK, 'done', 'ready 5m'], 'opened since: back to its own state');
+  } finally {
+    mentions.clear();
+    setView(null);
+    setAccount(null);
+  }
 });
 
 test('progressWhy: a release says its stage, what it waits on, since when and its usual (#906)', () => {

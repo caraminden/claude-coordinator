@@ -21,16 +21,15 @@ const MAX_TEXT = 300;
 const key = (person: string) => `mentions:${person.toLowerCase()}`;
 
 /**
- * The members `text` mentions, by name: "@" then a member's name or login (any case), at the start or after a space or
- * opening mark, and not followed by more of a word. The longest name wins, so "@Cara Lee" beats "@Cara". The sender
+ * The members `text` mentions, by name: "@" then a member's name (any case), at the start or after a space or opening
+ * mark, and not followed by more of a word. Names only, not logins: the picker writes names, and the chip draws them. The longest name wins, so "@Cara Lee" beats "@Cara". The sender
  * isn't mentioned by their own message. Names come back once each, in the members' order.
  */
 export function mentionedIn(text: string, members: { name: string; login: string }[], sender: string): string[] {
   const out = new Set<string>();
   const lower = text.toLowerCase();
   // Longest first, so a name that starts another name's loses to it.
-  const handles = members.flatMap((m) => [m.name, m.login].filter(Boolean).map((h) => ({ h: h.toLowerCase(), name: m.name })))
-    .sort((a, b) => b.h.length - a.h.length);
+  const handles = members.map((m) => ({ h: m.name.toLowerCase(), name: m.name })).sort((a, b) => b.h.length - a.h.length);
   for (let i = lower.indexOf('@'); i >= 0; i = lower.indexOf('@', i + 1)) {
     if (i > 0 && !/[\s([{"'“‘]/.test(lower[i - 1])) continue; // an email address, not a mention
     const hit = handles.find(({ h }) => lower.startsWith(h, i + 1) && !/[\p{L}\p{N}_-]/u.test(lower[i + 1 + h.length] ?? ''));

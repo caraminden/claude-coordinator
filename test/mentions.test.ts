@@ -13,9 +13,10 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 const members = [{ name: 'Cara', login: 'cara-gh' }, { name: 'Josh', login: 'katz' }, { name: 'Cara Lee', login: 'clee' }];
 
-test('mentionedIn: members by name or login, any case, once each, never the sender (#1149)', () => {
+test('mentionedIn: members by name, any case, once each, never the sender (#1149)', () => {
   assert.deepEqual(mentionedIn('@Josh can you look at this', members, 'Cara'), ['Josh']);
-  assert.deepEqual(mentionedIn('ping @KATZ and (@cara-gh), and @josh again', members, 'Someone'), ['Cara', 'Josh']);
+  assert.deepEqual(mentionedIn('ping @JOSH and (@cara), and @josh again', members, 'Someone'), ['Cara', 'Josh']);
+  assert.deepEqual(mentionedIn('@katz and @cara-gh', members, 'Someone'), [], 'a login is no one: the chip draws names');
   assert.deepEqual(mentionedIn('@Cara Lee, then @Cara.', members, 'Josh'), ['Cara', 'Cara Lee'], 'the longest name wins, and punctuation ends one');
   assert.deepEqual(mentionedIn('@Josh, me: @Cara', members, 'cara'), ['Josh'], 'not the sender');
   assert.deepEqual(mentionedIn('mail josh@x.com, @Joshua, @nobody, @', members, 'Cara'), [], 'an address, a longer word and a non-member are no one');

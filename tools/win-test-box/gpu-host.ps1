@@ -125,12 +125,22 @@ Invoke-Command -Session $s {
   # Folders from an older driver go. The current ones are copied over again: an earlier copy may have stopped halfway.
   Get-ChildItem $using:repo -Directory | Where-Object Name -notin $using:names | Remove-Item -Recurse -Force
 }
-foreach ($f in $folders) {
-  Write-Host "  $(Split-Path $f -Leaf)"
-  Copy-Item -ToSession $s -Path $f -Destination "$repo\" -Recurse -Force
+# File by file, skipping one the box has at the same size: a folder's name pins the driver version, so that file is
+# this driver's already. The box keeps some open once it has booted with the partition, even with the GPU off
+# (nvgpucomp64.dll, #1175's second run), so copying everything again would fail on them.
+$targets = @($folders | ForEach-Object { $root = Split-Path $_; Get-ChildItem $_ -Recurse -File | ForEach-Object { [pscustomobject]@{ From = $_.FullName; To = "$repo\" + $_.FullName.Substring($root.Length + 1); Length = $_.Length } } }) +
+  @($loose | ForEach-Object { [pscustomobject]@{ From = $_; To = $_; Length = (Get-Item $_).Length } })
+$paths = @($targets.To)
+$there = Invoke-Command -Session $s { $h = @{}; foreach ($p in $using:paths) { $i = Get-Item -LiteralPath $p -ErrorAction SilentlyContinue; if ($i) { $h[$p] = $i.Length } }; $h }
+$todo = @($targets | Where-Object { $there[$_.To] -ne $_.Length })
+Write-Host "  $($targets.Count - $todo.Count) of $($targets.Count) file(s) already there; copying $($todo.Count)"
+$dirs = @($todo | ForEach-Object { Split-Path $_.To } | Sort-Object -Unique)
+Invoke-Command -Session $s { $using:dirs | ForEach-Object { New-Item -ItemType Directory -Force $_ | Out-Null } }
+foreach ($t in $todo) {
+  try { Copy-Item -ToSession $s -Path $t.From -Destination $t.To -Force }
+  catch { Stop-With "the box has $($t.To) open, so it can't be replaced. Restart the box (Restart-VM -Name $Name in this window), then run this again." }
 }
-foreach ($f in $loose) { Copy-Item -ToSession $s -Path $f -Destination (Split-Path $f) -Force }
-Write-Host "  $($loose.Count) loose file(s) copied"
+Write-Host "  driver files copied"
 
 # ---------- 4. the partition: added the first time, and its share set whenever it isn't ours ----------
 # Max and optimal at the share; min at 1%, so a driver that did honour it reserves next to nothing.

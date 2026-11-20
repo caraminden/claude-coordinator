@@ -101,8 +101,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   name a server and never a command, and a tick needs no new token. The agent dials out to the app and holds an event stream open, so the computer
   needs no open ports and can be anywhere. Every minion turn (not the Taskmaster) gets each
   machine that is online when it starts as an MCP server named after the machine
-  (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
-  (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
+  (`mcp__<name>__…`): the turn's shared tool server links it through the app
+  (`src/pool-machine.ts`, `src/machines.ts`) on its first call, answering its start from the
+  machine's remembered tool list, and the agent runs a separate copy of the MCP server per session.
   Tokens are stored hashed; a new token or removing the machine disconnects it. With
   `MACHINES_URL` set (perigee uses its tailnet name), agents connect only there, on a second
   listener that serves nothing else, and the public address refuses them.
@@ -175,7 +176,8 @@ uses the built-in `node:sqlite`.
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |
-| `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
+| `src/mcp-pool.ts`, `src/pool-client.ts`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
+| `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |

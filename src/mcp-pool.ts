@@ -4,11 +4,12 @@
 // wrapper registers with the pool's key (src/pool-client.ts); each call runs in that turn's env and folder.
 // Usage: node mcp-pool.ts <dir> <version>. Exits once no turn has registered for a while.
 import { randomBytes } from 'node:crypto';
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { handle } from './mcp.ts';
+import { poolAlive } from './pool-client.ts';
 import { turnStore, type TurnContext } from './pool-context.ts';
 import { dropLinks, machineRequest } from './pool-machine.ts';
 
@@ -153,8 +154,47 @@ const write = (file: string, text: string) => {
   writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
   renameSync(`${file}.tmp`, file);
 };
+/** Another pool already serving this place and version (a second starter raced a slow start): its turns hold its port, so this one goes. */
+function other(): boolean {
+  try {
+    const pid = JSON.parse(readFileSync(poolFile, 'utf8')).pid;
+    return Number.isInteger(pid) && pid !== process.pid && poolAlive(pid);
+  } catch {
+    return false;
+  }
+}
+/** Put this pool on record unless a live one is: a hard link, which fails if the record exists, so two starters can't both win. */
+function claim(): boolean {
+  const mine = `${poolFile}.${process.pid}`;
+  writeFileSync(mine, JSON.stringify({ pid: process.pid, port, key, version }), { mode: 0o600 });
+  try {
+    for (let i = 0; i < 2; i++) {
+      try {
+        linkSync(mine, poolFile);
+        return true;
+      } catch (err: any) {
+        if (err.code !== 'EEXIST') throw err;
+      }
+      if (other()) return false;
+      try {
+        unlinkSync(poolFile); // a dead pool's record
+      } catch {}
+    }
+    return false;
+  } finally {
+    unlinkSync(mine);
+  }
+}
+if (!claim()) process.exit(0);
 write(join(dir, 'port'), String(port));
-write(poolFile, JSON.stringify({ pid: process.pid, port, key, version }));
+/** This pool is the one on record (another starter may have cleared it in the moment it claimed). */
+const onRecord = () => {
+  try {
+    return JSON.parse(readFileSync(poolFile, 'utf8')).pid === process.pid;
+  } catch {
+    return false;
+  }
+};
 
 setInterval(() => {
   const now = Date.now();
@@ -164,10 +204,10 @@ setInterval(() => {
       dropLinks(token);
     }
   if (turns.size) idleSince = now;
-  else if (now - idleSince > IDLE) {
+  else if (now - idleSince > IDLE || !onRecord()) {
     // Gone from pool.json first, so a turn starting now starts a fresh pool rather than registering with this one.
     try {
-      if (JSON.parse(readFileSync(poolFile, 'utf8')).pid === process.pid) unlinkSync(poolFile);
+      if (onRecord()) unlinkSync(poolFile);
     } catch {}
     process.exit(0);
   }

@@ -159,6 +159,20 @@ test('a call that arrives before the restarted pool has its turn back waits for 
   assert.ok(app.calls.some((c) => c.path === '/api/tickets/33' && c.token === 'token-late'));
 });
 
+test('two pools started at once for one place and version end as one: the later steps aside for the one on record', async () => {
+  const r = root();
+  const s = spec(r, 'v1', undefined, true);
+  mkdirSync(s.dir, { recursive: true });
+  const { spawn } = await import('node:child_process');
+  const kids = [0, 1].map(() => spawn(s.node, [s.script, s.dir, s.version], { env: s.env, stdio: 'ignore' }));
+  for (const k of kids) pools.push(k.pid!);
+  await until('a pool is on record', () => readPool(s.dir) !== null, 20_000);
+  await until('one of them has stepped aside', () => kids.some((k) => k.exitCode !== null), 20_000);
+  const live = kids.filter((k) => k.exitCode === null);
+  assert.equal(live.length, 1);
+  assert.equal(readPool(s.dir)!.pid, live[0].pid);
+});
+
 test('two pinned versions run side by side, each serving only its own turns, and one exits once its last turn is gone', async () => {
   const app = await fakeApp();
   const r = root();
@@ -241,7 +255,7 @@ test('a turn whose pool won\'t start runs with its own helpers instead (the stdi
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json'), '-p'], cwd: r, env: { PATH: process.env.PATH, COORDINATOR_TOKEN: 'tok' }, pool: broken }));
   const { spawn } = await import('node:child_process');
   const w = spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.ts'), dir], { stdio: 'ignore' });
-  await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 20_000);
+  await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 45_000); // the wrapper gives the pool 20 s to start
   w.kill();
   const seen = JSON.parse(readFileSync(join(r, 'argv.json'), 'utf8'));
   assert.deepEqual(seen.argv, ['--mcp-config', join(dir, 'mcp-stdio.json'), '-p']);

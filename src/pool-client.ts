@@ -11,20 +11,25 @@ export type PoolSpec = { dir: string; script: string; node: string; version: str
 export type PoolInfo = { pid: number; port: number; key: string; version: string };
 export type TurnReg = { env: Record<string, string | undefined>; cwd: string };
 
-const alive = (pid: number) => {
+/** `pid` runs a pool; its pid reused by another process doesn't count (where /proc can't say, a live pid does). */
+export function poolAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (err: any) {
-    return err.code === 'EPERM';
+    if (err.code !== 'EPERM') return false;
   }
-};
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('mcp-pool');
+  } catch {
+    return true;
+  }
+}
 
 /** The pool running in `dir`, or null when none is (no pool.json, or its process is gone). */
 export function readPool(dir: string): PoolInfo | null {
   try {
     const p = JSON.parse(readFileSync(join(dir, 'pool.json'), 'utf8'));
-    return Number.isInteger(p.pid) && Number.isInteger(p.port) && typeof p.key === 'string' && alive(p.pid) ? p : null;
+    return Number.isInteger(p.pid) && Number.isInteger(p.port) && typeof p.key === 'string' && poolAlive(p.pid) ? p : null;
   } catch {
     return null;
   }
@@ -54,11 +59,11 @@ function call(port: number, method: string, path: string, headers: Record<string
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** This place's pool for `spec.version`, started if none answers; throws if it can't start within about 10 s. */
+/** This place's pool for `spec.version`, started if none answers; throws if it can't start within about 20 s (a loaded box is slow to load it). */
 export async function ensurePool(spec: PoolSpec): Promise<PoolInfo> {
   mkdirSync(spec.dir, { recursive: true, mode: 0o700 });
   const lock = join(spec.dir, 'start.lock');
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const p = readPool(spec.dir);
     if (p && (await healthy(p, spec.version))) return p;
@@ -66,9 +71,9 @@ export async function ensurePool(spec: PoolSpec): Promise<PoolInfo> {
     try {
       fd = openSync(lock, 'wx');
     } catch {
-      // Another turn is starting it; a lock left by a starter that died is stale after 15 s.
+      // Another turn is starting it; a lock left by a starter that died is stale after 25 s.
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 15_000) unlinkSync(lock);
+        if (Date.now() - statSync(lock).mtimeMs > 25_000) unlinkSync(lock);
       } catch {}
       await sleep(200);
       continue;

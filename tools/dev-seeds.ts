@@ -272,6 +272,39 @@ mock.boards('#takes', { boards: [
       return route(c, t, e);
     },
   },
+  'where-it-stands': {
+    about: 'three minions with goals for the strip on top of the chat (#1130): working, waiting on you (a question card), parked and dismissed',
+    seed(c) {
+      const work = minion(c, 'Faster minions list', { status: 'running', last_activity: 'Running tests… 2/4', goal: 'Make the minions list load in under half a second on Citadel' }, 'bug');
+      const w = chat(c, work, 20);
+      w.asked('The minions list takes two seconds to load. Find out why and fix it.');
+      w.init();
+      w.plan([['Measure the slow load', 3], ['Find the slow query', 5], ['Run the tests', 8], ['Self-review and ship', 12]], 2);
+      w.call('Bash', { command: 'citadel-test test/list-tickets.test.ts', description: 'Run the minions list tests' }, null);
+      const you = minion(c, 'Sidebar badge colours', { note: 'needs a pick: badge style', goal: 'Make the unread badges readable in dark mode' });
+      const y = chat(c, you, 8);
+      y.asked('The unread badges are hard to see in dark mode. Can you fix them?');
+      y.init();
+      y.said('Two ways to fix the contrast; the card below asks which.');
+      y.put('question', { id: hex(), questions: [{ question: 'How should unread badges look in dark mode?', header: 'Badge style', multiSelect: false, options: [
+        { label: 'Solid accent', description: 'A filled pill with white text.', recommended: true },
+        { label: 'Outlined', description: 'A 1px outline with accent text.' },
+      ] }] });
+      y.done('Asked which badge style to use.');
+      const park = minion(c, 'Follow-up after the deploy', { state: 'parked', note: 'waiting on #700 going live', goal: 'Point the docs page at the new redirect once #700 is live' });
+      const k = chat(c, park, 3);
+      k.asked('Pick this up once #700 is live.');
+      k.init();
+      k.said('Parked until #700 is live; Citadel wakes me then.');
+      // Its ship line comes from git, which a seed can't fake: a shot wraps fetch to give it one (#1130's ready note).
+      const shipped = minion(c, 'Left-align card buttons', { status: 'closed', goal: 'Left-align the card buttons; centred ones look off' });
+      const d = chat(c, shipped, 3);
+      d.asked('The card buttons are centred and it looks off. Left-align them.');
+      d.init();
+      d.done('Shipped.');
+      return [work, you, park, shipped].map((t) => route(c, t)).join(' ');
+    },
+  },
   'mid-turn': {
     about: 'a minion mid-turn: a five-step plan with two done, one in progress and a Bash call still running',
     seed(c) {

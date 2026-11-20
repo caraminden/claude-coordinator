@@ -603,9 +603,10 @@ function standsStrip(t, phone) {
     renderTicketHead();
   } }, open ? '▴' : '▾') : '';
   return h('div', { class: `stands${phone ? ' phone' : ''}${open ? ' open' : ''}`, 'data-part': 'where-it-stands' },
-    line('goal', 'Goal', lines.goal),
+    // Closed on a phone, its one line is your move: whether it is on you, and the card to answer if so.
+    open ? line('goal', 'Goal', lines.goal) : '',
     open ? line('now', 'Now', lines.now) : '',
-    open ? line('move', 'Your move', lines.move) : '',
+    line('move', 'Your move', lines.move),
     toggle);
 }
 

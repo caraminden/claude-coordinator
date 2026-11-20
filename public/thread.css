@@ -524,7 +524,7 @@ details.recap-group:not([open]) > summary { margin: 0; }
 /* A phone's strip: one row per line, label then text cut to one line, ▾ opening the other two. */
 .ticket-head .stands.phone { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; margin-top: 0.4rem; }
 .ticket-head .stands.phone .stands-line { display: flex; align-items: center; gap: 0.5rem; height: 2rem; padding: 0 2.2rem 0 0.6rem; box-shadow: inset 3px 0 0 var(--c, var(--control-line)), 0 0 0 1px var(--line); }
-.ticket-head .stands.phone .stands-key { flex: none; width: 5.2rem; height: auto; }
+.ticket-head .stands.phone .stands-key { flex: none; width: 4.7rem; height: auto; line-height: 1; }
 .ticket-head .stands.phone .stands-text { display: block; height: auto; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head .stands.phone .stands-line + .stands-line { padding-right: 0.6rem; }
 .chat.stands-away .ticket-head .stands.phone { display: none; }

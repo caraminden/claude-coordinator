@@ -11,8 +11,10 @@
  * A merge that gives back the scheme's own file is nothing to do; a conflict makes no branch and goes to that scheme's
  * Taskmaster. This file holds the git side; KitSync (below) runs the rounds.
  */
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { rm } from 'node:fs/promises';
+import { promisify } from 'node:util';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostJobs } from './host-job.ts';
@@ -34,6 +36,12 @@ export function git(cwd: string, args: string[], opts: { input?: string; env?: R
     cwd, encoding: 'utf8', input: opts.input, maxBuffer: 64 << 20, stdio: ['pipe', 'pipe', 'pipe'],
     env: opts.env ? { ...process.env, ...opts.env } : process.env,
   });
+}
+
+const run = promisify(execFile);
+/** git off the event loop, for the round's checkouts and removals (a worktree can be a 1700-file checkout). */
+async function gitAsync(cwd: string, args: string[]): Promise<string> {
+  return (await run('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })).stdout;
 }
 
 function tryGit(cwd: string, args: string[]): string | null {
@@ -250,13 +258,22 @@ const CHECK_TIMEOUT = 900;
 export const SHIP = 'Ship it';
 export const NOT_NOW = 'Not now';
 
-/** The pre-card check: syntax, the guard's self-test when it changed, then the scheme's quick check (its SMOKE_CMD, else its CHECK). */
+/**
+ * The pre-card check: syntax, the guard's self-test when it changed, then the scheme's quick check (its SMOKE_CMD, else
+ * its CHECK, land.sh's default when land.local.sh sets neither), in a fresh worktree, so packages are installed first.
+ */
 export const CHECK_SCRIPT = `set -u
 bash -n tools/land.sh || exit
 if [ "\${KIT_SYNC_GUARD:-}" = 1 ]; then tools/guard.sh --self-test || exit; fi
 CHECK=true SMOKE_CMD=
+eval "$(grep -m1 '^CHECK=' tools/land.sh)"
 set +u
-. tools/land.local.sh || exit
+[ ! -f tools/land.local.sh ] || . tools/land.local.sh || exit
+# shortcut: npm only (every scheme with a package.json has a package-lock.json today); add pnpm or yarn when one needs it.
+if [ -f package-lock.json ] && [ ! -d node_modules ]; then
+  echo "kit sync: installing packages (npm ci)"
+  timeout -k 10 ${CHECK_TIMEOUT} npm ci --no-audit --no-fund --loglevel=error || exit
+fi
 cmd=\${SMOKE_CMD:-$CHECK}
 echo "kit sync: running: $cmd"
 timeout -k 10 ${CHECK_TIMEOUT} bash -c "$cmd"`;
@@ -287,12 +304,15 @@ export class KitSync {
    */
   poll(): Promise<void> {
     return this.serial(async () => {
+      // deploy.sh moves the checkout before its tests and boot check, and marks that window; its kit may yet be rolled back.
+      if (existsSync(join(git(this.d.kitDir, ['rev-parse', '--absolute-git-dir']).trim(), 'cc-deploy', 'unchecked'))) return;
       let s = this.d.load();
       const head = git(this.d.kitDir, ['rev-parse', 'HEAD']).trim();
       const blobs = templateBlobs(this.d.kitDir, head);
-      const shipping = s?.round?.schemes.some((x) => x.state === 'queued' || x.state === 'shipping');
+      // A running check or ship keeps its round: superseding would leave its job writing into the next round's folder.
+      const shipping = s?.round?.schemes.some((x) => x.state === 'checking' || x.state === 'queued' || x.state === 'shipping');
       if (JSON.stringify(blobs) !== JSON.stringify(s?.blobs) && !shipping) {
-        if (s?.round) this.supersede(s.round);
+        if (s?.round) await this.supersede(s.round);
         s = { blobs, round: await this.start(head, blobs) };
         this.d.save(s);
       }
@@ -318,6 +338,8 @@ export class KitSync {
     const names = new Map(this.d.projects().map((p) => [p.id, p.name]));
     const round: Round = { kit, blobs, at: Date.now(), schemes: [] };
     for (const { project, dir } of schemeRepos(this.d.projectsDir, [...names.keys()].filter((id) => id !== this.d.home()))) {
+      // Each scheme's plan is a few hundred ms of git; between schemes the server answers again.
+      await new Promise((ok) => setImmediate(ok));
       const name = names.get(project)!;
       let plan: FileSync[];
       try {
@@ -346,7 +368,7 @@ export class KitSync {
         continue;
       }
       try {
-        sync.commit = this.branch(sync, kit, merged);
+        sync.commit = await this.branch(sync, kit, merged);
       } catch (err) {
         console.error(`Kit sync: committing ${name}:`, err);
         sync.state = 'failed';
@@ -364,11 +386,11 @@ export class KitSync {
   }
 
   /** The sync's branch and commit, in a fresh worktree off the scheme's main. */
-  private branch(sync: SchemeSync, kit: string, merged: FileSync[]): string {
+  private async branch(sync: SchemeSync, kit: string, merged: FileSync[]): Promise<string> {
     const wt = this.worktree(sync.project);
     const branch = `kit-sync/${short(kit)}`;
-    this.drop(sync);
-    git(sync.repo, ['worktree', 'add', '-q', '-B', branch, wt, 'HEAD']);
+    await this.drop(sync);
+    await gitAsync(sync.repo, ['worktree', 'add', '-q', '-B', branch, wt, 'HEAD']);
     for (const f of merged) writeFileSync(join(wt, f.path), f.text!);
     git(wt, ['add', '--', ...merged.map((f) => f.path)]);
     const msg = `Kit sync: take the kit's ${list(merged.map((f) => f.path.split('/').pop()!))} (Citadel ${short(kit)})\n\nMerged by Citadel's kit sync (#1100) from the kit's templates, keeping this scheme's own edits.\n\n${TRAILER}: ${kit}`;
@@ -377,12 +399,10 @@ export class KitSync {
   }
 
   /** Remove a scheme's sync worktree and any sync branch. */
-  private drop(sync: { project: number; repo: string }) {
+  private async drop(sync: { project: number; repo: string }) {
     const wt = this.worktree(sync.project);
-    try {
-      git(sync.repo, ['worktree', 'remove', '--force', wt]);
-    } catch { /* not there */ }
-    rmSync(wt, { recursive: true, force: true });
+    // Gone before git's remove, which would walk an installed node_modules file by file on the event loop's thread pool.
+    await rm(wt, { recursive: true, force: true });
     try {
       git(sync.repo, ['worktree', 'prune']);
       for (const b of git(sync.repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/kit-sync/']).split('\n').filter(Boolean)) git(sync.repo, ['branch', '-q', '-D', b]);
@@ -392,11 +412,11 @@ export class KitSync {
   }
 
   /** A newer kit change replaces this round: its cards settle and its branches go. */
-  private supersede(round: Round) {
+  private async supersede(round: Round) {
     if (round.card) this.d.settle(round.card, `Superseded by a newer kit change: a new sync round started`);
     for (const x of round.schemes) {
       if (x.card) this.d.settle(x.card, `Superseded by a newer kit change`);
-      if (x.commit) this.drop(x);
+      if (x.commit) await this.drop(x);
     }
   }
 
@@ -427,7 +447,7 @@ export class KitSync {
       if (x.card) this.d.note(x.card.ticket, line);
       const chat = await this.d.chat(x.project);
       if (x.state === 'failed' && chat) this.d.mail(chat, `Kit sync (kit ${short(round.kit)}): ${x.by?.name}'s go to ship the sync of ${list(x.files)} here failed in tools/land.sh (exit ${job.code}). The branch is ${branchOf(round)} in ${this.worktree(x.project)}. Its last lines:\n\`\`\`\n${tail}\n\`\`\``);
-      if (x.state === 'shipped') this.drop(x);
+      if (x.state === 'shipped') await this.drop(x);
     }
     if (round.schemes.every((x) => x.state !== 'checking') && !round.card && round.schemes.some((x) => x.state === 'green')) {
       const home = this.d.home();
@@ -489,7 +509,7 @@ export class KitSync {
         if (choice === SHIP) Object.assign(x, { state: 'queued', by });
         else {
           x.state = 'dropped';
-          this.drop(x);
+          await this.drop(x);
         }
       }
       this.d.save(s!);

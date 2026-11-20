@@ -208,3 +208,61 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a round waits out a deploy's unchecked window, a running check keeps its round, and land.sh's own CHECK runs where land.local.sh is missing", async () => {
+  const { HostJobs } = await import('../src/host-job.ts');
+  const { KitSync } = await import('../src/kit-sync.ts');
+  const root = mkdtempSync(join(tmpdir(), 'kit-sync-wait-'));
+  try {
+    const kit = repo(root, 'kit');
+    const land1 = "#!/usr/bin/env bash\n# v1\nCHECK='echo the default check ran; exit 4'\n";
+    commit(kit, { [LAND.template]: land1 }, 'v1');
+    const projectsDir = join(root, 'projects');
+    const gate = join(root, 'gate');
+    const gated = repo(projectsDir, '3/repo');
+    commit(gated, { [LAND.path]: land1, 'tools/land.local.sh': `SMOKE_CMD='until [ -e ${gate} ]; do sleep 0.05; done'\n` }, 'setup');
+    commit(repo(projectsDir, '4/repo'), { [LAND.path]: land1 }, 'setup, with no land.local.sh');
+    const v2 = commit(kit, { [LAND.template]: land1.replace('# v1', '# v2') }, 'v2');
+    let saved: any;
+    const cards: any[] = [];
+    const mails: [number, string][] = [];
+    const ks = new KitSync({
+      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs: new HostJobs(() => false),
+      load: () => saved && JSON.parse(JSON.stringify(saved)), save: (s) => (saved = s),
+      projects: () => [{ id: 3, name: 'Gated' }, { id: 4, name: 'Bare' }],
+      home: () => 2, chat: async (p) => 100 + p, env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
+      canPush: async () => true, postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
+      settle: () => {}, note: () => {}, mail: (t, text) => mails.push([t, text]),
+    });
+    const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
+
+    mkdirSync(join(kit, '.git', 'cc-deploy'));
+    writeFileSync(join(kit, '.git', 'cc-deploy', 'unchecked'), 'prev\n');
+    await ks.poll();
+    assert.equal(saved, undefined, 'no round while deploy.sh has not finished checking the checkout');
+    rmSync(join(kit, '.git', 'cc-deploy', 'unchecked'));
+
+    await ks.poll();
+    assert.equal(saved.round.kit, v2);
+    for (let i = 0; i < 200 && states().Bare === 'checking'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      await ks.poll();
+    }
+    assert.equal(states().Bare, 'red');
+    assert.match(mails.find(([t]) => t === 104)![1], /exit 4[\s\S]*the default check ran/);
+
+    commit(kit, { [LAND.template]: land1.replace('# v1', '# v3') }, 'v3');
+    await ks.poll();
+    assert.equal(saved.round.kit, v2, 'a newer kit change waits for the running check');
+    assert.equal(states().Gated, 'checking');
+
+    writeFileSync(gate, '');
+    for (let i = 0; i < 200 && saved.round.kit === v2; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      await ks.poll();
+    }
+    assert.notEqual(saved.round.kit, v2, 'once the check ended, the newer change starts its own round');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1215,13 +1215,13 @@ test('every way to print the whole environment is refused like env; one named ha
     assert.equal(v.ask, false, `${command}: a hard block`);
     assert.match(v.reason, /cut -d= -f1/, `${command}: says how to list names`);
   }
-  for (const command of ['declare -p PATH', 'typeset -p HOME', 'export PATH', 'export FOO=1 BAR=2', 'declare -x FOO=1', 'declare -f', 'declare -F', 'typeset -f my_fn', 'local x=1', 'local x', 'set -e', 'set -euo pipefail', 'set -o', 'set -- a b', 'set +x'])
+  for (const command of ['declare -p PATH', 'typeset -p HOME', 'export PATH', 'export FOO=1 BAR=2', 'declare -x FOO=1', 'declare -f', 'declare -F', 'typeset -f my_fn', 'local x=1', 'local x', 'set -e', 'set -euo pipefail', 'set -o', 'set -- a b', 'set +x', 'f() { local -; set -e; }', 'declare "$k=$v"', 'declare -p "$k=$v"', 'export -p PATH'])
     assert.equal(bash(command), null, command);
 });
 
 test('citadel-heavy and setsid are wrappers: the command they run is checked (#1317 T4)', () => {
   const db = `${data}/coordinator.db`;
-  for (const command of [`citadel-heavy --here rm -f ${db}`, `citadel-heavy rm -f ${db}`, `setsid rm -f ${db}`, `setsid -f -w rm -f ${db}`, 'setsid pkill node', 'citadel-heavy --here env', 'setsid env', 'setsid node server.ts', 'citadel-heavy --here node server.ts', 'ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2 | setsid xargs kill'])
+  for (const command of [`citadel-heavy --here rm -f ${db}`, `citadel-heavy rm -f ${db}`, `setsid rm -f ${db}`, `setsid -f -w rm -f ${db}`, 'setsid pkill node', 'citadel-heavy --here env', 'setsid env', 'setsid node server.ts', 'citadel-heavy --here node server.ts', 'heavy-unit --what dev node server.ts', `tools/heavy-unit --exec rm -f ${db}`, 'ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2 | setsid xargs kill'])
     assert.ok(verdict(command), command);
   for (const command of ['citadel-heavy cargo test --workspace', 'citadel-heavy --here npm test', 'setsid -f sleep 5', 'citadel-heavy env FOO=1 cargo test', 'setsid env DATA_DIR=/tmp/d PORT=19998 node server.ts'])
     assert.equal(bash(command), null, command);
@@ -1230,7 +1230,7 @@ test('citadel-heavy and setsid are wrappers: the command they run is checked (#1
 test('server.ts is only refused when node (or a launcher) runs it, not when a search names node (#1317 T2)', () => {
   for (const command of ['grep -n node src/server.ts', 'rg node server.ts', 'git log -S node -- src/server.ts', 'grep -rn "tsx" server.ts', 'cat node server.ts'])
     assert.equal(bash(command), null, command);
-  for (const command of ['node server.ts', 'nohup node server.ts &', 'time node server.ts', 'npx tsx server.ts', 'npm exec -- tsx server.ts', 'pnpm exec node server.ts', 'bunx tsx server.ts', 'mise exec -- node server.ts', 'xargs node server.ts', '/usr/bin/node src/server.ts'])
+  for (const command of ['node server.ts', 'nohup node server.ts &', 'time node server.ts', 'npx tsx server.ts', 'npm exec -- tsx server.ts', 'pnpm exec node server.ts', 'bunx tsx server.ts', 'mise exec -- node server.ts', 'xargs node server.ts', '/usr/bin/node src/server.ts', 'taskset -c 0 node server.ts', 'strace -f node server.ts', 'tools/heavy-unit node server.ts'])
     assert.ok(verdict(command), command);
 });
 

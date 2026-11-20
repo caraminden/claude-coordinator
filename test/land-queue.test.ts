@@ -346,11 +346,15 @@ test("the queued restart's phases show to the waiters and count as progress", { 
     phase('restarting citadel on abc1234 since 10:00');
     b = waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '3' });
     const bs = b.stderr;
-    await until('b to see the restart', () => /ahead: the queued restart, restarting citadel on abc1234 since 10:00\)/.test(bs()));
-    await new Promise((ok) => setTimeout(ok, 2000));
-    phase('rolling back to def5678 since 10:01');
-    await until('b to see the next phase', () => /ahead: the queued restart, rolling back to def5678 since 10:01\)/.test(bs()));
-    await new Promise((ok) => setTimeout(ok, 2000));
+    await until('b to see the restart', () => bs().includes('in line for the deploy lock (ahead: the queued restart, restarting citadel on abc1234 since 10:00)'));
+    // Four 1 s gaps outlast the 3 s stall, each with 2 s to spare: two 2 s gaps had 1 s, and a starved runner (#1194,
+    // reproduced at a 1% CPU quota) let a gap run past the stall.
+    for (const next of ['rolling back to def5678 since 10:01', 'settling on def5678 since 10:02', 'checking def5678 since 10:03']) {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      phase(next);
+      await until(`b to see "${next}"`, () => bs().includes(`in line for the deploy lock (ahead: the queued restart, ${next})`), 30_000, bs);
+    }
+    await new Promise((ok) => setTimeout(ok, 1000));
     assert.doesNotMatch(bs(), /gave up/, 'past the stall since it arrived, but the restart moved');
     restart.kill('SIGKILL');
     assert.equal(await b.exit, 0, bs());

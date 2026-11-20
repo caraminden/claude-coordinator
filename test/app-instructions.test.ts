@@ -165,6 +165,11 @@ test('a Taskmaster save that repeats a registered rule is refused with the list,
     assert.ok(!saved.isError, saved.content[0].text);
     assert.equal(read(), repeat);
   }
+  // Another scheme's Taskmaster gets the same check on its own scheme's text.
+  const delve = await mcp(DelveTM, 'tools/call', { name: 'set_project_instructions', arguments: { instructions: repeat } }, false);
+  assert.ok(delve.isError, delve.content[0].text);
+  assert.match(delve.content[0].text, /Registered rule: When a minion closes/);
+  assert.equal(store.getProject(Delve.id)!.instructions, 'Delve rule.');
   // A save that repeats nothing goes straight through.
   const plain = await mcp(CitadelTM, 'tools/call', { name: 'set_app_instructions', arguments: { instructions: 'Three rules.\n\nLunch is at noon on Fridays for everyone in the building.' } }, true);
   assert.ok(!plain.isError, plain.content[0].text);

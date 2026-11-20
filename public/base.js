@@ -49,6 +49,7 @@ export function setView(next) {
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
+  if (!who) forgetKept(); // signing out leaves nothing of theirs on the device
 }
 // The shell's login page (core.js renderLogin), shown when the server says you're signed out.
 let showLogin = () => {};
@@ -59,14 +60,23 @@ export function setShowLogin(fn) {
 // ---------- helpers ----------
 
 export async function api(path, opts = {}) {
+  const get = !opts.method || opts.method === 'GET';
+  if (replay && get) {
+    // Opening the kept chat: its answers as they were, and nothing else waits on the network meanwhile.
+    if (path in replay.answers) return JSON.parse(replay.answers[path]);
+    throw Object.assign(new Error('Catching up'), { status: 0 });
+  }
   const res = await fetch(path, {
     ...opts,
     headers: opts.body ? { 'Content-Type': 'application/json' } : {},
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  // A copy, as callers change what they're given; histories are kept from the chat's own page (core.js keepOpenChat).
+  if (get && res.ok && !/events/.test(path)) answers.set(path, JSON.stringify(data));
   if (res.status === 401 && path !== 'api/login') {
     me = null;
+    forgetKept();
     showLogin();
     throw new Error('Not logged in');
   }
@@ -75,6 +85,60 @@ export async function api(path, opts = {}) {
   if (!res.ok && !data.error && [502, 503, 504].includes(res.status)) throw Object.assign(new Error('%APP_NAME% is restarting, try again in a moment'), { status: res.status });
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return data;
+}
+
+// ---------- the kept chat (#1144) ----------
+
+// The last chat opened, kept on this device so the installed app opens to it at once, marked as catching up,
+// while the live answers come (app.js boot). One chat, one person: signing out or a 401 forgets it.
+const KEPT = 'cc-last-chat';
+const KEPT_CHARS = 1_500_000; // localStorage holds about 5M characters per site, shared with drafts and settings
+export const KEPT_EVENTS = 80;
+/** Every GET answer this session, newest per path, as text: what a chat's opening asked for. Histories are kept apart. */
+const answers = new Map();
+let replay = null;
+
+/** The answers a cold open of chat `ticketId` in scheme `projectId` asks for, from this session's. */
+export function keptAnswers(projectId, ticketId) {
+  const out = {};
+  for (const [path, text] of answers) {
+    if (/\?/.test(path) && !/\?tickets=(open|closed)$/.test(path)) continue;
+    const p = path.match(/^api\/projects\/(\d+)/)?.[1];
+    const t = path.match(/^api\/tickets\/(\d+)/)?.[1];
+    if ((p && Number(p) !== projectId) || (t && Number(t) !== ticketId)) continue;
+    out[path] = text;
+  }
+  return out;
+}
+
+/** Keep the chat at `hash` with its history (`history`: { path: text }); one too big to keep forgets the last instead. */
+export function keepChat(hash, projectId, ticketId, history) {
+  if (!account) return;
+  const kept = JSON.stringify({ login: account.login, hash, at: Date.now(), me: account, answers: { ...keptAnswers(projectId, ticketId), ...history } });
+  try {
+    if (kept.length > KEPT_CHARS) throw new Error('too big');
+    localStorage.setItem(KEPT, kept);
+  } catch {
+    forgetKept();
+  }
+}
+
+/** The kept chat, if this launch (`hash`) opens it: its own address, or the app's start with none. */
+export function keptChat(hash) {
+  try {
+    const kept = JSON.parse(localStorage.getItem(KEPT));
+    if (kept?.me && kept.answers && (hash === kept.hash || hash === '' || hash === '#/')) return kept;
+  } catch {}
+  return null;
+}
+
+export function forgetKept() {
+  try { localStorage.removeItem(KEPT); } catch {}
+}
+
+/** While on, GETs answer from the kept chat's answers only (null turns it off). */
+export function replayKept(kept) {
+  replay = kept;
 }
 
 export function h(tag, attrs = {}, ...children) {

@@ -1,7 +1,7 @@
 // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
 import { inMerged } from './mine.js';
-import { ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, me, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { renderCost } from './cost.js';
@@ -271,7 +271,7 @@ let streamTimer = null;
 let reconnectChip = null;
 let reconnectTimer = null;
 function reconnecting(on) {
-  if (on && (reconnectChip || reconnectTimer)) return;
+  if (on && (reconnectChip || reconnectTimer || catchUpChip)) return;
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (on) {
@@ -286,8 +286,56 @@ function reconnecting(on) {
   }
 }
 
+// The kept chat drawn at launch (#1144) says so until the live answers replace it; it stands in for Reconnecting….
+let catchUpChip = null;
+let keptOpen = false; // the kept chat's answers are on screen: no stream (its events would skip the gap), nothing kept anew
+
+/** Open the app on the kept chat (base.js keptChat) while the live answers come; resolves once it's drawn. */
+export function startKept(kept) {
+  reconnecting(false);
+  catchUpChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' },
+    h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Catching up…');
+  document.body.append(catchUpChip);
+  keptOpen = true;
+  replayKept(kept);
+  return start(kept.me).finally(() => replayKept(null));
+}
+
+/** The live answer to api/me came: refresh the kept chat in place (a draft survives) and drop the chip. */
+export async function goLive(who) {
+  replayKept(null);
+  keptOpen = false;
+  setAccount(who);
+  prsAt = 0;
+  loadPrs();
+  initAppSwitch(me);
+  // The stream first: resync holds what it sends until the catch-up has fetched what came before.
+  connectStream();
+  try {
+    await resync();
+  } finally {
+    catchUpChip?.remove();
+    catchUpChip = null;
+  }
+  keepOpenChat();
+}
+
+/** Keep the open chat on the device for the next launch (base.js keepChat): the newest of its history and what opening it asked for. */
+function keepOpenChat() {
+  const v = view;
+  if (v?.kind !== 'project' || !v.id || keptOpen || !/^#\/p\/\d+(\/t\/\d+)?$/.test(location.hash)) return;
+  const src = v.merged?.src ?? v.id;
+  const page = eventCache.get(src);
+  if (!page) return;
+  const events = page.events.slice(-KEPT_EVENTS);
+  keepChat(location.hash, v.projectId, v.id, { [eventsUrl(src)]: JSON.stringify({ ...page, events, more: page.more || events.length < page.events.length }) });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') keepOpenChat();
+});
+
 function connectStream(catchUp = false) {
-  if (stream || !me) return;
+  if (stream || !me || keptOpen) return;
   clearTimeout(streamTimer);
   const es = new EventSource('api/stream');
   stream = es;
@@ -939,6 +987,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await openStartScheme();
+    if (seq === routeSeq) keepOpenChat();
   } catch (err) {
     if (err.message !== 'Not logged in' && seq === routeSeq) {
       // A notice with a way out, not a bare red line on a blank page.
@@ -1122,9 +1171,10 @@ export function start(who) {
   const meters = document.querySelector('.topbar .meters');
   if (!meters.querySelector('.ci-chip:not(.status-chip)')) meters.append(ciChip());
   if (!meters.querySelector('.status-chip')) meters.append(statusChip());
-  route();
+  const routed = route();
   showRail();
   initAppSwitch(me);
+  return routed;
 }
 
 export async function logout() {

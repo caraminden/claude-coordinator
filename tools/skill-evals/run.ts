@@ -6,12 +6,14 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type Case = { id: string; source: string; from: string; expect: string; also?: string[]; edited?: string; text: string };
-// fired: the first Skill call's name, `citadel:` stripped; Claude Code's own skills keep a `cc:` prefix; 'none' if none.
+// fired: the first Skill call's name, `citadel:` stripped; Claude Code's own skills keep a `cc:` prefix; 'none' if none;
+// 'error' when the run failed (a non-zero exit, a timeout, no result line), which is left out of the score.
 export type Result = { id: string; fired: string[] };
 
-const HERE = dirname(new URL(import.meta.url).pathname);
+const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 export const CASES_FILE = join(HERE, 'cases.json');
 
@@ -48,7 +50,7 @@ export function score(cases: Case[], results: Result[]): { rows: SkillRow[]; hit
   const row = (skill: string) => rows.get(skill) ?? rows.set(skill, { skill, cases: 0, hits: 0, runs: 0, falseFires: 0 }).get(skill)!;
   let hits = 0, total = 0;
   for (const c of cases) {
-    const fired = byId.get(c.id) ?? [];
+    const fired = (byId.get(c.id) ?? []).filter((f) => f !== 'error');
     const r = row(c.expect);
     r.cases++;
     for (const f of fired) {
@@ -75,17 +77,17 @@ export function table(cases: Case[], results: Result[], skills: string[]): strin
   const byId = new Map(results.map((r) => [r.id, r.fired]));
   for (const c of cases) {
     const fired = byId.get(c.id) ?? [];
-    const mark = fired.every((f) => ok(c, f)) ? '' : ' ✗';
+    const mark = fired.every((f) => f === 'error' || ok(c, f)) ? '' : ' ✗';
     out.push(`| ${c.id} | ${[c.expect, ...(c.also ?? [])].join(' / ')} | ${fired.join(', ')}${mark} |`);
   }
   return out.join('\n');
 }
 
-// The cases whose share of acceptable runs changed between two result sets.
+// The cases whose picks changed between two result sets, an acceptable pick swapped for another included.
 export function flips(cases: Case[], before: Result[], after: Result[]): string {
   const b = new Map(before.map((r) => [r.id, r.fired])), a = new Map(after.map((r) => [r.id, r.fired]));
-  const share = (c: Case, f: string[]) => f.filter((x) => ok(c, x)).length / (f.length || 1);
-  const lines = cases.filter((c) => share(c, b.get(c.id) ?? []) !== share(c, a.get(c.id) ?? []))
+  const key = (f: string[] = []) => [...f].sort().join();
+  const lines = cases.filter((c) => key(b.get(c.id)) !== key(a.get(c.id)))
     .map((c) => `| ${c.id} | ${[c.expect, ...(c.also ?? [])].join(' / ')} | ${(b.get(c.id) ?? []).join(', ')} | ${(a.get(c.id) ?? []).join(', ')} |`);
   return lines.length ? ['| Case | Expect | Before | After |', '|---|---|---|---|', ...lines].join('\n') : 'No case changed.';
 }
@@ -111,7 +113,15 @@ function runCase(kitDir: string, c: Case, model: string): Promise<string> {
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
     const t = setTimeout(() => p.kill(), 120_000);
-    p.on('close', () => { clearTimeout(t); rmSync(cwd, { recursive: true, force: true }); done(firstSkill(out)); });
+    p.on('close', () => {
+      clearTimeout(t);
+      rmSync(cwd, { recursive: true, force: true });
+      // Any first tool call (a Skill, or a switched-off tool) ends on --max-turns with exit 1; that run still answered.
+      // A login or API failure ends with another subtype, or with no result line at all.
+      const fired = firstSkill(out);
+      const answered = out.split('\n').some((l) => /"type":"result"/.test(l) && /"subtype":"(success|error_max_turns)"/.test(l));
+      done(fired !== 'none' || answered ? fired : 'error');
+    });
   });
 }
 
@@ -155,17 +165,22 @@ async function main(argv: string[]) {
   if (only) cases = cases.filter((c) => only.split(',').includes(c.id));
   if (!cases.length) throw new Error('no case matches');
   const runs = Number(arg('--runs') ?? 1), jobs = Number(arg('--jobs') ?? 4), model = arg('--model') ?? 'sonnet';
+  if (!(Number.isInteger(runs) && runs > 0 && Number.isInteger(jobs) && jobs > 0)) throw new Error('--runs and --jobs take a whole number above 0');
   const ref = arg('--ref'), base = arg('--base');
   const after = ref ? kitAt(ref) : { dir: join(REPO, 'kit'), cleanup: () => {} };
   const label = ref ?? 'working tree';
+  const failed: string[] = [];
   const parts: string[] = [`# Skill trigger evals: ${cases.length} cases × ${runs} run(s), ${model}`, ''];
   try {
     const skills = kitSkills(after.dir);
+    const errs = (rs: Result[]) => rs.forEach((r) => r.fired.forEach((f) => f === 'error' && failed.push(r.id)));
     const now = await runAll(after.dir, cases, runs, jobs, model, label);
+    errs(now);
     if (base) {
       const before = kitAt(base);
       try {
         const then = await runAll(before.dir, cases, runs, jobs, model, base);
+        errs(then);
         parts.push(`## Before (${base})`, '', table(cases, then, kitSkills(before.dir)), '');
         parts.push(`## After (${label})`, '', table(cases, now, skills), '', '## Cases that changed', '', flips(cases, then, now));
       } finally { before.cleanup(); }
@@ -175,6 +190,7 @@ async function main(argv: string[]) {
   process.stdout.write(report);
   const out = arg('--out');
   if (out) writeFileSync(out, report);
+  if (failed.length) throw new Error(`${failed.length} run(s) failed and were left out of the score (is claude logged in?): ${[...new Set(failed)].join(', ')}`);
 }
 
 if (import.meta.main) main(process.argv.slice(2)).catch((e) => { console.error(String(e?.message ?? e)); process.exit(1); });

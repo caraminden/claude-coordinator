@@ -20,12 +20,13 @@ export async function installProblems(name: string, get: (path: string) => Promi
  * `statics` is what an installer may fetch with no login (#987): the manifest the page links and every image its
  * manifest lists, as paths under /apps/<name> (staticOpen in src/apps.ts), whether or not they answered.
  */
-export async function installCheck(name: string, get: (path: string) => Promise<Response>): Promise<{ problems: string[]; icon: string | null; statics: string[] }> {
+export async function installCheck(name: string, get: (path: string) => Promise<Response>): Promise<{ problems: string[]; icon: string | null; statics: string[]; unchecked?: string }> {
   const statics: string[] = [];
   const found = (problems: string[], icon: string | null = null) => ({ problems, icon, statics });
   const home = `/apps/${name}/`;
   const page = await get(home);
-  if (!page.ok) return found([`Couldn't check how it installs: ${home} answered ${page.status}.`]);
+  // Not a lack: the check never got to look. `unchecked` says so, so a caller can retry rather than report a to-do.
+  if (!page.ok) return { ...found([`Couldn't check how it installs: ${home} answered ${page.status}.`]), unchecked: `${home} answered ${page.status}` };
   const html = await page.text();
   const hrefOf = (tag: string | undefined) => {
     const m = tag && /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);

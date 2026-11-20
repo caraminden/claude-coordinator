@@ -109,7 +109,7 @@ let fake: ReturnType<typeof fakeSystemd>;
 let services: AppServices;
 const opts = (): ServiceOptions => ({
   off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573',
-  logDir: join(home, 'deploy-logs'), healthMs: 3000, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
+  logDir: join(home, 'deploy-logs'), healthMs: 3000, installRetryMs: 150, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
   systemdRun: fake.run, heavy: join(import.meta.dirname, '..', 'tools', 'citadel-heavy'),
 });
 const appFolder = (name: string, manifest: object = MANIFEST) => {
@@ -798,6 +798,49 @@ test("a deploy checks, as the person deploying, that the app installs as its own
     services.deploy(c, 'Cara');
     assert.ok(!(await done(name)).said.some((l) => /points outside/.test(l)));
     assert.ok(!seen.includes('v1.signed.header'));
+  } finally {
+    svc.close();
+  }
+});
+
+test('an install check that cannot run is no to-do and no "no rail icon": it is retried, and only then said plainly', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const home = `/apps/${name}/`;
+  let slow = true;
+  const manifest = { id: home, start_url: home, scope: home, name: 'App', display: 'standalone', icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] };
+  const svc = createHttpServer((req, res) => {
+    if (slow && req.url === home) return void res.writeHead(503).end('busy');
+    if (req.url === home) return res.end('<link rel="manifest" href="manifest.webmanifest">');
+    if (req.url === `${home}manifest.webmanifest`) return res.end(JSON.stringify(manifest));
+    res.end('png');
+  });
+  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  const wait = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((x) => setTimeout(x, 50)); };
+  try {
+    const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const icons: string[] = [], todos: string[][] = [], notes: string[] = [];
+    const hooks = { setIcon: (i: string) => (icons.push(i), true), todo: (t: string[]) => todos.push(t), unchecked: (l: string) => notes.push(l) };
+    // Both tries fail: one plain line, no to-do, no rail icon complaint.
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
+    const d = await done(name);
+    assert.equal(d.state, 'deployed');
+    assert.deepEqual([d.todo, todos], [[], []]);
+    assert.ok(!d.said.some((l) => /^To do|rail icon/.test(l)), d.said.join('\n'));
+    await wait(() => notes.length > 0);
+    assert.deepEqual(notes, [`Couldn't check how ${name} installs: ${home} answered 503. Nothing to do unless it repeats.`]);
+    // The retry gets through: the icon is filled from the manifest and nothing is said about lacking.
+    notes.length = 0;
+    slow = false;
+    let calls = 0;
+    const orig = svc.listeners('request')[0] as any;
+    svc.removeAllListeners('request');
+    svc.on('request', (q, s) => { if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x'); orig(q, s); });
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
+    await done(name);
+    await wait(() => icons.length > 0);
+    assert.deepEqual([icons, notes, todos], [['/icon-192.png'], [], [[]]]);
   } finally {
     svc.close();
   }

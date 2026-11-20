@@ -116,16 +116,16 @@ Optional, for jobs that need real Direct3D hardware (#1175). Hyper-V gives the b
 **Set it up** (PowerShell as administrator on her PC; 2 min to check, about 10 in all). Refresh the kit and check first. `-CheckOnly` changes nothing:
 
 ```powershell-admin
-$kit = "$env:TEMP\citadel-kit"   # the kit from step 0: refreshed if it's still there, fetched if not
-if (-not (Test-Path $kit)) { git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit }
-git -C $kit fetch --depth 1 origin main; git -C $kit checkout --detach FETCH_HEAD
+$kit = "$env:TEMP\citadel-kit-admin"   # a fresh copy: git refuses to update step 0's copy from an admin window (it belongs to her user)
+if (Test-Path $kit) { Remove-Item -Recurse -Force $kit }
+git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit
 powershell -ExecutionPolicy Bypass -File "$kit\tools\win-test-box\gpu-host.ps1" -CheckOnly
 ```
 
 It names her GPU and driver, and says whether Windows can partition it. If it can't, it stops there and nothing changed: tell Citadel. Then, in the same window:
 
 ```powershell-admin
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\gpu-host.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit-admin\tools\win-test-box\gpu-host.ps1"
 ```
 
 - It asks for the box's password (user `citadel`, from her password manager), copies the driver's files into the box, and asks before the one step with downtime: it shuts the box down cleanly, adds the GPU partition and starts it again (about 3 minutes; a job running then fails and is run again).
@@ -145,10 +145,10 @@ Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box;
 - **The box sits at the sign-in screen** (its runner and machine show offline). The autologon broke. On her PC, in PowerShell as administrator:
 
   ```powershell
-  $kit = "$env:TEMP\citadel-kit"   # the kit from step 0: refreshed if it's still there, fetched if not
-  if (-not (Test-Path $kit)) { git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit }
-  git -C $kit fetch --depth 1 origin main; git -C $kit checkout --detach FETCH_HEAD   # an old kit may sit on another branch
-  powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\fix-autologon.ps1"
+  $kit = "$env:TEMP\citadel-kit-admin"   # a fresh copy: git refuses to update step 0's copy from an admin window (it belongs to her user)
+  if (Test-Path $kit) { Remove-Item -Recurse -Force $kit }
+  git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit
+  powershell -ExecutionPolicy Bypass -File "$kit\tools\win-test-box\fix-autologon.ps1"
   ```
 
   - It asks for the box's password (user `citadel`, from her password manager), prints why the box isn't signing in, stores the password again, restarts the box gracefully after asking, and says PASS or FAIL. It writes what it found to `citadel-box-autologon.txt` on the desktop, with no password in it.

@@ -66,7 +66,7 @@ take().then((m) => {
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(path.join(dir, session + '.jsonl'), JSON.stringify({ prompt }) + '\\n');
   // claude's init names the model it runs in full (#409).
-  out({ type: 'system', subtype: 'init', session_id: prompt.includes('odd session id') ? '../../victim' : session, tools: [], model: 'claude-' + (opt('--model') ?? 'default') + '-test' });
+  out({ type: 'system', subtype: 'init', session_id: prompt.includes('odd session id') ? '../../victim' : session, tools: prompt.includes('phantom') ? ['Read', 'mcp__mandate__move', 'mcp__mandate__list'] : [], model: 'claude-' + (opt('--model') ?? 'default') + '-test' });
   if (prompt.includes('slow')) return setInterval(() => {}, 1000);
   // Ignores SIGTERM, so only the SIGKILL ends it.
   if (prompt.includes('stubborn')) { process.on('SIGTERM', () => {}); return setInterval(() => {}, 1000); }
@@ -99,6 +99,15 @@ take().then((m) => {
     out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'r2', is_error: true, content: [{ type: 'text', text: 'No such tool available: mcp__mandate__list' }] }] } });
     out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: {} });
     return;
+  }
+  if (prompt.includes('phantom')) {
+    // A call to a tool that isn't there (#1174): claude refuses it with only the name; the note Citadel sends in arrives as the next message.
+    out({ type: 'assistant', message: { id: 'p1', content: [{ type: 'tool_use', id: 'ph1', name: prompt.includes('far') ? 'show_regions' : 'mandate_move', input: {} }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'ph1', is_error: true, content: '<tool_use_error>Error: No such tool available: ' + (prompt.includes('far') ? 'show_regions' : 'mandate_move') + '</tool_use_error>' }] } });
+    return take().then((m) => {
+      out({ type: 'assistant', message: { id: 'p2', content: [{ type: 'text', text: 'Note: ' + textOf(m) }] } });
+      out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: {} });
+    });
   }
   if (prompt.includes('grunts')) {
     // As Claude Code 2.1.316 streams it: a Grunt's events carry its Agent call's id; one it starts shows only as its Agent call.
@@ -333,6 +342,14 @@ test('effort passes --effort and toolSearch adds ToolSearch to the tools and the
   assert.equal(run.argv.includes('--effort'), false, "Claude Code's own default");
   assert.equal(argAfter(run.argv, '--tools'), '');
   assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
+});
+
+test('a call to a tool the agent does not have sends the agent a did-you-mean note into its turn, and a far one gets the plain list (#1174)', async () => {
+  const said = (evs: Ev[]) => evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join('');
+  const near = await turn(mandate, { session: 'phantom-near', prompt: 'phantom call' });
+  assert.match(said(near), /Note: mandate_move is not one of your tools\. Did you mean mcp__mandate__move\?/);
+  const far = await turn(mandate, { session: 'phantom-far', prompt: 'phantom far call' });
+  assert.match(said(far), /Note: show_regions is not one of your tools\. Your tools are: Read, mcp__mandate__move, mcp__mandate__list\./);
 });
 
 test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624), and goes to the error digest with its tool (#835)', async () => {

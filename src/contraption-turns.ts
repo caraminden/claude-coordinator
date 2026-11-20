@@ -28,6 +28,7 @@ import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { clockTime, parseResetTime, ZONE } from './pacific.ts';
 import type { ImageBlock } from './turn-images.ts';
 import { type CodexAt, type MediaTurn } from './contraption-media.ts';
+import { suggestTools, unknownToolName } from './tool-suggest.ts';
 import { args, mcpConfig, settings, toolNamesPrompt, userLine, MEDIA_SERVER } from './contraption-args.ts';
 import { keepTurn, keptDir, keptFile, dropKeptSession, optOutKey, sha256, cap, wantsKeep, type KeptCall } from './replay-keep.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
@@ -645,6 +646,8 @@ export class ContraptionTurns {
     const said = new Map<string, string>();
     // Tool names by call id, so a failed call's digest line names its tool.
     const tools = new Map<string, string>();
+    // The tools claude's init says the turn has, for the did-you-mean note on a call to one it hasn't (#1174).
+    let initToolNames: string[] = [];
     let message = '';
     let waited = false;
     const handle = (ev: any) => {
@@ -652,6 +655,7 @@ export class ContraptionTurns {
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
       // The full name of the model it runs (an alias, or none for the account's default, in start), for end.
       if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) { model = ev.model; if (live.audit) live.audit.model = model; }
+      if (ev.type === 'system' && ev.subtype === 'init' && !parent && Array.isArray(ev.tools)) initToolNames = ev.tools.filter((t: unknown): t is string => typeof t === 'string');
       if (ev.type === 'codex_waiting') {
         waited = true;
       } else if (ev.type === 'codex_rate_limits') {
@@ -704,6 +708,10 @@ export class ContraptionTurns {
             const error = blockText(b.content).slice(0, TOOL_ERROR_MAX);
             emit('tool_result', { id: b.tool_use_id, ok: false, parent, error });
             this.onToolError(c, tools.get(String(b.tool_use_id)) ?? 'tool', error);
+            // Claude Code's refusal names no alternative and runs no hook; the note goes in as a message the agent reads next (not a person's steer: no `taken` event).
+            const called = unknownToolName(error);
+            const note = called && !codex ? suggestTools(called, initToolNames) : null;
+            if (note && !live.replied && !live.stopped && live.child?.stdin?.writable) live.child.stdin.write(userLine(note));
           }
           else emit('tool_result', { id: b.tool_use_id, ok: true, parent });
         }

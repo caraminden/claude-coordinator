@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
 import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
 import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
+import { flailBrakeHook, FLAIL_LINE } from '../kit/hooks/flail-brake.ts';
 import { bigReadHook } from '../kit/hooks/big-read.ts';
 import { gruntModelHook, jobTable } from '../kit/hooks/grunt-model.ts';
 
@@ -220,6 +221,57 @@ test('test-first reminder: once per session on the first source edit, quiet afte
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'test-first.ts')], { input, env: { ...process.env, TMPDIR: dir }, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'cli', cwd: '/w', tool_input: { file_path: 'src/x.ts' } })).stdout, /test-first/);
   assert.equal(run('not json').stdout, '');
+});
+
+test('flail brake: three identical red runs with no edit between give the line once; an edit, a green run or another command resets the count', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-flail-'));
+  const run = (command: string, red: boolean, session: string) =>
+    flailBrakeHook({ hook_event_name: red ? 'PostToolUseFailure' : 'PostToolUse', tool_name: 'Bash', session_id: session, cwd: '/w', tool_input: { command }, ...(red ? { error: 'Exit code 1' } : { tool_response: { stdout: '', stderr: '' } }) }, dir);
+  const edit = (session: string, tool_name = 'Edit') => flailBrakeHook({ hook_event_name: 'PostToolUse', tool_name, session_id: session, cwd: '/w', tool_input: { file_path: '/w/src/a.ts' } }, dir);
+  const cmd = 'node --test test/a.test.ts';
+  // Three the same: quiet, quiet, the line; then quiet for the rest of the streak.
+  assert.equal(run(cmd, true, 'a'), null);
+  assert.equal(run(cmd, true, 'a'), null);
+  const out = run(cmd, true, 'a');
+  assert.ok(out);
+  const h = JSON.parse(out).hookSpecificOutput;
+  assert.equal(h.hookEventName, 'PostToolUseFailure');
+  assert.equal(h.additionalContext, FLAIL_LINE);
+  assert.match(FLAIL_LINE, /citadel:diagnosing-bugs/);
+  assert.equal(run(cmd, true, 'a'), null, 'once per streak');
+  assert.equal(run(cmd, true, 'a'), null);
+  // An edit between runs resets the count (Write, MultiEdit and NotebookEdit too).
+  for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+    const s = `edit-${tool}`;
+    run(cmd, true, s);
+    run(cmd, true, s);
+    assert.equal(edit(s, tool), null);
+    assert.equal(run(cmd, true, s), null, `${tool} reset it`);
+    assert.equal(run(cmd, true, s), null);
+    assert.ok(run(cmd, true, s), 'three more after the edit');
+  }
+  // A green run, or a different command, starts over.
+  run(cmd, true, 'g');
+  run(cmd, true, 'g');
+  run(cmd, false, 'g');
+  assert.equal(run(cmd, true, 'g'), null);
+  run(cmd, true, 'd');
+  run(cmd, true, 'd');
+  assert.equal(run('node --test test/b.test.ts', true, 'd'), null);
+  assert.equal(run(cmd, true, 'd'), null);
+  // Sessions don't share a count; a non-test command or a red run in the background counts for nothing.
+  run(cmd, true, 'x');
+  run(cmd, true, 'y');
+  assert.equal(run(cmd, true, 'x'), null);
+  assert.equal(run('grep -n foo src/a.ts', true, 'n'), null);
+  for (let i = 0; i < 3; i++) assert.equal(!!run('citadel-test test/a.test.ts', true, 'ct'), i === 2, 'citadel-test counts');
+  // The script prints the line and says nothing on a broken input.
+  const script = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'flail-brake.ts')], { input, env: { ...process.env, TMPDIR: dir }, encoding: 'utf8' });
+  const input = JSON.stringify({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', session_id: 'cli', cwd: '/w', tool_input: { command: cmd }, error: 'Exit code 1' });
+  assert.equal(script(input).stdout, '');
+  assert.equal(script(input).stdout, '');
+  assert.match(script(input).stdout, /diagnosing-bugs/);
+  assert.equal(script('not json').stdout, '');
 });
 
 test('big-read guard: sends back whole reads and plain cat/sed of big files, lets small, ranged, unclear and allow_large through', () => {

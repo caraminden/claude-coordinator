@@ -50,6 +50,7 @@ test('a fresh pull of an off-box set that stopped being made is a miss (B1): the
   assert.deepEqual(backupProblems(world(5, null, '2026-11-19', null, 30), NOW), ['the off-box set was last made 30 h ago'], 'made but never pulled still says the set is old');
   assert.equal(world(5, 6, null, null, 7).setAt, NOW - 7 * HOUR);
   assert.equal(world(5, null, null, null).setAt, null, 'no off-box folder: not set up here');
+  assert.deepEqual(backupProblems(world(5, 6, '2026-11-19', null, null), NOW), ['the off-box set is missing (no SHA256SUMS)'], 'pulled, but the list it reads is gone');
 });
 
 test('deploy/offbox-serve.sh list marks the pull', () => {

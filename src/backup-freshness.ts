@@ -65,7 +65,8 @@ export function backupProblems(b: BackupInfo, now: number): string[] {
   if (!b.db) out.push('no database backup on disk');
   else if (now - b.db.at > DB_STALE_H * HOUR) out.push(`the database backup is ${Math.round((now - b.db.at) / HOUR)} h old`);
   // .pulled is touched on every list, so a fresh pull can be of an old set: a failed state-db check or off-box step leaves SHA256SUMS behind.
-  if (b.setAt !== null && now - b.setAt > DB_STALE_H * HOUR) out.push(`the off-box set was last made ${Math.round((now - b.setAt) / HOUR)} h ago`);
+  if (b.setAt === null && b.pulledAt !== null) out.push('the off-box set is missing (no SHA256SUMS)');
+  else if (b.setAt !== null && now - b.setAt > DB_STALE_H * HOUR) out.push(`the off-box set was last made ${Math.round((now - b.setAt) / HOUR)} h ago`);
   if (b.pulledAt !== null && now - b.pulledAt > PULL_STALE_H * HOUR) out.push(`the off-box copy was last pulled ${Math.round((now - b.pulledAt) / HOUR)} h ago`);
   for (const a of b.apps) if (a.day && !a.ok) out.push(`${a.title} last wrote a backup on ${a.day}`);
   return out;

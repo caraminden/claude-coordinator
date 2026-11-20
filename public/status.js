@@ -223,7 +223,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       dayBars(days, c.uptime.restarts, { tip: (i) => plural(c.uptime.restarts[i], 'start'), label: 'starts a day' }),
     { tone: c.uptime.reason?.startsWith('a restart') && now - c.uptime.bootAt < 86_400_000 ? 'warn' : null, key: 'uptime', chart: `starts a day: ${perDay(days, c.uptime.restarts)}` }),
     tile('Stalls', plural(c.stalls.counts[today], 'stall') + ' today',
-      lastStall ? `Longest today ${secs(c.stalls.longest[today])} · the last ${ago(lastStall.at)}${lastStall.seconds !== null ? `, ${lastStall.seconds} s` : ''}` : 'None this week',
+      lastStall ? `Longest today ${secs(c.stalls.longest[today])} · the last ${ago(lastStall.at)}${lastStall.seconds !== null ? `, ${lastStall.seconds} s` : ''}${lastStall.cause ? `: ${lastStall.cause}` : ''}${lastStall.afterBoot ? ' (just after a start)' : ''}` : 'None this week',
       dayBars(days, c.stalls.counts, { tip: (i) => `${plural(c.stalls.counts[i], 'stall')}${c.stalls.counts[i] ? `, longest ${c.stalls.longest[i]} s` : ''}`, label: 'event-loop stalls a day' }),
       { key: 'stalls', chart: `stalls a day: ${perDay(days, c.stalls.counts)}; longest a day (s): ${perDay(days, c.stalls.longest)}` }),
     stormTile(c.storms, days, now),

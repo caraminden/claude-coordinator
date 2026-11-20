@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
-import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
+import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, BOOT_STALL, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
 import { git } from './git.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
@@ -243,13 +243,14 @@ test('restarting on the same commit is not a deploy; the first commit ever seen 
   assert.deepEqual(w.state(), { live: sha('0'), deploys: [] });
 });
 
-test('event-loop stalls in the first minutes after boot are not recorded', () => {
+test('event-loop stalls in the first minutes after boot are kept as their own kind, never counted by the checks', () => {
   const { store, clock, watch } = setup();
   const w = new DeployWatch({ ...(watch() as any).d, bootAt: clock.now });
   w.record('loop-lag', 'stalled 900 ms');
   clock.now += 8 * MIN;
   w.record('loop-lag', 'stalled 800 ms: restart warm-up (afterRestore) still running');
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0, 'a restart\'s warm-up runs minutes in');
+  assert.equal(store.healthCount(BOOT_STALL, 0, Infinity).count, 2, 'but its record is kept, marked');
   clock.now += 3 * MIN;
   w.record('loop-lag', 'Running: 90% all < newCode (src/new.ts:1)');
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 1, 'new code stalling after warm-up still counts');

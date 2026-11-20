@@ -4,6 +4,7 @@
 // stall's line names the code that ran during it, as its commonest stacks:
 //   The event loop was held for 1.2 s: ... Running: 70% listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 20% (garbage collector)
 import { readFileSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { Session } from 'node:inspector/promises';
 import { basename } from 'node:path';
@@ -66,6 +67,86 @@ export function ioStalledUs(file = '/proc/pressure/io'): number | null {
   } catch {
     return null;
   }
+}
+
+/** What the server's own process and its cgroup's pressure counters read at one moment, for a stall's before and after. */
+export interface Reading {
+  /** User plus system CPU time of the process, microseconds. */
+  cpuUs: number;
+  majorFaults: number;
+  voluntarySwitches: number;
+  involuntarySwitches: number;
+  /** Microseconds anyone (PSI "some") in the server's cgroup waited for CPU, disk and memory since it began. Null where the kernel can't say. */
+  cpuWaitUs: number | null;
+  ioWaitUs: number | null;
+  memWaitUs: number | null;
+}
+
+let cgroupDir: string | null | undefined;
+/** The server's cgroup v2 directory, or null (then the box-wide /proc/pressure files stand in). */
+function cgroupOf(): string | null {
+  if (cgroupDir !== undefined) return cgroupDir;
+  try {
+    const rel = /^0::(.*)$/m.exec(readFileSync('/proc/self/cgroup', 'utf8'))?.[1];
+    cgroupDir = rel ? `/sys/fs/cgroup${rel}` : null;
+  } catch {
+    cgroupDir = null;
+  }
+  return cgroupDir;
+}
+
+/** Microseconds of "some" pressure in `kind` (cpu, io or memory) for the server's cgroup, else the box; null if unreadable. */
+export function pressureUs(kind: 'cpu' | 'io' | 'memory', dir = cgroupOf()): number | null {
+  for (const file of [dir && `${dir}/${kind}.pressure`, `/proc/pressure/${kind}`]) {
+    if (!file) continue;
+    try {
+      const us = Number(/^some .*total=(\d+)/m.exec(readFileSync(file, 'utf8'))?.[1]);
+      if (Number.isFinite(us)) return us;
+    } catch {}
+  }
+  return null;
+}
+
+export function readNow(): Reading {
+  const r = process.resourceUsage();
+  return {
+    cpuUs: r.userCPUTime + r.systemCPUTime,
+    majorFaults: r.majorPageFault,
+    voluntarySwitches: r.voluntaryContextSwitches,
+    involuntarySwitches: r.involuntaryContextSwitches,
+    cpuWaitUs: pressureUs('cpu'),
+    ioWaitUs: pressureUs('io'),
+    memWaitUs: pressureUs('memory'),
+  };
+}
+
+export type Cause = 'own work' | 'waited for CPU' | 'waited for disk' | 'waited for memory' | 'unclear';
+
+/** A share of the stall's wall time that one kind of waiting must reach to be named the cause. */
+const WAIT_SHARE = 0.25;
+/** A share of wall time on the CPU that makes a stall the server's own work. */
+const OWN_SHARE = 0.7;
+
+/**
+ * Why the loop was held, from the counters' change over its `wallMs`: memory then disk when the cgroup waited on them
+ * for a quarter of it (they starve the CPU share too, so they win); then own work when the process was on CPU for
+ * 70% of it; then waited for CPU when CPU pressure reached a quarter of it; else unclear (the line still has the numbers).
+ * The CPU time is the whole process's: the write worker's threads count in it.
+ */
+export function stallCause(a: Reading, b: Reading, wallMs: number): { cause: Cause; text: string } {
+  const wallUs = wallMs * 1000;
+  const cpuUs = b.cpuUs - a.cpuUs;
+  const wait = (x: number | null, y: number | null) => (x != null && y != null ? y - x : null);
+  const mem = wait(a.memWaitUs, b.memWaitUs), io = wait(a.ioWaitUs, b.ioWaitUs), cpuWait = wait(a.cpuWaitUs, b.cpuWaitUs);
+  const s = (us: number | null) => (us == null ? '?' : (us / 1e6).toFixed(1));
+  let cause: Cause = 'unclear';
+  if (mem != null && mem >= WAIT_SHARE * wallUs) cause = 'waited for memory';
+  else if (io != null && io >= WAIT_SHARE * wallUs) cause = 'waited for disk';
+  else if (cpuUs >= OWN_SHARE * wallUs) cause = 'own work';
+  else if (cpuWait != null && cpuWait >= WAIT_SHARE * wallUs) cause = 'waited for CPU';
+  const text = `${s(cpuUs)} s on CPU of ${(wallMs / 1000).toFixed(1)} s; waited ${s(cpuWait)} s for CPU, ${s(io)} s for disk, ${s(mem)} s for memory; ` +
+    `${b.majorFaults - a.majorFaults} major faults, ${b.voluntarySwitches - a.voluntarySwitches} voluntary and ${b.involuntarySwitches - a.involuntarySwitches} involuntary switches`;
+  return { cause, text };
 }
 
 /**
@@ -149,23 +230,30 @@ class Sampler {
 
 /**
  * Log each time the event loop was held more than `over` ms, measured by a timer every `every` ms; with `profile`,
- * each line also names what ran (namedStacks). Each line says how long the disk stalled the whole box meanwhile, and
+ * each line also names what ran (namedStacks). Each line leads with its cause in words (stallCause: own work, waited for
+ * CPU, disk or memory) and the numbers behind it, and `backlog` says how many writes the write worker had queued. Each line says how long the disk stalled the whole box meanwhile, and
  * a stall over 2 s names the other processes that have any of `files` (the databases) open (#622). `stop`
  * ends the watch and the sampler.
  */
-export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false, files = [] as string[] } = {}): { stop(): void } {
+export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false, files = [] as string[], backlog = () => 0 } = {}): { stop(): void } {
   const sampler = profile ? new Sampler(log) : null;
   let last = process.hrtime.bigint();
   let io = ioStalledUs();
+  let reading = readNow();
   const timer = setInterval(() => {
     const now = process.hrtime.bigint();
     const held = Number(now - last) / 1e6 - every;
     const from = Number(last / 1000n);
     const ioFrom = io;
+    const before = reading;
     last = now;
     io = ioStalledUs();
+    reading = readNow();
     if (held <= over) return;
-    const line = `The event loop was held for ${(held / 1000).toFixed(1)} s: the server answered nobody meanwhile.`;
+    // The window is the whole gap since the last tick: wall time `held + every`.
+    const why = stallCause(before, reading, held + every);
+    const queued = backlog();
+    const line = `The event loop was held for ${(held / 1000).toFixed(1)} s: the server answered nobody meanwhile. Cause: ${why.cause} (${why.text}; ${queued} writes queued on the write worker).`;
     // A blocked write is the disk (this) or another process's lock (the openers): only the second waits on a busy timeout.
     const disk = io != null && ioFrom != null ? ` Disk: the box was fully stalled on I/O for ${((io - ioFrom) / 1e6).toFixed(1)} s of it.` : '';
     const to = Number(now / 1000n);

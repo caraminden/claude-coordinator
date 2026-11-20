@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ioStalledUs, namedStacks, openersOf, watchLoopLag } from '../src/loop-lag.ts';
+import { ioStalledUs, namedStacks, openersOf, stallCause, watchLoopLag, type Reading } from '../src/loop-lag.ts';
 import { until } from './wait.ts';
 
 const spin = (ms: number) => {
@@ -97,5 +97,34 @@ test('openersOf names the other processes with a database open, its -wal include
     child.kill();
     await new Promise((r) => child.once('exit', r));
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const reading = (over: Partial<Reading> = {}): Reading => ({ cpuUs: 0, majorFaults: 0, voluntarySwitches: 0, involuntarySwitches: 0, cpuWaitUs: 0, ioWaitUs: 0, memWaitUs: 0, ...over });
+
+test('stallCause names each cause from the counters over a 2 s stall (P2)', () => {
+  const at = reading();
+  assert.equal(stallCause(at, reading({ cpuUs: 1_900_000 }), 2000).cause, 'own work');
+  assert.equal(stallCause(at, reading({ cpuUs: 200_000, cpuWaitUs: 1_500_000, involuntarySwitches: 40 }), 2000).cause, 'waited for CPU');
+  assert.equal(stallCause(at, reading({ cpuUs: 100_000, ioWaitUs: 1_200_000 }), 2000).cause, 'waited for disk');
+  assert.equal(stallCause(at, reading({ cpuUs: 100_000, memWaitUs: 1_200_000, majorFaults: 900 }), 2000).cause, 'waited for memory');
+  assert.equal(stallCause(at, reading({ cpuUs: 100_000 }), 2000).cause, 'unclear');
+  // Memory starves the CPU share too, so it outranks CPU pressure; a box that can't say falls back on CPU time.
+  assert.equal(stallCause(at, reading({ cpuWaitUs: 1_500_000, memWaitUs: 1_500_000 }), 2000).cause, 'waited for memory');
+  assert.equal(stallCause(at, reading({ cpuUs: 1_900_000, cpuWaitUs: null, ioWaitUs: null, memWaitUs: null }), 2000).cause, 'own work');
+  const t = stallCause(at, reading({ cpuUs: 1_900_000, majorFaults: 3, voluntarySwitches: 5, involuntarySwitches: 7 }), 2000).text;
+  assert.match(t, /1\.9 s on CPU of 2\.0 s; .* 3 major faults, 5 voluntary and 7 involuntary switches/);
+});
+
+test('a real stall line carries its cause and the writer backlog (P2)', async () => {
+  const logged: string[] = [];
+  const watch = watchLoopLag((text) => logged.push(text), 10, 150, { backlog: () => 7 });
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    spin(400);
+    await waitFor(() => logged.length > 0);
+    assert.match(logged[0], /held for \d+\.\d s: the server answered nobody meanwhile\. Cause: (own work|waited for CPU|waited for disk|waited for memory|unclear) \(.*; 7 writes queued on the write worker\)\./, logged[0]);
+  } finally {
+    watch.stop();
   }
 });

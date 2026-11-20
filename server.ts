@@ -212,7 +212,8 @@ if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DI
   if (note !== 'already no-COW') (moved ? console.log : console.warn)(`coordinator.db: ${note}`);
 }
 const BOOT_AT = Date.now();
-if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 300))), 100, 500, { profile: true, files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
+let writerQueued = () => 0;
+if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 // systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
 startWatchdog();
 await loadAssets();
@@ -221,8 +222,9 @@ const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.
 // CITADEL_DB_WRITE_DELAY_MS is for tests (#1239): every write waits that long on the worker, as on a starved box, so a test
 // that reads the database itself right after a response, without waiting for the row, goes red every run. At most 1 s.
-writeOffThread(store, { delayMs: Math.min(Number(process.env.CITADEL_DB_WRITE_DELAY_MS) || 0, 1000) });
+const writer = writeOffThread(store, { delayMs: Math.min(Number(process.env.CITADEL_DB_WRITE_DELAY_MS) || 0, 1000) });
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
+if (writer) writerQueued = writer.queued;
 checkpointOffThread(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {

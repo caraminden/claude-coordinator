@@ -14,6 +14,7 @@ import { pressure } from './pressure.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
+import { BOOT_STALL } from './deploy-watch.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -108,6 +109,11 @@ export function looksFor(store: Store, scheme: number | null, target: string, no
     if (t) out[tile].minion = { project: scheme, number: t.number!, title: t.title, closed: t.status === 'closed' };
   }
   return out;
+}
+
+/** "…Cause: waited for disk (…)" → "waited for disk"; null for a line from before the cause was recorded. */
+export function stallCauseOf(detail: string): string | null {
+  return /Cause: ([a-zA-Z ]+?) \(/.exec(detail)?.[1] ?? null;
 }
 
 /** "The event loop was held for 2.3 s: …" → 2.3; null when the line doesn't say. */
@@ -336,7 +342,7 @@ export class StatusPage {
     const { store, bootAt } = this.deps;
     const dayOf = (at: number) => pacificDay(at);
     const blank = () => Object.fromEntries(days.map((d) => [d, 0])) as Record<string, number>;
-    const events = store.healthEventsSince(['boot', 'loop-lag'], since);
+    const events = store.healthEventsSince(['boot', 'loop-lag', BOOT_STALL], since);
     // Restarts: each boot, why, and how many a day.
     const boots = events.filter((e) => e.kind === 'boot');
     const lastBoot = boots.filter((b) => b.at <= bootAt + 60_000).at(-1) ?? null;
@@ -345,7 +351,7 @@ export class StatusPage {
     // Stalls: count and longest per day, and the last one's line.
     const stallCount = blank();
     const stallLongest = blank();
-    const stalls = events.filter((e) => e.kind === 'loop-lag');
+    const stalls = events.filter((e) => e.kind === 'loop-lag' || e.kind === BOOT_STALL);
     for (const s of stalls) {
       const d = dayOf(s.at);
       if (!(d in stallCount)) continue;
@@ -448,7 +454,7 @@ export class StatusPage {
       looks,
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
-      stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), detail: lastStall.detail.slice(0, 300) } : null },
+      stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
       host: { series, latest, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
@@ -551,7 +557,7 @@ export interface CitadelStatus {
   /** Whether this viewer can see Citadel's scheme, so its tiles carry Investigate (#1273). */
   canInvestigate: boolean;
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
-  stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; detail: string } | null };
+  stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
   host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */

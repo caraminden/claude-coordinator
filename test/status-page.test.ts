@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
-import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, stallSeconds } from '../src/status-page.ts';
+import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, stallSeconds, stallCauseOf } from '../src/status-page.ts';
+import { BOOT_STALL } from '../src/deploy-watch.ts';
 import type { Storm } from '../src/memory-storms.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
@@ -425,4 +426,18 @@ test('host samples keep the CPU and memory pressure (#1301), null when there was
   store.addHostSample({ ...base, at: 2000 });
   const rows = store.hostSamples(0);
   assert.deepEqual(rows.map((r) => [r.cpu_psi, r.mem_psi]), [[63, 4], [null, null]]);
+});
+
+test('the last stall says its cause in words, and a stall just after a boot is shown, marked (P2)', async () => {
+  const { store, josh, citadel } = setup('stall-cause');
+  const now = sameDayNow();
+  store.addHealthEvent('loop-lag', now - 20 * 60_000, 'x', 'The event loop was held for 1.5 s: the server answered nobody meanwhile. Cause: waited for disk (0.1 s on CPU of 1.6 s; 0.0 s for CPU, 1.2 s for disk, 0.0 s for memory; 2 major faults, 3 voluntary and 4 involuntary switches; 5 writes queued on the write worker).');
+  store.addHealthEvent(BOOT_STALL, now - 5 * 60_000, 'x', 'The event loop was held for 2.5 s: the server answered nobody meanwhile. Cause: own work (2.4 s on CPU of 2.6 s; ...).');
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now });
+  const c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.stalls.counts.at(-1), 2, 'the boot stall counts on the page');
+  assert.equal(c.stalls.last?.cause, 'own work');
+  assert.equal(c.stalls.last?.afterBoot, true);
+  assert.equal(stallCauseOf('The event loop was held for 1.5 s: x. Cause: waited for disk (0.1 s on CPU'), 'waited for disk');
+  assert.equal(stallCauseOf('The event loop was held for 1.5 s: old line'), null);
 });

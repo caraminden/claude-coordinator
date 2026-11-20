@@ -25,6 +25,8 @@ export const MIN_WINDOW = 5 * MIN;
  * not the change's: a restart's startup ran stalls up to 8 minutes in (#734).
  */
 export const BOOT_QUIET_MS = 10 * MIN;
+/** The health kind of a stall inside BOOT_QUIET_MS of the boot: kept and shown, never counted by a check. */
+export const BOOT_STALL = 'loop-lag-boot';
 /** A stall whose stacks name this file is the watch's own query, never the change's. */
 const OWN_STALL = 'src/deploy-watch.ts';
 
@@ -143,8 +145,10 @@ export class DeployWatch {
   record(kind: string, detail: string) {
     try {
       const now = this.now();
-      if (kind === 'loop-lag' && now - (this.d.bootAt ?? 0) < BOOT_QUIET_MS) return;
       if (kind === 'loop-lag' && detail.includes(OWN_STALL)) return;
+      // Marked, not dropped: a stall in a boot's first minutes is stored as its own kind, so the checks above never count it
+      // and the Status page still shows it with its cause.
+      if (kind === 'loop-lag' && now - (this.d.bootAt ?? 0) < BOOT_QUIET_MS) kind = BOOT_STALL;
       this.d.store.addHealthEvent(kind, now, this.d.head(), detail);
     } catch (err: any) {
       console.error(`Recording a ${kind} health reading failed: ${err?.message ?? err}`);

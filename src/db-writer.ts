@@ -115,9 +115,9 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     stalled = waitFor(target, READ_WAIT_MS) ? 0 : target;
   };
   const drain = (ms = drainMs) => {
-    const t0 = Date.now(), target = seq;
+    const t0 = Date.now(), target = seq, took = target - applied();
     const ok = !alive || waitFor(target, ms);
-    if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${target - applied()} queued writes${ok ? '' : ' and gave up'}.`);
+    if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${took} queued writes${ok ? '' : ' and gave up'}.`);
     return ok;
   };
   // After its own request's writes (landed, below), a response waits a moment for everyone else's, as a read does.

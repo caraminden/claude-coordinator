@@ -59,7 +59,12 @@ const call = async (who: string, path: string, opts: { method?: string; body?: u
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
-const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
+// Nothing queued too: a message that came in during a turn waits out its save with the minion not running, and the
+// next turn's token would log out the one live() last saw.
+const idle = () => until('the turn to end', async () => {
+  const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
+  return t.status !== 'running' && t.queued === 0;
+});
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const propose = (body: object) => call('minion', `/api/tickets/${ticket.id}/host-tool`, { method: 'POST', body });
 const verdict = (who: string, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });

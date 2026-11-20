@@ -145,14 +145,20 @@ function version(ref: string | undefined, work: string): { dir: string; name: st
   return { dir, name: `${ref} (${sha.slice(0, 8)})` };
 }
 
-/** A clone of the repo at a commit, with no remote: nothing in it can push. */
+/** A clone of the repo at a commit, with no remote (nothing in it can push) and only a `main` there: the clone's own
+ *  branches and tags would show later work. */
 function clone(commit: string, dir: string): string {
   if (existsSync(dir)) return dir;
   git('clone', '-q', '--shared', '--no-checkout', REPO, dir);
   git('-C', dir, 'checkout', '-q', '--detach', commit);
   git('-C', dir, 'remote', 'remove', 'origin');
+  for (const r of git('-C', dir, 'for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/tags').split('\n').filter(Boolean)) git('-C', dir, 'update-ref', '-d', r);
+  git('-C', dir, 'branch', '-q', 'main', commit);
   return dir;
 }
+
+/** Put a minion's checkout on its own branch off `main`, as a real turn's worktree is. */
+const onTicketBranch = (dir: string, n: number) => git('-C', dir, 'checkout', '-q', '-b', `ticket/${n}-replay`);
 
 /** The case's repo at its commit, with the side's CLAUDE.md and .claude, since those are part of the prompt under test. */
 function workspace(c: Case, side: Side, work: string): string {
@@ -165,6 +171,12 @@ function workspace(c: Case, side: Side, work: string): string {
     rmSync(join(dir, p), { recursive: true, force: true });
     if (existsSync(join(side.dir, p))) cpSync(join(side.dir, p), join(dir, p), { recursive: true });
   }
+  // Commit the side's prompt files onto main, so `git status` is clean and the branch starts at main's tip.
+  git('-C', dir, 'add', '-A', '--', 'CLAUDE.md', '.claude');
+  git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'Prompt files under test');
+  git('-C', dir, 'branch', '-q', '-f', 'main', 'HEAD');
+  if (c.role === 'taskmaster') git('-C', dir, 'checkout', '-q', 'main'); // the Taskmaster works in the repo on main
+  else onTicketBranch(dir, c.ticket.number);
   return dir;
 }
 
@@ -291,6 +303,7 @@ async function runBrief(b: Brief, side: Side, i: number, work: string, budget: n
   const tmp = join(dir, 'tmp');
   mkdirSync(tmp, { recursive: true });
   const cwd = clone(b.before, join(dir, 'repo'));
+  onTicketBranch(cwd, b.ticket.number);
   const p = render(side, 'minion', b.ticket, { files: join(dir, 'files'), shared: join(dir, 'shared'), tickets: join(work, 'tickets'), cwd });
   writeFileSync(join(dir, 'system.md'), p.system);
   writeFileSync(join(dir, 'tools.json'), JSON.stringify(p.tools));

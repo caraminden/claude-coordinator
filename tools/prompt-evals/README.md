@@ -108,9 +108,12 @@ call still shows in the transcript, so a check can see the attempt). So is any c
 state (the real shared folder, `coordinator.db`, the live checkout, the auto-memory): it would leak the
 present into a past moment.
 
+The copy has only a `main` branch, at `commit` plus one commit holding the side's prompt files, and a minion
+works on `ticket/<n>-replay` off it (the Taskmaster on `main`), as a real turn's worktree does.
+
 What a rerun doesn't get back: the minion's auto-memory and the live state of the moment beyond the
-case's `facts`, and the repo copy still has later commits in its object store (`git log --all` can see
-them). `history` stands in for the earlier chat.
+case's `facts`, and the repo copy still has later commits in its object store (unreachable from any branch,
+but `git cat-file` could find them). `history` stands in for the earlier chat.
 
 ## A brief (`briefs/<id>.json`): whole reruns for tier questions
 

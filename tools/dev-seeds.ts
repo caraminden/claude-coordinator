@@ -16,6 +16,7 @@ import { inviteHash } from '../src/auth.ts';
 import { pacificDay } from '../src/contraption-errors.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
+import { CARD_OPTIONS } from '../src/welcome.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -118,7 +119,35 @@ function crc32(b: Buffer): number {
   return ~c;
 }
 
+/**
+ * The signed-in person as on their first day (#1151's welcome), `done` of its five steps ticked: 1 (only the password),
+ * 3 (Claude and a phone too) or 5 (said hi and answered the practice card). Wipes their actions, push devices and Claude
+ * link on the copy, so a later look reads them as new.
+ */
+function firstDay(c: SeedCtx, done: 1 | 3 | 5) {
+  const u = c.store.listUsers().find((x) => x.name === c.who)!;
+  c.store.db.prepare('DELETE FROM last_actions WHERE name = ?').run(u.name);
+  c.store.db.prepare('UPDATE users SET server_login = ? WHERE id = ?').run(done > 1 ? 1 : 0, u.id);
+  for (const s of c.store.listPushSubscriptions().filter((x) => x.name === u.name)) c.store.deletePushSubscription(s.endpoint);
+  c.store.setSetting(`welcome:${u.id}`, { shown: Date.now(), ...(done === 5 ? { card: CARD_OPTIONS[1] } : {}) });
+  if (done > 1) c.store.savePushSubscription(u.name, `https://push.example/${hex()}`, 'seeded', 'seeded');
+  if (done === 5) c.store.addEvent(c.store.getCoordinator(c.project.id)!.id, 'user_message', { author: u.name, text: 'Hi! What are my schemes doing?' });
+  return `#/p/${c.project.id}`;
+}
+
 export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => string }> = {
+  'welcome-new': { about: "you on your first day: the welcome over Seeded's Taskmaster chat, only the password ticked (#1151)", seed: (c) => firstDay(c, 1) },
+  'welcome-half': { about: 'you halfway through the welcome: password, Claude and phone ticked (#1151)', seed: (c) => firstDay(c, 3) },
+  'welcome-no-scheme': {
+    about: "Rin, invited but in no scheme (#1151): the welcome over the New scheme page says how to get in; sign in by POSTing a password to /api/invite/welcomeseedwelcomeseedwelcome001",
+    seed(c) {
+      const rin = c.store.listUsers().find((u) => u.login === 'rin') ?? c.store.createUser({ name: 'Rin', login: 'rin' });
+      c.store.updateUser(rin.id, { invite_hash: inviteHash('welcomeseedwelcomeseedwelcome001'), invite_expires: Date.now() + 7 * 24 * 3_600_000 });
+      c.store.deleteSetting(`welcome:${rin.id}`);
+      return '#/';
+    },
+  },
+  'welcome-done': { about: "you with every welcome step done: it says You're set once, then is gone (#1151)", seed: (c) => firstDay(c, 5) },
   'question-card': {
     about: 'a minion waiting on two open question cards: one pick with a recommended option, one multi-select',
     seed(c) {

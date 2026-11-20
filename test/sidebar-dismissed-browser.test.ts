@@ -84,9 +84,12 @@ test('a redraw reuses the Dismissed rows whose minion did not change, and rebuil
   await page.eval(`document.querySelector('#threads details.g-closed summary').click()`);
   await waitFor(page, 'the dismissed rows', `${closedRows} === 1000`);
   await page.eval(`(() => { window.before = [...document.querySelectorAll('#threads details.g-closed .thread-row')]; window.group = document.querySelector('#threads details.g-closed'); })()`);
+  const nodes = await page.eval<number>(`document.getElementById('threads').childNodes.length`);
   // An update to the running minion redraws the list: every dismissed row and the list itself stay the same nodes.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'More' } }) })`);
   assert.equal(await page.eval(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].every((r, i) => r === before[i]) && document.querySelector('#threads details.g-closed') === group`), true);
+  for (let n = 0; n < 3; n++) await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'Again ${n}' } }) })`);
+  assert.equal(await page.eval(`document.getElementById('threads').childNodes.length`), nodes); // no empty text nodes pile up
   // A dismissed minion that changes gets a new row in its place; its neighbours keep theirs.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...closed[5], title: 'Renamed', updated_at: closed[5].updated_at + 1 } }) })`);
   const same = await page.eval<boolean[]>(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].map((r, i) => r === before[i])`);

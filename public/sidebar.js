@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, pacificDay, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -191,9 +191,9 @@ export function renderSidebar() {
   // The list stays in the page while the rest is swapped, so a redraw doesn't restyle its rows.
   if (closedGroup.parentNode !== el) el.replaceChildren(...head, closedGroup, ...tail);
   else {
-    for (const c of [...el.children]) if (c !== closedGroup) c.remove();
-    closedGroup.before(...head);
-    closedGroup.after(...tail);
+    for (const c of [...el.childNodes]) if (c !== closedGroup) c.remove();
+    closedGroup.before(...head.filter(Boolean));
+    closedGroup.after(...tail.filter(Boolean));
   }
   if (whyTips?.open) whyTips.refresh();
 }
@@ -206,7 +206,8 @@ function finish(el, head, tail) {
 
 let closedGroup = null, closedList = [];
 const closedRows = new Map();
-let closedUsage = null; // rows show the plan's usage, which is replaced when it changes
+// The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place).
+let closedUsage = null, closedDay = '';
 
 function dismissedGroup() {
   const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed'));
@@ -218,20 +219,18 @@ function dismissedGroup() {
 }
 
 /** What a dismissed row shows besides its minion: when any of it changes the row is built again. */
-// The stamp's words change with the Pacific day; a half hour's rebuild of every row is cheaper than formatting each row's date to check.
-let halfHour = 0;
 function closedKey(t) {
   const note = view.personNotes?.[t.id];
-  return `${view.id === t.id}|${isSeen(t)}|${ago(t.updated_at)}|${halfHour}|${note ? `${note.text}${note.by}` : ''}|${othersIn(t).join()}|${me}`;
+  return `${view.id === t.id}|${isSeen(t)}|${ago(t.updated_at)}|${note ? `${note.text}${note.by}` : ''}|${othersIn(t).join()}|${me}`;
 }
 
 /** Fills the Dismissed list with its rows (none while it is shut), building only the rows that are new or changed. */
 function fillClosed(closed) {
   const rows = [];
   if (view.showClosed) {
-    const stamp = Math.floor(Date.now() / 1_800_000);
-    if (closedUsage !== usage || halfHour !== stamp) closedRows.clear();
-    halfHour = stamp;
+    const day = pacificDay();
+    if (closedUsage !== usage || closedDay !== day) closedRows.clear();
+    closedDay = day;
     closedUsage = usage;
     const live = new Set();
     for (const t of closed) {

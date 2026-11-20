@@ -172,6 +172,8 @@ export function dismissedWhen(ms) {
 // Made once: a formatter built per call (toLocaleString) cost a quarter second per redraw of a thousand dismissed rows (#1077).
 const PT = { timeZone: 'America/Los_Angeles' };
 const DAY = new Intl.DateTimeFormat('en-CA', PT);
+/** Today's Pacific date: a dismissed row's stamp changes words when it changes. */
+export const pacificDay = () => DAY.format(Date.now());
 const TIME = new Intl.DateTimeFormat('en-US', { ...PT, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 const DATE = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric' });
 const DATE_YEAR = new Intl.DateTimeFormat('en-US', { ...PT, month: 'short', day: 'numeric', year: 'numeric' });

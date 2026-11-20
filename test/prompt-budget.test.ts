@@ -105,22 +105,27 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
   ].join('\n'));
 });
 
-// The tool definitions loaded up front (src/mcp.ts ALWAYS_LOAD) sit in the same prefix. Characters of name, description and
-// input schema, the biggest of a plain scheme, Citadel's (deploys) and one with apps. 13,100 before #1275, which added the
-// plan and ship tools for 3,700 (under 1k tokens, the handoff's bar: hand_off_land was trimmed from 4,600 to fit).
-const TOOLS_BUDGET = 16_900;
+// The tool definitions loaded up front (src/mcp.ts ALWAYS_LOAD) sit in the same prefix: characters of name, description and
+// input schema, in a plain scheme, Citadel's (deploys), one with apps, and both. 12,900 at most before #1275, whose plan and
+// ship tools are held to 3,700 characters (1k tokens at reports/quality-push-2026-11/tokens.md's 3.7 a token, the handoff's bar).
+const TOOLS_BUDGET = 16_700;
+const ADDED_BUDGET = 3_700;
 
 test("a minion's always-loaded tool definitions stay within their budget", () => {
-  for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {
+  for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }, { COORDINATOR_DEPLOYS: '1', COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {
     const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
     const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '', COORDINATOR_HOME_CONTRAPTIONS: '', ...env } });
     const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']);
+    assert.deepEqual(tools.map((t: any) => t.name).sort(), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status'], JSON.stringify(env));
     const sizes = tools.map((t: any) => ({ name: t.name, n: JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length }));
     const total = sizes.reduce((s: number, x: any) => s + x.n, 0);
+    const added = sizes.filter((x: any) => x.name === 'plan' || x.name === 'hand_off_land').reduce((s: number, x: any) => s + x.n, 0);
+    const lines = sizes.sort((a: any, b: any) => b.n - a.n).map((x: any) => `  ${x.n} ${x.name}`);
+    assert.ok(added <= ADDED_BUDGET, [`plan and hand_off_land (${JSON.stringify(env)}) are ${added} characters, over the ${ADDED_BUDGET} (1k tokens) #1275 added them for. Trim them.`, ...lines].join('\n'));
     assert.ok(total <= TOOLS_BUDGET, [
       `A minion's always-loaded tools (${JSON.stringify(env)}) are ${total} characters, over their budget of ${TOOLS_BUDGET}.`,
       'Every minion API call re-reads them; each 1k tokens costs about $22 a week. Trim, or raise TOOLS_BUDGET with the reason in the commit message.',
-      ...sizes.sort((a: any, b: any) => b.n - a.n).map((x: any) => `  ${x.n} ${x.name}`),
+      ...lines,
     ].join('\n'));
   }
 });

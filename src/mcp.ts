@@ -9,6 +9,7 @@ import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
+import { planError } from '../public/progress.js';
 import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
@@ -1416,11 +1417,11 @@ function labelFields(args: any) {
 
 /** land.sh's forms, for the land and hand_off_land tools (landArgs in src/land.ts checks them). */
 const LAND_PROPS = {
-  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "build/<n>: a feeder's merge into its build, or the build minion's merge of main. With files or full" },
-  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files this change touched; only these run. None only for docs' },
-  full: { type: 'boolean', description: 'With into, no files: the build minion takes main in and the whole suite runs' },
-  build: { type: 'boolean', description: "The build minion shipping its build to main (land.sh --build), alone" },
-  fix: { type: 'boolean', description: 'Only when land.sh refused for a rolled-back deploy on main and this branch is its fix or revert' },
+  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's or the build minion's merge into build/<n>, with files or full" },
+  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files to run (none: docs only)' },
+  full: { type: 'boolean', description: 'With into: the build minion takes main in; the whole suite runs' },
+  build: { type: 'boolean', description: 'The build minion shipping its build to main, alone' },
+  fix: { type: 'boolean', description: 'Only for the fix or revert of a rolled-back deploy that land.sh refused for' },
 };
 
 const MARK_IMAGE = {
@@ -1489,7 +1490,7 @@ const SEAM_FRESH = {
  */
 export const PLAN = {
   name: 'plan',
-  description: 'Your task list, which people watch as the progress readout ("Running tests… 3/7"). Number the steps 1, 2, 3… yourself. Each call changes only the steps it names: a new number adds that step, a known one updates it. Once every step is done, a call with step titles starts a new plan. Finish one step and start the next in one call.',
+  description: 'Your task list, which people watch as the progress readout ("Running tests… 3/7"). Each call changes only the steps it names by number n (1, 2, 3…): a new n adds a step, a known one updates it. Once every step is done, naming step 1 with a title starts a new plan. Finish one step and start the next in one call.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1501,7 +1502,7 @@ export const PLAN = {
           properties: {
             n: { type: 'integer', minimum: 1 },
             step: { type: 'string', description: 'Short title' },
-            doing: { type: 'string', description: 'Shown while underway, e.g. "Running tests"' },
+            doing: { type: 'string', description: 'While underway, e.g. "Running tests"' },
             why: { type: 'string', description: 'One sentence: what it involves and why' },
             minutes: { type: 'number', description: 'Your estimate' },
             status: { type: 'string', enum: ['todo', 'doing', 'done', 'dropped'] },
@@ -1517,9 +1518,8 @@ export const PLAN = {
 
 /** What a plan call answers: it checks the shape and returns no state (the readout replays the calls). */
 export function planResult(args: any): string {
-  const steps = args?.steps;
-  if (!Array.isArray(steps) || !steps.length) throw new Error('steps is required: a list of { n, … }, one per step to add or change.');
-  if (steps.some((s) => !Number.isInteger(s?.n) || s.n < 1)) throw new Error('Each step needs n, its number: 1, 2, 3…');
+  const error = planError(args);
+  if (error) throw new Error(error);
   return 'ok';
 }
 
@@ -1653,17 +1653,17 @@ const THREAD_TOOLS = () => ([
     name: 'hand_off_land',
     // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
-      `Ship: the server runs tools/land.sh in your worktree and reports it with no model call. Use it wherever the instructions say to run tools/land.sh, once tested and self-reviewed. Commit everything first: uncommitted changes, or a branch that would conflict, are refused at once. On a clean land the server posts the shipped line${C().DEPLOYS ? ' and dismisses you, or sets pending-deploy for a restart' : ' and dismisses you'}.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')} and the shipped line says whether it went live, so never redeploy what it reports.` : ''} If it fails (a conflict, a red test, a refusal, a failed deploy) you are woken with the end of its output: fix it and hand it off again. After the call, end your turn with a short reply and set no state: you show as shipping until it ends.`,
+      `Ship: the server runs tools/land.sh in your worktree. Use it where the instructions say to run tools/land.sh, once tested and self-reviewed (or first, when the self-review says it ships alongside). Commit everything first: uncommitted or conflicting work is refused at once. On a clean land the server posts the shipped line and dismisses you${C().DEPLOYS ? ', or sets pending-deploy for a restart' : ''}; it never parks you.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy.` : ''} If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with its output's end: fix it and hand it off again. Else end your turn with a short reply and set no state: you show as shipping until it ends.`,
     inputSchema: {
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
-        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or the docs did not tell you, and which tool, rule or skill got in your way; "nothing" is fine. It goes to the ship lessons queue and never holds the ship' },
+        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or the docs missed and what got in your way; "nothing" is fine. It never holds the ship' },
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out only when no review gives one (your Kit reviewers line); it then ships as high and needs go" },
         risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus anything you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'At or above the go threshold (your Shipping lines; high when they name none), or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
-        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for this minion: a clean land still ships, but you stay open in state ready' },
-        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open, a wait or after-land steps, e.g. "Cara testing on her phone": you are woken once with the shipped line when it is live' },
+        go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
+        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, and you stay open in state ready' },
+        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing on her phone"); woken once live, do them and set your state' },
         ...LAND_PROPS,
         ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
       },

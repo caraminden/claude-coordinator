@@ -422,12 +422,26 @@ function updateTask(p, idx, input, at) {
 
 const PLAN_STATUS = { todo: 'pending', doing: 'in_progress', done: 'completed', dropped: 'deleted' };
 
+/** Why a plan call (#1275) is refused, or '' when it is fine. The tool and the readout share it, so a refused call never moves the readout. */
+export function planError(input) {
+  const steps = input?.steps;
+  if (!Array.isArray(steps) || !steps.length) return 'steps is required: a list of { n, … }, one per step to add or change.';
+  for (const s of steps) {
+    if (!Number.isInteger(s?.n) || s.n < 1) return 'Each step needs n, its number: 1, 2, 3…';
+    const bad = ['step', 'doing', 'why', 'outcome'].find((k) => s[k] != null && typeof s[k] !== 'string');
+    if (bad) return `Step ${s.n}: ${bad} is text.`;
+    if (s.minutes != null && !(Number.isFinite(s.minutes) && s.minutes >= 0)) return `Step ${s.n}: minutes is a number.`;
+    if (s.status != null && !Object.hasOwn(PLAN_STATUS, s.status)) return `Step ${s.n}: status is todo, doing, done or dropped.`;
+  }
+  return '';
+}
+
 /** A plan call (#1275): each step by its number n, added when new, else changed as a TaskUpdate would. */
 function applyPlan(p, callId, input, at) {
-  const steps = (Array.isArray(input.steps) ? input.steps : []).filter((s) => Number.isInteger(s?.n) && s.n > 0);
-  // A new plan starts once the previous one is finished; its numbers start again under new ids.
-  if (steps.some((s) => s.step) && p.tasks.length && allDone(p)) p.tasks = [];
-  for (const s of steps) {
+  if (planError(input)) return;
+  // Naming step 1 with a title once the plan is finished starts a new one, its ids new; a late step 4 just adds.
+  if (input.steps.some((s) => s.n === 1 && s.step) && p.tasks.length && allDone(p)) p.tasks = [];
+  for (const s of input.steps) {
     const update = { status: PLAN_STATUS[s.status], subject: s.step, activeForm: s.doing, description: s.why, metadata: { estimate: s.minutes, outcome: s.outcome } };
     // A step TaskCreate made (id "3") is step 3 too, so a minion that started its plan before #1275 carries it on.
     let idx = p.tasks.findIndex((t) => (t.n ?? Number(t.id)) === s.n);

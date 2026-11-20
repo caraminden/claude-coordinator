@@ -271,7 +271,7 @@ test("the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: 
   plan('a', [
     { n: 1, step: 'Find the parser', doing: 'Finding the parser', why: 'x', minutes: 3 },
     { n: 2, step: 'Fix it', doing: 'Fixing it', minutes: 5 },
-    { n: 3, step: 'Ship it', minutes: 'soon' },
+    { n: 3, step: 'Ship it' },
   ], at(0));
   assert.deepEqual(p.tasks.map((t) => [t.subject, t.status, t.estimate]), [['Find the parser', 'pending', 3], ['Fix it', 'pending', 5], ['Ship it', 'pending', undefined]]);
   assert.equal(progressLine(p, true), 'Planning… 0 of 3 done');
@@ -289,12 +289,17 @@ test("the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: 
   assert.equal(progressLine(p, true), 'Fixing the parser… · 1 of 2 done');
   plan('e', [{ n: 2, status: 'done', outcome: 'Fixed.' }], at(6));
   assert.equal(progressLine(p, false), 'Done · 2/2 steps');
-  // Once every step is done, titles start a new plan, numbered from 1 again under new ids.
+  // A late step on a finished plan joins it; only naming step 1 with a title starts a new plan.
+  plan('k', [{ n: 4, step: 'Fix a review finding', status: 'doing' }], at(6));
+  assert.equal(progressLine(p, true), 'Fix a review finding… · 2 of 3 done');
+  plan('l', [{ n: 4, status: 'done' }], at(7));
   plan('f', [{ n: 1, step: 'Next thing', minutes: 2 }], at(7));
   assert.deepEqual(p.tasks.map((t) => [t.subject, t.status]), [['Next thing', 'pending']]);
   assert.notEqual(p.tasks[0].id, p.finished[0].id);
-  // A call with no steps, or a step with no number, changes nothing.
+  // A call the tool refuses changes nothing, not even its good steps: no steps, a step with no number, a number as text.
   plan('h', null, at(8));
-  plan('i', [{ step: 'No number' }], at(8));
-  assert.equal(p.tasks.length, 1);
+  plan('i', [{ n: 1, status: 'dropped' }, { step: 'No number' }], at(8));
+  plan('j', [{ n: 1, doing: 42, status: 'doing' }], at(8));
+  plan('m', [{ n: 1, status: 'started' }], at(8));
+  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status]), [['Next thing', 'pending']]);
 });

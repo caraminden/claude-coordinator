@@ -1,0 +1,27 @@
+# {{title}}'s own tests (apps/{{name}}/), on the scheme's CI runner. Written by the kit's new-app generator.
+name: app-{{name}}
+on:
+  push:
+    branches: [main]
+    paths: ['apps/{{name}}/**', '.github/workflows/app-{{name}}.yml']
+  pull_request:
+    paths: ['apps/{{name}}/**', '.github/workflows/app-{{name}}.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "{{runner}}"]') }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/{{name}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test

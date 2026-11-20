@@ -10,8 +10,8 @@ export { git };
 
 // tools/land.sh on throwaway repos: a scheme repo on main, a minion worktree, and a live clone. The
 // worktree's tools/deploy.sh is a stand-in that notes whether it got the lock, and fails on request. FAKE_DEPLOY_LOG gets
-// main's commit for each deploy. FAKE_RESTART_GATE acts out deploy.sh's queued restart: it lets go of the line, then
-// waits for that file before the restart goes live (or, with FAKE_ROLLED_BACK, is rolled back and fails).
+// main's commit for each deploy. FAKE_RESTART_GATE acts out deploy.sh's queued restart: it lets go of the line but not
+// the restart lock, then waits for that file before the restart goes live (or, with FAKE_ROLLED_BACK, is rolled back and fails).
 export const land = join(import.meta.dirname, '..', 'tools', 'land.sh');
 export const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -39,7 +39,7 @@ until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0
 if [ -n "\${FAKE_RESTART_GATE:-}" ]; then
   echo "queued \$(date +%s)" >>"\$DEPLOY_TIMES"
   rm -f "\$DEPLOY_QUEUE_TICKET"
-  flock -u 9
+  flock -u 9 # fd 7, the restart lock, stays held, as the restart unit holds it until its verdict
   until [ -e "\$FAKE_RESTART_GATE" ]; do sleep 0.05; done
   [ -z "\${FAKE_ROLLED_BACK:-}" ] || exit 1
   echo "live \$(date +%s)" >>"\$DEPLOY_TIMES"

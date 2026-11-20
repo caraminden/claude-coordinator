@@ -178,7 +178,7 @@ test('with <state>/train-off, every ship lands on its own', async () => {
 // deploy.sh lets go of the line once its restart is queued, while the restart is still judged (#566), so a rider can get
 // the lock before its front has a verdict to give.
 async function restart(rolledBack: boolean) {
-  const l = await line([{}, rolledBack ? { env: { FAKE_ROLLED_BACK: '1' } } : {}, {}, {}], (dir) => ({ FAKE_RESTART_GATE: join(dir, 'restarted') }));
+  const l = await line([{ env: { FAKE_RESTART_GATE: '' } }, rolledBack ? { env: { FAKE_ROLLED_BACK: '1' } } : {}, {}, {}], (dir) => ({ FAKE_RESTART_GATE: join(dir, 'restarted') }));
   const all = l.go();
   await until('ships 3 and 4 wait outside the line', () => [2, 3].every((i) => /waiting outside the line for the restart of ticket\/2-x's ship train/.test(l.out[i])));
   writeFileSync(join(l.r.dir, 'restarted'), '');

@@ -27,6 +27,9 @@
 //   no-test   no runnable test file, own or sibling
 //   no-source the commit changed only tests or docs (a failing-test-first commit and the like)
 //   red-both  tests fail on today's tree too: no evidence
+//   partial-* the whole undo conflicted, so the clashing hunks kept today's code (-X ours); share says how much of
+//             the fix's source change was undone. Weaker evidence: the kept hunk may be the fix itself, and a red
+//             may come from a half-undone change that no longer loads (read its failing test names).
 //   skipped   every test in them was skipped (none ran)
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -151,25 +154,42 @@ function run(args: string[]) {
     const wt = join(scratch, `wt${k++}`);
     git(repo, 'worktree', 'add', '--detach', '--quiet', wt, base);
     try {
-      const rev = gitTry(wt, 'revert', '--no-commit', '--no-edit', p.sha);
-      // Tests and docs the commit touched go back to today's version (or away, if today has none).
-      for (const f of p.testOrDoc) {
-        if (gitTry(wt, 'cat-file', '-e', `${base}:${f}`).status === 0) git(wt, 'checkout', base, '--', f);
-        else { gitTry(wt, 'rm', '-f', '--quiet', '--ignore-unmatch', '--', f); rmSync(join(wt, f), { force: true }); }
+      // A whole undo first; when it conflicts, a partial one: -X ours keeps today's code in the clashing hunks only.
+      let rev = gitTry(wt, 'revert', '--no-commit', '--no-edit', p.sha);
+      const restoreTests = () => {
+        // Tests and docs the commit touched go back to today's version (or away, if today has none).
+        for (const f of p.testOrDoc) {
+          if (gitTry(wt, 'cat-file', '-e', `${base}:${f}`).status === 0) git(wt, 'checkout', base, '--', f);
+          else { gitTry(wt, 'rm', '-f', '--quiet', '--ignore-unmatch', '--', f); rmSync(join(wt, f), { force: true }); }
+        }
+        return git(wt, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
+      };
+      let unmerged = restoreTests(), conflicts: string[] = [];
+      if (unmerged.length) {
+        conflicts = unmerged;
+        gitTry(wt, 'revert', '--abort');
+        git(wt, 'reset', '--hard', '--quiet', base);
+        rev = gitTry(wt, 'revert', '--no-commit', '--no-edit', '-X', 'ours', p.sha);
+        unmerged = restoreTests();
       }
-      const unmerged = git(wt, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
       if (unmerged.length || (rev.status !== 0 && !/conflict/i.test(rev.stderr + rev.stdout))) {
-        say({ ...head, outcome: 'no-apply', conflicts: unmerged, err: unmerged.length ? undefined : (rev.stderr || '').slice(-300) });
+        say({ ...head, outcome: 'no-apply', conflicts: unmerged.length ? unmerged : conflicts, err: unmerged.length ? undefined : (rev.stderr || '').slice(-300) });
         continue;
       }
       const changed = git(wt, 'diff', '--cached', '--name-only', base).split('\n').filter(Boolean);
       const changedSrc = changed.filter((f) => !isTest(f) && !isDoc(f));
-      if (!changedSrc.length) { say({ ...head, outcome: 'no-op' }); continue; }
+      if (!changedSrc.length) { say({ ...head, outcome: conflicts.length ? 'no-apply' : 'no-op', conflicts }); continue; }
+      // How much of the fix's source change the undo carries: 1 for a whole undo, less when hunks were kept.
+      const lines = (out: string) => out.split('\n').reduce((n, l) => n + (Number(l.split('\t')[0]) || 0) + (Number(l.split('\t')[1]) || 0), 0);
+      const share = conflicts.length
+        ? Math.min(1, +(lines(git(wt, 'diff', '--cached', '--numstat', base, '--', ...changedSrc)) / Math.max(1, lines(git(repo, 'diff', '--numstat', `${p.sha}^`, p.sha, '--', ...p.src)))).toFixed(2))
+        : 1;
+      const pre = conflicts.length ? 'partial-' : '';
       const stat = git(wt, 'diff', '--cached', '--shortstat', base);
       // The tests that exist today; a test file the fix deleted again since is gone already.
       const tests = p.tests.filter((f) => existsSync(join(wt, f)));
       // FIX_REPLAY_DRY=1 stops before the tests: the undo alone is cheap git, fine on perigee, and sorts out no-apply.
-      if (process.env.FIX_REPLAY_DRY) { say({ ...head, outcome: 'applies', undo: stat, changedSrc, tests }); continue; }
+      if (process.env.FIX_REPLAY_DRY) { say({ ...head, outcome: pre + 'applies', share, conflicts, undo: stat, changedSrc, tests }); continue; }
       const undone = runTests(wt, tests);
       let outcome: string, clean: Run | undefined;
       if (undone.pass + undone.fail === 0 && undone.code === 0) outcome = 'skipped';
@@ -180,7 +200,7 @@ function run(args: string[]) {
         clean = runTests(wt, tests);
         outcome = clean.code === 0 ? 'red' : 'red-both';
       }
-      say({ ...head, outcome, undo: stat, changedSrc, undone, clean, secs: Math.round((Date.now() - t0) / 1000) });
+      say({ ...head, outcome: pre + outcome, share, conflicts, undo: stat, changedSrc, undone, clean, secs: Math.round((Date.now() - t0) / 1000) });
     } catch (e: any) {
       say({ ...head, outcome: 'error', err: String(e.stderr || e.message).slice(-400) });
     } finally {

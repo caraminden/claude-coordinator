@@ -92,9 +92,9 @@ function sameFile(named: string, changed: string): boolean {
 export const RARE = 4;
 /** A file more minions changed than this in the window is a hub (a store, a router), not evidence. */
 export const HUB = 6;
-/** Minions started this close together are parts of one plan, not one fix after another. */
 /** The brief naming an earlier minion's #N is one piece of evidence: it often names a source ("found by #468's sweep"), not a fix that failed. */
 export const W_CITE = 1;
+/** Minions started this close together are parts of one plan, not one fix after another. */
 export const SIBLINGS_MS = 3_600_000;
 
 /**

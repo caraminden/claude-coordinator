@@ -415,7 +415,9 @@ export function ordersMenu() {
   return h('nav', { class: 'orders-pane', 'aria-label': 'Orders' }, ORDERS_GROUPS.map(([label, hue, items]) =>
     h('div', { class: 'orders-group', 'data-hue': hue }, h('span', { class: 'orders-group-label' }, label),
       items.map(([kind, text, ic, sum]) =>
-        h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, title: sum, 'aria-current': view.main === kind ? 'page' : null },
+        h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, title: sum, 'aria-current': view.main === kind ? 'page' : null,
+          // Back from the schedules list to this menu changes no route, so Schedules again only shows the list (#1083).
+          onclick: kind === 'schedules' ? (e) => { if (view.main === 'schedules') e.currentTarget.closest('.sidebar')?.classList.add('show-schedules'); } : null },
           icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
 }
 

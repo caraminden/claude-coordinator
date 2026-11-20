@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describeCron, guessCategory, nextRun, parseCron, pinForOwner, runBrief, runMinion, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
 
 // Local wall-clock times, since schedules run in the server's time zone.
@@ -219,4 +222,20 @@ test('a schedule with no category chosen gets one from its template or name; the
   const odd = store.schedules.create({ ...base, name: 'January refresh', category: '' });
   store.schedules.categorize();
   assert.deepEqual([store.schedules.get(bare.id)!.category, store.schedules.get(odd.id)!.category, store.schedules.get(chosen.id)!.category], ['Models and usage', '', 'Ops']);
+});
+
+test('opening a database from before schema 82 fills its schedules\' categories once; a later clear survives a restart (#1083)', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'sched-cat-')), 'c.db');
+  let store = new Store(file);
+  const p = store.createProject('One', null).id;
+  const row = store.schedules.create({ project_id: p, cron: '@daily', brief: 'b', type: 'chore', created_by: 'Cara', name: 'Daily pipeline check', category: '' });
+  store.setSetting('schema_version', 81);
+  store.db.close();
+  store = new Store(file);
+  assert.equal(store.schedules.get(row.id)!.category, 'Process', 'the startup backfill guessed it');
+  store.schedules.update(row.id, { category: '' });
+  store.db.close();
+  store = new Store(file);
+  assert.equal(store.schedules.get(row.id)!.category, '', 'a person\'s clear stays cleared after a restart');
+  store.db.close();
 });

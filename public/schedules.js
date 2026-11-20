@@ -144,8 +144,7 @@ function schedulePage(s) {
     h('div', { class: 'settings-rows' },
       settingsRow({ key: `schedule-brief:${s.id}`, icon: 'doc', hue: 'running', title: 'Instructions',
         summary: [s.template ? toneChip('info', 'From the kit') : toneChip('neutral', 'Written here'), `${s.brief.length.toLocaleString()} characters`] },
-        h('pre', { class: 'schedule-brief small' }, s.brief),
-        s.template && s.notes ? [h('p', { class: 'look-prose' }, "This scheme's notes, added under the template:"), h('pre', { class: 'schedule-brief small' }, s.notes)] : '')[0],
+        h('pre', { class: 'schedule-brief small' }, s.brief))[0],
       settingsRow({ key: `schedule-skills:${s.id}`, icon: 'spark', hue: 'accent', title: 'Skills it uses',
         summary: skills.length ? [toneChip('violet', String(skills.length)), skills.slice(0, 2).join(', ') + (skills.length > 2 ? '…' : '')] : 'None named in its brief' },
         skills.length ? h('div', { class: 'schedule-skills' }, skills.map((k) => h('a', { class: 'cui-chip', 'data-tone': 'violet', href: `#/p/${view.projectId}/skills` }, k)))
@@ -243,6 +242,7 @@ export function schedulesPage(projectId, id) {
 export function openSchedule(projectId, id) {
   if (!pageEl?.isConnected || !paneEl?.isConnected || data?.projectId !== projectId) return false;
   current = id ?? null;
+  paneEl.closest('.sidebar')?.classList.add('show-schedules');
   draw();
   pageEl.scrollTop = 0;
   return true;
@@ -314,18 +314,19 @@ function pause(s) {
   });
 }
 
-/** Delete: gone from the list at once and back to the overview; a refusal puts it back in the list. */
+/** Delete: gone from the list at once and back to the overview; a refusal puts it back. Only its own scheme's list changes. */
 function remove(s) {
-  const list = data.schedules;
+  const mine = () => data?.schedules && data.projectId === s.project_id;
   optimistic({
     key: `schedule:${s.id}`,
     apply: () => {
-      data.schedules = list.filter((x) => x !== s);
+      if (!mine()) return;
+      data.schedules = data.schedules.filter((x) => x.id !== s.id);
       if (current === s.id) location.hash = href(null);
       draw();
     },
     send: () => api(`api/schedules/${s.id}`, { method: 'DELETE' }),
-    undo: () => { if (data?.schedules && !data.schedules.includes(s)) data.schedules = [...data.schedules, s]; draw(); },
+    undo: () => { if (mine() && !data.schedules.some((x) => x.id === s.id)) data.schedules = [...data.schedules, s]; draw(); },
     label: `delete the schedule "${s.name}"`,
   });
 }

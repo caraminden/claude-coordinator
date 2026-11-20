@@ -309,9 +309,12 @@ function scheduleView(app: App, s: Schedule) {
     return t ? { number: t.number, state: t.state, status: t.status, note: t.note, cost: app.store.ticketCost(t.id) } : null;
   };
   const last = run(s.last_ticket_id);
+  // A standard audit's run renders its kit template fresh, so its page shows that text, not the copy from its last run (#1083).
+  const t = s.template ? loadTemplates().get(s.template) : null;
+  const brief = t ? renderTemplate(t, s.notes, templateVars(app.store, app.dataDir, s.project_id)) : s.brief;
   const runs = app.store.schedules.runs(s.id).map((r) => ({ at: r.at, skip: r.skip, ...(run(r.ticket_id) ?? {}) }));
   return {
-    ...s, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
+    ...s, brief, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
     last_note: last?.note ?? null, last_cost: last?.cost ?? null, runs, skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
   };
 }

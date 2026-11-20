@@ -1,5 +1,6 @@
 // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
+import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
@@ -429,8 +430,7 @@ function connectStream(catchUp = false) {
 
 // ---------- front-end updates ----------
 
-// A new front end only loads between messages: never while something is half-written or
-// being typed, so an update can't yank the page out from under you.
+// A new front end loads out of sight, and never while something is half-written or being typed.
 let reloadPending = false; // or the version the server now runs
 let lastInputAt = 0;
 export let sending = 0;
@@ -495,23 +495,23 @@ async function freshShell(to) {
   await Promise.race([reg.update().then(settled), new Promise((done) => setTimeout(done, 8000))]);
 }
 
+/**
+ * A new front end loads out of sight (Josh, 2026-11-20, "Reload out of sight"): while the tab is hidden, or on the next
+ * in-app navigation (route()). A tab you are looking at never refreshes on its own, so a visible one left untouched
+ * catches up the next time it is hidden. Unsent work still holds it back. ↻ reloads at once.
+ */
 export function reloadWhenIdle() {
-  if (!reloadPending) return;
-  const until = unsentWork();
-  if (!until) return reloadNow();
-  const words = `A new version is ready and will load ${until}. `;
-  const said = document.querySelector('#update-banner .update-until');
-  if (said) said.textContent = words;
-  else {
-    const banner = h('div', { class: 'update-banner', id: 'update-banner' },
-      h('span', { class: 'update-until' }, words),
-      h('button', { class: 'secondary small', onclick: reloadNow }, 'Refresh now'),
-      h('span', { class: 'muted' }, ' (drafts are kept)'));
-    document.querySelector('.topbar').after(banner);
-    // Sticky bars and panels sit below the banner (style.css, --banner-h); it wraps on narrow screens.
-    new ResizeObserver(() => document.documentElement.style.setProperty('--banner-h', `${banner.getBoundingClientRect().height}px`)).observe(banner);
-  }
+  if (shouldReload({ pending: !!reloadPending, hidden: document.hidden, navigating: false, unsent: !!(reloadPending && unsentWork()) })) reloadNow();
 }
+
+/** The next navigation opens its target with a full load, so it comes up on the new version. */
+function reloadOnNavigate() {
+  if (!shouldReload({ pending: !!reloadPending, hidden: document.hidden, navigating: true, unsent: !!(reloadPending && unsentWork()) })) return false;
+  reloadNow();
+  return true;
+}
+
+document.addEventListener('visibilitychange', reloadWhenIdle);
 
 setInterval(reloadWhenIdle, 2000);
 
@@ -950,6 +950,8 @@ async function route() {
     showPart(show.name, () => routeSeq > from && routedHash === location.hash && !document.body.classList.contains('navigating'));
     return replaceHash(show.hash);
   }
+  // A new front end is waiting: this navigation is the moment to load it (the address is already the target).
+  if (reloadOnNavigate()) return;
   // Under a contraption's frame the page keeps its scroll; it's saved when you left it for the frame.
   if (!framed()) saveScroll();
   const seq = ++routeSeq;

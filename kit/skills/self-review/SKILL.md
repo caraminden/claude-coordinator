@@ -141,7 +141,7 @@ reason. Record the run with `review_set` (slug `fresh-eyes`).
 ## 3. Fix what's real
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
-and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
+(the files you touched, plus the repo's affected-tests command if its Project facts name one) and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
 list with a reason, not silently away. Comments from a person, a GitHub review or Codex go
 through "Receiving review" in `references/lenses.md` part 2. On a UI change, also check your own
 desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,

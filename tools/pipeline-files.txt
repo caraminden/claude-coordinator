@@ -12,6 +12,8 @@ tools/kit-land-drift.sh
 tools/run-tests.sh
 tools/parse-check.ts
 tools/citadel-test
+tools/affected.ts
+tools/affected-map.txt
 tools/always-tests.txt
 tools/lanes
 tools/lane.sh

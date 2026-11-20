@@ -23,6 +23,11 @@ const IMAGE_REPO = 'localhost/citadel-claude';
 const LIVE_CHECKOUT = join(import.meta.dirname, '..');
 /** More ignored files than this in the live checkout (an installed node_modules) and it isn't mounted at all. */
 const MAX_MASKED = 50;
+/**
+ * Each person's container's memory (#1214, sizes in deploy/citadel.slice): everyday peaks were 1.6G and 3.4G, one ran to
+ * 22.3G with 21.6G of it in swap. Throttled past 6G, OOM-killed (one process, OOMPolicy=continue) past 8G, 4G of zram swap.
+ */
+export const CONTAINER_MEMORY = { high: '6G', max: '8G', swap: '4G' };
 
 /**
  * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's
@@ -48,7 +53,8 @@ const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-cont
  * (Delve's tools/windows-build.sh, #290; the rest of ~/.local/share/godot is editor state, the person's own),
  * and the Android SDK (#379).
  */
-export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk'];
+// .config/mise: mise's global config, which says which version of an approved host tool (#1147) its shims run.
+export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.config/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk'];
 /** The shared Android toolchain tools/android/install-sdk.sh puts on the host (#379): the SDK, mise's JDK 21 and Gradle's defaults. */
 export const ANDROID_SDK = '.local/share/android-sdk';
 export const ANDROID_JDK = '.local/share/mise/installs/java/temurin-21';
@@ -436,7 +442,7 @@ export class ClaudeLink {
       // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
-    return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: '6g', cpus: 4 };
+    return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY };
   }
 
   /** Build the image if needed, make the volume and start the container (or keep it, if it runs from this spec or turns run in it). */

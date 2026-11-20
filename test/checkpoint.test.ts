@@ -16,8 +16,13 @@ after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
 const store = () => new Store(join(root, `${++n}.db`));
 const size = (f: string) => statSync(f).size;
-// 1,500 pages' worth, past SQLite's 1000-page auto-checkpoint.
-const fill = (s: Store) => { for (let i = 0; i < 30; i++) s.setSetting(`big:${i}`, 'x'.repeat(200_000) + i); };
+// 1,500 pages' worth, past SQLite's 1000-page auto-checkpoint. One commit (#1203): the worker's thread runs during
+// the writes, and a checkpoint between two of them let the next start the WAL over, too short to checkpoint again.
+const fill = (s: Store) => {
+  s.db.exec('BEGIN');
+  for (let i = 0; i < 30; i++) s.setSetting(`big:${i}`, 'x'.repeat(200_000) + i);
+  s.db.exec('COMMIT');
+};
 
 test('setting a value it already has writes nothing to the WAL', () => {
   const s = store();

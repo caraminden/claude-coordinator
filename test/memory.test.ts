@@ -375,3 +375,21 @@ test('a search with a selective filter yields between pages of rows scanned, and
   // 700 rows are 3 pages of 256, so the search yields twice.
   assert.ok(ticks >= 2, `the search held the loop for all 700 rows at once (${ticks} ticks)`);
 });
+
+// #1125: the pass read every message past the mark, text and all, into a sort for 200 of them (0.7 s of the loop).
+test('indexing sorts message ids, never message text', async () => {
+  const { store } = world(join(root, 'sort.db'));
+  const P = store.createProject('P', null);
+  const t = store.createTicket({ project_id: P.id, title: 'm', permission_mode: 'default', created_by: 'cara' });
+  for (let i = 0; i < 5; i++) turn(store, t.id, 'cara', `question ${i}`, `answer ${i}`);
+  const seen: string[] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  assert.equal(await store.memory.index(P.id, embed, 'fake'), 6, 'five turns and the minion itself');
+  const withText = seen.filter((sql) => /e\.data/.test(sql) && /FROM events/.test(sql));
+  assert.ok(withText.length);
+  for (const sql of withText) {
+    const plan = (store.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array((sql.match(/\?/g) ?? []).length).fill(1)) as { detail: string }[]).map((r) => r.detail).join('\n');
+    assert.doesNotMatch(plan, /TEMP B-TREE/, `a statement that reads message text must not sort:\n${sql}`);
+  }
+});

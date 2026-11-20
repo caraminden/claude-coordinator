@@ -144,3 +144,43 @@ test('the MCP tools: listed only for the Citadel scheme\'s Taskmaster, and refus
   assert.ok(refused.isError);
   assert.equal((await srv.call('/api/app/instructions')).data.text, 'Three rules.');
 });
+
+// #1211: the Taskmaster's own saves get the overlap check a person's Settings save gets (#1162), and are refused with
+// the list unless it passes repeats_ok.
+test('a Taskmaster save that repeats a registered rule is refused with the list, and saved with repeats_ok', async () => {
+  const repeat = 'Three rules.\n\n## Wrapping up\n\nA minion stays open until nothing is left for a person, and never waits on an "are we good?" from anyone.';
+  for (const [tool, read, appTools] of [
+    ['set_app_instructions', () => store.appInstructions().text, true],
+    ['set_project_instructions', () => store.getProject(Citadel.id)!.instructions, true],
+  ] as const) {
+    const before = read();
+    const held = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat } }, appTools);
+    assert.ok(held.isError, `${tool}: ${held.content[0].text}`);
+    assert.match(held.content[0].text, /Nothing was saved/);
+    assert.match(held.content[0].text, /Registered rule: When a minion closes/);
+    assert.match(held.content[0].text, /repeats_ok/);
+    assert.equal(read(), before, `${tool} saved nothing`);
+
+    assert.match(held.content[0].text, /Sonnet Grunt/, 'it says to have its own Grunt judge them');
+
+    // repeats_ok saves past them only with its Grunt's verdicts (Josh, 2026-11-20: "Yes, its own Grunt").
+    const bare = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true } }, appTools);
+    assert.ok(bare.isError, `${tool}: ${bare.content[0].text}`);
+    assert.match(bare.content[0].text, /repeats_ok needs your Grunt's verdict on each place as overlaps \(1 listed, 0 given\)/);
+    assert.equal(read(), before, `${tool} saved nothing without verdicts`);
+
+    const verdict = 'Registered rule: When a minion closes: repeats; the Closing rule already says this.';
+    const saved = await mcp(CitadelTM, 'tools/call', { name: tool, arguments: { instructions: repeat, repeats_ok: true, overlaps: [verdict] } }, appTools);
+    assert.ok(!saved.isError, saved.content[0].text);
+    assert.equal(read(), repeat);
+    assert.ok(saved.content[0].text.includes(verdict), 'the verdicts come back to tell the person');
+  }
+  // Another scheme's Taskmaster gets the same check on its own scheme's text.
+  const delve = await mcp(DelveTM, 'tools/call', { name: 'set_project_instructions', arguments: { instructions: repeat } }, false);
+  assert.ok(delve.isError, delve.content[0].text);
+  assert.match(delve.content[0].text, /Registered rule: When a minion closes/);
+  assert.equal(store.getProject(Delve.id)!.instructions, 'Delve rule.');
+  // A save that repeats nothing goes straight through.
+  const plain = await mcp(CitadelTM, 'tools/call', { name: 'set_app_instructions', arguments: { instructions: 'Three rules.\n\nLunch is at noon on Fridays for everyone in the building.' } }, true);
+  assert.ok(!plain.isError, plain.content[0].text);
+});

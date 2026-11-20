@@ -2,7 +2,7 @@
 // instruction edit, every paragraph elsewhere that already speaks to the same thing. Pure functions over texts, so the
 // repo test (test/rule-homes.test.ts) and the server's Settings check run the same code.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
 
@@ -54,6 +54,7 @@ export function statement(text: string, anchor: string): string | null {
 /** The rule's full text where its home is, or null when the home isn't among the texts given. */
 export function homeText(rule: RuleHome, read: (file: string) => string | null, citadel: string | null): string | null {
   const h = rule.home;
+  if (h.kind === 'scheme') return null;
   if (h.kind === 'citadel') return citadel === null ? null : section(citadel, h.section);
   const text = read(h.file);
   if (text === null) return null;
@@ -105,11 +106,9 @@ export function findCopies(sources: Source[], homes: Map<string, string | null>,
   return out;
 }
 
-const STOP = new Set('about after again also any been before being both but can cannot does each else even every from have here into its just like many more most must never next none not once only other over same should some such than that their them then there these they this those through under until upon very what when where which while who whom why will with would your yours'.split(' '));
-const content = (s: string) => new Set(norm(s).split(' ').filter((w) => w.length > 3 && !STOP.has(w)).map((w) => w.replace(/(ing|ed|es|s)$/, '')));
-
 /** A paragraph elsewhere that speaks to the same thing as an edit's new words. */
-export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string }
+/** `rule`: the registered rule's id, on a registered-rule hit (whose excerpt is the new words, not the rule's home). */
+export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string; rule?: string }
 
 /** Paragraphs of `text` that are new against `before` (an edit's added words). */
 export function added(before: string, text: string): Para[] {
@@ -119,31 +118,25 @@ export function added(before: string, text: string): Para[] {
 
 /**
  * What already speaks to an edit's new paragraphs: a registered rule they repeat (outside its home section), and any
- * paragraph in the sources that shares a run of words with them or most of their content words.
+ * paragraph in the sources that shares a run of RUN_WORDS words with them (Josh, 2026-11-20, #1211: no word-share test).
  * `inHome(rule, para)` says whether a new paragraph sits in that rule's own home, where its phrases belong.
  */
 export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: RuleHome, p: Para) => boolean, rules = RULE_HOMES): Overlap[] {
   const out: Overlap[] = [];
   const seen = new Set<string>();
   const push = (o: Overlap) => { const k = `${o.label}|${o.line}|${o.why}`; if (!seen.has(k)) { seen.add(k); out.push(o); } };
-  const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text), qw: content(q.text) }))) : [];
+  const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text) }))) : [];
   for (const p of news) {
     for (const rule of rules) {
       const hits = phraseHits(p.text, rule);
-      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
+      if (hits.length >= PHRASE_HITS && !inHome(rule, p)) push({ label: `Registered rule: ${rule.title}`, href: null, line: p.line, excerpt: excerpt(p.text), rule: rule.id, why: `repeats ${hits.map((h) => `"${h}"`).join(', ')}; its one home is ${rule.pointer}` });
     }
     const pr = runs(p.text);
-    const pw = content(p.text);
     const pn = norm(p.text);
-    for (const { s, q, qn, qr, qw } of others) {
+    for (const { s, q, qn, qr } of others) {
       if (!qn || qn === pn) continue;
-      let why: string | null = null;
-      for (const r of qr) if (pr.has(r)) { why = `shares "${r}"`; break; }
-      if (!why) {
-        const both = [...pw].filter((w) => qw.has(w)).length;
-        if (both >= 6 && both / Math.min(pw.size, qw.size) >= 0.6) why = `shares ${both} of its words`;
-      }
-      if (why) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why });
+      const run = sharedRun(q.text, pr);
+      if (run) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why: `shares "${run}"` });
     }
   }
   return out;
@@ -166,7 +159,7 @@ export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): st
   });
 }
 
-const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
+export const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
 const fileSources = (root: string, files: string[], href: (f: string) => string | null): Source[] =>
   files.flatMap((f) => { const text = readIn(root, f); return text === null ? [] : [{ label: f, text, code: !f.endsWith('.md'), href: href(f) }]; });
 
@@ -191,19 +184,42 @@ export function settingsSources(o: { root: string; citadelUrl: string | null; pi
     { label: mine[0], text: o.text, href: `#/p/${o.pid}/${mine[1]}` },
     { label: theirs[0], text: o.other, href: `#/p/${o.pid}/${theirs[1]}` },
     ...fileSources(o.root, [...CITADEL_FILES, ...mdFiles(o.root, 'kit')], gh(o.citadelUrl)),
-    ...(o.repo ? fileSources(o.repo, ['CLAUDE.md', 'AGENTS.md', ...mdFiles(o.repo, '.claude/rules')], gh(o.repoUrl)).map((s) => ({ ...s, label: `Scheme repo: ${s.label}` })) : []),
+    ...(o.repo ? fileSources(o.repo, [...new Set(['CLAUDE.md', 'AGENTS.md', ...mdFiles(o.repo, '.claude/rules'), ...schemeRules(o.repo).flatMap((r) => (r.home.kind === 'repo' ? [r.home.file] : []))])], gh(o.repoUrl)).map((s) => ({ ...s, label: `Scheme repo: ${s.label}` })) : []),
   ];
 }
 
-/** Whether a paragraph of a Settings text sits under its `## ` heading for a Citadel-wide home. */
+/** Whether a paragraph of a Settings text sits under the `## ` heading of a rule's home in that same text. */
 export function inSettingsHome(scope: 'citadel' | 'scheme', text: string) {
   const lines = text.split('\n');
   return (rule: RuleHome, p: Para): boolean => {
-    if (scope !== 'citadel' || rule.home.kind !== 'citadel') return false;
+    if (rule.home.kind !== scope) return false;
     const want = norm(rule.home.section);
     for (let i = p.line - 1; i >= 0; i--) if (/^#{1,6}\s/.test(lines[i])) return norm(lines[i]).includes(want);
     return false;
   };
+}
+
+/**
+ * A scheme's own registered rules (#1211): its repo's .claude/rule-homes.json, a list shaped like RULE_HOMES whose homes
+ * are a `scheme` Settings section or a `repo` file inside that repo. An entry that doesn't fit is skipped, and a missing
+ * or broken file is no rules: a scheme's typo never blocks its saves.
+ */
+export function schemeRules(repo: string | null): RuleHome[] {
+  if (!repo) return [];
+  let list: unknown;
+  try { list = JSON.parse(readIn(repo, '.claude/rule-homes.json') ?? '[]'); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  const text = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+  return list.flatMap((r: any): RuleHome[] => {
+    if (!r || !text(r.id) || !text(r.title) || !text(r.pointer) || !Array.isArray(r.phrases)) return [];
+    const h = r.home;
+    const home = h?.kind === 'scheme' && text(h.section) ? { kind: 'scheme' as const, section: h.section }
+      // Inside the repo only: no absolute path and no `..` (readIn already refuses a link).
+      : h?.kind === 'repo' && text(h.file) && !isAbsolute(h.file) && !h.file.split(/[\\/]/).includes('..') ? { kind: 'repo' as const, file: h.file, ...(text(h.section) ? { section: h.section } : text(h.anchor) ? { anchor: h.anchor } : {}) }
+      : null;
+    const phrases = r.phrases.filter((p: unknown) => typeof p === 'string' && norm(p) !== '').slice(0, 40);
+    return home && phrases.length ? [{ id: r.id, title: r.title, home, pointer: r.pointer, phrases }] : [];
+  });
 }
 
 /** Each rule's home text as the repo holds it (Citadel-wide homes are null here: they live in Settings). */

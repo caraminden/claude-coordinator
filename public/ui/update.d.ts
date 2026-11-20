@@ -26,5 +26,5 @@ export interface MountUpdateOptions extends UpdateOptions {
 /** The update waiting for this app, or null: none newer, not inside the Android app, or the feed can't be read. */
 export declare function checkUpdate(opts?: UpdateOptions): Promise<Update | null>;
 
-/** Check for an update and, when there is one, put the banner at the top of `parent` (default document.body). */
+/** Check for an update and, when there is one, put the banner at the top of `parent` (default document.body). Null in an app on Citadel's shared Android shell, which asks natively. */
 export declare function mountUpdate(parent?: HTMLElement, opts?: MountUpdateOptions): Promise<HTMLElement | null>;

@@ -10,14 +10,15 @@ import { isWorking } from '../public/schemecounts.js';
 test("server work (#727): a handed-off land is working until it settles, and its row is sent at each end", (t) => {
   const data = mkdtempSync(join(tmpdir(), 'server-work-'));
   t.after(() => rmSync(data, { recursive: true, force: true }));
-  const landings = new Landings(data);
   let clock = 0;
   const sent: number[] = [];
+  let landings: Landings;
   const work = serverWorkWatch(() => landings.handoffs(), (id) => sent.push(id), () => clock);
   // What Landings.handOff leaves, without running land.sh.
   const dir = join(data, 'run', 'landings', '5');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: 's', risk: 'low', reason: 'r', args: [] }));
+  landings = new Landings(data); // reads the waiting hand-offs once, at start
 
   assert.deepEqual(work.of(5), { kind: 'land' });
   assert.equal(work.of(6), null, 'another minion');

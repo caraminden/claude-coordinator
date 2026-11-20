@@ -51,6 +51,9 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   gets that body, `{scheme}` filled in, plus the scheme's own notes (`src/schedules.ts`). Frontmatter
   holds the defaults, the stagger and `applies:`, which the setup plan checks before adding one.
   A template names no repo's paths, as skills don't.
+- `android-shell/` is Citadel's shared Android shell (#1138), a Capacitor plugin every contraption's Android app
+  pins as a packed copy: Citadel links, the offline page, the update prompt and push. Not a skill: the
+  `citadel:android-app` skill's "Shared shell" section and its `scripts/android-shell.mjs` pin it.
 - A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.
 - A kit skill or agent names no repo's paths or commands. It reads them from the repo's CLAUDE.md
   "Project facts" section (check commands, glossary, decisions log, retro folder, high-risk files,

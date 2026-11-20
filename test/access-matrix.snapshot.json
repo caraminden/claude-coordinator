@@ -439,6 +439,16 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "POST /api/contraptions/push": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "DELETE /api/contraptions/relay/nope/x": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
@@ -599,6 +609,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/desktop/:p/nope/1": {
+  "anon": "404 No builds of nope yet",
+  "person": "404 No builds of nope yet",
+  "member": "404 No builds of nope yet",
+  "outsider": "404 No builds of nope yet",
+  "tmA": "404 No builds of nope yet",
+  "tmB": "404 No builds of nope yet",
+  "m1": "404 No builds of nope yet",
+  "m2": "404 No builds of nope yet"
+ },
+ "HEAD /api/desktop/:p/nope/1": {
+  "anon": "404",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "404",
+  "tmB": "404",
+  "m1": "404",
+  "m2": "404"
+ },
  "POST /api/download-links": {
   "anon": "401 Not logged in",
   "person": "400 Not a file Citadel can link to",
@@ -606,6 +636,16 @@
   "outsider": "400 Not a file Citadel can link to",
   "tmA": "403 Only people make download links",
   "tmB": "403 Only people make download links",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/emulator-lease": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1373,6 +1413,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/apps": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster makes an app",
+  "member": "403 Only a scheme's Taskmaster makes an app",
+  "outsider": "403 Only a scheme's Taskmaster makes an app",
+  "tmA": "400 name must be a short slug: lowercase letters, digits and dashes, like trip-notes",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/apps/nope/people/999": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster switches its apps for people",
+  "member": "403 Only a scheme's Taskmaster switches its apps for people",
+  "outsider": "403 Only a scheme's Taskmaster switches its apps for people",
+  "tmA": "404 No such contraption",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/projects/:p/artifact-data": {
   "anon": "401 Not logged in",
   "person": "403 Not for people",
@@ -1523,6 +1583,16 @@
   "m1": "200",
   "m2": "200"
  },
+ "POST /api/projects/:p/desktop/publish": {
+  "anon": "401 Not logged in",
+  "person": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "member": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "outsider": "404 No such scheme",
+  "tmA": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 Give path (a build you made) or ci_file (a file in the CI store)",
+  "m2": "400 Give path (a build you made) or ci_file (a file in the CI store)"
+ },
  "GET /api/projects/:p/flake-brief": {
   "anon": "401 Not logged in",
   "person": "404 No flake of that file in the last 14 days",
@@ -1608,8 +1678,18 @@
   "person": "400 scope must be \"scheme\" or \"citadel\"",
   "member": "400 scope must be \"scheme\" or \"citadel\"",
   "outsider": "404 No such scheme",
-  "tmA": "403 Not available to the Taskmaster",
-  "tmB": "403 Not available to the Taskmaster",
+  "tmA": "400 scope must be \"scheme\" or \"citadel\"",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/projects/:p/instructions/overlaps/verdicts": {
+  "anon": "401 Not logged in",
+  "person": "400 scope must be \"scheme\" or \"citadel\"",
+  "member": "400 scope must be \"scheme\" or \"citadel\"",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only a person's own Settings save gets the Sonnet check, on their own Claude login",
+  "tmB": "403 Only a person's own Settings save gets the Sonnet check, on their own Claude login",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -2802,6 +2882,16 @@
   "m1": "400 Summary is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/host-tool": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can propose a host tool in its chat",
+  "member": "403 Only the minion itself can propose a host tool in its chat",
+  "outsider": "403 Only the minion itself can propose a host tool in its chat",
+  "tmA": "403 Only the minion itself can propose a host tool in its chat",
+  "tmB": "403 Only the minion itself can propose a host tool in its chat",
+  "m1": "400 source must be one of mise, npm, pypi, cargo, github, pacman",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/images/0123456789abcdef01234567.png": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -3539,6 +3629,16 @@
   "outsider": "404 No such minion",
   "tmA": "400 Summary is required",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/host-tool": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can propose a host tool in its chat",
+  "member": "403 Only the minion itself can propose a host tool in its chat",
+  "outsider": "403 Only the minion itself can propose a host tool in its chat",
+  "tmA": "403 Only the minion itself can propose a host tool in its chat",
+  "tmB": "403 Only the minion itself can propose a host tool in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

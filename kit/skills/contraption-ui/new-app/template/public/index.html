@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- {{title}}'s first page on Citadel UI (citadel:contraption-ui): the top bar and who's signed in.
+     It is a starting point, not a look every app keeps: build the idea here. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{title}}</title>
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/apps/_citadel/theme.css">
+  <link rel="stylesheet" href="/apps/_citadel/ui/base.css">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="/apps/_citadel/rail.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="cui-topbar">
+    <img src="icon.svg" alt="">
+    <h1>{{title}}</h1>
+  </header>
+  <main>
+    <!-- Always drawn and sized, so the name arriving moves nothing. -->
+    <p id="who" class="who">&nbsp;</p>
+  </main>
+</body>
+</html>

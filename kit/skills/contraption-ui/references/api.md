@@ -46,7 +46,14 @@ the test on purpose.
 
 An admin registers a contraption in Settings → Contraptions, or Citadel's own Taskmaster does it on
 an admin's turn (`register_contraption`, `update_contraption`, `set_contraption_person`,
-`rotate_contraption_keys`). Another scheme asks its Taskmaster to ask Citadel's.
+`rotate_contraption_keys`). Another scheme asks its Taskmaster to ask Citadel's, except for a new
+app: any scheme's Taskmaster, on a turn a member of that scheme asked for, calls `make_app` (`name`,
+`title`, `idea`). It generates the kit's starter (`new-app/` beside this skill's `SKILL.md`: a server that
+checks the identity header, migrations, a nightly backup, `/healthz`, a first page on Citadel UI, its tests
+and a CI workflow when the scheme has a runner) into `apps/<name>/` of the scheme's repo on a new minion's
+branch, registers it with `subdir` set and a free port from 7350 to 7999, switches it on for the scheme's
+members and briefs that minion to ship it and build the idea. `set_app_person` (`name`, `login`,
+`enabled`) then switches a scheme's own app for one person.
 
 | Field | What | Rules |
 |---|---|---|
@@ -60,6 +67,7 @@ an admin's turn (`register_contraption`, `update_contraption`, `set_contraption_
 | `default_model` | Model for turns that name none | `^[\w.\[\]-]{1,60}$`, like `haiku` |
 | `turn_cap` | Turns a person may start per day (server-local midnight) | 1 to 100,000, or none |
 | `repo`, `branch`, `folder` | Where deploys come from and go | `owner/name`; default `main`; default `~/apps/<name>` |
+| `subdir` | The app's folder inside its repo, for an app that shares its scheme's repo (`make_app` sets `apps/<name>`) | A relative path; default none, the repo's root. Its manifest, build, units, migrations and `paths` all read there, and a ship that changes nothing in it doesn't redeploy it |
 
 Being in the home scheme grants no access to the app. Only people the contraption is **enabled
 for** reach it, and disabling someone takes effect on their next request (tested).
@@ -72,7 +80,7 @@ Citadel sets these on your service and its timers; `citadel-app.json` can't over
 |---|---|
 | `PORT` | The registry's port |
 | `BASE_PATH` | `/apps/<name>` |
-| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise, except that big uploads land in its `uploads/<login>/` ("Big uploads") (tested) |
+| `DATA_DIR` | `~/.local/share/<name>`, created empty (0700) on install or deploy if missing; never touched otherwise, except that big uploads land in its `uploads/<login>/` ("Big uploads"), and a deploy that changes your `migrations` snapshots it and a roll back restores it (below) (tested) |
 | `CITADEL_KEYS` | Your key folder |
 | `CITADEL_URL` | Where your server calls Citadel: `http://127.0.0.1:8573` on the live box. Read it; don't hard-code it |
 | `PATH` | mise's shims, `~/.local/bin`, then the system's |
@@ -496,6 +504,51 @@ Authorization: Bearer <contraption.key>
   whether to keep going.
 - Minions report theirs with the `report_spend` tool.
 
+## Push to a person's phone: `POST /api/contraptions/push`
+
+Your Android app (one built on Citadel's shared shell, the `citadel:android-app` skill) can get
+notifications and silent data from your server. Citadel does the sending through Firebase, for every app;
+you don't need a Firebase project or key of your own.
+
+**The phone side.** The shell registers the phone. Your page asks for it with
+`await Capacitor.Plugins.CitadelShell.enablePush()`: that call asks Android for notification permission,
+then registers this phone's token for the signed-in person and your app. Make the call from a button
+the person taps, not on load. `disablePush()` forgets the phone, and `pushStatus()` answers
+`{ enabled, available, permission }`. The shell calls `/apps/_citadel/push/<app>` itself, on your host
+(`POST {token, platform: "android"}` registers the phone and `DELETE {token}` forgets it, 204 either way;
+401 when the person is signed out, 403 when your app isn't enabled for them). A token belongs to one
+person and one app: when a phone registers it again, the token moves to whoever is signed in now.
+
+**The send.**
+
+```
+POST /api/contraptions/push
+Authorization: Bearer <contraption.key>
+{ "to": ["cara", "josh"], "title": "Report ready", "body": "Tuesday's take",
+  "open": "/apps/voice/#/takes/12", "tag": "take-12", "data": { "take": "12" } }
+→ 200 { "devices": 3, "sent": 3, "dropped": 0, "skipped": [] }
+```
+
+- `to`: one login, or a list of 1 to 100 logins. Only people your app is enabled for right now get it.
+  Anyone else, and any login nobody has, comes back in `skipped`. A person with no phone registered
+  just adds nothing to `devices`.
+- **A notification:** send a `title` (1 to 200 characters). `body` (at most 2000 characters), `open` and
+  `tag` (at most 100 characters) are optional, and they only go with a title. `open` is the page a tap
+  opens, a path under `/apps/<your app>/` (at most 1000 characters, no `..`). Without `open`, a tap opens
+  the app. A later push with the same `tag` replaces the notification that's still showing.
+- **Silent data:** `data` is an object of string values. The phone's `PushHandler` gets it, even when the
+  app isn't running (the `citadel:android-app` skill). Send `data` with no title for a silent push, or
+  both together. The keys `citadel_*`, `from`, `notification`, `message_type`, `google.*` and `gcm.*` are
+  refused: Citadel's own keys (`citadel_title`, `citadel_body`, `citadel_open`, `citadel_tag`,
+  `citadel_app`) carry the notification.
+- **Size:** the whole data block has to fit in Firebase's 4 KB. That counts your keys and values plus
+  Citadel's keys, so a long body leaves less room for data.
+- **The answer:** `devices` is how many phones were tried. `sent` is how many Firebase took. `dropped`
+  is tokens Firebase called dead, which Citadel deletes; the shell registers the phone again on its next
+  launch. Any other failure is logged and the phone kept.
+- A body that isn't valid gets a 400. If this Citadel has no Firebase key yet, the answer is a 503 that
+  names the file the key goes in.
+
 ## Asks: bug reports, feature asks and data
 
 `POST /api/contraptions/asks` sends a person's report to your home scheme, as them (tested):
@@ -836,7 +889,8 @@ Authorization: Bearer <contraption.key>
 
 ## Running and deploying: `citadel-app.json`
 
-Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.service` (and
+Put `citadel-app.json` at your repo's root (with `subdir`, at that folder's root; `workdir` and every
+path in it are then relative to the folder). Citadel writes `citadel-app-<name>.service` (and
 `citadel-app-<name>-<job>.service`/`.timer` per timer) from it; you never write a unit.
 
 ```json
@@ -863,10 +917,11 @@ Put `citadel-app.json` at your repo's root. Citadel writes `citadel-app-<name>.s
 | `build_timeout` | Whole minutes for the whole build, 1 to 60, default 20. Time waiting in line for a heavy slot doesn't count |
 | `disk_warn_gb` | A number of GB above 0: Settings marks the app once its `DATA_DIR` passes it ("Heavy steps and disk use") |
 | `clipboard` | `"write"` lets your page call `navigator.clipboard.writeText` itself (the frame gets `clipboard-write`); leave it out otherwise. Without it, a framed app can't touch the clipboard on its own, as Windows Defender flags any page that copies a command with no click (#1086). Citadel UI's `copyText` needs no opt-in: called from a click, it copies the old way. Takes effect on the next page load after a deploy |
-| `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A Roll back to last green past a commit that touched one is refused (below) |
+| `migrations` | Up to 20 paths in the repo (folders or files) that change your data's shape, like `["src/migrations", "src/schema.ts"]`. A deploy that changes one snapshots your `DATA_DIR` first, so a roll back brings the data back with the code; with no matching snapshot, a Roll back to last green past one is refused (below) |
 
-The service restarts 5 s after any exit and starts with the box. Citadel never reads or writes
-your `DATA_DIR` beyond creating it when missing.
+The service restarts 5 s after any exit and starts with the box. Citadel creates your `DATA_DIR`
+when missing, and touches it otherwise only to snapshot and restore it around a deploy that changes
+your `migrations` ("Data snapshots", below).
 
 **Deploying.** An admin sets `repo`, `branch` and `folder` and installs the service once. After
 that your home scheme's Taskmaster and minions have `deploy_contraption`. A ship handed off
@@ -909,8 +964,22 @@ when that Taskmaster deployed it itself). It never fails the deploy, so a first 
 **Roll back to last green.** While your app runs a commit newer than your home scheme's last green
 (the newest commit on its default branch whose every CI workflow passed), its Releases card offers
 **Roll back to last green**. Any member can press it: it deploys that commit as above (steps 1 to 4,
-the same two checkouts), refusing one off the branch or past a change to a `migrations` path, since
-code that old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations").
+the same two checkouts), refusing one off the branch. Past a change to a `migrations` path, code that
+old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrations"), so it also puts
+back the newest snapshot of your data taken under code with the same migrations, and is refused when
+there is none.
+
+**Data snapshots** (#1137; Josh, 2026-11-19, picked "Build it"). A deploy whose commit changes a
+`migrations` path stops your app and its timers, copies its `DATA_DIR` to
+`~/.local/share/.<name>.snapshots/<time>-<commit>/data` (a reflinked copy on perigee's btrfs, so it
+costs little disk), then starts the new code; the deploy says "Snapshotted its data" and ends
+"its data was snapshotted first". If the new code fails its health check, the roll back restores
+that snapshot along with the old code. A restore never deletes: the data it replaces is kept as a
+snapshot of its own, so what your people wrote since is still there for a person to merge back by
+hand; the copy a failed start leaves is never restored by a roll back. Each app keeps its newest 3
+snapshots within 10 GB together, dropping first the ones no roll back would pick; a `DATA_DIR` over 10 GB isn't
+snapshotted (the deploy says so). These are for roll backs and never leave the box: keep writing
+your nightly `backups/<day>/`, which do. A deploy that changes no `migrations` path takes none.
 Once it is live, auto-deploy leaves the app there until main has a newer green commit, and a
 minion's or Taskmaster's `deploy_contraption` is refused meanwhile; a person's Deploy on the card ships main at
 once. Your home scheme's Taskmaster is told either way. With no CI, there is no last green and no
@@ -969,6 +1038,7 @@ red would hold a real release. So name what your updater gates on.
 | Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
 | Embed call | 16 texts of 4,000 characters |
+| Push | 100 logins a send; title 200, body 2000, open 1000, tag 100 characters; data block 4 KB with Citadel's keys |
 | `/app-api/read` timeout, answer | 15 s, 64 KB |
 | Open paths, relay paths | 20 each |
 | Timers | 5 |
@@ -983,6 +1053,21 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-19:** Push to a person's phone: `POST /api/contraptions/push` sends a notification and/or
+  silent data to their Android app, through the shared shell ("Push to a person's phone"). The fake
+  Citadel answers it as well, giving each enabled person one phone, and records the sends in `fake.pushes`.
+- **2026-11-19:** New apps in one call: a scheme's Taskmaster calls `make_app` and gets a tested,
+  signed-in, backed-up app in `apps/<name>/` of its own repo, with a minion to ship it ("The registry
+  entry"). An app can live in a folder of a repo (`subdir`); a ship that doesn't touch that folder
+  doesn't redeploy it, and its release target counts only changes there.
+
+- **2026-11-19:** A fake Citadel for your tests: `fake-citadel/fake-citadel.ts` beside this skill's
+  `SKILL.md`. It signs the identity header and answers turns (scripted), cancel, messages, verdict,
+  sessions, media list, openrouter, spend, asks, home, minions and the relay as this file describes them;
+  `test/fake-citadel-contract.test.ts` runs the same calls on it and on the real API. Not faked: the
+  audit, caps, jobs, embeddings, secrets (404 `not_faked`).
+- **2026-11-19:** A deploy that changes your `migrations` snapshots your `DATA_DIR` first, and a roll
+  back restores it with the code ("Data snapshots").
 - **2026-11-19:** Turns take `effort` (`low`, `medium`, `high`) and `toolSearch: true` (MCP tools
   load only when the agent searches for them). Kept turns record both. Claude Code doesn't let a
   turn clear old tool results before compacting yet: Citadel has no switch for it.

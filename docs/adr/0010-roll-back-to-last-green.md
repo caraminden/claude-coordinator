@@ -22,5 +22,6 @@ turns on for no scheme until it is live (Cara, 2026-11-18: "No build, rollback f
   the suite, so last green can be the broken version itself; that one isn't what this button is for.
 - **Migrations** (Q3: "App lists its migrations"): a contraption's `citadel-app.json` may list `migrations`, paths in its
   repo; a rollback is refused, saying which files, when anything under them changed between last green and what runs.
-  An app that lists none rolls back, with its health check as the guard. Citadel's server is guarded by its boot check
+  An app that lists none rolls back, with its health check as the guard. Since #1137 (ADR 0015), a snapshot of the app's
+  data taken under code with the same migrations lets it go back, data and all; it is refused only when there is none. Citadel's server is guarded by its boot check
   against a copy of the database, and its schema_version warning.

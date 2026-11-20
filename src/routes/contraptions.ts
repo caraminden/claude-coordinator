@@ -14,12 +14,14 @@ import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMes
 import { AUDIT_DAYS, parseTurn, TurnError } from '../contraption-turns.ts';
 import { loadImages } from '../turn-images.ts';
 import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
-import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { CONTRAPTION_NAME, RESERVED } from '../contraptions.ts';
 import { secretName } from '../secrets.ts';
 import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
+import { makeApp } from '../make-app.ts';
+import { pushToPeople } from '../fcm.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
 import { HttpError, json, oneOf, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
@@ -29,7 +31,6 @@ import { addAppTurnsCheck } from '../standard-audits.ts';
 import { isAppTurnsRun } from '../schedules.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
-const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions', 'media', 'openrouter']);
 
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
@@ -288,6 +289,27 @@ function eventStream(req: IncomingMessage, res: Ctx['res']) {
 }
 
 export const contraptionRoutes: Route[] = [
+  // make_app (#1136): a scheme's Taskmaster, on a member's turn, makes an app in its own repo (src/make-app.ts).
+  {
+    method: 'POST', path: '/api/projects/:project/apps', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster makes an app",
+    handler: async ({ req, res, app, project, caller, session }) => json(res, 201, await makeApp(app, project, caller!, session.name, await readJson(req))),
+  },
+  // Its member switch: the home scheme's Taskmaster, on a member's turn, switches one of its apps on or off for a person.
+  {
+    method: 'PUT', path: '/api/projects/:project/apps/:name/people/:person', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster switches its apps for people",
+    async handler({ req, res, app, project, caller, params }) {
+      const c = contraption(app, params.name);
+      if (c.home_scheme !== project.id) throw new HttpError(403, `${c.name} isn't one of ${project.name}'s apps: ask the ${APP_NAME} scheme's ${AGENT_NAME}`);
+      const asker = app.store.turnAsker(caller!.id);
+      if (asker === null || !app.store.listMembers(project.id).some((m) => m.id === asker)) throw new HttpError(403, `Only on a turn a member of ${project.name} asked for`);
+      const body = await readJson(req);
+      if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'Say enabled: true or false');
+      const person = app.store.findUser('login', decodeURIComponent(params.person).replace(/^@/, ''));
+      if (!person) throw new HttpError(404, 'No such person');
+      app.store.setContraptionUser(c.id, person.id, body.enabled, asker);
+      return json(res, 200, { name: c.name, people: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean) });
+    },
+  },
   // First, so a relayed path like /people/5 never reads as an admin route on a contraption called relay (reserved anyway).
   { method: ['GET', 'PUT', 'POST', 'DELETE'], path: '/api/contraptions/relay/:to/*rest', who: 'contraption', handler: (ctx) => relay(ctx, ctx.contraption) },
   // mandate_item (#268): a minion or Taskmaster puts or clears an item in its asker's Mandate.
@@ -307,6 +329,10 @@ export const contraptionRoutes: Route[] = [
     });
     return json(res, 200, { model: app.memory.model, vectors: vecs.map((v) => [...v]) });
   }),
+  // Push to people's phones (#1138, src/fcm.ts): a notification and/or silent data to the Android app of each
+  // person named who has this contraption enabled.
+  fromContraption('POST', '/api/contraptions/push', async ({ req, res, app }, c) =>
+    json(res, 200, await pushToPeople(app.store, (name, uid) => app.contraptions.enabled(name, uid), app.fcm, c, await readJson(req, 64 * 1024)))),
   // #421: whether a person is a member of the app's home scheme, and its minions' progress for members.
   fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
     const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));

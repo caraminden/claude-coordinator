@@ -87,13 +87,15 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     // An image attaches, keeping the text.
     await page.eval(`${box}.blur()`);
     assert.equal(await paste(page, { image: true }), true);
-    await waitFor(page, 'the thumbnail', '!!document.querySelector(".attachments .thumb img")');
+    // Loaded, not just in the page: until its picture loads the thumbnail is 2 px wide, and on a phone a tap at its
+    // centre (x 17) lands on the left drawer's edge handle (0 to 17.6 px, at mid-height like this row), which opens
+    // the drawer instead of the viewer (#1192: under load in CI, the picture was still loading when it was measured).
+    await waitFor(page, 'the thumbnail', 'document.querySelector(".attachments .thumb img")?.naturalWidth > 0');
     assert.equal(await page.eval(`${box}.value`), 'draft and more');
     await shoot(page, `${label}-pasted.png`);
 
     // Clicking (tapping) the thumbnail shows it large, ready to draw on (#946); a click off the picture closes it.
-    // #963: on a phone in CI this tap has now and then opened nothing (not reproduced in 30+ runs, under load or
-    // not), so a timeout says what was under the finger and whether the tapped thumbnail was still in the page.
+    // A timeout says what was under the finger and whether the tapped thumbnail was still in the page (#963).
     const at = await page.centre('.attachments .thumb .zoom');
     await page.eval(`window.tapped = document.querySelector('.attachments .thumb .zoom')`);
     await press(page, width, at.x, at.y);

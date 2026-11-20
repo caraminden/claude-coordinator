@@ -15,6 +15,7 @@
 // signed with the contraption's key (src/contraptions.ts), which the contraption checks. The proxy never
 // hands the contraption's server either login cookie, nor lets it set one, nor a cookie for another host.
 import { join } from 'node:path';
+import { connect } from 'node:net';
 import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { APP_NAME } from './appname.ts';
@@ -32,8 +33,100 @@ export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
 export const MAX_BODY = 20 * 1024 * 1024;
 /** A contraption page's big uploads (#832): /apps/_citadel/uploads/<app>[/<id>], the protocol in src/chunked-uploads.ts. */
 const UPLOADS = /^\/apps\/_citadel\/uploads\/([a-z0-9-]+)(?:\/([^/]+))?$/;
+/** A phone's push registration from the Android shell (#1138, src/fcm.ts): POST or DELETE { token }. */
+const PUSH = /^\/apps\/_citadel\/push\/([a-z0-9-]+)$/;
 /** How often open streams and websockets are checked against who the contraption is enabled for. */
 const SWEEP_MS = 2000;
+
+/** How long a request waits for a restarting app's port (#1118); the server's own socket hold is the precedent. */
+export const HOLD_MS = 5000;
+
+/**
+ * Apps restarting now (#1118): from a deploy's or restart's drain until its release, and HOLD_MS after (a restart's
+ * systemctl returns before the app listens). Meanwhile a request waits until the app's port takes a connection, up
+ * to HOLD_MS, before it is forwarded, so a deploy isn't a burst of 502s. Nothing goes to the app before its port is
+ * open, so nothing is replayed, bodies included; an app that isn't restarting fails fast as before.
+ */
+export class RestartHolds {
+  private holdMs: number;
+  /** Past this many waiting on one app, a request goes on at once (and fails fast if the app is down). */
+  private maxWaiting: number;
+  private apps = new Map<string, { holds: number; ended: number; waiting: number; stopped?: boolean }>();
+
+  constructor(holdMs = HOLD_MS, maxWaiting = 200) {
+    this.holdMs = holdMs;
+    this.maxWaiting = maxWaiting;
+  }
+
+  /** The app is restarting until the returned release is called (once; again does nothing). */
+  hold(name: string): () => void {
+    const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };
+    this.apps.set(name, app);
+    app.holds++;
+    app.stopped = false;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      app.holds--;
+      app.ended = Date.now();
+    };
+  }
+
+  /** The app was stopped on purpose: what is left of a restart's grace ends, so it fails fast. */
+  stopped(name: string) {
+    const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };
+    this.apps.set(name, app);
+    app.ended = 0;
+    app.stopped = true;
+  }
+
+  /** Whether the app was stopped on purpose and hasn't run since: the proxy's retry (#1173) skips it, so it fails fast. */
+  isStopped(name: string): boolean {
+    return !!this.apps.get(name)?.stopped;
+  }
+
+  /** The app runs again (it answered a request, or a person started it), so a stop's mark is gone. */
+  running(name: string) {
+    const app = this.apps.get(name);
+    if (app) app.stopped = false;
+  }
+
+  /**
+   * Run `go` now, or once a restarting app's port is open or the hold's time is up; never for an asker who left meanwhile.
+   * `held` says it waited here, so the proxy needn't ask again on top (#1173's retry).
+   */
+  whenUp(name: string, port: number, conn: { once(e: 'close', f: () => void): unknown }, go: (held?: boolean) => void) {
+    const app = this.apps.get(name);
+    if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return go();
+    let gone = false;
+    conn.once('close', () => (gone = true));
+    app.waiting++;
+    const until = Date.now() + this.holdMs;
+    const poll = async () => {
+      while (!gone && Date.now() < until && !(await accepts(port, until - Date.now()))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - Date.now()))));
+    };
+    void poll().finally(() => {
+      app.waiting--;
+      if (!gone) go(true);
+    });
+  }
+}
+
+/** Whether something takes connections on 127.0.0.1:port within ms (the connection is closed at once). */
+const accepts = (port: number, ms: number) => new Promise<boolean>((ok) => {
+  const s = connect(port, '127.0.0.1');
+  // A full backlog leaves a connect pending: give up at the hold's end.
+  s.setTimeout(Math.max(1, ms), () => {
+    s.destroy();
+    ok(false);
+  });
+  s.once('connect', () => {
+    s.destroy();
+    ok(true);
+  });
+  s.once('error', () => ok(false));
+});
 
 /** Whether a path under the contraption (after /apps/<name>) is one of its open paths, or under one. */
 export function isOpenPath(openPaths: string[], rest: string): boolean {
@@ -129,6 +222,8 @@ export class AppProxy {
   private open = new Map<{ destroy(): void }, { name: string; uid: number }>();
   /** A 5xx answer from a contraption, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
   onServerError: (row: ContraptionRow, status: number, method: string, path: string, note?: string) => void = () => {};
+  /** Apps restarting now, whose requests wait for them (#1118): server.ts holds one around each drain. */
+  readonly restarts = new RestartHolds();
   /** Big uploads, and the home folder apps' DATA_DIRs are under (~/.local/share/<name>); null: no uploads. */
   private uploads: { chunked: ChunkedUploads; home: string } | null;
 
@@ -186,7 +281,8 @@ export class AppProxy {
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
     const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
-    forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
+    const go = (held?: boolean) => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed, ...(held || this.restarts.isStopped(a.row.name) ? { retryMs: 0 } : {}) });
+    this.restarts.whenUp(a.row.name, a.row.port, res, go);
   }
 
   /** Serve a request that asks to upgrade (a websocket): the same gate, then a tunnel. */
@@ -201,7 +297,7 @@ export class AppProxy {
     const a = this.admit(req, url, appHost(req, this.domain));
     if ('status' in a) return answerRaw(socket, a.status, a.reason, a.headers, a.body);
     this.track(socket, a);
-    forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed));
+    this.restarts.whenUp(a.row.name, a.row.port, socket, () => forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed)));
   }
 
   private track(conn: { destroy(): void; once(e: 'close', f: () => void): unknown }, a: Admitted) {
@@ -216,6 +312,7 @@ export class AppProxy {
       maxBody: MAX_BODY,
       // A contraption may set its own cookies, never a login, nor one for a wider domain (Citadel's, or the other apps').
       answer: (h) => {
+        this.restarts.running(row.name);
         if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].filter((c) => !/^\s*(cc_session|cc_app)=/.test(c) && !/;\s*domain\s*=/i.test(c));
         if (renewed) h['set-cookie'] = [...(h['set-cookie'] ?? []), renewed];
         // An open path's answer on Citadel's host can't open as a document there (an <object> asks with Accept */*).
@@ -340,6 +437,8 @@ export class AppProxy {
     if (host !== null && !this.store.getContraption(host)) return void res.writeHead(404, text).end('Not found');
     const upload = UPLOADS.exec(url.pathname);
     if (upload) return this.upload(req, res, url, host, upload[1], upload[2]);
+    const push = PUSH.exec(url.pathname);
+    if (push) return this.pushDevice(req, res, host, push[1]);
     if (req.method !== 'GET' && req.method !== 'HEAD') return void res.writeHead(405, text).end('Method not allowed');
     const session = this.who(req, host);
     if (!session) return void res.writeHead(401, text).end('Not logged in');
@@ -403,6 +502,32 @@ export class AppProxy {
     } catch (err) {
       if (res.headersSent) return void res.destroy();
       answer(err instanceof HttpError ? err.status : 500, { error: err instanceof HttpError ? err.message : 'Internal error' });
+    }
+  }
+
+  /**
+   * The Android shell registers (POST) or forgets (DELETE) a phone's FCM token for the person signed in, on the app's
+   * own host (cc_app) or Citadel's (cc_session). The same gate as uploads: signed in, enabled for it, same origin.
+   */
+  private async pushDevice(req: IncomingMessage, res: ServerResponse, host: string | null, name: string) {
+    const answer = (status: number, error?: string) =>
+      void (error === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error })));
+    const row = this.store.getContraption(name);
+    if (!row || (host !== null && host !== name)) return answer(404, 'Not found');
+    if (req.method !== 'POST' && req.method !== 'DELETE') return answer(405, 'Method not allowed');
+    const session = this.who(req, host);
+    if (!session) return answer(401, 'Not logged in');
+    if (host !== null && crossOrigin(req)) return answer(403, 'Cross-origin request');
+    if (!this.contraptions.enabled(row.name, session.uid!)) return answer(403, `You don't have access to ${row.title}`);
+    try {
+      const body = await readJson(req, 16 * 1024);
+      if (typeof body.token !== 'string' || !body.token || body.token.length > 4096) throw new HttpError(400, 'token must be a string of 1 to 4096 characters');
+      if (req.method === 'DELETE') return void (await this.store.deletePushDevice(body.token, session.uid!), answer(204));
+      if ((body.platform ?? 'android') !== 'android') throw new HttpError(400, 'platform must be android');
+      await this.store.savePushDevice(row.id, session.uid!, body.token, 'android');
+      answer(204);
+    } catch (err) {
+      answer(err instanceof HttpError ? err.status : 500, err instanceof HttpError ? err.message : 'Internal error');
     }
   }
 

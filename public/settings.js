@@ -820,8 +820,9 @@ export function myInstructionsEditor() {
 
 /**
  * Before a person's save (#1162): the server's matcher lists what already says the new words (a registered rule outside
- * its one home, or a paragraph elsewhere sharing most of its words), and the save goes ahead only on Save anyway.
- * Resolves true to save. A failed check never blocks a save.
+ * its one home, or a paragraph elsewhere sharing a run of its words), and the save goes ahead only on Save anyway.
+ * Resolves true to save. A failed check never blocks a save. Then a Sonnet check on the person's own Claude login says
+ * whether each really repeats (#1211; Josh, 2026-11-20: "List now, verdicts fill in"); Save anyway works throughout.
  */
 async function checkRepeats(scope, text, box, status) {
   let found;
@@ -836,13 +837,48 @@ async function checkRepeats(scope, text, box, status) {
       const name = `${o.label}${o.line ? `, line ${o.line}` : ''}`;
       return o.href ? h('a', { href: o.href, ...(/^https?:/.test(o.href) ? { target: '_blank', rel: 'noopener' } : {}) }, name) : h('strong', {}, name);
     };
+    const marks = found.map(() => h('span', { class: 'repeat-verdict muted' }, 'Sonnet: checking…'));
+    const note = h('p', { class: 'muted' }, 'Sonnet is reading these on your Claude login to say which really repeat.');
     box.replaceChildren(
       h('p', {}, h('strong', {}, 'Already said elsewhere. '), 'Work your change in where it is already written, or point there in a few words, or save it anyway.'),
-      h('ul', {}, ...found.map((o) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`)))),
-      h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')));
+      // The buttons sit above the list, so verdicts filling in below never move them (no reflow without input).
+      h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')),
+      h('ul', {}, ...found.map((o, i) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`), marks[i]))),
+      note);
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
+    void fillVerdicts(scope, text, box, marks, note, found.map((o) => `${o.label}|${o.line}`).join('\n'));
   });
+}
+
+const VERDICT = { repeats: 'really repeats it', conflicts: 'conflicts with it', fine: 'only shares wording' };
+
+/** Sonnet's verdicts into the open repeats list; a later check or a closed list drops them. */
+async function fillVerdicts(scope, text, box, marks, note, places) {
+  const run = (box.dataset.run = String(Number(box.dataset.run ?? 0) + 1));
+  let r;
+  try {
+    r = await api(`api/projects/${view.projectId}/instructions/overlaps/verdicts`, { method: 'POST', body: { scope, text } });
+  } catch (err) {
+    r = { failed: err.message };
+  }
+  if (box.dataset.run !== run || box.hidden) return;
+  // The server matched again; verdicts for a different list (the text changed under it) would land on the wrong rows.
+  if (r.verdicts && (r.places ?? []).join('\n') !== places) r = { failed: 'the saved text changed while it ran; save again to check' };
+  if (r.verdicts) {
+    marks.forEach((m, i) => {
+      const v = r.verdicts[i];
+      m.className = `repeat-verdict${v && v.verdict !== 'fine' ? ' strong' : ' muted'}`;
+      m.textContent = v ? `Sonnet: ${VERDICT[v.verdict]}${v.why ? `. ${v.why}` : '.'}` : 'Sonnet: no verdict.';
+    });
+    const vs = r.verdicts;
+    note.textContent = vs.some((v) => v && v.verdict !== 'fine') ? 'Sonnet has read them: work in the ones it marks, or save anyway.'
+      : vs.every((v) => v) ? 'Sonnet found no real repeat here: saving anyway is fine.'
+        : "Sonnet left some without a verdict, so read those yourself before saving anyway.";
+    return;
+  }
+  for (const m of marks) m.remove();
+  note.textContent = r.unlinked ? `No Sonnet check: ${r.unlinked}. Link it to have these read, or save anyway.` : `Sonnet's check didn't finish (${r.failed}), so the list above is the matcher's alone.`;
 }
 
 /** The Citadel-wide instructions as last loaded or broadcast, for the tab below. */

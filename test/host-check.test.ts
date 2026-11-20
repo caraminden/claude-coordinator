@@ -23,7 +23,7 @@ store.createMachine('box', 'MACHINEHASH', 'Cara', null);
 store.db.prepare("INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at) VALUES ('mandate', 'Mandate', 9100, 'PUB', 'PRIVKEY', 'KEYHASH', 1, 1)").run();
 // Every column whose name says secret, in the schema the code makes today.
 const secretish = (store.db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_schema m, pragma_table_info(m.name) p WHERE m.type = 'table'").all() as { t: string; c: string }[])
-  .filter(({ c }) => /hash|secret|private|password|nonce|p256dh|^auth$|^endpoint$|^meta$/.test(c)).map(({ t, c }) => `${t}.${c}`);
+  .filter(({ c }) => /hash|secret|private|password|nonce|p256dh|^auth$|^endpoint$|^meta$|^token$/.test(c)).map(({ t, c }) => `${t}.${c}`);
 store.db.close();
 
 // Stand-ins that print what they were asked.

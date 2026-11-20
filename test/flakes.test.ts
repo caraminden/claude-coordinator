@@ -144,3 +144,20 @@ test('a minion already on the file (the tab\'s button) is the fix: no second one
   assert.equal(started.length, 3);
   assert.equal(new Set(started).size, 3);
 });
+
+test('three sightings from before the file\'s newest commit start no minion; three after it do (#1219)', async () => {
+  const dir = mkdtempSync(join(root, 'fixed-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('F', null);
+  const now = Date.now();
+  for (const h of [30, 20, 10]) st.addFlakeEvents(project.id, null, null, now - h * 3_600_000, [{ file: 'test/old.test.ts', source: 'in CI', detail: '' }]);
+  const changed: number | null = now - 5 * 3_600_000; // the file was fixed after all three
+  const started: string[] = [];
+  const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [], changedAt: async () => changed,
+    start: async (_p, b) => { started.push(b.title); return { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }; } });
+  await fx.tick([project]);
+  assert.deepEqual(started, [], 'all three sightings were before the commit: already fixed');
+  for (const h of [4, 3, 2]) st.addFlakeEvents(project.id, null, null, now - h * 3_600_000, [{ file: 'test/old.test.ts', source: 'in CI', detail: '' }]);
+  await fx.tick([project]);
+  assert.deepEqual(started, ['Flaky test: test/old.test.ts'], 'three after the commit start one as before');
+});

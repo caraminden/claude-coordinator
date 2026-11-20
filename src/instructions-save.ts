@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { recheckDecisions } from './decisions-load.ts';
 import { GLOBAL_OWNER } from './properties.ts';
-import { added, inSettingsHome, overlapsFor, settingsSources, type Overlap } from './rule-overlap.ts';
+import { RULE_HOMES } from './rule-homes.ts';
+import { added, homeText, inSettingsHome, overlapsFor, readIn, schemeRules, section, settingsSources, type Overlap } from './rule-overlap.ts';
 import type { App } from './http.ts';
 import type { Project } from './db.ts';
 
@@ -40,8 +41,8 @@ export function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit
 }
 
 /**
- * What already speaks to an edit's new words: a registered rule outside its home, or a paragraph elsewhere sharing a
- * run of words or most of its words. The sections of the edited text that the edit touches are left out, so a new
+ * What already speaks to an edit's new words: a registered rule (Citadel's or the scheme's own) outside its home, or a paragraph elsewhere sharing a
+ * run of words. The sections of the edited text that the edit touches are left out, so a new
  * bullet isn't flagged against its own neighbours.
  */
 export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scope: Scope, before: string, text: string): Overlap[] {
@@ -53,7 +54,54 @@ export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scop
   const rest = lines.map((l, i) => (touched.has(sectionStart(lines, i + 1)) ? '' : l)).join('\n');
   const other = scope === 'citadel' ? project.instructions ?? '' : store.appInstructions().text;
   const sources = settingsSources({ root: ROOT, citadelUrl: store.getProject(GLOBAL_OWNER)?.repo_url ?? null, pid: project.id, repo: project.repo_dir, repoUrl: project.repo_url, scope, text: rest, other });
-  return overlapsFor(news, sources, inSettingsHome(scope, text));
+  // The shared rules, and on a save of a scheme's own text its own (#1211), read fresh each time.
+  return overlapsFor(news, sources, inSettingsHome(scope, text), scope === 'scheme' ? [...RULE_HOMES, ...schemeRules(project.repo_dir)] : RULE_HOMES);
+}
+
+/** Sonnet's word on one matcher hit (#1211): whether the new words really repeat it, contradict it, or only share wording. */
+export interface Verdict { verdict: 'repeats' | 'conflicts' | 'fine'; why: string }
+
+/** A registered rule's home as it reads now: Citadel's own rules from this repo, a scheme's from its repo or its Settings text. */
+export function ruleHome(app: Pick<App, 'store'>, project: Project, id: string): string | null {
+  const citadel = app.store.appInstructions().text;
+  const ours = RULE_HOMES.find((r) => r.id === id);
+  if (ours) return homeText(ours, (f) => readIn(ROOT, f), citadel);
+  const theirs = schemeRules(project.repo_dir).find((r) => r.id === id);
+  if (!theirs) return null;
+  if (theirs.home.kind === 'scheme') return section(project.instructions ?? '', theirs.home.section);
+  return homeText(theirs, (f) => (project.repo_dir ? readIn(project.repo_dir, f) : null), citadel);
+}
+
+/**
+ * What the Sonnet check reads: the edit's new paragraphs, then each place the matcher found, numbered. A registered
+ * rule's hit quotes the new words themselves, so its home's text goes with it (`home`), for Sonnet to compare against.
+ */
+export function verdictPrompt(scope: Scope, before: string, text: string, found: Overlap[], home: (id: string) => string | null = () => null): string {
+  const cut = (t: string) => (t.length > 3000 ? `${t.slice(0, 3000)}…` : t);
+  const place = (o: Overlap, i: number) => {
+    const h = o.rule ? home(o.rule) : null;
+    const said = h ? `\n   The rule's home says:\n   <home>\n${cut(h.trim())}\n   </home>` : '';
+    return `${i + 1}. ${o.label}${o.line ? `, line ${o.line}` : ''}: "${o.excerpt}" (matcher: it ${o.why})${said}`;
+  };
+  const where = scope === 'citadel' ? `the ${APP_NAME}-wide instructions` : "a scheme's instructions";
+  return [
+    `A person is saving an edit to ${where}, the standing rules every agent in it reads. A word matcher flagged places that already say something like the new words. Judge each place against the new words: "repeats" when it states the same rule, so the rule would be written twice; "conflicts" when it says something different about the same thing, so agents get two answers; "fine" when they only share wording and speak to different things.`,
+    `The new words:\n<new>\n${added(before, text).map((p) => p.text).join('\n\n')}\n</new>`,
+    `The places (a registered rule's place quotes the new words; judge them against the rule's home):\n<places>\n${found.map(place).join('\n')}\n</places>`,
+    'Reply with JSON only, no fences: {"verdicts": [{"n": <the place\'s number>, "verdict": "repeats" | "conflicts" | "fine", "why": "<one plain line for the person>"}]}, one for each place.',
+  ].join('\n\n');
+}
+
+/** Sonnet's reply as one verdict per place, in order (null where it gave none); throws when the reply isn't JSON. */
+export function readVerdicts(reply: string, count: number): (Verdict | null)[] {
+  const t = reply.trim();
+  let data: any;
+  try { data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch { throw new Error("Sonnet's answer wasn't the verdicts it should be"); }
+  const out: (Verdict | null)[] = Array(count).fill(null);
+  for (const v of Array.isArray(data?.verdicts) ? data.verdicts : []) {
+    if (Number.isInteger(v?.n) && v.n >= 1 && v.n <= count && ['repeats', 'conflicts', 'fine'].includes(v.verdict)) out[v.n - 1] = { verdict: v.verdict, why: typeof v.why === 'string' ? v.why.trim().slice(0, 300) : '' };
+  }
+  return out;
 }
 
 /** The line of the heading a 1-based line sits under (0 above the first heading). */

@@ -18,6 +18,10 @@ src/mcp.ts: test/mcp-always-load.test.ts
 src/turn-launch.ts: test/pinned-mcp.test.ts
 src/runner.ts: test/pinned-mcp.test.ts
 
+# The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
+server.ts: test/boot-imports.test.ts
+src/**: test/boot-imports.test.ts
+
 # Routes and who sees what.
 src/routes/**: test/access-matrix.test.ts
 

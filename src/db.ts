@@ -566,6 +566,8 @@ export interface ContraptionRow {
   repo: string | null;
   branch: string | null;
   folder: string | null;
+  /** The app's own folder inside its repo, like apps/notes (#1136): its citadel-app.json, units and build run there; null: the repo's root. */
+  subdir: string | null;
   default_model: string | null;
   turn_cap: number | null;
   identity_public: string;
@@ -1212,6 +1214,19 @@ CREATE TABLE IF NOT EXISTS contraption_errors (
   last_at INTEGER NOT NULL,
   PRIMARY KEY (contraption_id, day, kind, key)
 );
+-- Phones that take a contraption's push (#1138, src/fcm.ts): the Firebase token the Android shell registered at
+-- /apps/_citadel/push/<app>, whose phone it is and for which app. One row per token: registered again by someone
+-- else, or for another app, the phone moves. The token reaches the phone, so it is a secret (src/db-view.ts).
+CREATE TABLE IF NOT EXISTS contraption_push_devices (
+  id INTEGER PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS contraption_push_devices_user ON contraption_push_devices(contraption_id, user_id);
 -- One row per release of a scheme's target (#625, specs/release-monitor.md): the version people got, the minions
 -- in it (JSON [{ ticketId, number, title, stages }]), when its first change started on its way and went live,
 -- how it ended, and each stage's length in s (JSON { stage: s }). src/releases.ts writes and reads them.
@@ -1407,6 +1422,7 @@ export class StateDb {
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
+  ['contraptions', 'subdir', 'ALTER TABLE contraptions ADD COLUMN subdir TEXT'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1586,8 +1602,10 @@ export const SCHEMA_HISTORY = [
   [89, 'ideas (#1150)'],
   [90, 'flake_fixes (#1120)'],
   [91, 'review_refutes (#1158)'],
-  [92, 'host_samples (#1123)'],
-  [93, 'tickets.goal (#1130)'],
+  [92, 'contraptions.subdir (#1136)'],
+  [93, 'contraption_push_devices (#1138)'],
+  [94, 'host_samples (#1123)'],
+  [95, 'tickets.goal (#1130)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3782,6 +3800,17 @@ export class Store {
     return { count: Number(count), first: first ?? null, top: rows.map((r) => ({ detail: r.detail, n: Number(r.n) })) };
   }
 
+  /** The readings in [from, to), oldest first, at most `limit`, of `kinds` only if given: an incident's timeline (#1145). */
+  healthBetween(from: number, to: number, limit: number, kinds?: string[]): { at: number; kind: string; commit_sha: string | null; detail: string }[] {
+    const only = kinds?.length ? ` AND kind IN (${kinds.map(() => '?').join(', ')})` : '';
+    return this.db.prepare(`SELECT at, kind, commit_sha, detail FROM health_events WHERE at >= ? AND at < ?${only} ORDER BY at, id LIMIT ?`).all(from, to, ...(kinds ?? []), limit) as any;
+  }
+
+  /** The newest `kind` reading before `before` (#1135: the last stall before a watchdog restart), or null. */
+  lastHealthEvent(kind: string, before: number): { at: number; detail: string } | null {
+    return (this.db.prepare('SELECT at, detail FROM health_events WHERE kind = ? AND at < ? ORDER BY at DESC LIMIT 1').get(kind, before) as { at: number; detail: string } | undefined) ?? null;
+  }
+
   /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
   eventIdAt(at: number): number {
     // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).
@@ -4063,6 +4092,26 @@ export class Store {
 
   deleteView(projectId: number, owner: string, id: number): boolean {
     return this.db.prepare('DELETE FROM person_views WHERE project_id = ? AND owner = ? AND id = ?').run(projectId, owner, id).changes > 0;
+  }
+
+  /** A phone's FCM token for a person and contraption (#1138); a token seen before moves here and is fresh again. */
+  savePushDevice(contraptionId: number, userId: number, token: string, platform: string) {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO contraption_push_devices (token, contraption_id, user_id, platform, created_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(token) DO UPDATE SET contraption_id = excluded.contraption_id, user_id = excluded.user_id, platform = excluded.platform, seen_at = excluded.seen_at`)
+      .run(token, contraptionId, userId, platform, now, now);
+  }
+
+  /** Forget a phone: a dead token, or (with userId) a person's own phone signing out. */
+  deletePushDevice(token: string, userId: number | null = null) {
+    this.db.prepare('DELETE FROM contraption_push_devices WHERE token = ? AND (? IS NULL OR user_id = ?)').run(token, userId, userId);
+  }
+
+  /** The tokens of these people's phones for a contraption. */
+  pushDevices(contraptionId: number, userIds: number[]): string[] {
+    if (!userIds.length) return [];
+    return (this.db.prepare(`SELECT token FROM contraption_push_devices WHERE contraption_id = ? AND user_id IN (${userIds.map(() => '?').join(', ')}) ORDER BY id`)
+      .all(contraptionId, ...userIds) as { token: string }[]).map((r) => r.token);
   }
 
   listPushSubscriptions(): PushSubscriptionRow[] {

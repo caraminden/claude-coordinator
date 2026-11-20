@@ -9,6 +9,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import type { ContraptionRow, Project, Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { git, type Target } from './releases.ts';
+import { desktopTargetOf, type DesktopTarget } from './desktop-feed.ts';
 
 /** contraption: an app at /apps/<name>/; apk: an Android app people install; ci: a package a workflow builds; file: builds minions
  * handed people as files (no CI makes them); main: the branch itself. */
@@ -31,9 +32,13 @@ export interface Found extends Target {
   jobName?: string;
   /** The repo folders it ships (#764): a change touching one goes to it; a target with none takes what no target's folder holds. */
   paths?: string[];
+  /** Ships only changes in its paths, never the rest as a fallback: an app in a folder of its scheme's repo (#1136). */
+  own?: boolean;
   /** ci: the workflow files ("desktop.yml") that must also run every job green on a build's commit before it goes out to
    * people (#1019, citadel-app.json `release.needs`): until then its changes are still on their way. */
   needs?: string[];
+  /** ci: the desktop app its release build goes out to through Citadel's feed (#1148, citadel-app.json `desktop`). */
+  desktop?: DesktopTarget;
 }
 
 export interface Override {
@@ -45,6 +50,8 @@ export interface Override {
   paths?: string[];
   /** How its releases are numbered and named (Target.numbering). */
   release?: { name?: string; number?: string; needs?: string[] };
+  /** ci: publish its release build to a desktop feed: { app, exe?, started?, title? } (src/desktop-feed.ts). */
+  desktop?: unknown;
 }
 
 /** A build a minion shared (the artifacts table): a file people install or run, and what it is for. */
@@ -119,7 +126,7 @@ export interface SchemeFacts {
   /** The scheme whose code this server runs: its server is its target (CitadelServer), so it gets no Main. */
   own: boolean;
   branch: string;
-  contraptions: (Pick<ContraptionRow, 'name' | 'title'> & Partial<Pick<ContraptionRow, 'repo'>>)[];
+  contraptions: (Pick<ContraptionRow, 'name' | 'title'> & Partial<Pick<ContraptionRow, 'repo' | 'subdir'>>)[];
   /** Contraptions with an android/latest.json in their data folder: an APK they serve. */
   apkFeeds: string[];
   workflows: { path: string; text: string }[];
@@ -288,7 +295,8 @@ export function detect(f: SchemeFacts): Found[] {
   const base = { projectId: pid, branch: f.branch };
   for (const c of f.contraptions) {
     // The root citadel-app.json is the contraption deployed from this repo.
-    const dir = f.appDir && (!c.repo || c.repo.toLowerCase() === slug) ? { paths: [f.appDir] } : {};
+    // An app in a folder of the repo (#1136) ships only what touches that folder; otherwise the root citadel-app.json's workdir.
+    const dir = c.subdir ? { paths: [`${c.subdir.replace(/\/$/, '')}/`], own: true } : f.appDir && (!c.repo || c.repo.toLowerCase() === slug) ? { paths: [f.appDir] } : {};
     out.push({ ...base, id: `app:${c.name}`, kind: 'contraption', name: f.contraptions.length > 1 ? c.title : 'Contraption', link: `/apps/${c.name}/`, contraption: c.name, ...dir });
   }
   const apkDir = f.apkDir ? { paths: [f.apkDir] } : {};
@@ -336,9 +344,11 @@ export function detect(f: SchemeFacts): Found[] {
     const paths = Array.isArray(o?.paths) ? o.paths.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
     const numbering = numberingOf(o?.release);
     const needs = t.kind === 'ci' ? needsOf(o?.release) : [];
+    const desktop = t.kind === 'ci' ? desktopTargetOf(o?.desktop) : null;
     kept.push({
       ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}),
       ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}), ...(needs.length ? { needs } : {}),
+      ...(desktop ? { desktop } : {}),
     });
   }
   return kept;

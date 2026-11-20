@@ -1,6 +1,6 @@
 ---
 name: android-app
-description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, wires an app's update banner, or tries an APK or a page on the shared emulator (citadel-android), its microphone included.
+description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, wires an app's shared shell or push, or tries an APK or a page on the shared emulator (citadel-android), its microphone included.
 ---
 
 # Android app
@@ -27,6 +27,40 @@ is **read-only**.
   be updated in place, so its owner uninstalls it once (local data goes) before the first
   shared-key install.
 - The first build in a home downloads Gradle and its dependencies, about 1 GB in `~/.gradle`.
+
+## Shared shell
+
+Every Capacitor app on Citadel runs the same native shell, `kit/android-shell` (a Capacitor
+plugin, `@citadel/android-shell`): Citadel's pages other than sign-in open outside the app, only a
+gateway error (502/503/504) or a load that shows nothing for 20 s opens the bundled offline page
+(`webDir`'s `offline.html`, Capacitor's `server.errorPath`), a native "Update available" dialog reads
+the app's `android/latest.json`, and push comes through Citadel. A new Capacitor app starts on it;
+an app with its own copies of these moves onto it (deletes them; MainActivity goes back to a plain
+`BridgeActivity`). Its README has the version history.
+
+- **Adopt or move to a newer shell:** from the repo root,
+  `node <kit>/skills/android-app/scripts/android-shell.mjs install` (`<kit>` is this skill's kit;
+  `status` says whether the app's pin is behind). It packs the kit's shell into
+  `<android>/citadel-shell/`, pins it in the Capacitor root's `package.json` and runs `cap sync`.
+  Commit the `.tgz` with `package.json` and its lock file: each app builds from its own pinned copy,
+  so a shell change reaches an app only when it re-pins, builds and tries it.
+- **Config**, in `capacitor.config.json` under `plugins.CitadelShell` (all optional):
+  `updateFeed` (default `<server.url>/android/latest.json`; a debug build checks only when it's set),
+  `updates: false` (no update dialog), `citadelHost` (default: the app's host minus its first label),
+  and `firebase: { projectId, applicationId, apiKey, senderId }` for push (Firebase starts from
+  these, no `google-services.json`; the values are public identifiers, not secrets).
+- **The page's side**, `Capacitor.Plugins.CitadelShell`: `enablePush()` (asks for notification
+  permission, then registers the phone with Citadel; call it when the person turns push on, never on
+  load), `disablePush()`, `pushStatus()` → `{ enabled, available, permission }`, and
+  `checkUpdate()` (shows the dialog now, even after Later).
+- **Push** is sent by the app's server through Citadel, `POST /api/contraptions/push` (the
+  `citadel:contraption-ui` API reference, "Push to a person's phone"). Tapping a notification opens
+  its `open` page in the app. Data keys beyond the notification go to the app's own handler: a class
+  implementing `zip.citadel.shell.PushHandler`, named in the app's manifest as
+  `<meta-data android:name="zip.citadel.shell.push_handler" android:value="<class>"/>`. A
+  monochrome notification icon goes in `zip.citadel.shell.notification_icon` (a drawable resource).
+  Each app's package needs adding to Citadel's Firebase project once (a person's console step).
+- Trying a change to the shell itself: its README, "Testing a change".
 
 ## Pinned versions
 
@@ -115,7 +149,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   any turn, container ones too) or the Deploy button on its card on the Releases page, not by
   copying files. Both refuse an APK signed with a different key from the published one, and
   record who published it.
-- **The update banner is Citadel UI's `update.js`**: in the web layer,
+- **An app on the shared shell (above) gets the native update dialog and needs no banner**; `mountUpdate()`
+  steps aside there. Otherwise **the update banner is Citadel UI's `update.js`**: in the web layer,
   `import { mountUpdate } from '/apps/_citadel/ui/update.js'; mountUpdate();` (with base.css).
   Inside the Android app only, it compares `App.getInfo().build` (`@capacitor/app`) with
   `latest.json`. When it's behind, it shows "Update the app", which opens the APK in the system
@@ -170,6 +205,11 @@ citadel-android down               # when you're done
   coordinates: `adb -s emulator-5554 exec-out uiautomator dump /dev/tty`, then tap the centre of the
   node's `bounds` (`exec-out` avoids a shared temp file). One app's log:
   `adb -s emulator-5554 logcat -d --pid=$(adb -s emulator-5554 shell pidof <pkg>)`.
+- **Take the lease before a test session** (#1128): `citadel-android lease [minutes] ["what for"]` (20 minutes
+  unless you say, at most 60; call it again to renew). Other turns' steps then wait, saying who holds it and for
+  what, however long you pause between your steps. `citadel-android release` gives it back (so does `down`, and so
+  does your turn ending); a turn that dies loses it at its time. `citadel-android status` says who has it, and the
+  Machines page shows it. Without a lease you still keep the screen 2 minutes after each step.
 - **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each
   call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
   holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.

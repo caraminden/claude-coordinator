@@ -274,6 +274,24 @@ const PROPOSE_PLAN = {
   },
 };
 
+// propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.
+const HOST_TOOLS_LIST = process.env.COORDINATOR_HOST_TOOLS;
+const PROPOSE_HOST_TOOL = {
+  name: 'propose_host_tool',
+  description:
+    `Propose installing a command-line tool on the server every turn runs on (yours too, in a container, which can't install one), as a card in this chat showing the exact install command. Only a member of the ${APP_NAME} scheme can approve it: approve installs it with mise (an Arch package is installed by a person, as the server has no root) and ships its line in the server's host tools list, which a rebuild installs from; reject installs nothing. Either comes as a message. Pin one exact version and say in why what it's for.${HOST_TOOLS_LIST ? ` What the server has already: ${HOST_TOOLS_LIST}.` : ''} A newer proposal for the same package replaces an open one. Link every mention of the card, as with propose_plan.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      source: { type: 'string', enum: ['mise', 'npm', 'pypi', 'cargo', 'github', 'pacman'], description: "Where it comes from: mise (mise's own tools and registry, e.g. jq, go), npm, pypi (a Python CLI), cargo (a Rust crate, built from source: minutes), github (a release binary, package owner/repo), pacman (an Arch package)" },
+      package: { type: 'string', maxLength: 140, description: 'Its name in that source, e.g. "ripgrep", "@biomejs/biome", "BurntSushi/ripgrep"' },
+      version: { type: 'string', maxLength: 64, description: 'One exact version, e.g. "14.1.1": no ranges, no "latest"' },
+      why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
+    },
+    required: ['source', 'package', 'version', 'why'],
+  },
+};
+
 const PROPOSE_MACHINE_NOTES = {
   name: 'propose_machine_notes',
   description:
@@ -803,8 +821,8 @@ const TOOLS = [
   {
     name: 'set_project_instructions',
     description:
-      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
+      'Replace the scheme instructions with new text (max 32,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change. New words that repeat a registered rule or text elsewhere are refused with the list: have a Sonnet Grunt judge each, then work them in, or save anyway with repeats_ok and its verdicts as overlaps. To register a scheme rule\'s one home (a member asks, or offer it on a card when you write a standing rule), start a minion to add it to the scheme repo\'s `.claude/rule-homes.json` (`citadel:writing-for-agents`, Pruning).',
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose, and with overlaps.' }, overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: "With repeats_ok: your Sonnet Grunt's verdict on each place the refusal listed, one line each: where, repeats / conflicts / fine, and why" } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
@@ -882,8 +900,8 @@ const APP_INSTRUCTION_TOOLS = [
   {
     name: 'set_app_instructions',
     description:
-      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' } }, required: ['instructions'] },
+      `Replace the ${APP_NAME}-wide instructions with new text (max 32,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change; new words that repeat a registered rule or text elsewhere are refused with the list: have a Sonnet Grunt judge each, then work them in, or save anyway with repeats_ok and its verdicts as overlaps. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 32000, description: 'The whole new text, at most 32,000 characters' }, repeats_ok: { type: 'boolean', description: 'Save even though the new words repeat a registered rule or text elsewhere (the refusal lists them). Only when the repeat is on purpose, and with overlaps.' }, overlaps: { type: 'array', maxItems: 30, items: { type: 'string' }, description: "With repeats_ok: your Sonnet Grunt's verdict on each place the refusal listed, one line each: where, repeats / conflicts / fine, and why" } }, required: ['instructions'] },
   },
 ];
 
@@ -903,6 +921,32 @@ const CONTRAPTION_FIELDS = {
   branch: { type: ['string', 'null'], description: 'The branch it deploys; null for main.' },
   folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
 };
+
+/** make_app and its member switch (#1136): every scheme's Taskmaster, for its own scheme, on a member's turn. */
+const APP_TOOLS = [
+  {
+    name: 'make_app',
+    description: `Make a new ${APP_NAME} app (a contraption at /apps/<name>/) for this scheme, when a member asks for one. One call does it all: it starts a minion whose branch already holds a working app in apps/<name>/ of this scheme's repo (a server that checks who is signed in, migrations, a nightly backup, a health path, a first page on ${APP_NAME} UI, tests, and CI when the scheme has a runner), registers the app to deploy from that folder, switches it on for every member of this scheme, and briefs the minion to ship it and then build the idea. Returns the minion's number and the app's port. Refused for a name that's taken, on a turn no member of this scheme asked for, or when the scheme has no GitHub repo. Switch it on or off for other people with set_app_person.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Its name, kept for good: in its address and folder. Lowercase letters, digits and dashes, like trip-notes.' },
+        title: { type: 'string', maxLength: 60, description: 'What people see, like Trip Notes: letters, digits, spaces and simple punctuation, at most 60.' },
+        idea: { type: 'string', maxLength: 4000, description: "What it's for, in the asker's own words (at most 4,000 characters): it goes into the app's CLAUDE.md and the minion's brief." },
+      },
+      required: ['name', 'title', 'idea'],
+    },
+  },
+  {
+    name: 'set_app_person',
+    description: `Switch one of this scheme's apps on or off for a person, by login: on shows it in their rail and lets them open it, off takes at their next request. On a turn a member of this scheme asked for.`,
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The app, like trip-notes.' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
+      required: ['name', 'login', 'enabled'],
+    },
+  },
+];
 
 // Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn an admin asked for (#255).
 const CONTRAPTION_TOOLS = [
@@ -965,6 +1009,25 @@ const PUBLISH_RELEASE = {
       contraption: { type: 'string', ...(HOME_CONTRAPTIONS.length ? { enum: HOME_CONTRAPTIONS } : {}) },
     },
     required: ['contraption'],
+  },
+};
+
+/** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
+const PUBLISH_DESKTOP = {
+  name: 'publish_desktop',
+  description: `Publish a Windows desktop app's build to its update feed on the ${APP_NAME} server, for apps run by the kit's desktop launcher (the citadel:desktop-app skill). Give the build as path (a .zip, .tar.gz or .tgz of the app's folder that you made) or ci_file (a file id in this scheme's CI store; ci_files lists them). It gets the next build number; PCs running the app download it in the background, check its SHA-256 and switch on their next start, keeping the old build if the new one doesn't start. A ci target with "desktop" in citadel-app.json publishes its green runs by itself; this is for builds made elsewhere and for a first build. The reply has the feed's URL and the first-install zip's.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      app: { type: 'string', description: 'The app\'s name: lower case letters, digits and dashes ("peek"). Its install folder and launcher are named after it.' },
+      path: { type: 'string', description: 'The build you made, as you would link it.' },
+      ci_file: { type: 'integer', description: 'Or a file in the CI store, by id.' },
+      exe: { type: 'string', description: 'The exe to start, inside the build ("App.exe", "bin/App.exe"); found when the build has one .exe at its top.' },
+      started: { type: 'string', enum: ['file', 'alive'], description: 'How the launcher knows the build started: "file" (default) when the app writes the file named by CITADEL_STARTED_FILE once its window is up; "alive" when it is still running 30 seconds later.' },
+      title: { type: 'string', description: 'Its name on the PC, for the launcher\'s messages.' },
+      version: { type: 'string', description: 'What the scheme calls this build ("1.4.2").' },
+    },
+    required: ['app'],
   },
 };
 
@@ -1897,6 +1960,27 @@ async function approve(args: any): Promise<string> {
   return JSON.stringify({ behavior: 'deny', message });
 }
 
+/**
+ * The overlap check a person's Settings save gets (#1162), before the Taskmaster saves rule text (#1211): refused with
+ * what already says the new words. Like a Settings save's Sonnet check, its own Sonnet Grunt judges the hits (Josh,
+ * 2026-11-20: "Yes, its own Grunt"), and repeats_ok saves past them only with the Grunt's verdicts as `overlaps`.
+ */
+async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<string> {
+  const text = wholeText(args);
+  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim().slice(0, 300)) : [];
+  let found: any[];
+  // Like a Settings save, a check that fails never blocks the save: it says so instead.
+  try { ({ found } = await call('POST', `/api/projects/${PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
+  if (!found.length) return '';
+  if (args.repeats_ok === true && judged.length >= found.length) return `\nSaved past ${found.length} flagged place${found.length > 1 ? 's' : ''} on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
+  const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
+  throw new Error([
+    args.repeats_ok === true ? `repeats_ok needs your Grunt's verdict on each place as overlaps (${found.length} listed, ${judged.length} given). Nothing was saved.` : `Nothing was saved: a word matcher flagged places that may already say the new words.`,
+    ...found.map((o: any) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
+    `First have a Sonnet Grunt judge each against the new words (for a registered rule, against its home): repeats, conflicts, or fine (only shared wording). Put what it marks where it is already said, or point there in a few words. To save anyway, call again with repeats_ok: true and its verdicts as overlaps, one line per place.`,
+  ].join('\n'));
+}
+
 /** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
 function wholeText(args: any): string {
   if (typeof args.instructions !== 'string') {
@@ -2083,12 +2167,22 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
+      const unchecked = await repeatsFirst('citadel', args);
       const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
-      return app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`;
+      return (app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`) + unchecked;
     }
     case 'list_contraptions': {
       const all = await call('GET', '/api/contraptions');
       return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
+    }
+    case 'make_app': {
+      const m = await call('POST', `/api/projects/${PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
+      return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
+    }
+    case 'set_app_person': {
+      if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
+      const r = await call('PUT', `/api/projects/${PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      return `${args.enabled ? 'On' : 'Off'} for ${args.login}. ${r.name} is on for: ${r.people.join(', ') || 'no one'}.`;
     }
     case 'register_contraption': {
       const c = await call('POST', '/api/contraptions', args);
@@ -2243,6 +2337,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href } = await call('POST', `/api/tickets/${TICKET}/release-key`, { contraption: args.contraption });
       return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
+    case 'publish_desktop':
+      return (await call('POST', `/api/projects/${PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
     case 'publish_release':
       return (await call('POST', `/api/projects/${PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
@@ -2267,8 +2363,9 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'rotate_contraption_keys':
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
+      const unchecked = await repeatsFirst('scheme', args);
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
-      return project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.';
+      return (project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.') + unchecked;
     }
     case 'message_ticket': {
       const ticketId = await id(args);
@@ -2391,6 +2488,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
       const { href, owner } = await call('POST', `/api/tickets/${TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
+    }
+    case 'propose_host_tool': {
+      const { href } = await call('POST', `/api/tickets/${TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
+      return `The host tool card is in the chat; its link is ${href}. Link every mention of it, e.g. [the host tool card below](${href}). Only a member of the ${APP_NAME} scheme can approve it, and the answer comes as a message, then another once it's installed. Keep working on what doesn't depend on it.`;
     }
     case 'propose_memory': {
       const { href, counts } = await call('POST', `/api/tickets/${TICKET}/memory-proposal`, { changes: args.changes });
@@ -2626,8 +2727,8 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS, ...(SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  return [...THREAD_TOOLS, ...(SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, PROPOSE_MEMORY, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

@@ -72,9 +72,10 @@ export const describesIn = (container: string) => running.get(container) ?? 0;
 
 /**
  * Run the prompt once on `place` (the asker's login: their container, or the host for the server login's owner, as
- * ultra reviews do) and return the model's text. `cwd` is a scratch folder the place can see.
+ * ultra reviews do) and return the model's text. `cwd` is a scratch folder the place can see. The Settings repeat
+ * check (src/instructions-save.ts) runs its Sonnet call here too, with a shorter timeout.
  */
-export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeBin: string; hostEnv: Record<string, string>; cwd: string }): Promise<string> {
+export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeBin: string; hostEnv: Record<string, string>; cwd: string; timeoutMs?: number }): Promise<string> {
   let argv: string[];
   let env: Record<string, string>;
   if (place.host) {
@@ -90,8 +91,10 @@ export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeB
   }
   try {
     const out = await new Promise<string>((done, fail) => {
-      const child = execFile(argv[0], argv.slice(1), { cwd: place.host ? o.cwd : undefined, env, timeout: TIMEOUT_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
-        if (err && !stdout) fail(new Error(`The agent didn't answer: ${(stderr || err.message).trim().split('\n').pop()?.slice(0, 300)}`));
+      const child = execFile(argv[0], argv.slice(1), { cwd: place.host ? o.cwd : undefined, env, timeout: o.timeoutMs ?? TIMEOUT_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+        // err.message is the whole command line: people read this, so say what happened instead.
+        const why = () => (err!.killed ? `it ran past ${Math.round((o.timeoutMs ?? TIMEOUT_MS) / 1000)} s` : stderr.trim().split('\n').pop() || `Claude stopped with no answer (exit ${err!.code ?? err!.signal})`);
+        if (err && !stdout) fail(new Error(`The agent didn't answer: ${why().slice(0, 300)}`));
         else done(stdout);
       });
       child.stdin?.end(prompt);

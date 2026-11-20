@@ -4,7 +4,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
@@ -19,6 +19,7 @@ import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
+import { releaseEmulatorLease } from './emulator-lease.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
@@ -622,7 +623,7 @@ export class Runner {
    * The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts).
    * It carries the calling turn's own token: a fresh one would log that turn's tools out (#225).
    */
-  hostEnv(ticket: Ticket, token: string): Record<string, string> {
+  hostEnv(ticket: Ticket, token?: string): Record<string, string> {
     const project = this.store.getProject(ticket.project_id);
     // land.sh's retro_log and run-tests.sh's log_flake write there, as they do from a turn.
     const shared = project && this.sharedDir(project);
@@ -2788,7 +2789,7 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     try {
       const pins = turnPins();
-      copyPinned(pins.MCP_DIR, pin);
+      copyPinned(pins.MCP_DIR, pin, !!place.host);
       // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
       if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
@@ -3169,6 +3170,9 @@ export class Runner {
     if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
     rmSync(live.dir, { recursive: true, force: true });
     this.onFilesMayChange(ticketId);
+    // The emulator lease (#1128) ends with the turn that took it.
+    const endedTicket = this.store.getTicket(ticketId);
+    if (endedTicket) releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!);
     this.onTurnEnd(ticketId);
     // Re-read the ticket: the turn may have given it its first (or a new) session id.
     const after = this.store.getTicket(ticketId);

@@ -86,7 +86,7 @@ function flakeBlock(s, flakes, refresh) {
     meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`)
       : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it') },
   h('strong', { title: f.file }, f.file),
-  h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.ticketId}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
+  h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.ticketId}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
   f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null);
   const [row] = settingsRow({ key: `health-flakes-${s.id}`, icon: 'chart', hue: flakes.length ? 'waiting' : 'done', title: 'Flaky tests, last 14 days',
     summary: flakes.length ? [toneChip('warn', `${flakes.length} file${flakes.length === 1 ? '' : 's'}`), `${total} flake${total === 1 ? '' : 's'}`] : [toneChip('ok', 'None'), 'no flaky test file reported'] },

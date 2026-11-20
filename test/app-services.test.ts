@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
-import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
+import { AppServices, folderHolds, manifestOn, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd } from './helpers.ts';
 import { until } from './wait.ts';
@@ -978,20 +978,204 @@ test('a roll back deploys an older commit of its branch, but not one off it or p
     services.deploy(c, 'Cara', [], undefined, { to: git(work, 'rev-parse', 'HEAD') });
     assert.match((await done(name)).said.join('\n'), /isn't on cara\/.*'s main, so nothing changed/);
 
-    // Its data's shape moved on after first: refused, and green still runs.
+    // Its data's shape moved on after first: refused, and green still runs. That deploy snapshotted its data (#1137),
+    // which would let the roll back go; with no snapshot to bring back (a person cleared them), it's refused.
     mkdirSync(join(work, 'db'), { recursive: true });
     git(work, 'reset', '--quiet', '--hard', 'HEAD~1');
     r.push({ 'db/0002.sql': 'alter' });
     services.deploy(c, 'Cara');
-    await done(name);
+    assert.match((await done(name)).said.join('\n'), /Snapshotted its data/);
+    rmSync(join(home, '.local/share', `.${name}.snapshots`), { recursive: true, force: true });
     services.deploy(c, 'Cara', [], undefined, { to: first });
     const refused = await done(name);
     assert.equal(refused.state, 'failed');
-    assert.match(refused.said.join('\n'), /Its migrations changed since .* \(db\/0002\.sql\), so going back could leave its data/);
+    assert.match(refused.said.join('\n'), /Its migrations changed since .* \(db\/0002\.sql\), and no snapshot of its data matches that code, so going back could leave its data/);
     assert.notEqual(git(liveSlot(name), 'rev-parse', 'HEAD'), first);
   } finally {
     svc.close();
   }
+});
+
+test('an app in a folder of its repo (#1136) reads its manifest, builds and runs there, and counts only its own migrations', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const work = join(root, 'work', `cara/${name}`);
+  mkdirSync(join(work, 'apps/notes/migrations'), { recursive: true });
+  mkdirSync(join(work, 'migrations'), { recursive: true });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null, subdir: 'apps/notes' } as ContraptionRow;
+    r.push({
+      'README.md': 'the scheme\'s own repo', '.gitignore': 'out.txt\n',
+      'apps/notes/citadel-app.json': appManifest(['pwd > out.txt'], { migrations: ['migrations'] }), 'apps/notes/migrations/0001.sql': 'a',
+    });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(realpathSync(readFileSync(join(liveSlot(name), 'apps/notes/out.txt'), 'utf8').trim()), join(liveSlot(name), 'apps/notes'), 'the build ran in its folder');
+    assert.equal(unitDirOf(name), join(liveSlot(name), 'apps/notes'), 'its service runs there');
+    assert.equal((await services.status(c)).manifestError, null);
+
+    // The repo's own migrations folder isn't the app's: no snapshot.
+    r.push({ 'migrations/0001.sql': 'the scheme\'s, not the app\'s' });
+    services.deploy(c, 'Cara');
+    assert.doesNotMatch((await done(name)).said.join('\n'), /Snapshotted its data/);
+    r.push({ 'apps/notes/migrations/0002.sql': 'b' });
+    services.deploy(c, 'Cara');
+    assert.match((await done(name)).said.join('\n'), /Snapshotted its data/);
+  } finally {
+    svc.close();
+  }
+});
+
+// #1137: a fixture app whose migration runs when it starts, as a real one's does. A stand-in systemctl runs the live
+// slot's migrate.sh against its DATA_DIR on start, and its /health fails while its data holds "GARBLED".
+async function migratingApp() {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const data = join(home, '.local/share', name);
+  const wrapper = join(root, `systemctl-${name}`);
+  writeFileSync(wrapper, `#!/bin/sh
+"${fake.bin}" "$@" || exit $?
+case "$2" in start|restart) [ "$3" = "citadel-app-${name}.service" ] || exit 0
+  wd=$(sed -n 's/^WorkingDirectory=//p' "${unitDir}/$3")
+  [ -f "$wd/migrate.sh" ] && cd "${data}" && sh "$wd/migrate.sh";; esac
+exit 0
+`);
+  chmodSync(wrapper, 0o755);
+  services = new AppServices({ ...opts(), systemctl: wrapper });
+  const svc = createHttpServer((req, res) => {
+    const db = existsSync(join(data, 'db.txt')) ? readFileSync(join(data, 'db.txt'), 'utf8') : '';
+    res.writeHead(req.url === '/health' && !db.includes('GARBLED') ? 200 : 500).end();
+  });
+  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  const manifest = appManifest([], { health: '/health', migrations: ['migrate.sh'] });
+  const db = () => readFileSync(join(data, 'db.txt'), 'utf8');
+  const snaps = join(home, '.local/share', `.${name}.snapshots`);
+  const snapshots = () => (existsSync(snaps) ? readdirSync(snaps).sort() : []);
+  return { name, r, c, svc, data, db, manifest, snapshots };
+}
+
+test('a deploy whose migration breaks its data rolls back to the old code and the old data in one step (#1137)', async () => {
+  const { name, r, c, svc, data, db, manifest, snapshots } = await migratingApp();
+  try {
+    const v1 = r.push({ 'citadel-app.json': manifest, 'migrate.sh': '[ -f db.txt ] || echo "v1: alice" > db.txt\n' });
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    writeFileSync(join(data, 'db.txt'), 'v1: alice, bob\n'); // what its people wrote since
+    assert.deepEqual(snapshots(), [], 'a first deploy takes none');
+
+    // A change outside its migrations: no snapshot.
+    r.push({ 'app.txt': 'copy change' });
+    services.deploy(c, 'Cara');
+    let d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.doesNotMatch(d.said.join('\n'), /[Ss]napshot/);
+    assert.deepEqual(snapshots(), []);
+
+    // v2's migration garbles the data, and v2 fails its health check.
+    r.push({ 'migrate.sh': 'echo GARBLED > db.txt\n' });
+    services.deploy(c, 'Cara');
+    d = await done(name);
+    const said = d.said.join('\n');
+    assert.equal(d.state, 'rolled back', said);
+    assert.match(said, /Snapshotted its data \(.*\) as .*\.snapshots/);
+    assert.match(said, /Restored its data from the snapshot taken .* at /);
+    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD').length, 40);
+    assert.match(readFileSync(join(liveSlot(name), 'migrate.sh'), 'utf8'), /v1: alice/, 'the old code runs');
+    assert.equal(db(), 'v1: alice, bob\n', 'and the old data, what its people wrote included');
+    // Nothing deleted: the snapshot, and the garbled data kept beside it.
+    const kept = snapshots();
+    assert.equal(kept.length, 2, kept.join(' '));
+    assert.ok(kept.some((s) => readFileSync(join(home, '.local/share', `.${name}.snapshots`, s, 'data', 'db.txt'), 'utf8') === 'GARBLED\n'));
+    assert.notEqual(v1, d.to);
+  } finally {
+    svc.close();
+  }
+});
+
+test('a roll back past a migration brings back the snapshot its code reads, and keeps the newer data; with none it is refused (#1137)', async () => {
+  const { name, r, c, svc, data, db, manifest, snapshots } = await migratingApp();
+  try {
+    const v1 = r.push({ 'citadel-app.json': manifest, 'migrate.sh': '[ -f db.txt ] || echo "v1: alice" > db.txt\n' });
+    services.deploy(c, 'Cara');
+    await done(name);
+    // v2's migration loses a row but stays healthy: only a person notices.
+    const v2 = r.push({ 'migrate.sh': 'grep -q v2 db.txt || echo "v2:" > db.txt\n' });
+    services.deploy(c, 'Cara');
+    let d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.match(d.said.join('\n'), /Deployed .*; its data was snapshotted first/);
+    assert.equal(db(), 'v2:\n');
+    writeFileSync(join(data, 'db.txt'), 'v2: carol\n');
+
+    // A bad snapshot (a person edited it): v1 fails its health check on it, and that roll back's own roll back puts v2's
+    // code and data back. The data v1 failed on is kept, marked failed, so the next roll back passes it by.
+    const snapDir = join(home, '.local/share', `.${name}.snapshots`);
+    const [first] = snapshots();
+    writeFileSync(join(snapDir, first, 'data', 'db.txt'), 'GARBLED\n');
+    services.deploy(c, 'Cara', [], undefined, { to: v1 });
+    d = await done(name);
+    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD'), v2);
+    assert.equal(db(), 'v2: carol\n', "v2's data is back with its code");
+    assert.ok(snapshots().some((s) => JSON.parse(readFileSync(join(snapDir, s, 'snapshot.json'), 'utf8')).failed === true));
+    writeFileSync(join(snapDir, first, 'data', 'db.txt'), 'v1: alice\n');
+
+    services.deploy(c, 'Cara', [], undefined, { to: v1 });
+    d = await done(name);
+    const said = d.said.join('\n');
+    assert.equal(d.state, 'deployed', said);
+    assert.equal(d.to, v1);
+    assert.match(said, /Its migrations changed since .* \(migrate\.sh\): its data goes back too/);
+    assert.match(said, /Kept the data it had/);
+    assert.equal(db(), 'v1: alice\n');
+    const kept = snapshots().map((s) => readFileSync(join(home, '.local/share', `.${name}.snapshots`, s, 'data', 'db.txt'), 'utf8'));
+    assert.ok(kept.includes('v2: carol\n'), 'what v2 wrote is kept, not deleted');
+
+    // Its snapshots gone (a person cleared them): the old refusal stands, and nothing changed.
+    const v3 = r.push({ 'migrate.sh': 'echo "v3:" > db.txt\n' });
+    services.deploy(c, 'Cara');
+    await done(name);
+    rmSync(join(home, '.local/share', `.${name}.snapshots`), { recursive: true, force: true });
+    services.deploy(c, 'Cara', [], undefined, { to: v1 });
+    d = await done(name);
+    assert.equal(d.state, 'failed');
+    assert.match(d.said.join('\n'), /no snapshot of its data matches that code/);
+    assert.equal(git(liveSlot(name), 'rev-parse', 'HEAD'), v3);
+  } finally {
+    svc.close();
+  }
+});
+
+test('snapshots keep the newest few within a size cap, never the ones a step just took or restored (#1137)', async () => {
+  const { takeSnapshot, prune, listSnapshots } = await import('../src/app-snapshots.ts');
+  const data = join(home, 'data');
+  const snaps = join(home, 'snaps');
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'f'), Buffer.alloc(1000));
+  const cap = { keep: 2, maxBytes: 2500 };
+  for (let i = 1; i <= 3; i++) await takeSnapshot(data, snaps, { commit: `c${i}`.padEnd(40, '0'), why: 'test' }, cap, i * 1000);
+  assert.deepEqual((await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)), ['c3', 'c2'], 'the oldest past the count goes');
+  writeFileSync(join(data, 'f'), Buffer.alloc(2000));
+  const { said } = await takeSnapshot(data, snaps, { commit: 'c4'.padEnd(40, '0'), why: 'test' }, cap, 4000);
+  assert.deepEqual((await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)), ['c4'], 'past the size cap too (2000 + 1000 > 2500), but the new one stays');
+  assert.match(said.join('\n'), /Removed 2 older snapshots past the cap .*c3.*c20+\. Kept: .*c4/);
+  assert.deepEqual(await prune(snaps, []), [], 'under the default cap nothing goes');
+  const big = await takeSnapshot(data, snaps, { commit: 'c5'.padEnd(40, '0'), why: 'test' }, { keep: 2, maxBytes: 100 }, 5000);
+  assert.equal(big.snap, null);
+  assert.match(big.said[0], /over the .* cap/);
+  writeFileSync(join(snaps, 'stray.part'), 'x');
+  assert.equal((await listSnapshots(snaps)).length, 1, 'a .part is no snapshot');
+
+  // Past the cap, an older snapshot of a commit that has a newer one goes before an older commit's only one: a roll back
+  // only ever picks the newest of a commit, so repeated tries of one deploy can't push out the snapshot an older commit needs.
+  const dup = join(home, 'snaps-dup');
+  const wide = { keep: 3, maxBytes: 1e9 };
+  for (const [c, t] of [['d1', 1000], ['d2', 2000], ['d2', 3000]] as const) await takeSnapshot(data, dup, { commit: c.padEnd(40, '0'), why: 'test' }, wide, t);
+  await takeSnapshot(data, dup, { commit: 'd3'.padEnd(40, '0'), why: 'test' }, wide, 4000);
+  assert.deepEqual((await listSnapshots(dup)).map((s) => `${s.commit.slice(0, 2)}@${s.taken_at}`), ['d3@4000', 'd2@3000', 'd1@1000']);
 });
 
 // #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.
@@ -1061,4 +1245,31 @@ test('a deploy won\'t run over a hand-installed unit until an admin replaces it'
   assert.equal(d.state, 'failed');
   assert.match(d.said.join('\n'), new RegExp(`Hand-installed units run ${name}: ${name}.service. An admin installs it once with replace`));
   assert.ok(!existsSync(join(home, 'apps', name)), 'nothing cloned');
+});
+
+test("a folder app (#1136): a ship that changes nothing in its folder holds its deploy, and it deploys only once its manifest is on main", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'folder-app-'));
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'README.md'), 'x');
+    git('add', '-A');
+    git('commit', '-qm', 'start');
+    assert.equal(manifestOn(dir, 'apps/notes'), false, 'registered before its folder ships: not deployed yet');
+    mkdirSync(join(dir, 'apps', 'notes'), { recursive: true });
+    writeFileSync(join(dir, 'apps', 'notes', 'citadel-app.json'), '{}');
+    git('add', '-A');
+    git('commit', '-qm', 'the app');
+    assert.equal(manifestOn(dir, 'apps/notes'), true);
+    const deployed = git('rev-parse', 'HEAD');
+    writeFileSync(join(dir, 'README.md'), 'y');
+    git('commit', '-qam', 'outside the folder');
+    assert.equal(await folderHolds(dir, 'apps/notes', git('rev-parse', 'HEAD'), deployed), true);
+    writeFileSync(join(dir, 'apps', 'notes', 'server.ts'), '');
+    git('add', '-A');
+    git('commit', '-qm', 'inside the folder');
+    assert.equal(await folderHolds(dir, 'apps/notes', git('rev-parse', 'HEAD'), deployed), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

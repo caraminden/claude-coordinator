@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # The shared headless Android emulator (#381), one AVD (`citadel`) for every scheme:
+#   citadel-android lease [minutes] [why] | release | status (#1128: a lease keeps the screen 20 min, renewable) |
 #   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down
 #                   | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]
 # Since #533 the emulator runs on Cara's desktop, in the WSL distro citadel-android (deploy/desktop/android/),
@@ -37,7 +38,8 @@ BOOT_WAIT=360
 ADB_PORT=${ANDROID_ADB_SERVER_PORT:-5037} # adb's own variable
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
-lock="$dir/android.lock" holder="$dir/android.who" used="$dir/android.used"
+lock="$dir/android.lock" holder="$dir/android.who" used="$dir/android.used" leasef="$dir/android.lease"
+LEASE_DEFAULT=20 LEASE_MAX=60 # minutes: `lease` start value and its ceiling
 CONSOLE_PORT=${CITADEL_ANDROID_CONSOLE_PORT:-$CONSOLE} # tests only
 SMS_MAX=500
 
@@ -65,6 +67,14 @@ take_screen() {
     if ! flock -n 9; then
       [ $((SECONDS - told)) -lt 60 ] || { say "waiting for the screen: $(cut -f2 "$holder" 2>/dev/null) has a step running"; told=$SECONDS; }
       flock 9
+    fi
+    # An explicit lease (`lease`, #1128) outranks the per-step one: others wait until it ends, however long since its holder's last step.
+    local lu ln lw now; now=$(date +%s)
+    IFS=$'\t' read -r lu ln lw 2>/dev/null <"$leasef" || lu=0
+    if [ "${lu:-0}" -gt "$now" ] && [ -n "${ln:-}" ] && [ "$ln" != "$who" ]; then
+      flock -u 9
+      [ $((SECONDS - told)) -lt 60 ] || { say "waiting for the screen: $ln has it leased${lw:+ for \"$lw\"} (another $(((lu - now + 59) / 60)) min unless released); waited $(((SECONDS - since) / 60)) min"; told=$SECONDS; }
+      sleep 2; continue
     fi
     IFS=$'\t' read -r until name 2>/dev/null <"$holder" || until=0
     if [ -z "${name:-}" ] || [ "$name" = "$who" ] || [ "${until:-0}" -le "$(date +%s)" ]; then break; fi
@@ -310,6 +320,15 @@ down() {
   fi
 }
 
+# The lease: "<until epoch>\t<who>\t<what for>". Taking it waits like any step; the same holder renews it.
+lease_status() {
+  local lu ln lw now; now=$(date +%s)
+  IFS=$'\t' read -r lu ln lw 2>/dev/null <"$leasef" || lu=0
+  if [ "${lu:-0}" -gt "$now" ] && [ -n "${ln:-}" ]; then
+    say "leased by $ln${lw:+ for \"$lw\"} until $(date -d "@$lu" '+%H:%M:%S') ($(((lu - now + 59) / 60)) min left)"
+  else say "not leased"; fi
+}
+
 mic="$(dirname "$(readlink -f "$0")")/citadel-android-mic.ts"
 cmd=${1:-}
 [ $# -gt 0 ] && shift
@@ -345,7 +364,22 @@ case "$cmd" in
     take_screen; up; need_server; console_step sms "$1" "$2"; s=$?; keep_screen
     [ $s = 0 ] && say "sent a text from $1 to the emulator"
     exit $s ;;
-  down) take_screen; down ;;
+  lease)
+    # citadel-android lease [minutes] [what for]: keep the screen for several steps, 20 minutes unless told, renewable by calling it again.
+    mins=$LEASE_DEFAULT
+    case "${1:-}" in ''|*[!0-9]*) ;; *) mins=$1; shift ;; esac
+    [ "$mins" -ge 1 ] && [ "$mins" -le "$LEASE_MAX" ] || { say "minutes: 1 to $LEASE_MAX"; exit 2; }
+    reason=${*:-}; reason=${reason//[$'\t\r\n']/ }; reason=${reason:0:100}
+    take_screen
+    printf '%s\t%s\t%s\n' "$(($(date +%s) + mins * 60))" "$who" "$reason" >"$leasef"
+    keep_screen; say "leased to you for $mins min (citadel-android release when done)"; exit 0 ;;
+  release)
+    IFS=$'\t' read -r _ ln _ 2>/dev/null <"$leasef" || ln=
+    # Its two-minute step lease goes too, so the next caller starts at once.
+    if [ "${ln:-}" = "$who" ]; then : >"$leasef"; [ "$(cut -f2 "$holder" 2>/dev/null)" = "$who" ] && : >"$holder"; fi
+    say "released"; exit 0 ;;
+  status) lease_status; exit 0 ;;
+  down) take_screen; down; s=$?; [ "$(cut -f2 "$leasef" 2>/dev/null)" = "$who" ] && : >"$leasef"; exit $s ;;
   tone) exec node "$mic" tone "$@" ;;
   mic)
     [ $# -ge 1 ] && [ $# -le 2 ] && [ -f "$1" ] || { say "usage: citadel-android mic <file.wav> [seconds]   (plays once an app records; loops to fill seconds)"; exit 2; }
@@ -356,6 +390,6 @@ case "$cmd" in
     node "$mic" play "$@"; s=$?; kill "$renew"; wait "$renew" 2>/dev/null; keep_screen; exit $s ;;
   mic-check) exec node "$mic" check "$@" ;;
   *)
-    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]"
+    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | lease [minutes] [why] | release | status | down | tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]"
     exit 2 ;;
 esac

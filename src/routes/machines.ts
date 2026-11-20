@@ -1,6 +1,7 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
 import { appOwners, hostLoad } from '../host-load.ts';
+import { readEmulatorLease } from '../emulator-lease.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
@@ -272,6 +273,8 @@ export const machineRoutes: Route[] = [
       json(res, 200, hostLoad(app.heavyDir, Date.now(), undefined, owners));
     },
   },
+  // Who holds the shared Android emulator's lease (#1128), for the Machines page.
+  { method: 'GET', path: '/api/emulator-lease', ...people, handler: ({ res, app }) => json(res, 200, app.heavyDir ? readEmulatorLease(app.heavyDir) : null) },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {
     method: 'POST', path: '/api/machines', ...people,

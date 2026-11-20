@@ -1,8 +1,28 @@
-# perigee is shared: cap Citadel, the web app and every turn it runs (citadel-turns.slice, a child of
-# this one by its name), at half the box together.
+# perigee is shared (29.1G of RAM, 29.1G of zram swap, 16 cores): this caps Citadel and everything it runs, so a
+# runaway turn is throttled or OOM-killed in here instead of the kernel picking victims box-wide (#1214).
+# Inside: the server (claude-coordinator.service, its own MemoryMax=8G), host turns, lands and fast-verify
+# (citadel-turns.slice, a child by its name), each person's container (citadel-claude-N.service, its own
+# MemoryMax=8G: src/claude-link.ts CONTAINER_MEMORY) and landing test scopes (tools/run-tests.sh).
+#
+# Measured 2026-11-19/20 (journal "memory peak" lines and the units' cgroups):
+#   server            peak 6.5G, average 3.9G, no swap (priority.conf MemorySwapMax=0)
+#   citadel-turns     peak 19.8G + 11.2G swap: land units up to 4.3G each (average 1.6G, up to 6 at once),
+#                     fast-verify 2.5G, host turns 1.1G (average 0.13G)
+#   containers        1.6G and 3.4G on a normal day; citadel-claude-2 ran to 22.3G + 21.6G swap
+#   run-tests scopes  up to 4.4G each
+# 2026-11-19 22:34 PST the kernel OOM-killed in citadel.slice and -.slice: the box ran out, not a cap.
+#
+# Budget: 29.1G - about 2G for the system and other logins - about 5G for app.slice (the Godot editor and its
+# agent 3G, apps and their builds; contraptions.slice once app units move there) leaves about 22G. Swap is
+# zram, so each swapped GiB still costs about a third of a GiB of RAM the cgroup isn't charged for: 6G of swap
+# is about 2G of RAM. That made 20G; Josh, 2026-11-20: "lets give citadel.slice the room if it needs it, we can
+# always cap harder if cody complains". So MemoryMax=22G, with MemoryHigh 3G below it to reclaim and throttle first,
+# which leaves the rest of the box about 5G when Citadel is full: cap harder if Godot or the apps start losing out.
+# No CPUQuota: the old 800% was never installed, and installing it would newly halve Citadel's cores.
 [Unit]
 Description=Citadel and its turns
 
 [Slice]
-MemoryMax=8G
-CPUQuota=800%
+MemoryHigh=19G
+MemoryMax=22G
+MemorySwapMax=6G

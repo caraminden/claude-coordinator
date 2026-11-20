@@ -8,7 +8,7 @@
 // files that do. Units an app's people installed by hand before (same port, or run from its folder) are
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { execResult, runLogged } from './exec.ts';
 import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
@@ -18,6 +18,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
+import { listSnapshots, restoreSnapshot, snapshotsDir, takeSnapshot, type Snapshot } from './app-snapshots.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -121,6 +122,27 @@ const execLine = (argv: string[], home: string) => [argv[0], ...argv.slice(1).ma
 const tilde = (s: string, home: string) => (s.startsWith('~/') ? join(home, s.slice(2)) : s);
 /** A contraption's folder: where its repo is checked out; default ~/apps/<name>. */
 export const appFolder = (row: Pick<ContraptionRow, 'name' | 'folder'>, home: string) => (row.folder ? tilde(row.folder, home) : join(home, 'apps', row.name));
+/** Where the app itself is in a checkout of its repo: its subdir (#1136, an app in a folder of a scheme's repo), else the root. */
+export const appRoot = (row: { subdir?: string | null }, checkout: string) => (row.subdir ? join(checkout, row.subdir) : checkout);
+/** A repo path of the app's, from one relative to its own folder (its manifest's migrations, say). */
+export const repoPath = (row: { subdir?: string | null }, rel: string) => (row.subdir ? `${row.subdir.replace(/\/$/, '')}/${rel}` : rel);
+/**
+ * For an app in a folder of its scheme's repo (#1136): whether a build of `deployed` holds all of the app's at `landed`,
+ * nothing in its folder differing, so a ship that didn't touch the folder doesn't redeploy it. Read in the scheme's
+ * clone, which has both commits.
+ */
+export async function folderHolds(repoDir: string, subdir: string, landed: string, deployed: string): Promise<boolean> {
+  return (await execResult('git', ['diff', '--quiet', deployed, landed, '--', subdir], { cwd: repoDir, timeout: 30_000 })).code === 0;
+}
+/** Whether its manifest is on `ref` yet: make_app registers an app before its first ship puts the folder on main. Sync: the land's apps list is. */
+export function manifestOn(repoDir: string, subdir: string, ref = 'main'): boolean {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${ref}:${repoPath({ subdir }, MANIFEST)}`], { cwd: repoDir, stdio: 'ignore', timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 /** Where a deploy keeps an app's two builds (#801), `.<folder's name>/a` and `/b` beside it; the folder links to the live one. */
 export const slotsOf = (folder: string) => join(dirname(folder), `.${basename(folder)}`);
 
@@ -381,9 +403,9 @@ export class AppServices {
   readonly opts: ServiceOptions;
   /**
    * Before its service stops or restarts (#319): hold its new turns and wait for its running ones
-   * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start.
+   * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start. `stop`: it isn't coming back.
    */
-  drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
+  drain: (row: ContraptionRow, stop?: boolean) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
   /** A deploy reached a stage, or ended (finished_at set): the release monitor records and shows it (#627). */
   onDeploy: (view: DeployView) => void = () => {};
   /**
@@ -458,8 +480,9 @@ export class AppServices {
   }
 
   /** The manifest in the app's folder, or an Error saying why not. */
-  async manifest(row: Pick<ContraptionRow, 'name' | 'folder'>, folder = this.folder(row)): Promise<Manifest> {
+  async manifest(row: Pick<ContraptionRow, 'name' | 'folder'> & { subdir?: string | null }, folder = this.folder(row)): Promise<Manifest> {
     let text: string;
+    folder = appRoot(row, folder);
     try {
       text = await readFile(join(folder, MANIFEST), 'utf8');
     } catch {
@@ -473,7 +496,7 @@ export class AppServices {
   }
 
   private inputs(row: ContraptionRow, manifest: Manifest, folder: string): UnitInputs {
-    return { row, manifest, folder, keysDir: this.opts.keysDir(row.name), citadelUrl: this.opts.citadelUrl(), home: this.opts.home };
+    return { row, manifest, folder: appRoot(row, folder), keysDir: this.opts.keysDir(row.name), citadelUrl: this.opts.citadelUrl(), home: this.opts.home };
   }
 
   /** The unit files this contraption owns now, by file name. */
@@ -564,7 +587,7 @@ export class AppServices {
    * `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart.
    * `slot` (a deploy's): the slot to run from, which the app's folder is pointed at once its turns are drained (#801).
    */
-  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string }): Promise<string[]> {
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string; data?: () => Promise<void> }): Promise<string[]> {
     // Units run from the real folder, never through the link, so a running app never sees a deploy's flip (#801).
     const folder = opts.slot ?? await realpath(this.folder(row)).catch(() => this.folder(row));
     const manifest = await this.manifest(row, folder);
@@ -579,7 +602,8 @@ export class AppServices {
       const old = await readFile(path, 'utf8').catch(() => null);
       if (old !== null && ownedBy(old) !== row.name) throw new ServiceError(409, `${path} exists and Citadel didn't write it for ${row.name}: move it away first.`);
     }
-    // The one thing Citadel does in an app's DATA_DIR: make it when missing (an existing one is never touched), so a service that opens its database there can start.
+    // Citadel makes an app's DATA_DIR when missing, so a service that opens its database there can start; otherwise only a
+    // deploy's `data` step touches it (#1137: a snapshot before a migration, a restore on roll back), with the app stopped.
     const data = join(this.opts.home, '.local/share', row.name);
     let created = '';
     if (!existsSync(data)) {
@@ -597,6 +621,20 @@ export class AppServices {
     if (quiet.said) said.push(quiet.said);
     if (opts.holds) opts.holds.push(quiet.release);
     try {
+      // Stopped for a whole copy of its data, its timers and their jobs too (a running job is cut short, as by a restart); only
+      // units it has installed, so one that never got a service isn't a failure. writeAndRestart starts them again, and a data
+      // step that throws starts its service and timers again here.
+      if (opts.data) {
+        const units = (await this.owned(row.name)).sort((a, b) => Number(b.endsWith('.timer')) - Number(a.endsWith('.timer')));
+        if (units.length) await this.must('stop', ...units);
+        try {
+          await opts.data();
+        } catch (err) {
+          const back = units.filter((u) => u === `${unitName(row.name)}.service` || u.endsWith('.timer'));
+          if (back.length) await this.systemctl('start', ...back);
+          throw err;
+        }
+      }
       if (opts.slot) said.push(await this.point(row, opts.slot));
       return await this.writeAndRestart(row, files, live, said);
     } finally {
@@ -650,7 +688,7 @@ export class AppServices {
     if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
-    const quiet = action === 'start' ? null : await this.drain(row);
+    const quiet = action === 'start' ? null : await this.drain(row, action === 'stop');
     try {
       await this.must(action, main);
     } finally {
@@ -838,6 +876,8 @@ export class AppServices {
     /** The live slot, kept as it is for a roll back; null on a first deploy. */
     let old: string | null = null;
     let next: string;
+    /** A roll back past a migration change (#1137): the snapshot whose data that older code reads. */
+    let restore: Snapshot | null = null;
     let link = await readlink(folder).catch(() => null);
     /** An empty slots folder is one a deploy stopped right after making. */
     const inTheWay = () => existsSync(slots) && readdirSync(slots).length > 0;
@@ -890,9 +930,24 @@ export class AppServices {
       if (hooks.to) {
         // A roll back (#1016) goes to an older commit of the branch, never one off it; nor past a change to the data's shape.
         if (!(await inBranch(hooks.to, to))) throw new Error(`${short(hooks.to)} isn't on ${repo}'s ${view.branch}, so nothing changed.`);
-        const paths = (await this.manifest(row, old).catch(() => null))?.migrations ?? [];
+        // Both ends' migrations: the commit it goes back to may list a path the live one dropped.
+        const there = await git(next, 'show', `${hooks.to}:${repoPath(row, MANIFEST)}`).then(parseManifest).catch(() => null);
+        const paths = [...new Set([...((await this.manifest(row, old).catch(() => null))?.migrations ?? []), ...(there?.migrations ?? [])])].map((p) => repoPath(row, p));
         const moved = paths.length ? (await git(next, 'diff', '--name-only', hooks.to, prev, '--', ...paths)).split('\n').filter(Boolean) : [];
-        if (moved.length) throw new Error(`Its migrations changed since ${short(hooks.to)} (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''}), so going back could leave its data in a shape that code can't read. Nothing changed: fix forward instead.`);
+        if (moved.length) {
+          // The newest snapshot whose code has the same migrations as the commit it goes back to (#1137).
+          const changed = `Its migrations changed since ${short(hooks.to)} (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''})`;
+          for (const snap of await listSnapshots(snapshotsDir(this.opts.home, row.name))) {
+            if (snap.failed) continue; // what a failed start left: its code ran on it, but it's the shape that failed
+            const same = await git(next, 'diff', '--name-only', snap.commit, hooks.to, '--', ...paths).then((out) => !out, () => false);
+            if (same) {
+              restore = snap;
+              break;
+            }
+          }
+          if (!restore) throw new Error(`${changed}, and no snapshot of its data matches that code, so going back could leave its data in a shape that code can't read. Nothing changed: fix forward instead.`);
+          await say(`${changed}: its data goes back too, to the snapshot taken at ${short(restore.commit)}.`);
+        }
         await say(`Rolling back to ${short(hooks.to)}${prev ? ` from ${short(prev)}` : ''}.`);
         to = hooks.to;
       } else if (!(await inBranch(prev, to))) {
@@ -908,8 +963,8 @@ export class AppServices {
 
     // Its turns held by the restart wait for the health check too, so they find its MCP servers up.
     const holds: (() => void)[] = [];
-    const start = async (slot: string, m: Manifest) => {
-      for (const line of await this.installNow(row, { all, holds, slot, stage: (s) => this.stage(view, s) })) await say(line);
+    const start = async (slot: string, m: Manifest, data?: () => Promise<void>) => {
+      for (const line of await this.installNow(row, { all, holds, slot, stage: (s) => this.stage(view, s), data })) await say(line);
       await this.healthy(row, m.health);
       await say(`Healthy: ${m.health ? `${m.health} answered` : `port ${row.port} open`}.`);
     };
@@ -928,7 +983,7 @@ export class AppServices {
             const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
             const fd = openSync(view.log, 'a');
             holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
-              cwd: next, env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
+              cwd: appRoot(row, next), env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
             });
             closeSync(fd);
             holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
@@ -952,11 +1007,11 @@ export class AppServices {
             const stepEnv = { ...env, CITADEL_HEAVY_HELD: '1', CITADEL_HEAVY_WHO: who };
             const unit = buildUnit(row.name);
             const argv = this.opts.systemdRun
-              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${next}`, `--property=StandardOutput=append:${view.log}`,
+              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
                 `--property=StandardError=append:${view.log}`, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
               : inner;
             // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).
-            const code = await sh(argv, next, secs * 1000 + 15_000, stepEnv);
+            const code = await sh(argv, appRoot(row, next), secs * 1000 + 15_000, stepEnv);
             if (code === 124 && this.opts.systemdRun) await run(this.opts.systemctl, ['--user', 'stop', unit]);
             if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
             if (code) throw new Error(`Build step failed (${exitWhy(code)}): ${step}${await lastLines(view.log, from)}`);
@@ -971,10 +1026,34 @@ export class AppServices {
         await unchanged();
         return;
       }
+      // A deploy forward that changes its migrations snapshots its data first, with the app stopped (#1137).
+      const dataDir = this.dataDir(row);
+      const snapRoot = snapshotsDir(this.opts.home, row.name);
+      /** The snapshot a failed start goes back to: the one this deploy took, or the data a restore set aside. */
+      let taken = null as Snapshot | null;
+      let snapWhy: string | null = null;
+      if (!hooks.to && prev && prev !== view.to) {
+        const paths = [...new Set([...((await this.manifest(row, old!).catch(() => null))?.migrations ?? []), ...m.migrations])].map((p) => repoPath(row, p));
+        const moved = paths.length ? (await git(next, 'diff', '--name-only', prev, view.to, '--', ...paths)).split('\n').filter(Boolean) : [];
+        if (moved.length) snapWhy = `before ${short(view.to)} deployed, which changes ${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''}`;
+      }
+      const data = snapWhy
+        ? async () => {
+          const r = await takeSnapshot(dataDir, snapRoot, { commit: prev!, why: `${short(prev)}'s data, ${snapWhy}` });
+          taken = r.snap;
+          for (const line of r.said) await say(line);
+        }
+        : restore
+          ? async () => {
+            const r = await restoreSnapshot(dataDir, snapRoot, restore!, { commit: prev!, why: `${short(prev)}'s data, kept when ${view.by} rolled back to ${short(view.to)}` });
+            taken = r.kept;
+            for (const line of r.said) await say(line);
+          }
+          : undefined;
       try {
-        await start(next, m);
+        await start(next, m, data);
         view.state = 'deployed';
-        await say(`Deployed ${short(view.to)}.`);
+        await say(`Deployed ${short(view.to)}${taken && !restore ? `; its data was snapshotted first, so a roll back brings that back too` : restore ? `, with its data as it was at ${short(restore.commit)}` : ''}.`);
       } catch (err: any) {
         await say(`Failed: ${err.message}`);
         // Refused before its folder was pointed at the new slot: the old one runs on, untouched.
@@ -983,9 +1062,12 @@ export class AppServices {
           await unchanged();
           return;
         }
-        await say(`Rolling back to ${short(prev)}, built as it was in ${old}.`);
+        await say(`Rolling back to ${short(prev)}, built as it was in ${old}${taken ? `, and its data to ${restore ? 'what it had before' : 'the snapshot taken before this deploy'}` : ''}.`);
+        const back: Snapshot | null = taken;
         try {
-          await start(old, await this.manifest(row, old));
+          await start(old, await this.manifest(row, old), back ? async () => {
+            for (const line of (await restoreSnapshot(dataDir, snapRoot, back, { commit: view.to!, why: `the data ${short(view.to)} left when its deploy failed and rolled back`, failed: true })).said) await say(line);
+          } : undefined);
           view.state = 'rolled back';
           await say(`Rolled back: ${short(prev)} runs again.`);
         } catch (again: any) {

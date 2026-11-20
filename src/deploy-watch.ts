@@ -327,6 +327,12 @@ export const DEDUPE_MS = 10 * MIN;
 export const RATE = 30;
 export const RATE_MS = 60 * MIN;
 
+/** Browser warnings that aren't faults: never recorded. A new harmless one is a one-line add. */
+export const HARMLESS_CLIENT_ERRORS: { name: string; match: RegExp }[] = [
+  // Fires when a ResizeObserver callback needs another layout pass; nothing breaks.
+  { name: 'ResizeObserver loop', match: /^ResizeObserver loop (limit exceeded|completed with undelivered notifications)/i },
+];
+
 /** The beacon's reports (POST /api/client-errors): each person's de-duplicated and rate-limited, kept in memory only. */
 export class ClientErrors {
   private seen = new Map<string, { since: number; n: number; last: Map<string, number> }>();
@@ -335,7 +341,7 @@ export class ClientErrors {
   take(who: string, body: any, now = Date.now()): string | null {
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
     const message = text(body?.message, 300);
-    if (!message) return null;
+    if (!message || HARMLESS_CLIENT_ERRORS.some((h) => h.match.test(message))) return null;
     // Only the path: the origin and any query (a cache-buster, a token) would split one error into many.
     const source = text(body?.source, 300).replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/[?#].*$/, '');
     const line = Number.isInteger(body?.line) && body.line > 0 ? `:${body.line}` : '';

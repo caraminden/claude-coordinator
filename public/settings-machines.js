@@ -87,6 +87,7 @@ export function machinesPage() {
     add.form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
+    h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     // The CI desktop's load moved to the CI page (#968, Cara: "move the CI box performance page from machines into here").
     h('p', { class: 'muted small' }, 'CI runners, their queue and the CI desktop\'s load are on ', h('a', { href: `#/p/${view.projectId}/ci` }, 'the CI page'), '.'),
     runners ? h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, 'A CI runner host adds and removes schemes\' CI runners on its PC (tools/ci-runner/README.md).'), h('span', { class: 'spacer' }), runners.toggle) : '',
@@ -100,6 +101,12 @@ export function machinesPage() {
         h('li', {}, h('strong', {}, 'Commands live on that computer.'), ' Commands and tasks are only in ', h('code', {}, 'machine-agent.json'), ' there, beside the agent.'),
         h('li', {}, h('strong', {}, 'A person\'s own machine'), ' goes only to turns they ask for: their minions\' turns in schemes they are in, and their contraptions\' turns.'),
         h('li', {}, h('strong', {}, 'When a minion gets it.'), ' At the start of its turn: the tools of every machine online and lent to its scheme, plus the machine\'s notes.'))));
+  api('api/emulator-lease').then((l) => {
+    const el = document.getElementById('emulator-lease');
+    if (!el) return;
+    if (!l) el.textContent = 'Android emulator (citadel-android): free.';
+    else el.textContent = `Android emulator (citadel-android): leased by ${l.who}${l.what ? ` for "${l.what}"` : ''}, until ${new Date(l.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+  }).catch(() => document.getElementById('emulator-lease')?.remove());
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();

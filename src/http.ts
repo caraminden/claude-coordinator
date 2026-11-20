@@ -3,6 +3,7 @@ import type { Presence } from './presence.ts';
 import type { ClaudeLink } from './claude-link.ts';
 import type { CodexLink } from './codex-link.ts';
 import type { Contraptions } from './contraptions.ts';
+import type { Fcm } from './fcm.ts';
 import type { AppServices } from './app-services.ts';
 import type { ContraptionTurns } from './contraption-turns.ts';
 import type { ErrorDigest } from './contraption-errors.ts';
@@ -30,6 +31,8 @@ import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
 import type { Releases } from './releases.ts';
 import type { ApkBuilds } from './apk-build.ts';
+import type { DesktopFeeds } from './desktop-feed.ts';
+import type { Launchers } from './desktop-launcher.ts';
 import type { AutoDeploy } from './auto-deploy.ts';
 import type { Rollback } from './rollback.ts';
 import type { FastMode } from './fast-mode.ts';
@@ -245,6 +248,8 @@ export interface App {
   /** What each minion waits on, the land line among them (src/waits.ts): the Releases page reorders the line through it (#1002). Absent in tests that build no server. */
   waits?: Waits;
   apkBuilds: ApkBuilds;
+  /** Desktop apps' update feeds and their launcher (src/desktop-feed.ts, #1148); absent in tests that build no server. */
+  desktop?: { feeds: DesktopFeeds; launchers: Launchers };
   machines: MachineRelay;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
   jobs: MachineJobs;
@@ -283,6 +288,8 @@ export interface App {
   codex: CodexLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */
   contraptions: Contraptions;
+  /** Push to contraptions' Android apps through Firebase (src/fcm.ts, #1138). */
+  fcm: Fcm;
   /** Contraptions' systemd user services (src/app-services.ts). */
   services: AppServices;
   /** Contraption turns: the turn API's engine (src/contraption-turns.ts). */

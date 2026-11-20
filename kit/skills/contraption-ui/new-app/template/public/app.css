@@ -1,0 +1,13 @@
+/* The page's own layout, on Citadel's tokens (theme.css). No hex values but the accent: use the --citadel-* variables. */
+/* The app's accent: a light and a dark value matching icon.svg. Change both when you redraw it. */
+:root { --citadel-accent: #2f5d62; }
+@media (prefers-color-scheme: dark) { :root { --citadel-accent: #5fb3ab; } }
+html { background: var(--citadel-bg); }
+body {
+  margin: 0; display: flex; flex-direction: column; min-height: 100dvh;
+  background: var(--citadel-bg); color: var(--citadel-text);
+  font: var(--citadel-size-body)/1.5 var(--citadel-font);
+}
+.cui-topbar > h1 { flex: 1; }
+main { flex: 1; width: 100%; max-width: 60rem; box-sizing: border-box; margin: 0 auto; padding: var(--citadel-space-4); }
+.who { margin: 0; }

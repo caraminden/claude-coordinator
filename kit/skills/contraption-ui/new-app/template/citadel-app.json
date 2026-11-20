@@ -1,0 +1,8 @@
+{
+  "start": ["node", "server.ts"],
+  "health": "/apps/{{name}}/healthz",
+  "migrations": ["migrations"],
+  "timers": {
+    "backup": { "command": ["node", "tools/backup.ts", "${DATA_DIR}"], "on_calendar": "*-*-* 03:00:00 America/Los_Angeles" }
+  }
+}

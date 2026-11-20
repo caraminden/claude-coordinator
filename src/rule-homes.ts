@@ -5,6 +5,10 @@
 // five". test/rule-homes.test.ts fails on a copy in the repo; the server's overlap check (src/rule-overlap.ts) runs the
 // same matcher on a Settings save, where the Citadel-wide homes live.
 //
+// Another scheme registers its own rules in its repo's .claude/rule-homes.json (#1211; Josh, 2026-11-20, "A file in its
+// own repo"): a JSON list of the same shape, its homes a `scheme` section or a `repo` file of that scheme's repo, read
+// on every save of its text (src/rule-overlap.ts, schemeRules).
+//
 // To register a rule: give it a home and phrases taken from the home's own details, not its name: a pointer may say
 // "the card rule" or "write the failing test first", but not two of the details. Then run the test and turn each copy
 // it names into a pointer.
@@ -13,6 +17,8 @@
 export type Home =
   /** A section of the Citadel-wide instructions (Settings), by its `## ` heading. */
   | { kind: 'citadel'; section: string }
+  /** A section of one scheme's own instructions (Settings), by its `## ` heading: only in a scheme's rule file. */
+  | { kind: 'scheme'; section: string }
   /** A section of a repo markdown file, by its heading, or a code statement, by the text its first line starts with. */
   | { kind: 'repo'; file: string; section?: string; anchor?: string };
 

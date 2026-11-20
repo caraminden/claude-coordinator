@@ -2,6 +2,16 @@
 // (land.sh's `land: flake: <file> · <where>` lines, run-tests.sh's "failed in the full run, passed alone"). Each becomes a
 // flake_events row, and the CI page's Test health tab counts them and offers a minion to fix one.
 
+import { execFile } from 'node:child_process';
+
+/** When `file`'s newest commit on main was made (ms), or null when git can't say. A sighting from before it was of the old file (#1219). */
+export function fileChangedAt(repoDir: string, file: string): Promise<number | null> {
+  return new Promise((done) => execFile('git', ['log', '-1', '--format=%ct', 'main', '--', file], { cwd: repoDir, timeout: 15_000 }, (err, out) => {
+    const sec = Number(String(out ?? '').trim());
+    done(err || !Number.isFinite(sec) || sec <= 0 ? null : sec * 1000);
+  }));
+}
+
 export const FLAKE_WINDOW_MS = 14 * 24 * 60 * 60_000;
 /** The third sighting of one file inside this window starts its fix minion (#1120). */
 export const FLAKE_REPEAT = 3;

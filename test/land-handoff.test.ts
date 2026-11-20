@@ -311,7 +311,8 @@ test('a land that ended across a restart is reported by the next server, and one
   writeFileSync(join(dir, 'started'), String(Date.now() - 600_000));
   writeFileSync(join(dir, 'output.log'), 'land: rebasing onto main\n');
   writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ ...H, args: [] }));
-  await cut.handoffs.poll();
+  // A server starting after it finds the file (the set is read from disk once, at start).
+  await new LandHandoffs({ ...cut.deps, landings: new Landings(cut.data) }).poll();
   assert.equal(cut.sent.length, 1);
   assert.match(cut.sent[0], /ended without an exit code/);
 });
@@ -679,4 +680,16 @@ test('every way a handed-off land ends replaces its outside state', async () => 
   await waiting.land(RESTART, 0, { stayOpen: true, waitingOn: 'the CI run' });
   await waiting.handoffs.poll();
   assert.deepEqual([waiting.ticket.state, waiting.ticket.note], ['outside', 'shipped, wakes once live; waiting on: the CI run']);
+});
+
+test('handoffs() answers from memory: it does not read the landings folder again (#1210)', () => {
+  const data = mkdtempSync(join(root, 'mem-'));
+  const dir = join(data, 'run', 'landings');
+  for (let i = 1; i <= 50; i++) mkdirSync(join(dir, String(i)), { recursive: true });
+  writeFileSync(join(dir, '7', 'handoff.json'), '{}');
+  const l = new Landings(data);
+  rmSync(dir, { recursive: true, force: true });
+  assert.deepEqual(l.handoffs(), [7], 'found at start, then served from memory');
+  l.settled(7);
+  assert.deepEqual(l.handoffs(), []);
 });

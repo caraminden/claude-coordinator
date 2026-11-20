@@ -4,6 +4,7 @@ import { ago, api, h, isCoordinator, isSeen, jumpHref, me, schemeIcon, STATES, t
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 import { askWhy } from './threadstate.js';
+import { homeEvent, refreshHomeSoon } from './home.js';
 import { mountTips } from './ui/tip.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -18,6 +19,8 @@ const faded = (item) => item.kind === 'replies' && isSeen(ticketOf(item.ticketId
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
+  // Home's list (#1140) moves with the same news as every scheme's counts.
+  if (view.home) refreshHomeSoon();
   const projectId = view.projectId;
   const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
@@ -42,6 +45,7 @@ function refreshSoon() {
 export function refreshSchemeCounts() {
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
+    for (const el of document.querySelectorAll('[data-scheme-inbox="home"]')) el.replaceWith(homeCount(projects.filter((p) => !p.hidden && p.member !== false)));
     for (const p of projects) {
       for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
       // A favicon a merge added or changed since the page drew it.
@@ -62,6 +66,7 @@ const others = otherSchemes(() => {
 /** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
 export function inboxEvent(event) {
   if (view?.kind !== 'project') return;
+  homeEvent(event);
   if (!ticketOf(event.ticket_id)) {
     others.event(event);
     // A card another scheme addressed to you (#687), or news of one this list shows, redraws this list too.
@@ -72,7 +77,10 @@ export function inboxEvent(event) {
 /** One of this scheme's minions changed: refetch when that can move the count; a turn starting or ending only redraws the spinner. */
 export function inboxTicket(before, after) {
   if (countMoved(before, after)) refreshSoon();
-  else if (turnMoved(before, after)) renderInbox();
+  else if (turnMoved(before, after)) {
+    renderInbox();
+    if (view.home) refreshHomeSoon(); // Home's Working now
+  }
 }
 
 /** The counts came afresh with the page (or after the stream dropped): news the watcher missed meanwhile mustn't hide the next change. */
@@ -110,6 +118,15 @@ export function schemeCount(p) {
 }
 
 let pillTips = null;
+
+/** The Home line's pill (#1140): every shelf scheme's counts summed, purple when any of them is. */
+export const homeCount = (schemes) => schemeCount({
+  id: 'home',
+  inbox: schemes.reduce((n, p) => n + (p.inbox || 0), 0),
+  running: schemes.some((p) => p.running),
+  working: schemes.reduce((n, p) => n + (p.running ? p.working || 1 : 0), 0),
+  fresh: schemes.some((p) => schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p).fresh),
+});
 
 const badge = { on: null };
 /** The installed app's icon badge follows the purple pills (#980). */
@@ -201,7 +218,7 @@ export function renderInbox() {
   // only the toggle and the rows are new.
   list ??= h('div', { class: 'inbox-rows' });
   // Shut, the rows aren't in the page: they're built when it opens (the toggle redraws).
-  list.replaceChildren(...(open ? [...rows.values()].map(inboxRow) : []));
+  list.replaceChildren(...(open ? [...rows.values()].map((r) => inboxRow(r)) : []));
   if (strip.firstChild) strip.firstChild.replaceWith(toggle);
   else strip.append(toggle);
   if (open && list.parentNode !== strip) strip.append(list);
@@ -213,7 +230,7 @@ export function renderInbox() {
  * another scheme (a card addressed to you there, #687) names that scheme.
  */
 let inboxTips = null;
-function inboxRow(items) {
+export function inboxRow(items, { href = (to) => to, scheme = null } = {}) {
   const { from } = items[0];
   const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
   const asks = new Map();
@@ -227,8 +244,9 @@ function inboxRow(items) {
   inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });
   const seen = items.every(faded);
   const target = rowTarget(items);
-  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
-    h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
+  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: href(target ? jumpHref(t, target) : threadHref(t)) },
+    // Home (#1140) names the scheme with its tag, in its own hue (`scheme`); a scheme's own strip as words.
+    h('span', { class: 'name' }, from ? (scheme ? [scheme(from.scheme), ' '] : `${from.scheme} `) : '',
       isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.

@@ -5,7 +5,8 @@
 import { account, api, h, me, schemeIcon, view } from './base.js';
 import { gloss } from './help-words.js';
 import { schemeSwitchHash } from './scheme-switch.js';
-import { schemeCount } from './inbox.js';
+import { homeCount, schemeCount } from './inbox.js';
+import { rememberHomeLine } from './home.js';
 import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
@@ -136,7 +137,13 @@ export function renderSchemesShelf() {
   // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
+  // Home (#1140): everything waiting on you across your schemes, for someone in two or more.
+  const home = shown.length >= 2 ? h('div', { class: 'home-shelf' },
+    h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' },
+      h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'), homeCount(shown))) : null;
+  rememberHomeLine(!!home);
   el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesLink()),
+    home,
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),

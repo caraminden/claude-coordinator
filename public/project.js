@@ -28,6 +28,7 @@ import { reviewsPage } from './reviews.js';
 import { helpPage } from './help.js';
 import { gloss } from './help-words.js';
 import { toast } from './ui/status.js';
+import { homeOverview, homePanel, refreshHome, startVisit } from './home.js';
 
 /**
  * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
@@ -104,8 +105,12 @@ function renderCrumbs(main) {
   const filesLink = (to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
   // Orders pages (#1071) sit under Orders, the rest under Settings.
   const settingsLink = isOrdersPage(main.kind) ? h('a', { href: `#/p/${project.id}/orders` }, 'Orders') : h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
+  // Home (#1140): its own crumb, and a chat opened from it leads back to it.
+  const home = h('a', { href: '#/home', class: 'home-crumb' }, '‹ Home');
   crumbs.replaceChildren(...(
-    main.kind === 'files' ? [projectLink, ' / ', 'Files']
+    main.kind === 'home' ? [h('span', { class: 'home-crumb' }, 'Home')]
+      : main.home ? [home, ' · ', projectLink, ...(view.id !== view.coordinator.id ? [' / ', `#${view.ticket.number ?? view.ticket.id}`] : [])]
+      : main.kind === 'files' ? [projectLink, ' / ', 'Files']
       : main.kind === 'settings' ? [projectLink, ' / ', 'Settings']
       : main.kind === 'orders' ? [projectLink, ' / ', 'Orders']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
@@ -142,7 +147,8 @@ function renderCrumbs(main) {
 export async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const seq = routeSeq;
   // Moving between chats of the project already on screen only swaps the chat; the side panels stay.
-  if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
+  // In and out of Home (#1140) redraws the side panel, so only a chat to a chat in the same mode swaps.
+  if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && !!view.home === !!main.home && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
   // Another schedule of the Schedules page on screen only swaps its page and the list's highlight (#1083).
@@ -202,7 +208,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const page = cached?.page ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(src) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
+  // Coming to Home from elsewhere is a new visit: its rows start afresh.
+  if (main.home && !view?.home) startVisit();
   setView({
+    home: !!main.home, // Home's list in the side panel and its overview or a chat beside it (#1140)
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     taskmasters: taskmasters ?? [], // every Taskmaster session once the scheme has several (#919): { id, person_id, person_name }
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
@@ -238,10 +247,14 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
         h('button', { type: 'button', class: 'sign-out', onclick: logout }, 'Sign out'))),
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));
-  const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
+  // Home (#1140): its list takes the panel's place (on a phone, Home's own page holds it), the scheme's parts kept but hidden.
+  const narrowHome = main.kind === 'home' && narrowQuery.matches;
+  const sidebar = h('details', { class: `sidebar${main.home ? ' home-mode' : ''}`, open: panelOpen('threads') },
+    main.home ? h('summary', { title: 'Show or hide Home' }, h('span', { class: 'label' }, 'Home'))
     // Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): Orders swaps the list for its pages.
-    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
+    : h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
       panelTab('minions', h('span', { class: 'tab-name' }, gloss('minion', 'Minions'))), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true })))),
+    main.home && !narrowHome ? homePanel() : '',
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
@@ -268,7 +281,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     shelf.open = panelOpen('shelf');
     sidebar.open = panelOpen('threads');
   };
-  const section = main.kind === 'files' ? filesView(main.folder)
+  const section = main.kind === 'home' ? homeOverview(narrowHome ? homePanel() : null)
+    : main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'settings' ? settingsHome()
     : main.kind === 'orders' ? settingsHome(true)
     : main.kind === 'instructions' ? instructionsEditor()
@@ -298,7 +312,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
+  // Home's list keeps its scroll from one scheme's chat to another's (#1140).
+  const homeScroll = main.home ? document.querySelector('#app .sidebar.home-mode')?.scrollTop ?? 0 : 0;
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
+  if (homeScroll) sidebar.scrollTop = homeScroll;
   renderUsage();
   renderCost();
   renderSettingsCount();
@@ -312,6 +329,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   else if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
   renderHiddenNote();
   refreshInbox();
+  if (main.home) refreshHome();
   prefetchTopRows();
   if (main.kind === 'files') renderFiles();
   if (main.kind === 'artifact') renderArtifactHead();
@@ -414,9 +432,9 @@ async function switchChat(main, seq) {
   const cached = cachedEvents(merged?.src ?? chatId);
   const page = cached?.page ?? await loadEvents(merged?.src ?? chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, home, projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'chat', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
+    kind, home, main: 'chat', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null,
     ...chatView(chatId, ticket, merged),
   });
@@ -428,6 +446,7 @@ async function switchChat(main, seq) {
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
   renderShelf();
   renderSidebar();
+  if (view.home) homePanel(); // its row for the chat now open
   revealActiveRow();
   const v = view;
   api(`api/tickets/${chatId}`).then((r) => { if (view === v) onTicketUpdate(r.ticket); }).catch(() => {});

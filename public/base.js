@@ -128,10 +128,15 @@ export function keepChat(hash, projectId, ticketId, history) {
 export function keptChat(hash) {
   try {
     const kept = JSON.parse(localStorage.getItem(KEPT));
-    if (kept?.me && kept.answers && (hash === kept.hash || hash === '' || hash === '#/')) return kept;
+    // The app's start opens Home for someone in two or more schemes (#1140), so a kept chat only reopens at its own address then.
+    if (kept?.me && kept.answers && (hash === kept.hash || ((hash === '' || hash === '#/') && !homeFirst()))) return kept;
   } catch {}
   return null;
 }
+
+/** Set while the shelf shows the Home line (#1140): the app's start opens Home rather than the kept chat. */
+export const HOME_LINE = 'cc-home-line';
+const homeFirst = () => { try { return localStorage.getItem(HOME_LINE) === '1'; } catch { return false; } };
 
 export function forgetKept() {
   try { localStorage.removeItem(KEPT); } catch {}

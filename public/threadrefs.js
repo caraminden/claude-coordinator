@@ -90,7 +90,7 @@ const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
  * `?e=<event id>`, or `?e=latest` for the minion's latest reply. Gives { hash, target }, or null.
  */
 export function jumpParts(hash) {
-  const m = /^(#\/p\/\d+(?:\/t\/\d+)?|#\/t\/\d+)\?e=(\d+|latest)$/.exec(hash ?? '');
+  const m = /^(#\/(?:home\/)?p\/\d+(?:\/t\/\d+)?|#\/t\/\d+)\?e=(\d+|latest)$/.exec(hash ?? '');
   return m ? { hash: m[1], target: m[2] } : null;
 }
 

@@ -378,9 +378,11 @@ export class Ideas {
       if (lesson.get(id)) { this.shipped.add(id); return true; }
       const m = (last.get(id) as { m: number | null }).m ?? 0;
       const from = this.shipScanned.get(id) ?? 0;
-      if (m <= from) return false;
+      if (m === from) return false;
+      // m < from: the minion's events were deleted and its id reused, so scan it afresh.
+      const since = m < from ? 0 : from;
       this.shipScanned.set(id, m);
-      if (!ship.get(id, from)) return false;
+      if (!ship.get(id, since)) return false;
       this.shipped.add(id);
       return true;
     };

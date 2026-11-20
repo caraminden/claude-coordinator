@@ -85,3 +85,9 @@ test('a turn\'s pin copy links the files instead of copying their bytes, so a la
     rmSync(d, { recursive: true, force: true });
   }
 });
+
+test('the pinned files are read-only, so a write through a turn\'s linked copy fails instead of reaching the server\'s', async () => {
+  const { statSync } = await import('node:fs');
+  const pins = testPins();
+  assert.equal(statSync(pins.TRIPWIRE).mode & 0o222, 0);
+});

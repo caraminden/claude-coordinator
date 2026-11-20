@@ -90,17 +90,18 @@ test('a deploy that changes the template tells the Taskmaster once, as the deplo
     assert.equal(quiet.stderr, '', 'a range without the template says nothing');
     assert.equal(srv.seen.length, 0);
     const r = await w.deploy(a, c, who);
-    assert.match(r.stderr, /the kit's land\.sh changed; these schemes' tools\/land\.sh differ from it: 3 o\/synced; 4 o\/drifted/);
+    assert.match(r.stderr, /the kit's scheme files changed; sync waiting on your go\. Schemes whose tools\/land\.sh differ: 3 o\/synced; 4 o\/drifted/);
     assert.equal(srv.seen.length, 1);
     const [m] = srv.seen;
     assert.equal(m.url, '/api/tickets/7/coordinator');
     assert.equal(m.auth, 'Bearer tok-secret');
     const text: string = JSON.parse(m.body).text;
-    assert.match(text, /\n- 3 o\/synced\n- 4 o\/drifted\n/);
-    assert.match(text, /copy the template over tools\/land\.sh byte for byte/);
+    assert.match(text, /\n- 3 o\/synced\n- 4 o\/drifted$/);
+    assert.match(text, /sync waiting on your go\. The server makes the syncs itself/);
+    assert.match(text, /Start no sync minions/);
     // Run by hand (no minion): it only prints.
     const hand = await w.deploy(a, c);
-    assert.match(hand.stderr, /differ from it: 3 o\/synced; 4 o\/drifted/);
+    assert.match(hand.stderr, /differ: 3 o\/synced; 4 o\/drifted/);
     assert.equal(srv.seen.length, 1);
   } finally {
     srv.close();

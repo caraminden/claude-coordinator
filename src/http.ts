@@ -16,6 +16,7 @@ import type { Builds } from './builds.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { MachineJobs } from './machine-jobs.ts';
+import type { KitSync } from './kit-sync.ts';
 import type { GithubLink } from './github-link.ts';
 import type { OpenRouter } from './openrouter.ts';
 import type { OutsideSpend } from './outside-spend.ts';
@@ -246,6 +247,8 @@ export interface App {
   machines: MachineRelay;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
   jobs: MachineJobs;
+  /** The kit's scheme files syncing themselves (src/kit-sync.ts, #1100). */
+  kitSync: KitSync;
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */
   github: GithubLink;

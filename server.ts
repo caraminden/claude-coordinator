@@ -21,7 +21,7 @@ import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
-import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
+import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
@@ -75,7 +75,8 @@ import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
 import { ErrorDigest } from './src/contraption-errors.ts';
-import { projectRoutes } from './src/routes/projects.ts';
+import { ensureCoordinatorFor, projectRoutes } from './src/routes/projects.ts';
+import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
@@ -366,6 +367,17 @@ function liveOn(head: string | null) {
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
+/** Take a card out of people's way with a line saying why (a machine job's go, a superseded kit sync); an answered or settled one stays. */
+function settleCard(card: { ticket: number; question: string }, by: string, line: string) {
+  const e = store.eventsOfKinds(card.ticket, ['question']).find((q) => JSON.parse(q.data).id === card.question);
+  const q = e && JSON.parse(e.data);
+  if (!e || q.settled) return;
+  const settled = { at: Date.now(), by };
+  store.setEventData(e.id, { ...q, settled });
+  runner.emit(card.ticket, 'question_result', { id: q.id, settled });
+  runner.emit(card.ticket, 'note', { text: line });
+  runner.broadcastTicket(card.ticket);
+}
 // Jobs on a person's own machine (#857): the queue of record, its go cards in the asking minion's chat (a
 // contraption's in its home scheme's Taskmaster chat), and results in the scheme's shared folder or the app's DATA_DIR.
 const jobs = new MachineJobs({
@@ -376,16 +388,7 @@ const jobs = new MachineJobs({
     const ticket = job.ticket_id !== null ? store.getTicket(job.ticket_id) : store.getCoordinator(job.project_id);
     return ticket ? { ticket: ticket.id, question: postCard(app, ticket, { ...card, job: job.id }).id } : null;
   },
-  settleCard: (card, by, line) => {
-    const e = store.eventsOfKinds(card.ticket, ['question']).find((q) => JSON.parse(q.data).id === card.question);
-    const q = e && JSON.parse(e.data);
-    if (!e || q.settled) return;
-    const settled = { at: Date.now(), by };
-    store.setEventData(e.id, { ...q, settled });
-    runner.emit(card.ticket, 'question_result', { id: q.id, settled });
-    runner.emit(card.ticket, 'note', { text: line });
-    runner.broadcastTicket(card.ticket);
-  },
+  settleCard: (card, by, line) => settleCard(card, by, line),
   wake: (id, text, light) => runner.send(id, APP_NAME, text, [], light ? { light } : {}),
   note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
   // The view rides along so the card draws at once, sized as it will stay; machine_job events keep it live after.
@@ -454,7 +457,49 @@ const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
-runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running();
+// Kit files sync themselves (#1100): a change to the scheme-setup templates schemes copy is merged into each scheme
+// that is behind, checked there, and shipped on one go from Citadel's Taskmaster chat, pushed as whoever said go.
+const kitSyncJobs = new HostJobs(() => runner.units);
+const kitSync = new KitSync({
+  kitDir: import.meta.dirname, projectsDir: join(DATA_DIR, 'projects'), runDir: join(DATA_DIR, 'run', 'kit-sync'), jobs: kitSyncJobs,
+  load: () => store.getSetting<KitSyncState>('kit-sync') ?? undefined,
+  save: (state) => store.setSetting('kit-sync', state),
+  projects: () => store.listProjects(),
+  home: () => ownScheme()?.id ?? null,
+  chat: async (id) => {
+    const project = store.getProject(id);
+    return project ? (store.getCoordinator(id) ?? (await ensureCoordinatorFor(app, project, null))).id : null;
+  },
+  // Pushes and gh calls go out as the person who said go, with their own GitHub link (as a minion's land does, #911).
+  env: (person) => ({
+    ...turnEnv(process.env), CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'), CITADEL_HEAVY_WHO: 'kit sync',
+    ...(person === null ? {} : runner.githubFor?.(person, join(DATA_DIR, 'people', String(person)))?.env),
+  }),
+  canPush: async (repoDir, env) => {
+    const origin = await new Promise<string>((done) => execFile('git', ['remote', 'get-url', 'origin'], { cwd: repoDir, timeout: 15_000 }, (_e, out) => done(String(out ?? '').trim())));
+    const slug = githubRepo(origin);
+    // An origin that isn't GitHub's can't be asked: land.sh's push decides.
+    if (!slug) return !!origin;
+    return new Promise((done) => execFile('gh', ['api', `repos/${slug}`, '--jq', '.permissions.push'], { env: { ...process.env, ...env }, timeout: 30_000 }, (err, out) => done(!err && String(out).trim() === 'true')));
+  },
+  postCard: (ticket, card) => postCard(app, store.getTicket(ticket)!, card).id,
+  settle: (card, line) => settleCard(card, APP_NAME, line),
+  note: (ticket, text) => {
+    runner.emit(ticket, 'note', { text });
+    runner.broadcastTicket(ticket);
+  },
+  mail: (ticket, text) => runner.leaveMail(ticket, APP_NAME, text),
+});
+if (!BOOT_CHECK && !PREVIEW) {
+  // The templates are looked at every 10 minutes (a kit-only deploy may not restart the server), and a running round every 20 s.
+  let lastLook = 0;
+  setInterval(() => {
+    if (!kitSync.active() && Date.now() - lastLook < 10 * 60_000) return;
+    lastLook = Date.now();
+    void safely('kit sync', () => kitSync.poll());
+  }, 20_000).unref();
+}
+runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running() + sideAsks.running() + kitSyncJobs.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);
@@ -1329,7 +1374,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, contraptionTurns, errorDigest, landings, kitSync, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

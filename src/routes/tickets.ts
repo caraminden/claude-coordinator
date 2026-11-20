@@ -51,6 +51,7 @@ import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } fr
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
 import { MachineJobs } from '../machine-jobs.ts';
+import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -714,6 +715,22 @@ export const ticketRoutes: Route[] = [
         if (!choice) throw new HttpError(400, 'Pick one of the card\'s options');
         app.jobs.decide(data.job, choice, { uid: session.uid ?? -1, name: session.name, admin: !!session.admin }, true);
         runner.send(id, session.name, `My answer to job #${data.job}'s go card: ${answers[0].selected[0]}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
+      // A kit sync's ship card (#1100): the server ships or drops the syncs itself, pushed as whoever answered, with no
+      // turn. The answer is held mail for the Taskmaster, as a machine job's is.
+      if (data.kitSync) {
+        const choice = answers[0]?.selected[0];
+        if (choice !== KIT_SHIP && choice !== KIT_NOT_NOW) throw new HttpError(400, "Pick one of the card's options");
+        let line: string;
+        try {
+          line = await app.kitSync.decide({ ticket: id, question: data.id }, choice, { id: session.uid ?? -1, name: session.name });
+        } catch (err: any) {
+          throw new HttpError(409, err.message);
+        }
+        runner.send(id, session.name, `My answer to the kit sync card: ${choice}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.emit(id, 'note', { text: line });
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }

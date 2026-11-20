@@ -160,7 +160,10 @@ The template carries no `permissions.allow` list: minions run in bypassPermissio
 rules change nothing, and the prompts left (Claude Code's check on an `rm` it cannot resolve)
 ignore allow rules and hooks alike; the minion prompt teaches the `rm` habits that avoid them.
 If the scheme's main branch has a name other than `main` or `master`, add it to `is_protected`
-in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.local.sh`.
+in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.local.sh`. Adapt these
+copies freely: when the kit changes `land.sh`, `guard.sh`, `pre-push` or `ponytail.md`, Citadel's
+server merges the change into the scheme's copy, keeping the scheme's own edits, and ships it on a
+member's go (Citadel #1100).
 
 When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable), byte
 for byte, and `land.local.sh` to `tools/land.local.sh`. Every setting below goes in `land.local.sh`,

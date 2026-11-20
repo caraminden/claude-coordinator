@@ -166,19 +166,28 @@ export function applyChanges(dir: string, changes: Change[], approved: Set<numbe
   return { changes: out, backup };
 }
 
-/** Put each saved note back as it was: its text (or no file, for a note the proposal added) and its MEMORY.md line. Returns how many it put back. */
-export function restoreSaved(dir: string, saved: Saved[], gone: (file: string) => void = () => {}): number {
-  let n = 0;
+/**
+ * Put each saved note back as it was: its text (or no file, for a note the proposal added) and its MEMORY.md line.
+ * A note that can't go back (MEMORY.md full, a file that isn't plain) is listed in `failed` with why, and the rest go on.
+ */
+export function restoreSaved(dir: string, saved: Saved[], gone: (file: string) => void = () => {}): { restored: number; failed: string[] } {
+  let restored = 0;
+  const failed: string[] = [];
   for (const s of saved) {
     const path = join(dir, s.file);
-    if (existsSync(path) && !plain(path)) continue;
-    if (s.text === null) {
-      if (existsSync(path)) { rmSync(path); gone(s.file); }
-    } else writeAtomic(path, s.text);
-    writeIndex(dir, withLine(readIndex(dir), s.file, s.text === null ? null : s.line));
-    n++;
+    try {
+      if (existsSync(path) && !plain(path)) throw new Error('not a plain file');
+      // The line first, as in applyChanges: a full MEMORY.md refuses before the note is touched.
+      writeIndex(dir, withLine(readIndex(dir), s.file, s.text === null ? null : s.line));
+      if (s.text === null) {
+        if (existsSync(path)) { rmSync(path); gone(s.file); }
+      } else writeAtomic(path, s.text);
+      restored++;
+    } catch (err: any) {
+      failed.push(`${s.file} (${err.message})`);
+    }
   }
-  return n;
+  return { restored, failed };
 }
 
 /** The changes as the Memory page shows them: whether each note has moved on since, so a person sees it before approving. */

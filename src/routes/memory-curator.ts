@@ -80,10 +80,11 @@ export const memoryCuratorRoutes: Route[] = [
     // Apply the ticked changes and turn down the rest; none ticked turns the whole tidy down (Josh, 2026-11-19: "Any scheme member").
     method: 'POST', path: '/api/projects/:project/memory-proposals/:id/decide', who: ['person'],
     async handler({ req, res, app, project, params, session }) {
+      // The body first: from the status check to decide() nothing awaits, so a tidy superseded or decided meanwhile can't be written.
+      const body = await readJson(req);
       const p = app.store.memoryProposals.get(Number(params.id));
       if (!p || p.project_id !== project.id) throw new HttpError(404, 'No such memory tidy');
       if (p.status !== 'open') throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already decided this tidy`);
-      const body = await readJson(req);
       if (!Array.isArray(body.apply) || body.apply.some((n: unknown) => !Number.isInteger(n))) throw new HttpError(400, 'apply must list the ticked changes\' ids');
       const folder = folderOf(app, project, p.folder);
       if (!folder && body.apply.length) throw new HttpError(409, 'The memory folder this tidy was for is gone');
@@ -110,9 +111,11 @@ export const memoryCuratorRoutes: Route[] = [
       if (!p.backup) throw new HttpError(409, p.restored_by ? `${p.restored_by} already put it back` : 'Its old notes are no longer kept (30 days)');
       const folder = folderOf(app, project, p.folder);
       if (!folder) throw new HttpError(409, 'The memory folder this tidy was for is gone');
-      const n = restoreSaved(folder.dir, p.backup, (file) => app.store.deleteClaudeState(join(folder.rel, file)));
+      const { restored, failed } = restoreSaved(folder.dir, p.backup, (file) => app.store.deleteClaudeState(join(folder.rel, file)));
+      // Its copy stays until every note is back: putting one back twice writes the same text, so a retry is safe.
+      if (failed.length) throw new HttpError(409, `Put back ${restored} of ${p.backup.length}; not ${failed.join(', ')}. Fix that and press Put back again.`);
       app.store.memoryProposals.restored(p.id, session.name);
-      return json(res, 200, { restored: n, view: view(app, project) });
+      return json(res, 200, { restored, view: view(app, project) });
     },
   },
 ];

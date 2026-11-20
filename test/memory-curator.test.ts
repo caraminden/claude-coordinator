@@ -78,7 +78,7 @@ test('nothing changes until approve, and only the ticked changes apply', () => {
   assert.deepEqual(gone, []);
   assert.equal(backup.length, 3);
   // Put back restores every note and line, and removes the note the proposal added.
-  assert.equal(restoreSaved(dir, backup, (f) => gone.push(f)), 3);
+  assert.deepEqual(restoreSaved(dir, backup, (f) => gone.push(f)), { restored: 3, failed: [] });
   assert.deepEqual(snapshot(dir), before);
   assert.deepEqual(gone, ['d.md']);
 });
@@ -93,6 +93,22 @@ test('a delete removes the note and its line, and put back brings both back', ()
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A](a.md) — first\n');
   assert.deepEqual(gone, ['b.md']);
   restoreSaved(dir, backup);
+  assert.deepEqual(snapshot(dir), before);
+});
+
+test('put back into a full MEMORY.md leaves that note out and says so, and works once there is room', () => {
+  const dir = setup();
+  const before = snapshot(dir);
+  const { backup } = applyChanges(dir, checkChanges(view(dir), [{ action: 'delete', file: 'b.md', reason: 'stale' }]), new Set([1]));
+  const full = `- [A](a.md) — first\n${Array.from({ length: 199 }, (_, i) => `- line ${i}`).join('\n')}\n`;
+  writeFileSync(join(dir, 'MEMORY.md'), full);
+  const r = restoreSaved(dir, backup);
+  assert.equal(r.restored, 0);
+  assert.match(r.failed[0], /^b\.md \(MEMORY\.md would pass the 200 lines/);
+  assert.equal(existsSync(join(dir, 'b.md')), false, 'the note waits for its line: no note nothing reaches');
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), full);
+  writeFileSync(join(dir, 'MEMORY.md'), '- [A](a.md) — first\n');
+  assert.deepEqual(restoreSaved(dir, backup), { restored: 1, failed: [] });
   assert.deepEqual(snapshot(dir), before);
 });
 

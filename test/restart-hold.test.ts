@@ -1,18 +1,25 @@
 // An app restarting behind the proxy (#1118): its requests wait for it instead of getting a 502, and a dead app still
 // fails fast. A fixture app is closed and opened again on the same port under a stream of requests.
 import assert from 'node:assert/strict';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { RestartHolds } from '../src/apps.ts';
 import { forward } from '../src/proxy.ts';
-import { freePort } from './helpers.ts';
+import { bootServer, fakeSystemd, freePort, until, type Booted } from './helpers.ts';
 
 const servers: Server[] = [];
-after(() => {
+let srv: Booted | undefined;
+const root = mkdtempSync(join(tmpdir(), 'restart-hold-'));
+after(async () => {
   for (const s of servers) {
     s.closeAllConnections();
     s.close();
   }
+  await srv?.stop();
+  rmSync(root, { recursive: true, force: true });
 });
 
 /** The fixture app: answers 200 with the body it got. */
@@ -34,14 +41,7 @@ const stop = (s: Server) => new Promise<void>((ok) => {
 
 /** The proxy in front of it, as AppProxy.serve uses the holds. */
 async function proxy(holds: RestartHolds, port: number): Promise<string> {
-  const s = createServer((req, res) => {
-    const go = () => forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture' });
-    let gone = false;
-    res.once('close', () => (gone = true));
-    const waiting = holds.wait('fixture', port, () => gone);
-    if (!waiting) return go();
-    void waiting.then(() => gone || go());
-  });
+  const s = createServer((req, res) => holds.whenUp('fixture', port, res, () => forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture' })));
   servers.push(s);
   const p = await freePort();
   await new Promise<void>((ok) => s.listen(p, '127.0.0.1', () => ok()));
@@ -129,4 +129,43 @@ test('past the cap on waiting requests, the next one is not held', async () => {
   assert.equal(second.status, 502);
   assert.ok(second.ms < 400, `the second waited ${second.ms} ms`);
   assert.ok((await first).ms >= 750);
+});
+
+test('through Citadel: a restart from Settings holds the app\'s requests, a stop does not', async () => {
+  // A systemctl whose restart takes a while, as a real one does while the app comes back; it says when it began.
+  const fake = fakeSystemd(join(root, 'systemd'));
+  const slow = join(root, 'slow-systemctl');
+  writeFileSync(slow, `#!/bin/sh\ncase " $* " in *" restart "*) touch "${root}/restarting"; sleep 1.5;; esac\nexec "${fake.bin}" "$@"\n`);
+  chmodSync(slow, 0o755);
+  const home = join(root, 'home');
+  const units = join(home, '.config', 'systemd', 'user');
+  mkdirSync(units, { recursive: true });
+  writeFileSync(join(units, 'citadel-app-fixture.service'), '# Written by Citadel for contraption fixture.\n');
+  srv = await bootServer({ root, env: { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), CITADEL_SYSTEMCTL: slow, CITADEL_JOURNALCTL: fake.journal } });
+  const port = await freePort();
+  let fixture = await app(port);
+  assert.equal((await srv.call('/api/contraptions', { name: 'fixture', title: 'Fixture', port })).status, 201);
+  const me = (await srv.call('/api/me')).data.id;
+  assert.equal((await srv.call(`/api/contraptions/fixture/people/${me}`, { enabled: true }, 'PUT')).status, 200);
+  const get = async () => {
+    const t = Date.now();
+    const res = await fetch(`${srv!.base}/apps/fixture/x`, { headers: { Cookie: srv!.cookie, Connection: 'close' } });
+    return { status: res.status, body: await res.text(), ms: Date.now() - t };
+  };
+  assert.equal((await get()).status, 200);
+
+  const restarted = srv.call('/api/contraptions/fixture/service', { action: 'restart' });
+  await until('the restart to begin', () => existsSync(join(root, 'restarting')));
+  await stop(fixture);
+  const held = [get(), get(), get()];
+  await new Promise((r) => setTimeout(r, 800));
+  fixture = await app(port);
+  assert.equal((await restarted).status, 200);
+  for (const d of await Promise.all(held)) assert.deepEqual([d.status, d.body], [200, 'got ']);
+
+  assert.equal((await srv.call('/api/contraptions/fixture/service', { action: 'stop' })).status, 200);
+  await stop(fixture);
+  const d = await get();
+  assert.equal(d.status, 502);
+  assert.ok(d.ms < 1000, `a stopped app took ${d.ms} ms to fail`);
 });

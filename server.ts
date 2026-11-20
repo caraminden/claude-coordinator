@@ -1353,8 +1353,13 @@ contraptions.appsDomain = APPS_DOMAIN;
 contraptions.appsHome = services.opts.home;
 const apps = new AppProxy(store, contraptions, auth, APPS_DOMAIN, { chunked, home: services.opts.home });
 // A drain comes before every restart of an app's service: its requests wait for it until the release, and a little after (#1118).
+// A stop's don't, and it ends a restart's grace, so a stopped app fails fast.
 const drainTurns = services.drain;
-services.drain = async (row) => {
+services.drain = async (row, stop) => {
+  if (stop) {
+    apps.restarts.stopped(row.name);
+    return drainTurns(row);
+  }
   const restarted = apps.restarts.hold(row.name);
   try {
     const quiet = await drainTurns(row);

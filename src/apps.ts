@@ -70,22 +70,38 @@ export class RestartHolds {
     };
   }
 
-  /** null: go now. Else resolves once the app's port is open, the hold's time is up, or the asker is gone. */
-  wait(name: string, port: number, gone: () => boolean): Promise<void> | null {
+  /** The app was stopped on purpose: what is left of a restart's grace ends, so it fails fast. */
+  stopped(name: string) {
     const app = this.apps.get(name);
-    if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return null;
+    if (app) app.ended = 0;
+  }
+
+  /** Run `go` now, or once a restarting app's port is open or the hold's time is up; never for an asker who left meanwhile. */
+  whenUp(name: string, port: number, conn: { once(e: 'close', f: () => void): unknown }, go: () => void) {
+    const app = this.apps.get(name);
+    if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return go();
+    let gone = false;
+    conn.once('close', () => (gone = true));
     app.waiting++;
     const until = Date.now() + this.holdMs;
     const poll = async () => {
-      while (!gone() && Date.now() < until && !(await accepts(port))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - Date.now()))));
+      while (!gone && Date.now() < until && !(await accepts(port, until - Date.now()))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - Date.now()))));
     };
-    return poll().finally(() => app.waiting--);
+    void poll().finally(() => {
+      app.waiting--;
+      if (!gone) go();
+    });
   }
 }
 
-/** Whether something takes connections on 127.0.0.1:port (the connection is closed at once). */
-const accepts = (port: number) => new Promise<boolean>((ok) => {
+/** Whether something takes connections on 127.0.0.1:port within ms (the connection is closed at once). */
+const accepts = (port: number, ms: number) => new Promise<boolean>((ok) => {
   const s = connect(port, '127.0.0.1');
+  // A full backlog leaves a connect pending: give up at the hold's end.
+  s.setTimeout(Math.max(1, ms), () => {
+    s.destroy();
+    ok(false);
+  });
   s.once('connect', () => {
     s.destroy();
     ok(true);
@@ -247,16 +263,7 @@ export class AppProxy {
     this.track(res, a);
     const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
     const go = () => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed });
-    this.whenUp(a.row, res, go);
-  }
-
-  /** Go now, or once a restarting app's port is open (#1118); never for an asker who left meanwhile. */
-  private whenUp(row: ContraptionRow, conn: { once(e: 'close', f: () => void): unknown }, go: () => void) {
-    let gone = false;
-    const waiting = this.restarts.wait(row.name, row.port, () => gone);
-    if (!waiting) return go();
-    conn.once('close', () => (gone = true));
-    void waiting.then(() => gone || go());
+    this.restarts.whenUp(a.row.name, a.row.port, res, go);
   }
 
   /** Serve a request that asks to upgrade (a websocket): the same gate, then a tunnel. */
@@ -271,7 +278,7 @@ export class AppProxy {
     const a = this.admit(req, url, appHost(req, this.domain));
     if ('status' in a) return answerRaw(socket, a.status, a.reason, a.headers, a.body);
     this.track(socket, a);
-    this.whenUp(a.row, socket, () => forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed)));
+    this.restarts.whenUp(a.row.name, a.row.port, socket, () => forwardUpgrade(req, socket, head, a.row.port, a.path, a.headers, this.options(a.row, null, a.sandboxed)));
   }
 
   private track(conn: { destroy(): void; once(e: 'close', f: () => void): unknown }, a: Admitted) {

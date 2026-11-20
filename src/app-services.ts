@@ -376,9 +376,9 @@ export class AppServices {
   readonly opts: ServiceOptions;
   /**
    * Before its service stops or restarts (#319): hold its new turns and wait for its running ones
-   * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start.
+   * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start. `stop`: it isn't coming back.
    */
-  drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
+  drain: (row: ContraptionRow, stop?: boolean) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
   /** A deploy reached a stage, or ended (finished_at set): the release monitor records and shows it (#627). */
   onDeploy: (view: DeployView) => void = () => {};
   /**
@@ -640,7 +640,7 @@ export class AppServices {
     if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
-    const quiet = action === 'start' ? null : await this.drain(row);
+    const quiet = action === 'start' ? null : await this.drain(row, action === 'stop');
     try {
       await this.must(action, main);
     } finally {

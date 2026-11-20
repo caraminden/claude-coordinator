@@ -5,7 +5,7 @@ import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, 
 import { onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { renderCost } from './cost.js';
-import { openStartScheme, renderSidebar } from './sidebar.js';
+import { homeScheme, openStartScheme, renderSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
@@ -968,7 +968,10 @@ async function route() {
       if (jump) jumpToEvent(jump);
       return;
     }
-    if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
+    // Home (#1140): its overview, or a chat opened from its list with the list kept beside it.
+    if (hash === '#/home') { const id = await homeScheme(); if (seq !== routeSeq) return; if (id == null) await openStartScheme(); else await showProject(id, { kind: 'home', home: true }); }
+    else if ((m = hash.match(/^#\/home\/p\/(\d+)(?:\/t\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chat', number: m[2] ? Number(m[2]) : null, home: true });
+    else if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'files', folder: '@minions' });
     // Settings and Orders open on their list of pages on a phone (#1018); on a desktop Settings opens on Members beside
     // its menu, and Orders on Instructions with the panel's Orders tab showing (#1071).

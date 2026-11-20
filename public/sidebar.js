@@ -23,9 +23,13 @@ import { toast } from './ui/status.js';
 
 export const LAST_SCHEME = 'cc-scheme'; // the scheme this browser last had open
 
-/** The app's front door: open the last scheme (or Citadel, or the first); with none, offer to make one. */
+/** Your schemes the shelf lists: not hidden, and yours (#674). Home (#1140) shows for two or more. */
+export const shelfSchemes = (projects) => (projects ?? []).filter((p) => !p.hidden && p.member !== false);
+
+/** The app's front door: Home when you're in two or more schemes (#1140; Josh, 2026-11-19: "Always opens to Home"), else the last scheme (or Citadel, or the first); with none, offer to make one. */
 export async function openStartScheme() {
   const projects = await api('api/projects');
+  if (shelfSchemes(projects).length > 1) return replaceHash('#/home');
   let last = NaN;
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
   // A hidden scheme, or one you aren't a member of (#674), only opens by itself when it was the last one open, or there's no other.
@@ -38,6 +42,16 @@ export async function openStartScheme() {
   const welcome = welcomePanel(null, []);
   if (welcome) refreshWelcome();
   app.replaceChildren(...(welcome ? [welcome] : []), h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
+}
+
+/** The scheme Home (#1140) loads under it, for the chats it opens: the one on screen, else the last one open, else the start scheme. */
+export async function homeScheme() {
+  const projects = view?.projects?.length ? view.projects : await api('api/projects');
+  const shown = shelfSchemes(projects);
+  if (view?.kind === 'project' && shown.some((p) => p.id === view.projectId)) return view.projectId;
+  let last = NaN;
+  try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
+  return startScheme(shown.length ? shown : projects, last);
 }
 
 /** Where a new scheme's code comes from. */

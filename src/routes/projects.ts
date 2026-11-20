@@ -11,7 +11,7 @@ import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GOAL_MAX, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
 import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
@@ -464,6 +464,14 @@ export const projectRoutes: Route[] = [
           coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
         };
       })));
+    },
+  },
+  {
+    // Home (#1140): what waits on you across your schemes, what's working in them, and what shipped since your last visit here.
+    method: 'GET', path: '/api/home', who: ['person'],
+    handler: ({ res, app: { store, runner }, session }) => {
+      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
+      json(res, 200, homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now())));
     },
   },
   {

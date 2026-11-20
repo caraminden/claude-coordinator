@@ -49,7 +49,7 @@ export function setView(next) {
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
-  if (!who) forgetKept(), answers.clear(); // signing out leaves nothing of theirs on the device, or for the next to keep
+  if (!who) forgetKept(), forgetHome(), answers.clear(); // signing out leaves nothing of theirs on the device, or for the next to keep
 }
 // The shell's login page (core.js renderLogin), shown when the server says you're signed out.
 let showLogin = () => {};
@@ -128,10 +128,18 @@ export function keepChat(hash, projectId, ticketId, history) {
 export function keptChat(hash) {
   try {
     const kept = JSON.parse(localStorage.getItem(KEPT));
-    if (kept?.me && kept.answers && (hash === kept.hash || hash === '' || hash === '#/')) return kept;
+    // The app's start opens Home for someone in two or more schemes (#1140), so a kept chat only reopens at its own address then.
+    if (kept?.me && kept.answers && (hash === kept.hash || ((hash === '' || hash === '#/') && !homeFirst()))) return kept;
   } catch {}
   return null;
 }
+
+/** Set while the shelf shows the Home line (#1140): the app's start opens Home rather than the kept chat. */
+export const HOME_LINE = 'cc-home-line';
+const homeFirst = () => { try { return localStorage.getItem(HOME_LINE) === '1'; } catch { return false; } };
+
+/** Home's cached answer and whether the shelf showed its line (home.js) are theirs too. */
+const forgetHome = () => { try { localStorage.removeItem('cc-home'); localStorage.removeItem(HOME_LINE); } catch {} };
 
 export function forgetKept() {
   try { localStorage.removeItem(KEPT); } catch {}

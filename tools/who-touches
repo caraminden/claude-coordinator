@@ -1,0 +1,168 @@
+#!/usr/bin/env node
+// who-touches (#1159): which other worktrees of this repo are changing a path, before a big edit to a shared file.
+//   who-touches <path>... [--base <ref>]
+// For every worktree (git worktree list) whose branch changes one of the paths against its merge-base with main,
+// committed or not (new untracked files count too), it prints the minion number (from a ticket/<n>-… branch), the
+// branch, lines added and removed per path, how much of that is uncommitted, and the branch's last commit time in
+// Pacific time. A worktree based on a major build's branch (build/<n>) is measured against that branch instead, so a
+// feeder shows only its own lines, and each build branch gets a row of its own against main. Worktrees with no change
+// to the paths are skipped; closed minions' stale worktrees still show, and the date says how stale. Read-only: it
+// writes nothing and never fetches. --base <ref> measures every worktree against that one ref instead.
+// Plain JavaScript in one file, so the copy on a turn's PATH runs without the repo; ESM by syntax, wherever it sits.
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { relative, resolve, join } from 'node:path';
+
+const usage = 'usage: who-touches <path>... [--base <ref>]';
+function die(msg, code = 2) {
+  process.stderr.write(`who-touches: ${msg}\n`);
+  process.exit(code);
+}
+
+const paths = [];
+let base = '';
+let fixedBase = false;
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--base') base = argv[++i] ?? die(usage);
+  else if (a.startsWith('--base=')) base = a.slice(7);
+  else if (a === '-h' || a === '--help') { console.log(usage); process.exit(0); }
+  else if (a === '--') paths.push(...argv.slice(i + 1)), (i = argv.length);
+  else if (a.startsWith('-')) die(`unknown option ${a}\n${usage}`);
+  else paths.push(a);
+}
+if (!paths.length) die(usage);
+
+/** git in a directory; resolves stdout, or null when git fails. Never throws. */
+function git(cwd, args) {
+  return new Promise((done) =>
+    execFile('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', maxBuffer: 64 << 20 }, (err, out) => done(err ? null : out)),
+  );
+}
+
+/** Runs fn over items, at most `width` at a time, keeping the order. */
+async function pool(items, width, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]); }
+  }));
+  return out;
+}
+
+const here = process.cwd();
+const top = (await git(here, ['rev-parse', '--show-toplevel']))?.trim();
+if (!top) die('not inside a git repository');
+// Pathspecs relative to the repository's top, whichever worktree or folder it runs from.
+const specs = paths.map((p) => relative(top, resolve(here, p)) || '.');
+if (specs.some((s) => s.startsWith('..'))) die(`a path is outside this repository (${top})`);
+
+if (!base) {
+  const origin = (await git(top, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']))?.trim().replace(/^origin\//, '');
+  for (const ref of [origin, 'main', 'master'].filter(Boolean)) {
+    if (await git(top, ['rev-parse', '--verify', '--quiet', `refs/heads/${ref}`]) !== null) { base = ref; break; }
+  }
+  if (!base) die('no local main branch: say which with --base <ref>');
+} else if (await git(top, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]) === null) die(`no such ref: ${base}`);
+else fixedBase = true;
+const builds = fixedBase ? [] : ((await git(top, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/build/'])) ?? '').split('\n').filter(Boolean);
+
+// Every worktree, from the porcelain list. Prunable ones (folder gone) are skipped: there is nothing to read.
+const trees = [];
+for (const block of ((await git(top, ['worktree', 'list', '--porcelain'])) ?? '').split('\n\n')) {
+  const t = { path: '', head: '', branch: '' };
+  let gone = false;
+  for (const line of block.split('\n')) {
+    if (line.startsWith('worktree ')) t.path = line.slice(9);
+    else if (line.startsWith('HEAD ')) t.head = line.slice(5);
+    else if (line.startsWith('branch ')) t.branch = line.slice(7).replace(/^refs\/heads\//, '');
+    else if (line.startsWith('prunable') || line === 'bare') gone = true;
+  }
+  if (t.path && t.head && !gone) trees.push(t);
+}
+
+/** `git diff --numstat` lines into { file: [added, removed] }; binary files count as 0 lines. */
+function numstat(out) {
+  const files = {};
+  for (const line of (out ?? '').split('\n')) {
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+    if (m) files[m[3]] = [Number(m[1]) || 0, Number(m[2]) || 0];
+  }
+  return files;
+}
+
+async function untrackedLines(tree, file) {
+  try {
+    const text = await readFile(join(tree.path, file), 'utf8');
+    return text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
+  } catch { return 0; }
+}
+
+/** The closest base a worktree grew from: main's merge-base, or a build branch's when that one is newer. */
+async function baseOf(tree) {
+  let mb = (await git(tree.path, ['merge-base', 'HEAD', base]))?.trim();
+  let from = base;
+  if (!mb) return null;
+  for (const b of builds) {
+    const bmb = (await git(tree.path, ['merge-base', 'HEAD', b]))?.trim();
+    if (bmb && bmb !== mb && await git(tree.path, ['merge-base', '--is-ancestor', mb, bmb]) !== null) { mb = bmb; from = b; }
+  }
+  return { mb, from };
+}
+
+/** A build branch as a row of its own: its commits against main, read from the repo with no worktree. */
+async function lookBuild(b) {
+  const mb = (await git(top, ['merge-base', b, base]))?.trim();
+  if (!mb) return null;
+  const files = numstat(await git(top, ['diff', '--numstat', '--no-renames', mb, b, '--', ...specs]));
+  if (!Object.keys(files).length) return null;
+  const when = Number(await git(top, ['log', '-1', '--format=%ct', b])) || 0;
+  return { path: '', head: '', branch: b, from: base, files, uncommitted: {}, when };
+}
+
+async function look(tree) {
+  const at = await baseOf(tree);
+  if (!at) return null;
+  const { mb, from } = at;
+  // The merge-base against the working tree: committed and uncommitted changes in one diff.
+  const [all, untracked] = await Promise.all([
+    git(tree.path, ['diff', '--numstat', '--no-renames', mb, '--', ...specs]),
+    git(tree.path, ['ls-files', '--others', '--exclude-standard', '--', ...specs]),
+  ]);
+  if (all === null) return null;
+  const files = numstat(all);
+  const fresh = (untracked ?? '').split('\n').filter(Boolean);
+  for (const f of fresh) files[f] = [await untrackedLines(tree, f), 0];
+  if (!Object.keys(files).length) return null;
+  const [dirty, when] = await Promise.all([
+    git(tree.path, ['diff', '--numstat', '--no-renames', 'HEAD', '--', ...specs]),
+    git(tree.path, ['log', '-1', '--format=%ct', 'HEAD']),
+  ]);
+  const uncommitted = numstat(dirty);
+  for (const f of fresh) uncommitted[f] = files[f];
+  return { ...tree, from, files, uncommitted, when: Number(when) || 0 };
+}
+
+const found = [...await pool(trees, 16, look), ...await pool(builds, 4, lookBuild)].filter(Boolean).sort((a, b) => b.when - a.when);
+
+const pacific = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+});
+const sum = (files) => Object.values(files).reduce((s, [a, r]) => [s[0] + a, s[1] + r], [0, 0]);
+const plusMinus = ([a, r]) => `+${a} -${r}`;
+const mine = (t) => resolve(t.path) === resolve(top);
+
+
+const rows = found.filter((t) => t.path).length;
+console.log(`who-touches ${specs.join(' ')}: ${rows} of ${trees.length} worktrees change ${specs.length > 1 ? 'them' : 'it'}, against their merge-base with ${base}${builds.length ? ' (or with the build branch they grew from)' : ''}`);
+for (const t of found) {
+  const n = t.branch.match(/^ticket\/(\d+)(?:-|$)/)?.[1];
+  const who = n ? `#${n}` : t.branch || `detached ${t.head.slice(0, 8)}`;
+  const dirty = sum(t.uncommitted);
+  const date = t.when ? pacific.format(new Date(t.when * 1000)).replace(',', '') : 'no commits';
+  const vs = t.path ? (t.from !== base ? `vs ${t.from}` : '') : `the build branch, vs ${base}`;
+  console.log(`${who}${t.path && mine(t) ? ' (you)' : ''}  ${plusMinus(sum(t.files))}${dirty[0] + dirty[1] ? ` (${plusMinus(dirty)} uncommitted)` : ''}  last commit ${date}  ${n ? t.branch : ''}  ${vs}  ${t.path}`.replace(/ {3,}/g, '  ').trimEnd());
+  const names = Object.keys(t.files).sort();
+  if (specs.length > 1 || names.length > 1 || names[0] !== specs[0]) for (const f of names) console.log(`    ${f} ${plusMinus(t.files[f])}${t.uncommitted[f] ? ' (uncommitted)' : ''}`);
+}

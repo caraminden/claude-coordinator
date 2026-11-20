@@ -55,16 +55,17 @@ export const PARTS: Part[] = [
   { name: 'invite-someone', label: 'Invite someone', page: '/people', where: 'Settings → People (admins)', words: 'invite person people add' },
 ];
 
-/** The link that shows `part`, as a route in the chat: in scheme `scheme`, on minion `minion`'s chat where the part is in one. */
-export function partLink(part: Part, scheme: number | string, minion?: number | null): string {
-  const page = part.page === MINION ? (minion ? `/t/${minion}` : '') : part.page;
-  return `#/p/${scheme}${page}?show=${part.name}`;
+/** The link that shows `part`, as a route in the chat: in scheme `scheme`, on minion `minion`'s chat where the part is in one (none without it). */
+export function partLink(part: Part, scheme: number | string, minion?: number | string | null): string | null {
+  if (part.page === MINION && !minion) return null;
+  return `#/p/${scheme}${part.page === MINION ? `/t/${minion}` : part.page}?show=${part.name}`;
 }
 
 // The words of a question ("where is the fast mode?") that name no part.
-const STOP = new Set(['where', 'is', 'are', 'the', 'a', 'an', 'my', 'i', 'can', 'do', 'how', 'to', 'find', 'it', 'its', 'out', 'point', 'me', 'show', 'of', 'in', 'on', 'for', 'button', 'setting', 'settings', 'change', 'turn', 'set']);
+const STOP = new Set(['where', 'is', 'are', 'the', 'a', 'an', 'my', 'i', 'can', 'do', 'how', 'to', 'find', 'it', 'its', 'out', 'point', 'me', 'show', 'of', 'in', 'on', 'for', 'button', 'setting', 'settings', 'change', 'turn', 'set',
+  'them', 'they', 'this', 'that', 'what', 'which', 'with', 'from', 'at', 'you', 'your', 'we', 'our', 'there', 'see', 'get', 'go', 'thing', 'option']);
 
-/** The parts that best match `query`: every word must hit the name, label, where or words; best first. */
+/** The parts that match `query`, best first: every word must hit the name, label, where or words, so a stray word finds nothing rather than the wrong part. */
 export function findParts(query: string): Part[] {
   const words = (query.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => !STOP.has(w));
   if (!words.length) return PARTS;
@@ -72,7 +73,7 @@ export function findParts(query: string): Part[] {
     const hay = `${p.name.replace(/-/g, ' ')} ${p.label} ${p.where} ${p.words ?? ''}`.toLowerCase();
     const hits = words.filter((w) => hay.includes(w));
     const inName = words.filter((w) => p.name.includes(w) || p.label.toLowerCase().includes(w)).length;
-    return { p, score: hits.length * 2 + inName };
+    return { p, score: hits.length === words.length ? hits.length * 2 + inName : 0 };
   });
   const best = Math.max(...scored.map((s) => s.score));
   return best ? scored.filter((s) => s.score === best).map((s) => s.p) : [];
@@ -112,9 +113,8 @@ function main(argv: string[]): number {
   }
   for (const p of hits) {
     // A minion's chat: the number given, else this turn's own minion by its internal id (#/t/<id> opens it).
-    const link = !scheme ? partLink(p, '<scheme id>', minion)
-      : p.page === MINION && !minion && place.ticketId ? `#/t/${place.ticketId}?show=${p.name}` : partLink(p, scheme, minion);
-    console.log(`[${p.label}](${link})  ${p.where}`);
+    const link = p.page === MINION && !minion && place.ticketId ? `#/t/${place.ticketId}?show=${p.name}` : partLink(p, scheme ?? '<scheme id>', minion);
+    console.log(link ? `[${p.label}](${link})  ${p.where}` : `${p.label}: ${p.where}. It's in a minion's chat: pass --minion N for a link.`);
   }
   if (!scheme) console.log('No scheme found from this folder: pass --scheme N.');
   return 0;

@@ -303,6 +303,8 @@ const READ_ONLY_COMMANDS = [
     'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh pr status', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
     // #621: more reads a Taskmaster reached for. Not sed or file: a writing flag bundled anywhere (-nsi, -bC) passes any rule.
     'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
+    // #1122: looks up a part of Citadel's UI and prints its link; reads nothing but its own list.
+    'citadel-where',
   ].map((c) => `Bash(${c}:*)`),
   ...['-s', '-sS', '-s -m 5'].flatMap((f) => ['127.0.0.1', 'localhost'].map((host) => `Bash(curl ${f} http://${host}:8573/api/health)`)),
 ];

@@ -76,9 +76,11 @@ const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(comman
 const ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 // citadel-replay (#836) runs from the pin, its replay.ts and contraption-args.ts beside it: with no arguments, its usage.
 const replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
+// citadel-where (#1122) runs from the pin, show-parts.ts beside it.
+const where = require('node:child_process').spawnSync('citadel-where', ['--scheme', '3', 'fast', 'mode'], { encoding: 'utf8' });
 // The kit's skills as this turn sees them, read while its folder still exists (#1062).
 const kitSkills = args.includes('--plugin-dir') ? require('node:fs').readdirSync(require('node:path').join(args[args.indexOf('--plugin-dir') + 1], 'skills')) : null;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, kitSkills, replay: { status: replay.status, stderr: replay.stderr } }));
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, kitSkills, replay: { status: replay.status, stderr: replay.stderr }, where: { status: where.status, stdout: where.stdout } }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 const initErrors = require('node:fs').existsSync(${JSON.stringify(join(root, 'init-errors'))}) ? JSON.parse(readFileSync(${JSON.stringify(join(root, 'init-errors'))}, 'utf8')) : {};
@@ -335,6 +337,7 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(t.devCopy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-dev-copy'), 'utf8'), 'citadel-dev-copy (#482) too');
   assert.equal(t.ciFailures, readFileSync(join(import.meta.dirname, '..', 'tools', 'ci-failures'), 'utf8'), 'ci-failures (#644) too');
   assert.deepEqual([t.replay.status, t.replay.stderr.split(' run ')[0]], [2, 'usage: citadel-replay'], 'citadel-replay (#836) runs from the pin');
+  assert.deepEqual([t.where.status, t.where.stdout.split('  ')[0]], [0, '[Fast mode](#/p/3/approvals?show=fast-mode)'], 'citadel-where (#1122) runs from the pin');
   assert.ok(!t.env.PATH.startsWith(MCP_DIR) && t.env.PATH.split(':')[0].endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
   assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
   assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);

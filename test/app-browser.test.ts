@@ -233,7 +233,7 @@ async function inboxPage(status: 'ok' | 'fail' | 'hold', closed = false): Promis
     renderTicketHead();
     // What the stream says once the server has it, as another tab hears it too.
     window.echo = (status) => onTicketUpdate({ ...minion, status });
-    window.needsYou = () => ({ rows: document.querySelectorAll('.inbox-row').length, strip: !document.querySelector('.inbox-strip').hidden,
+    window.needsYou = () => ({ rows: document.querySelectorAll('.inbox-row').length, strip: !!document.querySelector('.inbox-strip .inbox-toggle:not(.inbox-empty)'), empty: !!document.querySelector('.inbox-strip .inbox-empty'),
       badge: !document.querySelector('[data-scheme-inbox="2"]').hidden });
   })()`);
   return page;
@@ -242,33 +242,33 @@ const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
 test('dismissing a minion takes it out of Needs you and the badge at once, before the server answers', { skip }, async () => {
   const page = await inboxPage('hold');
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true }, 'waiting on you');
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, empty: false, badge: true }, 'waiting on you');
   await page.eval(`document.querySelector('.act-dismiss').click()`);
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, empty: true, badge: false });
 });
 
 test('a failed dismissal puts it back in Needs you', { skip }, async () => {
   const page = await inboxPage('fail');
   await page.eval(`document.querySelector('.act-dismiss').click()`);
   await settle(50);
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, empty: false, badge: true });
 });
 
 test('another tab drops a minion dismissed elsewhere from Needs you when the stream says so', { skip }, async () => {
   const page = await inboxPage('ok');
   await page.eval(`(server = [], echo('closed'))`);
   await settle(400); // the inbox's refetch waits out a burst
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, empty: true, badge: false });
 });
 
 test('reopening a dismissed minion that still waits on you puts it back in Needs you', { skip }, async () => {
   const page = await inboxPage('ok', true);
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, badge: false });
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 0, strip: false, empty: true, badge: false });
   await page.eval(`(server = [{ kind: 'state', ticketId: 900, at: Date.now(), key: 'state:900' }], document.querySelector('.act-reopen').click())`);
   await settle(50);
   await page.eval(`echo('idle')`);
   await settle(400);
-  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, badge: true });
+  assert.deepEqual(await page.eval('needsYou()'), { rows: 1, strip: true, empty: false, badge: true });
 });
 
 // #890: installing moves the open tab into the app window without a reload, so a colour app.js added only when the page

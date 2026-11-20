@@ -170,8 +170,14 @@ export function renderInbox() {
   if (!hidden) markItemsSeen(view.projectId, [...keys]);
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   updateBadge();
-  strip.hidden = !items.length;
-  if (!items.length) return strip.replaceChildren();
+  strip.hidden = false;
+  if (!items.length) {
+    // Stays when empty, same height as the toggle, so the list below never moves; nothing to open (hidden schemes show no count).
+    strip.classList.remove('open');
+    list?.remove();
+    const empty = h('div', { class: 'inbox-toggle inbox-empty' }, `Nothing needs you${working ? ` · ${working} working` : ''}`);
+    return strip.replaceChildren(empty);
+  }
   let open = false;
   try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
   // A minion's items share its row, in the order of its most urgent one. A card addressed to you is a row like the rest,

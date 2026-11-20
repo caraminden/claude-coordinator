@@ -653,7 +653,7 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.equal(call.env.FAKE_PODMAN, undefined);
   // Its files sit in the person's mounted turns folder: the driver with its lock and image helper, the tripwire, and a review-mode config.
   assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
-  assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'kit', 'tripwire.ts']);
+  assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'kit', 'tripwire-base.ts', 'tripwire-git.ts', 'tripwire.ts']);
   assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
   assert.equal(call.writable, false, 'read-only, as the runner writes it');
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');

@@ -139,7 +139,7 @@ test('generate_image_codex runs the driver in the person\'s container and copies
   assert.equal(ran.prompt, 'a frost rune');
   assert.deepEqual(ran.env, ['HOME=/home/x', 'PATH=/bin', `CITADEL_CODEX_TRIPWIRE=${join(job, 'codex-tripwire.json')}`]);
   assert.deepEqual(ran.cfg, { script: join(job, 'tripwire.ts'), config: { project: 0 } });
-  assert.deepEqual(ran.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'ref-0.png', 'tripwire.ts'], "the driver and everything it imports");
+  assert.deepEqual(ran.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'ref-0.png', 'tripwire-base.ts', 'tripwire-git.ts', 'tripwire.ts'], "the driver and everything it imports");
   assert.deepEqual(ran.refs, ['base']);
   assert.equal(woke, 1);
   assert.deepEqual(readdirSync(turnsDir), [], 'the folder goes once it ends');

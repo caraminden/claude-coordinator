@@ -28,4 +28,5 @@
 @media (max-width: 600px) {
   .skills-main .sk-bar .spacer { display: none; }
   .skills-main .sk-tabs { width: 100%; }
+  .sk-stats, .sk-detail summary { padding: 0.75rem 0; }
 }

@@ -71,6 +71,7 @@ function draw() {
     h('div', { class: 'row' }, close('narrow-only', 'back'),
       h('h2', {}, 'Reviewers and critics', h('span', { class: 'muted rv-scheme' }, ` · ${view.project?.name ?? ''}`)),
       h('span', { class: 'spacer' }),
+      h('a', { class: 'muted small', href: `#/p/${view.projectId}/skills` }, 'Skills'),
       h('button', { type: 'button', class: 'cui-btn rv-new', onclick: () => select(null, 'new') }, '+ New'),
       close('wide-only', 'close')));
   const body = state.error ? [h('p', { class: 'error' }, state.error)]

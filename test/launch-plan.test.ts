@@ -160,8 +160,8 @@ test("a minion's turn carries its scheme's screenshot widths and themes for tool
 });
 
 // #1125: a turn's copy of the pinned files was a cpSync of the tree, 3.8 to 8.7 s of the server's loop on a busy disk.
-test('copyPins links the pinned files instead of copying their bytes, and keeps links and modes', async () => {
-  const { copyPins } = await import('../src/turn-launch.ts');
+test('copyPinned links the pinned files instead of copying their bytes, and keeps links and modes', async () => {
+  const { copyPinned } = await import('../src/turn-launch.ts');
   const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, statSync, lstatSync, readlinkSync, readFileSync, rmSync, chmodSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -174,12 +174,12 @@ test('copyPins links the pinned files instead of copying their bytes, and keeps 
     chmodSync(join(src, 'bin', 'tool'), 0o755);
     symlinkSync('/usr/bin/node', join(src, 'bin', 'citadel-node'));
     const dst = join(root, 'pin');
-    copyPins(src, dst);
+    copyPinned(src, dst);
     assert.equal(statSync(join(dst, 'tripwire.ts')).ino, statSync(join(src, 'tripwire.ts')).ino, 'a link, not a copy');
     assert.equal(statSync(join(dst, 'bin', 'tool')).mode & 0o777, 0o755);
     assert.ok(lstatSync(join(dst, 'bin', 'citadel-node')).isSymbolicLink());
     assert.equal(readlinkSync(join(dst, 'bin', 'citadel-node')), '/usr/bin/node');
-    copyPins(src, join(root, 'boxed'), false);
+    copyPinned(src, join(root, 'boxed'), false);
     assert.notEqual(statSync(join(root, 'boxed', 'tripwire.ts')).ino, statSync(join(src, 'tripwire.ts')).ino, 'a container turn gets copies');
     rmSync(src, { recursive: true });
     assert.equal(readFileSync(join(dst, 'tripwire.ts'), 'utf8'), 'guard', "the turn's copy outlives the server's");

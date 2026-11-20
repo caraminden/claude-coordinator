@@ -70,3 +70,24 @@ test('importing the runner writes nothing; the pins are made by one call and swe
     rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test('a turn\'s pin copy links the files instead of copying their bytes, so a launch is not a 7 s stall', async () => {
+  const { copyPinned } = await import('../src/turn-launch.ts');
+  const { mkdirSync, mkdtempSync: mk, statSync, writeFileSync } = await import('node:fs');
+  const d = mk(join(tmpdir(), 'pincopy-'));
+  try {
+    mkdirSync(join(d, 'src', 'sub'), { recursive: true });
+    writeFileSync(join(d, 'src', 'sub', 'a.txt'), 'hello');
+    copyPinned(join(d, 'src'), join(d, 'dst'));
+    assert.equal(readFileSync(join(d, 'dst', 'sub', 'a.txt'), 'utf8'), 'hello');
+    assert.equal(statSync(join(d, 'dst', 'sub', 'a.txt')).ino, statSync(join(d, 'src', 'sub', 'a.txt')).ino);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('the pinned files are read-only, so a write through a turn\'s linked copy fails instead of reaching the server\'s', async () => {
+  const { statSync } = await import('node:fs');
+  const pins = testPins();
+  assert.equal(statSync(pins.TRIPWIRE).mode & 0o222, 0);
+});

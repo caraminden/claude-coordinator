@@ -3,7 +3,7 @@
 // both build their launches from these.
 import { LIVE_MANIFEST } from './host-tools.ts';
 import { msgEnv, msgSettings } from './msg-settings.ts';
-import { cpSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, statSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
@@ -113,26 +113,37 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
   if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
+  // A turn's pin copy is hard links to these files (copyPinned), so they are read-only: a write into a turn's copy must fail, not reach the server's.
+  const lock = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) lock(join(d, e.name));
+      else if (e.isFile()) chmodSync(join(d, e.name), statSync(join(d, e.name)).mode & ~0o222);
+    }
+  };
+  lock(MCP_DIR);
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
 }
 
 /**
- * A turn's copy of the pinned files (#1125): hard links, so no file's bytes are copied. cpSync of the tree held the server
- * 3.8 to 8.7 s on a busy disk, the second stall stack. A link outlives the server's own copy being swept, which is what the
- * copy is for; the pinned files are never written to (pruneKit only unlinks), so the shared inode is safe. Across filesystems
- * (a container's turns folder) a file is copied instead. A container's turn gets copies (`link` false): its folder is mounted writable, so a link would let it change the server's pinned tripwire.
+ * A turn's own copy of the pinned files: hard links, since copying ~240 files froze the server's loop for up to 7 s
+ * under load (#1215, #1125). A restart's sweep of the originals only unlinks a name, so the turn's links stay good. Falls back
+ * to a byte copy when links aren't possible (another filesystem). A container's turn gets copies (`link` false): its folder is
+ * mounted writable and it runs as the server's user, so it could chmod a link back and change the server's pinned tripwire.
  */
-export function copyPins(src: string, dst: string, link = true): void {
-  mkdirSync(dst, { recursive: true });
-  for (const e of readdirSync(src, { withFileTypes: true })) {
-    const from = join(src, e.name), to = join(dst, e.name);
-    if (e.isDirectory()) copyPins(from, to, link);
-    else if (e.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
-    else {
-      if (!link) cpSync(from, to);
-      else try { linkSync(from, to); } catch (err: any) { if (err.code !== 'EXDEV') throw err; cpSync(from, to); }
+export function copyPinned(src: string, dst: string, link = true): void {
+  if (link) try {
+    mkdirSync(dst, { recursive: true });
+    for (const e of readdirSync(src, { withFileTypes: true })) {
+      const from = join(src, e.name), to = join(dst, e.name);
+      if (e.isDirectory()) copyPinned(from, to);
+      else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
+      else linkSync(from, to);
     }
+    return;
+  } catch {
+    rmSync(dst, { recursive: true, force: true });
   }
+  cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */

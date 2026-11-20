@@ -868,6 +868,32 @@ const CONTRAPTION_FIELDS = {
   folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
 };
 
+/** make_app and its member switch (#1136): every scheme's Taskmaster, for its own scheme, on a member's turn. */
+const APP_TOOLS = [
+  {
+    name: 'make_app',
+    description: `Make a new ${APP_NAME} app (a contraption at /apps/<name>/) for this scheme, when a member asks for one. One call does it all: it starts a minion whose branch already holds a working app in apps/<name>/ of this scheme's repo (a server that checks who is signed in, migrations, a nightly backup, a health path, a first page on ${APP_NAME} UI, tests, and CI when the scheme has a runner), registers the app to deploy from that folder, switches it on for every member of this scheme, and briefs the minion to ship it and then build the idea. Returns the minion's number and the app's port. Refused for a name that's taken, on a turn no member of this scheme asked for, or when the scheme has no GitHub repo. Switch it on or off for other people with set_app_person.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Its name, kept for good: in its address and folder. Lowercase letters, digits and dashes, like trip-notes.' },
+        title: { type: 'string', maxLength: 60, description: 'What people see, like Trip Notes: letters, digits, spaces and simple punctuation, at most 60.' },
+        idea: { type: 'string', maxLength: 4000, description: "What it's for, in the asker's own words (at most 4,000 characters): it goes into the app's CLAUDE.md and the minion's brief." },
+      },
+      required: ['name', 'title', 'idea'],
+    },
+  },
+  {
+    name: 'set_app_person',
+    description: `Switch one of this scheme's apps on or off for a person, by login: on shows it in their rail and lets them open it, off takes at their next request. On a turn a member of this scheme asked for.`,
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The app, like trip-notes.' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
+      required: ['name', 'login', 'enabled'],
+    },
+  },
+];
+
 // Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn an admin asked for (#255).
 const CONTRAPTION_TOOLS = [
   {
@@ -1947,6 +1973,15 @@ async function runTool(name: string, args: any): Promise<string> {
       const all = await call('GET', '/api/contraptions');
       return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
     }
+    case 'make_app': {
+      const m = await call('POST', `/api/projects/${PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
+      return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
+    }
+    case 'set_app_person': {
+      if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
+      const r = await call('PUT', `/api/projects/${PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      return `${args.enabled ? 'On' : 'Off'} for ${args.login}. ${r.name} is on for: ${r.people.join(', ') || 'no one'}.`;
+    }
     case 'register_contraption': {
       const c = await call('POST', '/api/contraptions', args);
       return `Registered. Its service reads its keys from the key folder.${c.icon ? '' : `\n${NO_ICON}`}\n${contraptionText(c)}`;
@@ -2428,7 +2463,7 @@ function toolListAll() {
   const deploy = [...(APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE, MAKE_RELEASE_KEY] : [])];
   const memory = [...(MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS];
   const audit = HOME_CONTRAPTIONS.length && (ROLE !== 'thread' || process.env.COORDINATOR_APP_TURNS_RUN === '1') ? [CONTRAPTION_TURNS] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS.map(withScheme), WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS, WAKE_AT, CI_RUNNERS, CI_FILES, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION, PUBLISH_RELEASE, MAKE_RELEASE_KEY] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL, EDIT_INSTRUCTIONS, ...(JOB_MACHINES.length ? [QUEUE_JOB, JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(APPROVALS ? [APPROVE] : [])];
 }
 

@@ -1363,6 +1363,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/apps": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster makes an app",
+  "member": "403 Only a scheme's Taskmaster makes an app",
+  "outsider": "403 Only a scheme's Taskmaster makes an app",
+  "tmA": "400 name must be a short slug: lowercase letters, digits and dashes, like trip-notes",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/projects/:p/apps/nope/people/999": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster switches its apps for people",
+  "member": "403 Only a scheme's Taskmaster switches its apps for people",
+  "outsider": "403 Only a scheme's Taskmaster switches its apps for people",
+  "tmA": "404 No such contraption",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/projects/:p/artifact-data": {
   "anon": "401 Not logged in",
   "person": "403 Not for people",

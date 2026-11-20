@@ -317,7 +317,7 @@ export class StatusPage {
     const longStall = Math.max(0, ...stalls.filter((s) => s.at >= dayAgo).map((s) => stallSeconds(s.detail) ?? 0));
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`]);
     const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
-    if (stormS >= STORM_WARN_S) reasons.push(['warn', `${Math.round(stormS)} s stalled at a memory limit in the last day`]);
+    if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`]);
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free']);
     const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);

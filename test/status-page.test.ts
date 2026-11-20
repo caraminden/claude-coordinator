@@ -175,6 +175,9 @@ test('memory-limit storms (#1280): per day with their stalled seconds, the last 
   c = (await page.build(viewer(store, josh.id, true), now + 1)).citadel;
   assert.equal(c.storms.now.length, 1);
   assert.deepEqual(c.verdict.reasons, [`75 s stalled at a memory limit in the last day`], `a storm going now counts toward ${STORM_WARN_S} s`);
+  going = [{ ...JSON.parse(storm(940)) }];
+  c = (await page.build(viewer(store, josh.id, true), now + 2)).citadel;
+  assert.deepEqual(c.verdict.reasons, [`16 min stalled at a memory limit in the last day`], 'a long stall reads in minutes');
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {

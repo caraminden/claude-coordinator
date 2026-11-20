@@ -205,7 +205,7 @@ function citadelTiles(c, days, now, ships, redraw) {
 function stormTile(s, days, now) {
   if (!s) return '';
   const today = days.length - 1;
-  const one = (x) => `${x.group}${x.limit ? ` (limit ${bytes(x.limit)})` : ''}: ${secs(x.stalled)} stalled over ${secs(x.seconds)}${x.unit ? `, largest ${x.unit} ${bytes(x.unitBytes)}` : ''}`;
+  const one = (x) => `${x.group}${x.limit ? ` (limit ${bytes(x.limit)})` : ''}: ${secs(x.stalled)} stalled over ${secs(x.seconds)}${x.unit ? `, largest ${bytes(x.unitBytes)}: ${x.unit}` : ''}`;
   const live = s.now[0];
   const stalledToday = s.stalled[today] + sum(s.now.map((x) => x.stalled));
   return tile('Memory limits', live ? 'At its limit now' : stalledToday ? `${secs(stalledToday)} stalled today` : 'None today',

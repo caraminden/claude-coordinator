@@ -1,6 +1,6 @@
 // The tripwire's shared types and two helpers, for src/tripwire.ts and src/tripwire-git.ts.
-// It imports no local file: the pin copiers (pinnedCopy in turn-launch.ts, copyPinned in codex-review.ts) follow
-// ./ imports with no cycle guard, so neither tripwire file may import the other back.
+// It imports no local file, and neither tripwire file may import the other back: pinnedCopy in turn-launch.ts
+// follows ./ imports before it writes, so a cycle would recurse until the server fails to start.
 
 export interface TripwireConfig {
   home: string;

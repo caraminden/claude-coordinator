@@ -973,7 +973,11 @@ const fs = require('node:fs');
 const record = (m) => fs.appendFileSync(${JSON.stringify(codexLog)}, JSON.stringify(m) + '\\n');
 // The fake podman maps the container's ~/.citadel in argv only.
 const inVol = (f) => f.replace(${JSON.stringify(homedir() + '/.citadel/')}, process.env.FAKE_VOL + '/.citadel/');
-record({ tripwire: JSON.parse(fs.readFileSync(inVol(process.env.CITADEL_CODEX_TRIPWIRE), 'utf8')), argv: process.argv.slice(2) });
+const hook = JSON.parse(fs.readFileSync(inVol(process.env.CITADEL_CODEX_TRIPWIRE), 'utf8'));
+// The managed hook imports the staged tripwire (citadel-hook.mjs), so every file it imports must be staged beside it.
+let loads;
+try { loads = typeof require(inVol(hook.script)).tripwire; } catch (e) { loads = e.message; }
+record({ tripwire: hook, loads, argv: process.argv.slice(2) });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const note = (method, params) => send({ method, params: { threadId: 'cth', turnId: 'tu1', ...params } });
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
@@ -1009,6 +1013,7 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
     const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
     assert.deepEqual(calls[0].tripwire.mcp, ['mandate']);
+    assert.equal(calls[0].loads, 'function', "the staged tripwire loads: CODEX_FILES holds every file it imports");
     assert.ok(calls[0].argv.includes('features.shell_tool=false'), 'no shell for an app turn');
     assert.equal(calls.find((c) => c.method === 'thread/start').params.model, 'gpt-6-luna', "the app's haiku maps to Codex's fast model");
     // Again on the same name: the thread carries on.

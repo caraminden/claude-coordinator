@@ -465,6 +465,12 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
       assert.equal(refused.status, 1);
       assert.match(refused.stdout, /^::error::ci-download: the store refused .*HTTP 403.*its own commit/m);
       assert.match((await pull(['--kind', 'nope'])).stderr, /--kind build, report or release/);
+      assert.match((await pull(['--name', 'mandate-7.apk', '--out', 'got'])).stderr, /not a folder/);
+      // A + in a name reaches the store as a +, not a space.
+      await put('app+debug.zip', 'kind=build', 'plus build');
+      const plus = await pull(['--name', 'app+debug.zip']);
+      assert.equal(plus.status, 0, plus.stdout + plus.stderr);
+      assert.equal(readFileSync(join(pullDir, 'app+debug.zip'), 'utf8'), 'plus build');
       assert.match((await pull(['--name', 'x.zip'], { ACTIONS_ID_TOKEN_REQUEST_URL: '' })).stdout, /^::error::ci-download: no run token: the job needs 'permissions: id-token: write'/m);
       assert.match((await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: 'http://127.0.0.1:1' })).stdout, /^::error::ci-download: the store at .* didn't answer/m);
       // A 503 (the store couldn't read GitHub's keys yet) is tried again, for the list and for the bytes.
@@ -480,7 +486,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
       assert.equal(retried.status, 0, retried.stdout + retried.stderr);
       assert.equal(busy, 4);
       assert.equal(readFileSync(join(pullDir, 'x.zip'), 'utf8'), 'x bytes');
-      assert.deepEqual(readdirSync(pullDir).sort(), ['got', 'mandate-9.apk', 'x.zip'], 'nothing left in the runner\'s temp folder, and no file from a refusal');
+      assert.deepEqual(readdirSync(pullDir).sort(), ['app+debug.zip', 'got', 'mandate-9.apk', 'x.zip'], 'nothing left in the runner\'s temp folder, and no file from a refusal');
     } finally {
       tokens.close();
     }

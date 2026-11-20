@@ -76,10 +76,13 @@ permission as an upload:
   the newest match. `--out` sets where the file goes (default: its stored name, in the current folder).
   `--list` prints the matches instead, newest first.
 - The run token names the scheme and commit. A job reads only its own scheme's files of its own
-  commit; `--commit` with another SHA is refused (403). The file has to be stored already, so the
-  download runs after the job that uploads it (`needs:`, or a workflow that starts once it ends).
-- A file that can't be downloaded, or no match, fails the step. A 503 (the store couldn't yet read
-  GitHub's signing keys) is retried, as uploads are.
+  commit; `--commit` with another SHA is refused (403). The commit is the job's `GITHUB_SHA`.
+- The file has to be stored already: the download runs after the job that uploads it. Within one
+  workflow, `needs:`. Across workflows, both have to run for the same commit and the uploader has to
+  finish first. A workflow started by `workflow_run` runs for the default branch's newest commit,
+  not the commit of the run that started it, so it only finds that run's files when they are the same.
+- A download that can't happen, or finds no match, fails the step (`--list` prints nothing for no
+  match). A 503 (the store couldn't yet read GitHub's signing keys) is retried, as uploads are.
 - The routes it calls, on the store's address: `GET /api/ci-store?commit=&workflow=&kind=&target=&name=&run=`
   lists the matches as JSON, and each file's `url` (`/api/ci-store/<id>/<name>`) is the bytes, both with
   `Authorization: Bearer <run token>`.

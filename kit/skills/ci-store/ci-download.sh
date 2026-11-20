@@ -14,7 +14,7 @@
 #   --commit    the job's own commit (the default); any other is refused
 #   --out       where to write it (default: its stored name, in the current folder)
 #   --list      print the matches, newest first, one a line: NAME WORKFLOW run RUN_ID KIND [TARGET]
-# A file that can't be downloaded fails the step. CITADEL_STORE_URL overrides where the store is.
+# A file that can't be downloaded, or no match, fails the step (--list prints nothing for no match). CITADEL_STORE_URL overrides where the store is.
 set -euo pipefail
 
 store=${CITADEL_STORE_URL:-http://perigee.tail59477f.ts.net:8574}
@@ -25,10 +25,11 @@ while [ $# -gt 0 ]; do
     --workflow | --kind | --target | --name | --run | --commit)
       value=${2:-}
       [[ $value =~ $plain ]] || { echo "ci-download: $1 takes letters, digits and . _ + - only" >&2; exit 2; }
-      query="$query&${1#--}=$value"
+      # A + in a query is a space to the store: send it encoded.
+      query="$query&${1#--}=${value//+/%2B}"
       [ "$1" != --kind ] || case $value in build | report | release) ;; *) echo "ci-download: --kind build, report or release" >&2; exit 2 ;; esac
       shift 2 ;;
-    --out) out=${2:-}; [ -n "$out" ] || { echo "ci-download: --out takes a path" >&2; exit 2; }; shift 2 ;;
+    --out) out=${2:-}; [ -n "$out" ] && [ ! -d "$out" ] || { echo "ci-download: --out takes a file's path, not a folder" >&2; exit 2; }; shift 2 ;;
     --list) list=1; shift ;;
     *) echo "ci-download: unknown option $1" >&2; exit 2 ;;
   esac
@@ -83,6 +84,7 @@ first=$(printf '%s\n' "$files" | head -n 1)
 [ -n "$first" ] || give_up "nothing in the store matches ${query#&} for this job's commit"
 name=$(field "$first" name)
 [ -n "$out" ] || out=$name
+[ ! -d "$out" ] || give_up "$out is a folder: pass the file's path with --out"
 fetch "$(field "$first" url)" "$tmp/file"
 mkdir -p "$(dirname "$out")"
 mv "$tmp/file" "$out"

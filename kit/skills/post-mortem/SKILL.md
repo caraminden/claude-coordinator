@@ -34,11 +34,11 @@ with step 1's three lines, and ask it to show, within its 15 lines:
 
 An app's own agent chat (a contraption's, like an aura or a planner agent) is in the app, not the
 database. `contraption_read` reads it, as the person, only on a turn that answers a message they
-typed in the chat themselves (a card answer, even with text added, doesn't count, so ask for that
-message in your reply, not as a card option): list its read commands first (no `command`), and when one reads the chat, send a
-general-purpose Grunt (Sonnet, medium) with that command, the window and step 2's three asks. On
-any other turn, or with no such command, say the chat was not reached (and why), and mark the turn
-point and the class as guesses until it is.
+typed to you in this chat themselves (a card answer, even with text added, doesn't count, so ask for
+that message in your reply, not as a card option): list its read commands first (no `command`), and
+when one reads the chat, send a general-purpose Grunt (Sonnet, medium) with that command, the window
+and step 2's three asks. On any other turn, or with no such command, say the chat was not reached
+(and why), and mark the turn point and the class as guesses until it is.
 
 Read its timeline, not the sources. When its turn point doesn't explain the complaint, send it one
 follow-up question about that gap; a third call means the case is two cases.

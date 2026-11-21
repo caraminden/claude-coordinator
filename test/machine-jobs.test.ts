@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
+import { writeOffThread } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, type Booted } from './helpers.ts';
 
@@ -449,4 +450,39 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
   assert.match(q, /Command python x+…/);
   assert.match(q, /\nInputs none$/, 'the inputs line stays, cut to fit if it must');
   store.db.close();
+});
+
+test('with the DB writes behind on their worker, a job\'s card still moves for each state it reaches (main red, Nov 21)', async () => {
+  // A loaded box: every write waits 200 ms on the worker, past the 50 ms a read waits for it. The card for a state
+  // must still follow the write of that state, not a read that gave up and saw the one before.
+  const dir = join(root, 'slow-writes');
+  mkdirSync(dir);
+  const store = new Store(join(dir, 'coordinator.db'));
+  const w = writeOffThread(store, { delayMs: 200 })!;
+  try {
+    const owner = store.createUser({ name: 'Owner', login: 'owner' });
+    const who = { uid: owner.id, name: 'Owner', admin: false };
+    const p = store.createProject('W', null, owner.id);
+    const t = store.createTicket({ project_id: p.id, title: 'a minion', permission_mode: 'default', created_by: 'owner' });
+    const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
+    store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
+    w.drain();
+    const stages: string[] = [];
+    const jobs = new MachineJobs({
+      store, send: () => true, online: () => true, broadcast() {}, postCard: () => null, settleCard() {}, wake() {}, note() {},
+      placed: (_j, stage) => stages.push(stage), resultsDir: (j) => join(dir, 'jobs', String(j.id)),
+    });
+    const m = () => store.getMachine(id0)!;
+    const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
+    const j = jobs.queue({ machine: m(), projectId: p.id, ticketId: t.id, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'now', reason: 'now' });
+    assert.equal(jobs.decide(j.id, 'now', who).state, 'starting');
+    jobs.report(m(), { id: j.id, state: 'running', run_s: 1 });
+    assert.equal(jobs.pause(j.id, who).state, 'paused');
+    assert.equal(jobs.resume(j.id, who).state, 'running');
+    jobs.report(m(), { id: j.id, state: 'stopped', run_s: 2 });
+    assert.deepEqual(stages, ['waiting', 'running', 'paused', 'running', 'ended']);
+  } finally {
+    await w.stop();
+    store.db.close();
+  }
 });

@@ -94,6 +94,17 @@ test('a card\'s cached row is dropped again when its change lands, not only when
   assert.equal(card(), 'approved');
 });
 
+test('a machine\'s or a job\'s write is read back at once even on a stalled disk: the code acts on it next (main red, Nov 21)', () => {
+  const { store, w } = open(200);
+  const id = store.createMachine('box', 'x', 'cara', null).id;
+  w.drain();
+  // A queued write would leave these stale past READ_WAIT_MS: setLend then told the agent the lend from before.
+  store.updateMachine(id, { lend: JSON.stringify({ server: 'own', workspaces: [] }) });
+  assert.equal(JSON.parse(store.getMachine(id)!.lend!).server, 'own');
+  store.allowJobKind(id, 'h', 'k', '{}', 'cara');
+  assert.ok(store.jobKind(id, 'h'), 'a standing go is there for the start that follows it');
+});
+
 test('turning autocheckpoint off reaches the server\'s own connection at once', () => {
   const { store } = open(200);
   const pragma = () => (store.db.prepare('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint;
@@ -125,10 +136,10 @@ test('a write on the server\'s thread that waits long for the queue is named in 
 test('a void write returns a promise of its own write; a failed one rejects and is in the health log', async () => {
   const { store } = open();
   await store.setSetting('k', 1);
-  store.createMachine('one', '', 'cara', null);
-  const two = store.createMachine('two', '', 'cara', null);
-  await assert.rejects(store.updateMachine(two.id, { name: 'one' }) as unknown as Promise<void>, /UNIQUE/);
-  assert.equal(store.getMachine(two.id)!.name, 'two');
+  store.createUser({ name: 'One', login: 'one' });
+  const two = store.createUser({ name: 'Two', login: 'two' });
+  await assert.rejects(store.updateUser(two.id, { name: 'One' }) as unknown as Promise<void>, /UNIQUE/);
+  assert.equal(store.getUser(two.id)!.name, 'Two');
   assert.equal(store.healthCount('db-write-error', 0, Date.now() + 1000).count, 1);
 });
 

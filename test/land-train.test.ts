@@ -307,6 +307,61 @@ test('a scan-style guard test that imports nothing still pins the ship that turn
   l.done();
 });
 
+// #1479: the guard tests (land.sh's guards(), #1240) on the train, not just its front. On Nov 21, 03:46 to 04:20 PST,
+// #1460 rode trains with a break of the one-until guard that passed on its front in 1 s, and it took 6 CI runs to
+// refuse it. A stand-in citadel-test: the guard run (the one naming the one-until guard) fails on a commit whose
+// test/loop-lag.test.ts says "sleep", and logs "<commit> <exit>" for each guard run.
+// Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
+const oneUntil = `test/${'one-until'}.test.ts`;
+function guarded(r: ReturnType<typeof setup>) {
+  mkdirSync(join(r.source, 'test'), { recursive: true });
+  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+case " $* " in *" ${oneUntil} "*) ;; *) exit 0 ;; esac
+rc=0
+! grep -qs sleep test/loop-lag.test.ts || { echo "✖ ${oneUntil}:22 › loop-lag.test.ts has 5 \\\`sleep\\\` hits, the baseline allows 3"; echo "full output: /somewhere/citadel-test.log"; rc=1; }
+echo "$(git rev-parse HEAD) $rc" >>"$GUARD_LOG"
+exit $rc
+`, { mode: 0o755 });
+  writeFileSync(join(r.source, oneUntil), '');
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'guard tools');
+}
+const guardEnv = (extra: Record<string, string>) => (dir: string) => ({ GUARD_LOG: join(dir, 'guard-log'), LAND_SMOKE: '0', ...extra });
+const guardRuns = (l: { r: { dir: string } }) => readFileSync(join(l.r.dir, 'guard-log'), 'utf8').trim().split('\n').map((s) => s.split(' '));
+
+test('a rider that breaks a guard test is refused on the guard run on the train, before any CI run, and the riders after it still ride (#1479)', async () => {
+  const l = await line([{}, {}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts' }), guarded);
+  const done = await l.go();
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /loop-lag\.test\.ts has 5 `sleep` hits/, 'the guard output, on its own stderr');
+  assert.match(done[3].stderr, /the guard tests failed on ticket\/2-x's ship train in test\/one-until\.test\.ts with ticket\/4-x on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run/);
+  assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the culprit is as it was');
+  assert.match(done[1].stderr, /the guard tests failed on the ship train's top .* with ticket\/4-x on it/);
+  for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  for (const i of [3, 5]) shipped(l, done[i - 1], i, 2, 3);
+  assert.equal(l.runs(), 2, "ship 1's and the train's: none on a commit with ship 4's change");
+  const red = guardRuns(l).filter(([, rc]) => rc === '1').map(([c]) => c);
+  assert.ok(red.length > 0, 'the guards ran on a commit with ship 4 on it');
+  for (const c of red) assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${c}`), 'CI was never asked about a guard-red commit');
+  l.done();
+});
+
+test("each step of a red train's bisect runs the guard tests before asking CI, and a guard red needs no CI run (#1479)", async () => {
+  // Ship 5 fixes ship 4's guard break, so the train's top passes the guards, but CI is red on both (FAKE_RED_PATH) and
+  // names no suspect (FAKE_LOG=due), so the bisect looks: ship 3's step asks CI, ship 4's stops at its guards.
+  const l = await line([{}, {}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, { on: 4, change: ['test/loop-lag.test.ts', '// fixed\n'] }], guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts', FAKE_LOG: 'due' }), guarded);
+  const done = await l.go();
+  assert.match(done[1].stderr, /the bisect found ticket\/4-x the first ship that turned the train red \(its guard tests failed/);
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /the guard tests failed on ticket\/2-x's ship train in test\/one-until\.test\.ts with ticket\/4-x on it/);
+  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  shipped(l, done[2], 3, 2, 2);
+  const red = guardRuns(l).filter(([, rc]) => rc === '1').map(([c]) => c);
+  assert.equal(red.length, 1, 'one guard red: ship 4\'s bisect step');
+  assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${red[0]}`), "CI was never asked about ship 4's step");
+  l.done();
+});
+
 test("a failed test file CI didn't rerun alone may be load or real, so it names no suspect and the bisect finds the ship", async () => {
   const l = await line([{}, {}, {}, { change: ['test/busy.test.ts', 'x\n'] }], { FAKE_RED_PATH: 'test/busy.test.ts', FAKE_LOG: 'due' });
   const done = await l.go();

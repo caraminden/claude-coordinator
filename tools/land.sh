@@ -15,7 +15,8 @@
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).
 #    Then runs the guard tests on the rebased commit (#1240: guards() below), so a break only the branch and main
-#    together make is refused in a second or two, before a CI run is spent on it.
+#    together make is refused in a second or two, before a CI run is spent on it. A ship train's top and each step of
+#    its bisect get the same run (#1479: train_guards, train_bisect).
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
 #    (.github/workflows/tests.yml) and this waits for that run; when CI can't answer it says CI FALLBACK and runs
 #    the suite here (tools/run-tests.sh), but only once perigee is quiet (#1254: quiet() below), in citadel-heavy's
@@ -467,6 +468,7 @@ fi
 #   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped; its next lines, if any, are said
 #                                                as they are (known flakes, #1419; main's red it shipped through, #1478)
 #   refused <front> <the red CI run> [likely <tests> [pinned]]   the bisect found it the first ship that turned the train red, or
+#   refused <front> guard-tests guard <tests>    the guard tests failed on the train with it and passed without it (#1479), or
 #                                                with likely: the real failures in <tests> (comma-separated) map to its change (#1346), and
 #                                                with pinned: they failed alone here with it and passed without it (#1403); the
 #                                                failure's last lines follow
@@ -538,6 +540,7 @@ train_verdict() {
       [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
       queue_done
       land_timing 1 || true
+      [ "$c" != guard ] || refuse "the guard tests failed on $a's ship train in ${d//,/, } with $branch on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run on it (output above): nothing of it landed and $untouched; $branch is as it was. Run citadel-test on that file, fix it, commit, then run this again"
       [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
       [ "$c $e" != 'likely pinned' ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, and run alone on perigee it passed on the train up to the ship before $branch and failed with it, so it is the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again"
       [ "$c" != likely ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect), and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Look into it: fix it if it is yours, re-test, commit, then run this again"
@@ -863,18 +866,36 @@ preflight() {
 # was clean alone can break one only together with main: the smoke check, on the branch as it was, can't see that, and
 # on 2026-11-20 these four were most of CI's real reds. A second or two. Only the ones the repo has; a feeder's merge
 # into a build (--into) skips them as it skips CI, and its build's own land runs them.
+# [<worktree>]: the guard tests the repo has, in that worktree (this one by default). 0: passed, 1: failed (its output
+# in $guard_out), 2: couldn't decide (citadel-test's exit in $guard_rc), 3: the repo has none.
+guard_run() {
+  local dir=${1:-.} tests=() f
+  guard_out='' guard_rc=0
+  for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts; do [ ! -f "$dir/$f" ] || tests+=("$f"); done
+  [ -x "$dir/tools/citadel-test" ] && [ ${#tests[@]} -gt 0 ] || return 3
+  [ -n "${1:-}" ] || land_mark guards guards
+  guard_out=$(cd "$dir" && CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?
+  case $guard_rc in 0) return 0 ;; 2 | 124 | 137) return 2 ;; *) return 1 ;; esac
+}
+guard_files() { sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$guard_out" | sort -u | paste -sd, -; }
+# <commit>: guard_run on that commit, in a scratch worktree (a ship train's top or a bisect step, #1479).
+guard_at() {
+  local wt rc=0
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-guard.XXXXXX") && git worktree add -q --detach "$wt" "$1" >/dev/null 2>&1 || { guard_out='' guard_rc=2; return 2; }
+  guard_run "$wt" || rc=$?
+  git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  return "$rc"
+}
 guards() {
-  local t0=$SECONDS out rc=0 tests=() f
-  for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts; do [ ! -f "$f" ] || tests+=("$f"); done
-  [ -x tools/citadel-test ] && [ ${#tests[@]} -gt 0 ] || return 0
-  land_mark guards guards
-  out=$(CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&-) || rc=$?
+  local t0=$SECONDS rc=0
+  guard_run || rc=$?
   case $rc in
+    3) ;;
     0) say "guard tests passed on $short in $((SECONDS - t0)) s" ;;
-    2 | 124 | 137) say "the guard tests couldn't run or ran past ${LAND_GUARD_TIMEOUT:-120} s (exit $rc), so they don't decide: CI runs them" ;;
+    2) say "the guard tests couldn't run or ran past ${LAND_GUARD_TIMEOUT:-120} s (exit $guard_rc), so they don't decide: CI runs them" ;;
     *)
-      grep -v '^full output: ' <<<"$out" | tail -n 60 | sed 's/^/land: guard: /' >&2
-      retro_log "guard · $label · $(sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$out" | sort -u | paste -sd, -) · $((SECONDS - t0))s"
+      grep -v '^full output: ' <<<"$guard_out" | tail -n 60 | sed 's/^/land: guard: /' >&2
+      retro_log "guard · $label · $(guard_files) · $((SECONDS - t0))s"
       refuse "guard tests failed on $short, the branch rebased onto ${build:-main} (output above), so no CI run was spent and $untouched; $branch keeps the rebased work. Run citadel-test on that file, fix it, commit, then run this again" ;;
   esac
 }
@@ -1513,6 +1534,38 @@ train_build() {
   say "ship train: $branch takes the $((${#train_n[@]})) ships waiting behind it (${train_br[*]}): CI runs once on all $((${#train_n[@]} + 1)), and they ship together"
   retro_log "ship train · $label · ${#train_n[@]} riders: ${train_br[*]}"
 }
+# The guard tests on the train's top (#1479), as guards() ran them on this one: a rider's break with main or with the
+# ships before it is as cheap to catch here as this one's own was. Red: the train's prefixes are bisected with them (this
+# one passed), the first red rider is refused with their output before any CI run, and the train is built again
+# without it (the riders after it and the next in line), its new top checked the same way. Undecided, at the top or
+# at a step, names nobody: CI runs them.
+train_guards() {
+  local t0 lo hi mid i rc out files keep was t v
+  while [ ${#train_n[@]} -gt 0 ]; do
+    t0=$SECONDS rc=0
+    guard_at "$tip" || rc=$?
+    [ "$rc" = 1 ] || { [ "$rc" != 0 ] || say "guard tests passed on the ship train's top $short in $((SECONDS - t0)) s"; return 0; }
+    out=$guard_out lo=0 hi=${#train_n[@]}
+    while [ $((hi - lo)) -gt 1 ]; do
+      mid=$(((lo + hi) / 2)) rc=0
+      guard_at "$(train_at "$mid")" || rc=$?
+      if [ "$rc" = 1 ]; then hi=$mid out=$guard_out; elif [ "$rc" = 0 ]; then lo=$mid; else break; fi
+    done
+    [ "$rc" -lt 2 ] || { say "the guard tests failed on the ship train's top ($short) but couldn't decide on a step before it (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
+    i=$((hi - 1)) guard_out=$out files=$(guard_files)
+    say "the guard tests failed on the ship train's top ($short) in ${files:-the guard tests}, and on the train first with ${train_br[$i]} on it, so it is refused before any CI run and the train is built again without it"
+    retro_log "guard · ${train_br[$i]} · on $label's train · $files · $((SECONDS - t0))s"
+    train_say "$i" "refused $branch guard-tests guard ${files:-guards}" "$(grep -v '^full output: ' <<<"$out" | tail -n 40)"
+    train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
+    keep=("${train_n[@]:0:$i}" "${train_n[@]:$hi}") was=("${train_n[@]}")
+    train_tip=() train_br=() train_n=() train_was=()
+    tip=$own short=$(git rev-parse --short "$own")
+    train_build "${keep[@]}"
+    for t in "${was[@]}"; do # a rider the train no longer takes: back in line
+      [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
+    done
+  done
+}
 
 # <commit>: the gate on it. 0: green, 1: red (its log in $failed, its run in $ci_url; $reran when it was the one fresh
 # run after a red of flakes only), 2: no answer ($why).
@@ -1839,6 +1892,7 @@ train_suspects() {
     train_tip=() train_br=() train_n=() train_was=()
     tip=$own short=$(git rev-parse --short "$own")
     train_build "${keep[@]}"
+    train_guards
     top_say
     for t in "${was[@]}"; do # a rider the train no longer takes (it no longer rebases onto it, say): back in line
       [[ " ${train_n[*]} " != *" $t "* ]] && [[ $train_held != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
@@ -1863,28 +1917,37 @@ train_suspects() {
 # green part ships, the first red ship is refused with its own failure, and the ships after it go back in line. This
 # one's own commit red: the whole train goes back in line, and this one is refused as usual. A no-answer: the train
 # goes back in line, and this one falls back on its own.
+# Each step past this one's own commit runs the guard tests first (#1479): red there is the step's answer, with no CI run.
 train_bisect() {
-  local lo=-1 hi=${#train_n[@]} mid hf=$failed hu=$ci_url hr=$reran
+  local lo=-1 hi=${#train_n[@]} mid hf=$failed hu=$ci_url hr=$reran hg='' g
   say "CI is red on the ship train ($ci_url): finding the first ship that turned it red"
   queue_phase "finding the ship that turned the train red"
   while [ $((hi - lo)) -gt 1 ]; do
     mid=$(((lo + hi) / 2))
+    g=0
+    [ "$mid" = 0 ] || guard_at "$(train_at "$mid")" || g=$?
+    if [ "$g" = 1 ]; then
+      hi=$mid hf=$guard_out hu=guard-tests hr='' hg=$(guard_files)
+      hg=${hg:-guards}
+      say "the guard tests failed on the train up to ${train_br[$((mid - 1))]} ($(git rev-parse --short "$(train_at "$mid")")), so that step needs no CI run"
+      continue
+    fi
     rc=0
     gate "$(train_at "$mid")" || rc=$?
     busy_gate "$(train_at "$mid")"
     if [ "$rc" = 2 ]; then return; fi
-    if [ "$rc" = 0 ]; then lo=$mid; else hi=$mid hf=$failed hu=$ci_url hr=$reran; fi
+    if [ "$rc" = 0 ]; then lo=$mid; else hi=$mid hf=$failed hu=$ci_url hr=$reran hg=''; fi
   done
-  failed=$hf ci_url=$hu reran=$hr
+  [ -n "$hg" ] || failed=$hf ci_url=$hu reran=$hr # a guard red's step had no CI run
   if [ "$hi" = 0 ]; then
     say "the bisect found $branch itself red, so the ships behind it go back in line"
     train_drop
     rc=1
     return
   fi
-  say "the bisect found ${train_br[$((hi - 1))]} the first ship that turned the train red ($hu): it is refused, and the ${lo} before it ship"
-  retro_log "ship train red · $label · ${train_br[$((hi - 1))]} · $hu"
-  train_say $((hi - 1)) "refused $branch $hu" "$(tail -n 40 <<<"$hf")"
+  say "the bisect found ${train_br[$((hi - 1))]} the first ship that turned the train red (${hg:+its guard tests failed in $hg, with no CI run on it: }$hu): it is refused, and the ${lo} before it ship"
+  retro_log "ship train red · $label · ${train_br[$((hi - 1))]} · $hu${hg:+ $hg}"
+  train_say $((hi - 1)) "refused $branch $hu${hg:+ guard $hg}" "$(grep -v '^full output: ' <<<"$hf" | tail -n 40)"
   train_drop "$hi"
   train_tip=("${train_tip[@]:0:$((hi - 1))}") train_br=("${train_br[@]:0:$((hi - 1))}") train_n=("${train_n[@]:0:$((hi - 1))}") train_was=("${train_was[@]:0:$((hi - 1))}")
   tip=$(train_at "$lo") short=$(git rev-parse --short "$(train_at "$lo")") rc=0
@@ -1915,6 +1978,7 @@ else
     done
   }
   train_build
+  train_guards
   top_say
   early_gate
   gate "$tip" || rc=$?

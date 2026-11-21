@@ -125,3 +125,28 @@ test('a file in another minion\'s shared folder shows a short path, never the se
   assert.equal(displayPath(app, ticket, '/data/projects/2/shared/1974/critic.md'), 'shared files/critic.md');
   assert.equal(displayPath(app, ticket, '/data/projects/2/shared/882/a.md'), 'shared files/a.md');
 });
+
+test('a branch already in main still lists the files it added (#1345)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifacts-merged-'));
+  try {
+    const g = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'pipe' });
+    const origin = join(root, 'origin');
+    mkdirSync(origin);
+    g(origin, 'init', '-q', '-b', 'main');
+    writeFileSync(join(origin, 'old.md'), 'old');
+    g(origin, 'add', '.');
+    g(origin, 'commit', '-qm', 'base');
+    const work = join(root, 'work');
+    g(root, 'clone', '-q', origin, work);
+    g(work, 'checkout', '-qb', 'ticket/77-thing');
+    writeFileSync(join(work, 'mine.md'), 'm');
+    g(work, 'add', '.');
+    g(work, 'commit', '-qm', '#77: add mine');
+    g(origin, 'pull', '-q', work, 'ticket/77-thing'); // shipped: main now holds it
+    g(work, 'fetch', '-q', 'origin');
+    g(work, 'remote', 'set-head', 'origin', 'main');
+    assert.deepEqual((await findArtifacts(work, true)).map((f) => f.path), ['mine.md']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

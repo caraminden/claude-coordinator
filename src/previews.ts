@@ -140,6 +140,8 @@ export class Previews {
   // Keyed by ticket id, or buildKey(n) for a build's.
   private running = new Map<string, Running>();
   private starting = new Map<string, Promise<Running>>();
+  /** Boots that passed the cap check but are not in `running` yet: they count against `max`. */
+  private booting = new Set<string>();
   private stopping = new Map<string, Promise<void>>();
   /** A ticket's offer changed (its view's preview flag). */
   onChange: (ticketId: number) => void = () => {};
@@ -250,7 +252,10 @@ export class Previews {
   private boot(key: string, cwd: string, prepare?: () => Promise<void>): Promise<Running> {
     const pending = this.starting.get(key);
     if (pending) return pending;
-    const job = this.spawnPreview(key, cwd, prepare).finally(() => this.starting.delete(key));
+    const job = this.spawnPreview(key, cwd, prepare).finally(() => {
+      this.starting.delete(key);
+      this.booting.delete(key);
+    });
     this.starting.set(key, job);
     return job;
   }
@@ -260,10 +265,16 @@ export class Previews {
     // Also waits out a stop already under way, which would otherwise delete the new copy.
     await this.halt(key);
     await prepare?.();
-    while (this.running.size >= this.max) {
-      const [lru] = [...this.running].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      await this.halt(lru);
+    while (this.running.size + this.booting.size >= this.max) {
+      if (this.running.size) {
+        const [lru] = [...this.running].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+        await this.halt(lru);
+      } else {
+        // Only boots under way hold the slots: wait for one to come up (then it can be halted) or fail.
+        await Promise.race([...this.booting].map((k) => this.starting.get(k)?.catch(() => {}) ?? Promise.resolve()));
+      }
     }
+    this.booting.add(key);
     const dir = join(this.root, key);
     rmSync(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });

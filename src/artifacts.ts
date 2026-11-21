@@ -115,6 +115,13 @@ async function gitAdded(cwd: string): Promise<string[]> {
     const [base] = await git(['merge-base', 'HEAD', 'refs/remotes/origin/HEAD'], cwd);
     const added = await git(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=A', base.trim()], cwd);
     for (const f of added) files.add(f);
+    // A shipped branch is in main: no diff left. Its commits there start with "#<its number>" (land.sh's convention).
+    const [branch] = await git(['symbolic-ref', '-q', '--short', 'HEAD'], cwd).catch(() => []);
+    const n = /^ticket\/(\d+)-/.exec(branch ?? '')?.[1];
+    if (n && (await git(['rev-parse', 'HEAD'], cwd))[0]?.trim() === base.trim()) {
+      const out = await git(['log', '-z', '-E', `--grep=^#${n}[: ]`, '--max-count=200', '--name-only', '--format=', '--no-renames', '--diff-filter=A', 'HEAD'], cwd);
+      for (const f of out) files.add(f);
+    }
   } catch {
     // No origin/HEAD to compare against; untracked files are all we can tell apart.
   }

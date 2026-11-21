@@ -279,7 +279,7 @@ createServer((req, res) => {
 test('stopping a preview waits for its process to exit before deleting its copy', async () => {
   // A preview that ignores SIGTERM and keeps writing into its folder, as a shutting-down server does
   // (its exit handler removes run/mcp-<pid>, which made a delete racing it leave the folder behind).
-  const d3 = join(root, 'data3');
+  const d3 = join(root, 'data-cap');
   mkdirSync(d3);
   const s3 = new Store(join(d3, 'coordinator.db'));
   const t = s3.createTicket({ project_id: s3.createProject('Three', null).id, title: 'Stubborn', permission_mode: 'default', created_by: 'Cara' });
@@ -346,5 +346,27 @@ test('copyData finishes while another connection keeps writing the source (#1204
     copy.close();
   } finally {
     stop = true; await spin; writer.close(); db.close(); rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('two boots at once cannot pass the cap (#1345)', async () => {
+  const d3 = join(root, 'data-cap');
+  mkdirSync(d3);
+  const s3 = new Store(join(d3, 'coordinator.db'));
+  const p3 = s3.createProject('Three', null);
+  const make = (n: number) => {
+    const t = s3.createTicket({ project_id: p3.id, title: `T${n}`, permission_mode: 'default', created_by: 'Cara' });
+    s3.setTicketDir(t.id, worktree(`wt-cap-${n}`), `ticket/${n}`);
+    return s3.getTicket(t.id)!;
+  };
+  const [a, b] = [make(1), make(2)];
+  const previews = new Previews(s3, d3);
+  previews.max = 1;
+  try {
+    await Promise.all([previews.start(a), previews.start(b)]);
+    assert.equal([a, b].filter((t) => previews.isRunning(t.id)).length, 1);
+  } finally {
+    await previews.stop(a.id, true);
+    await previews.stop(b.id, true);
   }
 });

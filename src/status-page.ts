@@ -15,7 +15,7 @@ import { appBackup, readBackups, backupProblems, type BackupInfo } from './backu
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
-import { every, type Job } from './every.ts';
+import { every, jobList, type JobRow, type Job } from './every.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -456,6 +456,8 @@ export class StatusPage {
       host: { series, latest, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
+      // Every periodic job (#1311), for those who see Citadel's scheme.
+      jobs: ciVisible ? jobList(now) : [],
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,
       unitsFailed: units === null,
@@ -560,6 +562,8 @@ export interface CitadelStatus {
   host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
+  /** Every periodic job (#1311): empty for a viewer who can't see Citadel's scheme. */
+  jobs: (JobRow & { overdue: boolean; slow: boolean })[];
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
   /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
   ciVisible: boolean;

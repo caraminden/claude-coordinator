@@ -209,6 +209,22 @@ const perDay = (days, xs) => days.map((d, i) => `${shortDay(d)} ${xs[i]}`).join(
 const perHour = (series, idx) => series.slice(-24).map((s) => `${pacificClockBare(s[0])} ${s[idx]}`).join(', ');
 const slot = (s) => h('section', { class: 'st-tile st-slot', 'data-slot': s.key }, h('h4', {}, s.title), h('div', { class: 'st-sub muted' }, s.note));
 
+/** Every periodic job (#1311): how often, its last run and how long it took; overdue (3 periods without a run), slow (over 1 s) or failing ones first. */
+function jobsTile(jobs, now) {
+  const flags = (j) => [j.overdue && ['danger', 'overdue'], j.slow && ['warn', 'slow'], j.error && j.errorAt >= (j.last ?? 0) && ['danger', 'failed']].filter(Boolean);
+  const bad = jobs.filter((j) => flags(j).length);
+  const every = (ms) => ms >= 3_600_000 ? `every ${ms / 3_600_000} h` : ms >= 60_000 ? `every ${ms / 60_000} min` : `every ${ms / 1000} s`;
+  const sorted = [...bad, ...jobs.filter((j) => !flags(j).length)];
+  return tile('Jobs', bad.length ? `${plural(bad.length, 'job')} to look at` : 'All running', `${plural(jobs.length, 'periodic job')}; a slow one's freeze, if any, is on Stalls`,
+    h('ul', { class: 'st-list st-jobs' }, ...sorted.flatMap((j) => [h('li', {},
+      h('code', {}, j.name),
+      h('span', { class: 'muted' }, `${every(j.ms)} · ${j.last ? `last ${ago(j.last)}${j.took !== null ? `, took ${j.took < 1000 ? `${j.took} ms` : secs(j.took / 1000)}` : ', running'}` : 'not run yet'}${j.fails ? ` · ${plural(j.fails, 'failure')}` : ''}`),
+      ...flags(j).map(([tone, word]) => toneChip(tone, word))),
+      // The last error under its job, in full: a fixed-width list row would cut it.
+      j.error ? h('li', { class: 'st-job-error muted' }, `${j.name}: last error ${ago(j.errorAt)}: ${j.error}`) : '']).filter(Boolean)),
+    { tone: bad.some((j) => j.overdue || flags(j).some(([t]) => t === 'danger')) ? 'bad' : bad.length ? 'warn' : null, wide: true, key: 'jobs', chart: bad.map((j) => `${j.name}: ${flags(j).map((f) => f[1]).join(', ')}${j.error ? ` (${j.error})` : ''}`).join('; ') });
+}
+
 function citadelTiles(c, days, now, ships, redraw) {
   const today = days.length - 1;
   const lastStall = c.stalls.last;
@@ -227,6 +243,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       dayBars(days, c.stalls.counts, { tip: (i) => `${plural(c.stalls.counts[i], 'stall')}${c.stalls.counts[i] ? `, longest ${c.stalls.longest[i]} s` : ''}`, label: 'event-loop stalls a day' }),
       { key: 'stalls', chart: `stalls a day: ${perDay(days, c.stalls.counts)}; longest a day (s): ${perDay(days, c.stalls.longest)}` }),
     stormTile(c.storms, days, now),
+    ...(c.jobs?.length ? [jobsTile(c.jobs, now)] : []),
     tile('Memory', mem === null ? 'No reading yet' : `${mem}% used`, host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes',
       hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), { tone: mem !== null && mem >= 90 ? 'warn' : null, key: 'memory', chart: `% used, hourly worst: ${perHour(c.host.series, 1)}` }),
     tile('CPU', host ? `load ${host.load1.toFixed(1)} on ${c.host.cores} cores` : 'No reading yet',

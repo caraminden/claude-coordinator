@@ -41,7 +41,7 @@ if [ "$runs" -gt 0 ]; then
   # A test that skipped (a missing tool, such as pwsh for the .ps1 lint) proves nothing, so one run first must skip none
   # (#1519 CB2). burn-in.sh keeps no copy's output, so this run is its own.
   log=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/flake-proof.XXXXXX")
-  (unset NODE_TEST_CONTEXT; "$here/citadel-node" --test --test-force-exit --test-reporter=spec "$file") >"$log" 2>&1
+  (unset NODE_TEST_CONTEXT; timeout -k 10 "${BURN_IN_FILE_LIMIT:-600}" nice -n 19 "$here/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-reporter=spec "$file") >"$log" 2>&1
   if ! grep -q '^ℹ skipped 0$' "$log"; then
     grep -E '^ *﹣|^ℹ (skipped|fail)' "$log" | head -n 20
     rm -f "$log"

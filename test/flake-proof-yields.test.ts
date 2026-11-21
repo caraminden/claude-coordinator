@@ -25,8 +25,8 @@ test('burners and test runs start under nice -n 19', () => {
 
 test('a batch runs its copies at once (#1443), each in its own TMPDIR', () => {
   const dir = mkdtempSync(join(tmpdir(), 'fp-copies-'));
-  // each copy logs its TMPDIR, then waits for all three to have started: run one after another, it would time out
-  writeFileSync(join(dir, 'nice'), `#!/usr/bin/env bash\nshift 2\ncase "$*" in *citadel-node*) echo "$TMPDIR" >>${dir}/dirs; for i in $(seq 100); do [ "$(wc -l <${dir}/dirs)" -ge 3 ] && break; sleep 0.05; done; [ "$(wc -l <${dir}/dirs)" -ge 3 ] || exit 9;; esac\nexec "$@"\n`);
+  // each copy (not the skip check's run before them) logs its TMPDIR, then waits for all three to have started: run one after another, it would time out
+  writeFileSync(join(dir, 'nice'), `#!/usr/bin/env bash\nshift 2\ncase "$TMPDIR $*" in */burn-in.*citadel-node*) echo "$TMPDIR" >>${dir}/dirs; for i in $(seq 100); do [ "$(wc -l <${dir}/dirs)" -ge 3 ] && break; sleep 0.05; done; [ "$(wc -l <${dir}/dirs)" -ge 3 ] || exit 9;; esac\nexec "$@"\n`);
   chmodSync(join(dir, 'nice'), 0o755);
   writeFileSync(join(dir, 'x.test.ts'), "import { test } from 'node:test'; test('ok', () => {});\n");
   const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '3', '1'], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: '' }, encoding: 'utf8' });

@@ -209,15 +209,15 @@ async function main(argv: string[]): Promise<number> {
   let completed = false;
   let cancelled = false;
   /** The dispatch answers with no run id: the run is found by its name, which carries the id. */
-  const findRun = (): number | null => {
-    const runs = gh([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run').workflow_runs ?? [];
+  const findRun = (tries = 3): number | null => {
+    const runs = gh([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run', tries).workflow_runs ?? [];
     return runs.find((r: any) => r.display_title === `heavy ${id}`)?.id ?? null;
   };
   /** False when a run exists, or may, and GitHub refused to cancel it: it may still run, so nothing runs here too. A run
    *  dispatched but not found yet is looked for a while first, so a stop or a fallback can't leave it to start later (CB4). */
   const cancel = () => {
     for (let n = 0; dispatched && !runId && n < 15; n++) {
-      try { runId = findRun(); } catch { /* looked again below */ }
+      try { runId = findRun(1); } catch { /* looked again below: one try each, so a stop waits about 30 s, not minutes */ }
       if (!runId) sleepSync(Math.min(2, poll));
     }
     if (dispatched && !runId) return false;
@@ -299,7 +299,7 @@ async function main(argv: string[]): Promise<number> {
     // CI (a run can go from queued to completed between two looks, leaving `started` false: CB1, #1519).
     if (e instanceof Fallback || (!started && !completed)) {
       // A run still queued must not start after this runs here.
-      if (!cancel()) { say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run; nothing runs here`); return 1; }
+      if (!cancel()) { say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run, or it couldn't be found yet; nothing runs here: look for "heavy ${id}" in ${slug}'s Actions and cancel it there`); return 1; }
       throw e instanceof Fallback ? e : new Fallback(String((e as Error).message));
     }
     say(`${(e as Error).message}; the CI run is cancelled and nothing more runs here`);

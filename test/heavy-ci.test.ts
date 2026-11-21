@@ -276,5 +276,5 @@ test('a dispatched run found only after the fallback is cancelled before it runs
   const lost = run(l, 'lost', { CITADEL_HEAVY_CI_FIND: '0.1' });
   assert.equal(lost.status, 1, lost.stderr);
   assert.doesNotMatch(lost.stdout, /ran here/);
-  assert.match(lost.stderr, /GitHub wouldn't cancel the CI run; nothing runs here/);
+  assert.match(lost.stderr, /or it couldn't be found yet; nothing runs here: look for "heavy /);
 });

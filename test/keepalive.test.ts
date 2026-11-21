@@ -99,7 +99,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const calls = join(root, 'calls.jsonl');
-// Logs its prompt, then ends on its folder's release file (or at once for a keepalive, as claude would), with a
+// Logs its prompt, then ends on its folder's release file (or at once for a keepalive, as claude would, unless a hold file is there), with a
 // result carrying a running cost and the usage in usage.json (a warm read by default).
 const fake = join(root, 'claude-fake');
 writeFileSync(
@@ -358,6 +358,20 @@ test('a deploy that goes live during a keepalive is handled when it ends (2A3)',
   store.addEvent(id, 'question', { id: 'q1', questions: [] });
   await duringKeepalive(id, end, () => assert.equal(runner.deployLive(id), false, 'it waits for the running turn'));
   assert.ok(notesOf(id).includes('The deploy is live, but a question card is still open, so this minion stays open.'));
+});
+
+test('a minion waiting on its ship gets a keepalive too, and a ship that ends during it still dismisses it (#1274)', async () => {
+  const id = minion();
+  const end = pst(14, 5);
+  await realTurn(id, end);
+  store.updateTicket(id, { state: 'outside', note: 'landing: in line' });
+  // The ship goes through while the ping runs: src/land.ts asks for the dismissal at the turn's end.
+  await duringKeepalive(id, end, () => {
+    assert.equal(store.getTicket(id)!.state, 'outside', 'its state stays');
+    assert.ok(runner.closeAfterTurn(id, 'Shipped.'));
+  });
+  await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
+  assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
 });
 
 test('no keepalive outside the window or past the 8-hour cap', async () => {

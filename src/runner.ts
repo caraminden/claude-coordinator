@@ -2626,7 +2626,7 @@ export class Runner {
     }
   }
 
-  /** Whether a minion is waiting on a person with a warm cache that a keepalive would keep (keepaliveSweep). */
+  /** Whether a minion waiting on a person or on its ship has a warm cache that a keepalive would keep (keepaliveSweep). */
   private wantsKeepalive(t: Ticket, p: Project, now: number): boolean {
     return !this.keepaliveGate(t, p, now);
   }
@@ -2643,7 +2643,9 @@ export class Runner {
     if (this.killWait(t.id)) return 'kill wait';
     if (this.parked(t)) return 'parked';
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
-    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || this.store.openCardsOf(t.id).length)) return `state ${t.state}`;
+    // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
+    // and about 30 a day of them were woken cold by their ship's result an hour or more later.
+    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${t.state}`;
     if (!inWindow(now)) return 'hours';
     // Codex keeps no Claude cache.
     const person = this.turnPerson(t, p, []);

@@ -3,11 +3,14 @@
 # citadel.slice (MemoryMax=22G for everything Citadel runs). MemoryHigh makes the kernel reclaim from and
 # throttle these before they crowd out the server and the containers (2026-11-10: load ~100 with 19 GiB
 # swapped out). Measured 2026-11-19/20 (#1214): host turns up to 1.1G each; on 2026-11-20 18 turns at 350-650M
-# plus one land filled 10G and stalled (#1280). Whether to raise it is Josh's call after a week of storm records.
+# plus one land filled 10G and stalled (#1280). Raised 10G to 16G (#1328): at 16:05 PST on 2026-11-20 this slice sat at
+# 10.1G of 10G while citadel.slice had 6.3G free, and oomd killed 4 turns from 16:02 to 16:05. Cara, 2026-11-20:
+# picked "Raise to 16G" over waiting a week of storm records (Josh's earlier note), and called it "a stopgap though,
+# we need a REAL solution". Citadel's outer caps (19G soft, 22G hard) are unchanged, so it takes no more of the box.
 # No MemoryMax on purpose: it would OOM-kill turns. citadel.slice's MemoryMax is the hard stop. Container
 # turns carry their own caps on their unit (src/claude-link.ts CONTAINER_MEMORY).
 [Unit]
 Description=Host turns of Citadel
 
 [Slice]
-MemoryHigh=10G
+MemoryHigh=16G

@@ -3,8 +3,8 @@
  * than in perigee's /tmp, a 15 GB tmpfs every session shares, which their leftovers filled on 2026-10-31.
  * A folder is named by its ticket id; nothing but such a folder, directly under the root, is ever removed.
  */
-import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { readdir, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 
 const TICKET_NAME = /^[1-9]\d*$/;
@@ -46,4 +46,32 @@ export function sweepTmpDirs(root: string, keep: (ticketId: number) => boolean):
   const gone = names.filter((n) => TICKET_NAME.test(n) && !keep(Number(n))).map(Number);
   for (const id of gone) clearTmpDir(root, id);
   return gone;
+}
+
+/** A finished turn's folder renamed aside, awaiting its delete: not `<minion>-<ms>`, so no sweep takes it for a turn. */
+export const DROPPED_SUFFIX = '.gone';
+
+/**
+ * Remove a finished turn's folder without holding the server's thread (#1459): one cheap synchronous rename
+ * takes it out of sight, the delete runs async. Resolves once it is gone; never rejects.
+ */
+export function dropTurnDir(dir: string): Promise<void> {
+  let target = dir;
+  try {
+    target = `${dir}${DROPPED_SUFFIX}`;
+    renameSync(dir, target);
+  } catch {
+    target = dir; // already gone, or can't be renamed: the delete below copes with both
+  }
+  return rm(target, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Delete the leftovers of a crash mid-delete, in `root` and in the person folders under it, async. */
+export async function sweepDroppedTurnDirs(root: string): Promise<void> {
+  const names = await readdir(root).catch(() => [] as string[]);
+  const found = names.filter((n) => n.endsWith(DROPPED_SUFFIX)).map((n) => join(root, n));
+  for (const n of names.filter((n) => /^person-\d+$/.test(n))) {
+    for (const m of await readdir(join(root, n)).catch(() => [] as string[])) if (m.endsWith(DROPPED_SUFFIX)) found.push(join(root, n, m));
+  }
+  await Promise.all(found.map((d) => rm(d, { recursive: true, force: true }).catch(() => {})));
 }

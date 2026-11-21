@@ -31,7 +31,7 @@ import { accountUsageKey, usageKey } from './account-pick.ts';
 import { type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
-import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
+import { clearTmpDirLater, dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
@@ -1605,7 +1605,8 @@ export class Runner {
         const alive = wrapperAlive(dir); // once: a stale heartbeat reads all of /proc
         return alive === false || (alive === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);
       };
-      for (const dir of dirs) if (!followed.has(dir) && gone(dir)) rmSync(dir, { recursive: true, force: true });
+      for (const dir of dirs) if (!followed.has(dir) && gone(dir)) void dropTurnDir(dir);
+      void sweepDroppedTurnDirs(this.turnsDir); // a crash mid-delete (#1459)
     } catch {
       // No turns yet.
     }
@@ -3586,7 +3587,7 @@ export class Runner {
     else this.store.deleteSetting(keepaliveKey(ticketId));
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
     if (this.deployedMidTurn.delete(ticketId) && out.followUps.includes('deploy-note')) this.deployLive(ticketId);
-    rmSync(live.dir, { recursive: true, force: true });
+    void dropTurnDir(live.dir); // renamed aside at once, deleted off the thread (#1459)
     this.onFilesMayChange(ticketId);
     // The emulator lease (#1128) ends with the turn that took it.
     const endedTicket = this.store.getTicket(ticketId);
@@ -3619,7 +3620,7 @@ export class Runner {
       console.log(`[keepalive] minion ${ticketId}: its keepalive failed (${exit?.error ?? turn?.result?.text ?? `exit ${exit?.code ?? exit?.signal ?? 'unknown'}`}), so its series stops`);
       this.stopSeries(ticketId, 'failed');
     }
-    rmSync(live.dir, { recursive: true, force: true });
+    void dropTurnDir(live.dir); // renamed aside at once, deleted off the thread (#1459)
     if (!this.store.getTicket(ticketId)) {
       this.store.deleteSetting(savingKey(ticketId));
       return live.end();

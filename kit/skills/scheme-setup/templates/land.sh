@@ -72,7 +72,8 @@
 # for LAND_CI_DOWN seconds after a landing waited out one of those limits, no runner has taken this one's yet):
 # nothing is wrong with the branch and nothing landed, so park and run this again once a person says
 # the runners are back.
-# Its last line, however a landing ends (not --check, --lane, --verify, --into or --full), is the one Citadel reads:
+# Its last line, however a landing ends once under way (not --check, --lane, --verify, --into or --full, nor a refusal of
+# how it was run, before the smoke check: uncommitted changes, the wrong branch, a bad setting), is the one Citadel reads:
 #   ship: <landed|refused> <commit> batch <n> of <m> deploy <state|none>
 # <commit>: its own commit, 12 hex digits (the rebased one once it has one); batch: its place in the batch that
 # shipped together (1 of 1 alone; refused: the batch it was last in); deploy: none (this script deploys nothing).
@@ -941,7 +942,10 @@ g_last='' g_quiet='' # with batches, the head: when it last asked CI about the c
 # The timing line: when each phase began ($SECONDS; '' for not yet), and the phase a refusal from here on is at.
 # line: from getting in line to holding the lock (with batches: to its batch reaching the front); rebase: the rebase
 # and the check; ci-queue: until a runner took the job; ci-run: until CI's verdict. A rebuild starts the last three over.
+# A batch member that rides another's run (it never asks CI itself): ci-queue -, and ci-run from its batch reaching the
+# front until the batch was green (ride, below).
 T_start='' T_lock='' T_build='' T_built='' T_ci='' T_cirun='' T_gate='' at=smoke
+ride() { [ -z "$BATCH" ] || [ -n "$T_ci" ] || T_cirun=${T_lock:-$SECONDS} T_gate=$SECONDS; }
 SHIP_N=1 SHIP_M=1 # its place in its batch, and how many shipped with it (or, refused, were in its batch)
 ship_timing() (
   set +eu
@@ -954,7 +958,7 @@ ship_timing() (
   [ "$SHIP_M" = 1 ] || out="$out · batch $SHIP_N of $SHIP_M"
   dir=${TIMING_LOG:-$state/land-log}/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' "Written by the scheme's tools/land.sh (no session id, so one file per day): a timing line per landing that got in line, landed or not. Phase times in whole seconds, - for a phase never reached: line (waiting in line for the lock), rebase (the rebase and the check), ci-queue (until a runner took the job), ci-run (until CI's verdict)." >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' "Written by the scheme's tools/land.sh (no session id, so one file per day): a timing line per landing that got in line, landed or not. Phase times in whole seconds, - for a phase never reached: line (waiting in line for the lock, or for its batch to reach the front), rebase (the rebase and the check), ci-queue (until a runner took the job), ci-run (until CI's verdict; for a batch member riding another's run, from its batch reaching the front until the batch was green)." >>"$dir/land.md"
   printf -- '- %sZ · timing · %s · line %s · rebase %s · ci-queue %s · ci-run %s · %s\n' "$(date -u +%T)" "$branch" \
     "$(span "$T_start" "$T_lock")" "$(span "$T_build" "$T_built")" "$(span "$T_ci" "${T_cirun:-$T_gate}")" \
     "$(span "$T_cirun" "$T_gate")" "$out" >>"$dir/land.md"
@@ -1391,6 +1395,7 @@ batch_landed() {
     SHIP_M=$i
   done
   SHIP_N=$B_I
+  ride
   keep=$tip landed=ok
   say "landed in a batch with ${with#, }, on $on CI run (${BRANCH} is now $(git rev-parse --short=12 "refs/heads/$BRANCH"))"
   exit 0
@@ -1757,6 +1762,7 @@ while :; do
   sleep "$QUEUE_POLL"
 done
 at=landing
+ride
 
 # The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main; with
 # batches, main moves to G, the deepest green commit of its batch, which holds $tip.

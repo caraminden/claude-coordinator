@@ -651,7 +651,7 @@ test('batches: three share one run on the top commit; main moves once, straight 
     assert.deepEqual([a, b, d].map((l) => l.stderr().trimEnd().split('\n').pop()), [ta, tb, td].map((t, i) => `ship: landed ${t} batch ${i + 1} of 3 deploy none`));
     const timed = timingLines(join(c.state, 'land-log')).sort((x, y) => x.split(' · ')[2].localeCompare(y.split(' · ')[2]));
     assert.equal(timed.length, 3, timed.join('\n'));
-    timed.forEach((l, i) => assert.match(l, new RegExp(`· timing · ticket/${i + 1}-x · line \\d+ · rebase \\d+ · ci-queue ${i === 2 ? '\\d+' : '-'} · ci-run - · landed · batch ${i + 1} of 3$`)));
+    timed.forEach((l, i) => assert.match(l, new RegExp(`· timing · ticket/${i + 1}-x · line \\d+ · rebase \\d+ · ci-queue ${i === 2 ? '\\d+' : '-'} · ci-run ${i === 2 ? '-' : '\\d+'} · landed · batch ${i + 1} of 3$`)));
     assert.deepEqual([1, 2, 3].map(c.on), ['ticket/1-x', 'ticket/2-x', 'ticket/3-x']);
     assert.deepEqual([1, 2, 3].map((i) => branchAt(c, i)), [ta, tb, td], 'each branch sits on its own commit');
     assert.equal(readFileSync(join(c.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 1, 'only the head held the lock, so only it is timed');

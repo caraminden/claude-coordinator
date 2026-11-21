@@ -30,11 +30,10 @@ jobs:
     # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). Its wait for the lands
     # below holds its runner, which on the lands' runner would keep the land it waits for from starting.
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')) }}
-    # land.sh gives up on the run 10 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361), the clock step's up to 2
-    # min included, or 3 more (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374); this only stops one
-    # nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
+    # land.sh gives up on the run 6 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361), the clock step's up to 2 min included, or 3 more
+    # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
     # up to 30 more for the lands.
-    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 15 || 45 }}
+    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 12 || 45 }}
     steps:
       - uses: actions/checkout@v4
         with:

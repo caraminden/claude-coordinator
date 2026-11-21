@@ -808,7 +808,7 @@ CI_REF=land/$branch
 CI_STEP='the full suite' # the workflow's step that runs the tests; a run that fails in any other never ran them
 CI_CLOCK_STEP="the runner's clock" # the workflow's step that fails on a skewed runner clock
 CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
-CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-600} CI_POLL=${LAND_CI_POLL:-5}
+CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
 CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30} # how often a job waiting past CI_START asks whether a runner is online
 # The reruns alone get a window of their own (#1374, Cara 2026-11-20: "maybe that situation should restart the timer?
 # instead of globally raising it to 10m?"). On Nov 20 a busy desktop's full run took 295-351 s, so it ended past the

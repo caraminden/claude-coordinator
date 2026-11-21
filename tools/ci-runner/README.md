@@ -431,11 +431,11 @@ For Linux jobs, `runs-on: [self-hosted, <scheme-slug>-ci-linux]`; they need no `
 
 Citadel's suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one land's suite
 run at a time: two at once on that PC failed in a different file every run, 2026-11-11). Only the lands' runs may take
-the first runner: flake proofs (`flake-proof.yml`), the nightly and runs started by hand ask for the side label
+the first runner: flake proofs (`flake-proof.yml`), heavy jobs (`citadel-heavy.yml`, #1347), the desktop build (`desktop.yml`), the nightly and runs started by hand ask for the side label
 `citadel-ci-linux-side`, which only `-linux-2` carries (#1240: on 2026-11-20 proofs held both runners for three hours and
 every land fell back to perigee). Runners added before #1240 got the side label by hand, as the repo's admin:
 `gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-side'`.
-Without a runner carrying it, proofs and the nightly wait in GitHub's queue (up to a day) while lands go on.
+Without a runner carrying it, those wait in GitHub's queue (up to a day) while lands go on; `test/ci-runner-choice.test.ts` fails on a workflow job that could take the first runner.
 `.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
 thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the

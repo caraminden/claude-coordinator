@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux"]') }}
+    # Only the runner with the side label, so the first stays the ships' (#1240, #1347).
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

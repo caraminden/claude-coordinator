@@ -185,7 +185,7 @@ test('reds of flakes only keep its place twice at most, then it is refused back 
   assert.match(res.stderr, /\(2 of 2\)/);
   assert.doesNotMatch(res.stderr, /\(3 of 2\)/);
   assert.match(res.stderr, /only flakes failed again \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but it has kept its place 2 times already, so it is refused this time/);
-  assert.match(res.stderr, /on the one fresh run after a red of flakes only/);
+  assert.match(res.stderr, /on the one fresh run after a red whose files all passed alone/);
   assert.equal(keeps(shared).length, 2);
   assert.equal(pushes(c), 6, 'two runs a go, three goes');
 });
@@ -199,7 +199,7 @@ test('a second red with a real failure, a flake the ship changed, or leftover pr
     const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...(how === 'real' ? { FAKE_LOG_RERUN: 'mixed' } : {}), ...(how === 'leak' ? { FAKE_LEAK: '1' } : {}), COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, 1, how);
     assert.doesNotMatch(res.stderr, /keeping its place/, how);
-    assert.match(res.stderr, /on the one fresh run after a red of flakes only/, how);
+    assert.match(res.stderr, /on the one fresh run after a red whose files all passed alone/, how);
     assert.equal(pushes(c), 2, how);
   }
 });

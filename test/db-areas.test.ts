@@ -14,36 +14,33 @@ const STAYS = `attachState autoCheckpoint closedAtFromNotes deleteSetting dropEa
   shippingFromRules serverLoginOwnerOnly statePath`;
 
 /** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. */
-const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError addEvent addFlakeEvents addFlakeFix addGithubSeen
-  addHealthEvent addHostSample addMember addOpenrouterCall addPick addRelease addStepTimes adoptOwnerless appDeploysSince
-  appErrorsSince appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns briefStarts bugBriefs
-  canSee cardEventId chatTextEvents ciFiles claimBrief contraptionByKeyHash contraptionEnabled contraptionErrors
+const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError addEvent addFlakeEvents addFlakeFix addGithubSeen addHealthEvent
+  addHostSample addMember addOpenrouterCall addRelease addStepTimes adoptOwnerless appDeploysSince appErrorsSince
+  appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns briefStarts bugBriefs canSee
+  cardEventId chatTextEvents ciFiles claimBrief contraptionByKeyHash contraptionEnabled contraptionErrors
   contraptionReleases contraptionSession contraptionSessions contraptionsFor contraptionTurnsSince contraptionUsers
-  coordinatorFor countReleases createContraption createProject createTicket createUser dailyCosts deleteCiFile
-  deleteClaudeState deleteContraptionSession deleteCredential deleteProject deleteRepoCollaborator deleteSecret
-  deleteTicket deleteTurnAudit deleteUser deployedSince digestFor dropAudit endContraptionTurn eventIdAt eventsBefore
-  eventsBetween eventsOfKinds eventsPage fableSpend failCredential findArtifact findEvents findUser finishOpenrouterCall
-  flakeCounts flakeDetails flakeFiles flakeFix flakeFixes flakeSightings forgetCards getCiFile getClaudeState
-  getContraption getContraptionTurn getCoordinator getCredential getEvent getOverlord getProject getRepoCollaborator
-  getSecret getTicket getTicketByNumber getUser githubSeen hasActed hasFlakeNear healthBetween healthCount
-  healthEventsSince heldBelow hiddenProjects hostSamples inScheme insertEvent instructionHistory isAdmin isSplit
-  isTicketPinned lastApkPublish lastEventOf lastHealthEvent lastTurnEnd latestArtifact latestPlan leaveTouched
-  limitedTickets listArtifacts listClaudeState listContraptionDeploys listContraptions listCoordinators listCredentials
-  listEvents listMembers listOrder listProjects listReleases listRepoCollaborators listSecrets listTickets listTurns
-  listUsers liveReleasesSince markSeen memberSchemes minimizedProjects minionCosts minionOwner minionTurnsSince
-  nextNumber noteDigest noteLooks onboardingOpenedAt openCardAt openCardEventId openCards openCardsOf openCardsWhere
-  openrouterSpent ownerCoordinator personalInstructionHistory personalInstructions personalLayer personId personNotes
-  pickedCards picksOf pinnedArtifactPaths pinnedTickets planEvents promptHashes pruneArtifacts publishCiFile putCiFile
-  putClaudeState putContraptionSession putCredential putFates putRepoCollaborator putSecret putTurnAudit
-  readCardRows readsEveryScheme recap recentCards recordApkPublish recordGrunts recordTurn releasesSince removeMember
-  renameProject replyTexts rewriteClaudeEvents saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner
-  setAppInstructions setArtifactPinned setContraptionUser setEventData setLastActivity setListOrder
-  setOpenrouterCallPath setPersonalInstructions setPersonNote setProjectHidden setProjectInstructions
-  setProjectMinimized setProjectRepoDir setProjectSettings setProjectUpstream setSeenItems setSharedPin setTicketDir
-  setTicketPinned settleBrief setTurnVerdict sharedPins shipNotesSince shippedNotes shippedSince spendByPayer spendRows
-  splitScheme startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts ticketByBranch
-  ticketCost touch touchedBy turnAsker turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix
-  updateTicket updateTicketQuietly updateUser visibleProjects warmCardRows writeArtifactData`;
+  countReleases createContraption createProject createUser dailyCosts deleteCiFile deleteClaudeState
+  deleteContraptionSession deleteCredential deleteProject deleteRepoCollaborator deleteSecret deleteTurnAudit deleteUser
+  deployedSince dropAudit endContraptionTurn eventIdAt eventsBefore eventsBetween eventsOfKinds eventsPage fableSpend
+  failCredential findArtifact findEvents findUser finishOpenrouterCall flakeCounts flakeDetails flakeFiles flakeFix
+  flakeFixes flakeSightings forgetCards getCiFile getClaudeState getContraption getContraptionTurn getCredential
+  getEvent getProject getRepoCollaborator getSecret getUser githubSeen hasActed hasFlakeNear healthBetween healthCount
+  healthEventsSince heldBelow hiddenProjects hostSamples inScheme insertEvent instructionHistory isAdmin isTicketPinned
+  lastApkPublish lastEventOf lastHealthEvent lastTurnEnd latestArtifact latestPlan listArtifacts listClaudeState
+  listContraptionDeploys listContraptions listCredentials listEvents listMembers listOrder listProjects listReleases
+  listRepoCollaborators listSecrets listTurns listUsers liveReleasesSince markSeen memberSchemes minimizedProjects
+  minionCosts minionTurnsSince noteLooks onboardingOpenedAt openCardAt openCardEventId openCards openCardsOf
+  openCardsWhere openrouterSpent personalInstructionHistory personalInstructions personalLayer personNotes pickedCards
+  pinnedArtifactPaths pinnedTickets planEvents promptHashes pruneArtifacts publishCiFile putCiFile putClaudeState
+  putContraptionSession putCredential putFates putRepoCollaborator putSecret putTurnAudit readCardRows recap recentCards
+  recordApkPublish recordGrunts recordTurn releasesSince removeMember renameProject replyTexts rewriteClaudeEvents
+  saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner setAppInstructions setArtifactPinned
+  setContraptionUser setEventData setListOrder setOpenrouterCallPath setPersonalInstructions setPersonNote
+  setProjectHidden setProjectInstructions setProjectMinimized setProjectRepoDir setProjectSettings setProjectUpstream
+  setSeenItems setSharedPin setTicketPinned settleBrief setTurnVerdict sharedPins shipNotesSince shippedNotes
+  shippedSince spendByPayer spendRows startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts
+  ticketCost turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix updateUser visibleProjects
+  warmCardRows writeArtifactData`;
 
 /** The methods declared in src/db.ts's Store class body, by name. */
 function classMethods(): string[] {

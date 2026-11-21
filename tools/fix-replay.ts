@@ -120,7 +120,7 @@ type Run = { code: number | null; pass: number; fail: number; skipped: number; f
 function runTests(cwd: string, files: string[]): Run {
   const started = Date.now();
   const conc = String(Math.max(1, Math.floor(availableParallelism() / 2)));
-  const r = spawnSync('timeout', ['900', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000',
+  const r = spawnSync('timeout', ['300', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000',
     `--test-concurrency=${conc}`, '--test-global-setup=test/leak-guard.ts', ...files],
   { cwd, encoding: 'utf8', maxBuffer: 256 << 20, env: { ...process.env, CITADEL_HEAVY_HELD: '1' } });
   const out = (r.stdout ?? '') + (r.stderr ?? '');

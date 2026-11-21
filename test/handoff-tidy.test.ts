@@ -90,3 +90,33 @@ test('a name clash in shipped/ never overwrites, and only a top line marks not p
   assert.notEqual(a, b);
   assert.equal(markedNotPicked('# H\nGoal\n\n1\n2\n3\n4\n- Not picked: option B'), false);
 });
+
+test('a start naming a moved handoff makes no second ideas row, and reconcile does not throw (#1432)', () => {
+  const { dir, store, project, shared, file, minion } = setup();
+  file('x.md', '# Handoff X\nDo it.');
+  store.ideas.sync(project, shared);
+  tidyForClosed(store, dir, project, 'handoffs/x.md');
+  const t = minion('x', `Your brief is ${shared}/handoffs/x.md`);
+  store.ideas.sync(project, shared);
+  reconcileMoved(store, dir, project);
+  store.ideas.sync(project, shared);
+  const rows = store.db.prepare('SELECT card, handoff, ticket_id FROM ideas WHERE project_id = ?').all(project) as any[];
+  assert.equal(rows.length, 1, JSON.stringify(rows));
+  assert.equal(rows[0].card, 'handoffs/shipped/x.md');
+  assert.equal(rows[0].ticket_id, t.id);
+});
+
+test('relocate combines a loose row with its shipped twin, decided fields win, and one failure skips no other file (#1432)', () => {
+  const { dir, store, project, shared, file } = setup();
+  file('a.md'); file('b.md');
+  for (const n of ['a', 'b']) {
+    mkdirSync(join(shared, 'handoffs/shipped'), { recursive: true });
+    writeFileSync(join(shared, `handoffs/shipped/${n}.md`), '# x');
+    store.ideas.upsert(project, '', `handoffs/shipped/${n}.md`, { handoff: `handoffs/shipped/${n}.md` });
+    store.ideas.upsert(project, '', `handoffs/${n}.md`, { handoff: `handoffs/${n}.md`, pick: 'go', decided_by: 'Cara' });
+  }
+  rmSync(join(shared, 'handoffs/a.md')); rmSync(join(shared, 'handoffs/b.md'));
+  reconcileMoved(store, dir, project);
+  const rows = store.db.prepare('SELECT card, pick FROM ideas WHERE project_id = ? ORDER BY card').all(project) as any[];
+  assert.deepEqual(rows.map((r) => [r.card, r.pick]), [['handoffs/shipped/a.md', 'go'], ['handoffs/shipped/b.md', 'go']]);
+});

@@ -66,7 +66,16 @@ export function tidyForClosed(store: Store, dataDir: string, projectId: number, 
 export function relocate(store: Store, projectId: number, shared: string, from: string, to: string) {
   store.db.prepare('UPDATE OR IGNORE brief_starts SET path = ? WHERE project_id = ? AND path = ?').run(join(shared, to), projectId, join(shared, from));
   store.db.prepare('UPDATE ideas SET handoff = ? WHERE project_id = ? AND handoff = ?').run(to, projectId, from);
-  store.db.prepare('UPDATE ideas SET card = ? WHERE project_id = ? AND card = ? AND page = ?').run(to, projectId, from, '');
+  const loose = store.db.prepare("SELECT id FROM ideas WHERE project_id = ? AND page = '' AND card = ?").get(projectId, from) as { id: number } | undefined;
+  const twin = store.db.prepare("SELECT id FROM ideas WHERE project_id = ? AND page = '' AND card = ?").get(projectId, to) as { id: number } | undefined;
+  if (loose && !twin) store.db.prepare('UPDATE ideas SET card = ? WHERE id = ?').run(to, loose.id);
+  // A second row already made for the moved file (#1432): the twin keeps what it has, takes what only the loose row has, and the loose row goes.
+  else if (loose && twin) {
+    const cols = ['title', 'source_number', 'pick', 'pick_label', 'decided_by', 'words', 'decided_at', 'ticket_id', 'number', 'status_manual', 'manual_by', 'manual_at'];
+    store.db.prepare(`UPDATE ideas SET ${cols.map((c) => `${c} = COALESCE(NULLIF(${c}, ''), (SELECT ${c} FROM ideas WHERE id = ?))`).join(', ')},
+      link_manual = MAX(link_manual, (SELECT link_manual FROM ideas WHERE id = ?)) WHERE id = ?`).run(...cols.map(() => loose.id), loose.id, twin.id);
+    store.db.prepare('DELETE FROM ideas WHERE id = ?').run(loose.id);
+  }
 }
 
 /** Rows still naming a handoff that is gone from handoffs/ but sits in shipped/ or not-picked/ (the sweep moves files only): follow it. */
@@ -82,6 +91,8 @@ export function reconcileMoved(store: Store, dataDir: string, projectId: number)
   for (const rel of rels) {
     if (!gone(rel)) continue;
     const to = where(rel);
-    if (to) relocate(store, projectId, shared, rel, to);
+    if (!to) continue;
+    // One file's failure must not skip the scheme's other files.
+    try { relocate(store, projectId, shared, rel, to); } catch (e) { console.error(`handoff tidy: ${rel}: ${(e as Error).message}`); }
   }
 }

@@ -204,8 +204,8 @@ export class Pusher {
    * project, people who hid it (#226), and pinned-only devices whose person hasn't pinned this minion (the Taskmaster
    * can't be pinned, so it always gets through). Who it is for: a card's addressee alone (#687); else for a minion with an
    * owner (`assigned`, #690; Cara, 2026-11-14: "Owner only, switch for all"), its owner, whoever pinned it, and devices
-   * set to everything in this scheme; else (the Taskmaster, an unassigned minion, an owner gone from the scheme) everyone
-   * in it. A spend alert (#723) also reaches the turn's own person. Resolves once every push service has answered.
+   * set to everything in this scheme (an assignee gone from the scheme hands it to the scheme's owner, #1449); else (the
+   * Taskmaster, an unassigned minion) everyone in it. A spend alert (#723) also reaches the turn's own person. Resolves once every push service has answered.
    */
   async notify(ticket: Ticket, trigger: PushTrigger, except: string | null = null): Promise<void> {
     const project = this.store.getProject(ticket.project_id);
@@ -231,11 +231,10 @@ export class Pusher {
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
-  /** A minion's owner's name, lowercased, while they're still in its scheme; null for none, so everyone hears (a missed ping is worse than an extra one). */
+  /** A minion's owner's name, lowercased (Store.minionPerson: the scheme's owner once its assignee is gone, #1449); null for none, so everyone hears. */
   private owner(ticket: Ticket): string | null {
-    const raw = String(this.store.props.forTarget('minion', ticket.id).assigned ?? '').trim();
-    const name = raw && (this.store.props.personName(raw) ?? raw);
-    return name && this.inScheme(name, ticket.project_id) ? name.toLowerCase() : null;
+    const id = this.store.minionPerson(ticket);
+    return id == null ? null : this.store.getUser(id)?.name.toLowerCase() ?? null;
   }
 
   /**

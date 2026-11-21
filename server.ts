@@ -509,7 +509,7 @@ if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
-runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
+runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
 runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.

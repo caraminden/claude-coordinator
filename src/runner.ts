@@ -61,7 +61,7 @@ import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stag
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
-import { turnPayer } from './access.ts';
+import { payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
@@ -733,9 +733,12 @@ export class Runner {
     const shared = project && this.sharedDir(project);
     // Its pushes and gh calls go out as the person the minion's turns run for, as from the turn (#911): the box's gh
     // login can't see a member's private repo. Its gh folder is the person's, since the land outlives the turn's folder.
-    const person = (this.turns.has(ticket.id) ? this.store.getSetting<TurnState>(turnKey(ticket.id))?.person : null) ?? ticket.person_id;
+    // Outside a turn (a fast-mode verify, a queued hand-off) its last person, while still an enabled member, else the owner (#1449).
+    const live = this.turns.has(ticket.id) ? this.store.getSetting<TurnState>(turnKey(ticket.id))?.person : null;
+    const last = project ? payerInScheme(this.store, project, ticket.person_id) : ticket.person_id;
+    const person = live ?? (project && this.store.getUser(last ?? -1)?.disabled_at ? project.owner_id : last);
     const github = this.githubFor?.(person, join(this.dataDir, 'people', String(person ?? 'nobody')))?.env;
-    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
+    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, person), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
   }
 
   /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */
@@ -755,7 +758,7 @@ export class Runner {
   /** Other children of this server a restart would kill: landings that fell back to a child (src/land.ts), contraption turns, app deploys, ultra reviews. */
   hostJobs?: () => number;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
-  refuseTurn?: (ticket: Ticket, author: string, from?: number) => string | null;
+  refuseTurn?: (ticket: Ticket, author: string, from?: number, asker?: number | null) => string | null;
   /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
@@ -2127,7 +2130,7 @@ export class Runner {
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
-    const refused = ticket && this.refuseTurn?.(ticket, author, extra.from);
+    const refused = ticket && this.refuseTurn?.(ticket, author, extra.from, askedBy);
     if (refused) {
       const event = this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
       this.emit(ticketId, 'note', { text: refused });

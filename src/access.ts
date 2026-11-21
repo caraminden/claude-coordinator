@@ -38,12 +38,17 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
  * With none of those, the minion's last person, else the scheme's owner. Anyone picked by a fallback rather than by
  * their own message (a relay's asker, a Taskmaster's person, the minion's last person) must still be in the scheme:
  * someone taken out of it (or deleted) no longer pays for its turns, its owner does (#211, #1270). A disabled person
- * is still picked, so their turn is refused (turnPlace) rather than moved onto someone else's plan.
+ * is still picked, so their turn is refused (turnPlace) rather than moved onto someone else's plan. A message whose author
+ * names no person but which carries an `asker` (a contraption's ask to the Taskmaster, sent under the contraption's label)
+ * is that asker's, checked like a relay's (#1449).
  */
-export function turnPayer(store: Store, ticket: Ticket, project: Project, batch: { author: string; from?: number }[], personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
-  const inScheme = (p: number | null) => {
-    const user = p === null ? undefined : store.getUser(p);
-    return user && store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? p : project.owner_id;
+export function turnPayer(store: Store, ticket: Ticket, project: Project, batch: { author: string; from?: number; asker?: number | null }[], personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
+  const inScheme = (p: number | null) => payerInScheme(store, project, p);
+  // Whose ask a message is, and whether that was picked for it (a relay's or a contraption's asker) rather than written by them.
+  const askOf = (m: { author: string; from?: number; asker?: number | null }) => {
+    const p = personOf(m.author, m.from);
+    if (p) return { p, picked: !!m.from };
+    return m.asker != null ? { p: m.asker, picked: true } : null;
   };
   if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);
   // A message from someone disabled after it queued is still theirs (personOf drops them): its turn is refused, not moved onto another login.
@@ -53,15 +58,21 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
   // there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail name
   // no person, so they leave it on its person's.
   if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
-    const starter = batch.find((m) => !m.from && personOf(m.author));
-    return inScheme((starter && personOf(starter.author)) || ticket.coordinator_of);
+    const starter = batch.filter((m) => !m.from).map(askOf).find((a) => a);
+    return inScheme(starter?.p ?? ticket.coordinator_of);
   }
   for (const m of batch) {
-    const p = personOf(m.author, m.from);
-    if (p) return m.from ? inScheme(p) : p;
+    const a = askOf(m);
+    if (a) return a.picked ? inScheme(a.p) : a.p;
   }
   const overlord = ticket.kind === 'coordinator' && ticket.coordinator_of == null && store.isSplit(ticket.project_id);
   return !overlord && ticket.person_id != null ? inScheme(ticket.person_id) : project.owner_id;
+}
+
+/** `person` while they may still be paid for in this scheme (a member, its owner, or an admin), else the scheme's owner (#211, #1270). */
+export function payerInScheme(store: Store, project: Project, person: number | null): number | null {
+  const user = person === null ? undefined : store.getUser(person);
+  return user && store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? person : project.owner_id;
 }
 
 /**
@@ -70,10 +81,10 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
  * and Max plans are per person). A message is checked against whoever its turn would run for, by turnPayer's rule
  * (#468 S02-2, #1270); a disabled person's own message is refused as theirs.
  */
-export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null, from?: number): string | null {
+export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null, from?: number, asker?: number | null): string | null {
   const project = store.getProject(ticket.project_id);
   const named = from ? undefined : store.findUser('name', author);
-  const id = project ? turnPayer(store, ticket, project, [{ author, from }], messagePerson(store)) : null;
+  const id = project ? turnPayer(store, ticket, project, [{ author, from, asker }], messagePerson(store)) : null;
   const who = store.getUser(id ?? -1);
   if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";
   // Worded for the owner when it runs on their plan for a message they didn't write (GitHub, a schedule, a relay).

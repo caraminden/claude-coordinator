@@ -111,14 +111,36 @@ export const minionQueries = {
     }
   },
 
-  /** The person a minion reports to (#919): `assigned`, else `requestedBy`, else nobody (the Overlord). */
+  /**
+   * The person a minion reports to (#919): `assigned`, else `requestedBy`, else nobody (the Overlord). One who no longer
+   * hears from the scheme (minionPerson) hands it to the scheme's owner, so it never reports to a gone person's Taskmaster (#1449).
+   */
   minionOwner(this: Store, ticket: Pick<Ticket, 'id'>): number | null {
     const props = this.props.forTarget('minion', ticket.id);
-    for (const key of ['assigned', 'requestedBy']) {
-      const id = this.personId(props[key]);
-      if (id != null) return id;
-    }
-    return null;
+    const key = ['assigned', 'requestedBy'].find((k) => String(props[k] ?? '').trim());
+    return key ? this.minionPerson(ticket, key) : null;
+  },
+
+  /**
+   * Who a minion's cards and pings are for (#1449): its `assigned` person (or `key`'s) while they still hear from the
+   * scheme; when it names someone who doesn't (taken out of it, disabled, hid it, or nobody), the scheme's owner if they
+   * do; else null, as for a minion assigned to no one: everyone's. Push, the Needs-you list and minionOwner all ask this.
+   */
+  minionPerson(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, key = 'assigned'): number | null {
+    const raw = this.props.forTarget('minion', ticket.id)[key];
+    if (!String(raw ?? '').trim()) return null;
+    const projectId = ticket.project_id ?? this.getTicket(ticket.id)?.project_id;
+    if (projectId == null) return null;
+    const id = this.personId(raw);
+    if (id != null && this.hearsScheme(id, projectId)) return id;
+    const owner = this.getProject(projectId)?.owner_id ?? null;
+    return owner != null && this.hearsScheme(owner, projectId) ? owner : null;
+  },
+
+  /** Whether a person still hears from a scheme (push's rule since #690): here, enabled, its owner or a member, and hasn't hidden it. Admin reach doesn't count. */
+  hearsScheme(this: Store, userId: number, projectId: number): boolean {
+    const user = this.getUser(userId);
+    return !!user && !user.disabled_at && this.memberSchemes(user.id).has(projectId) && !this.hiddenProjects(user.id).has(projectId);
   },
 
   /** The Taskmaster a minion reports to: its owner's own, else the Overlord; a build's own minion, the Overlord (builds are shared, #921). */

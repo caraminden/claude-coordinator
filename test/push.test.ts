@@ -349,7 +349,7 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   assert.deepEqual(await who(joshs), ['Ada', 'Cody', 'Josh'], 'pinning follows a minion');
   // Stored by login, any case, it still finds him.
   assert.deepEqual(await who(mk('By login', 'JOSH')), ['Cody', 'Josh']);
-  // No owner, the Taskmaster, and an owner who left the scheme: everyone, as before.
+  // No owner and the Taskmaster: everyone, as before.
   const all = ['Ada', 'Cara', 'Cody', 'Josh'];
   assert.deepEqual(await who(mk('Nobody\'s')), all);
   const tm = mk('Taskmaster', 'Josh', 'coordinator');
@@ -360,10 +360,11 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   assert.deepEqual(await who(store.getTicket(tm.id)!), ['Cara', 'Cody'], "the old row is Cara's now");
   assert.deepEqual(await who(store.getOverlord(p.id)!), all, 'the Overlord is everyone\'s');
   assert.deepEqual(await who(joshTm, { kind: 'question', questions: [{ question: 'Ada?' }], to: 'Ada' }), ['Ada'], 'a card to Ada still goes to her');
-  assert.deepEqual(await who(mk('Gone', 'Someone')), all, 'an owner who is nobody here');
+  // An assignee who is nobody here, or who left the scheme, hands it to the scheme's owner, not everyone (#1449).
+  assert.deepEqual(await who(mk('Gone', 'Someone')), ['Cara', 'Cody'], 'an owner who is nobody here');
   const leaving = mk('Leaving', 'Josh');
   store.removeMember(p.id, store.findUser('name', 'Josh')!.id);
-  assert.deepEqual(await who(leaving), ['Ada', 'Cara', 'Cody']);
+  assert.deepEqual(await who(leaving), ['Cara', 'Cody']);
   // The everything switch is per scheme and resets when someone else signs in on the device.
   store.addMember(p.id, store.findUser('name', 'Josh')!.id);
   store.setPushEverything('https://push.example/Cody', []);

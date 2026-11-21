@@ -191,6 +191,8 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
+  // An assignee counts only while they're in the scheme (#1449).
+  for (const name of ['Cara', 'Josh']) store.addMember(p, store.createUser({ name, login: name.toLowerCase() }).id);
   const minion = (title: string, assigned?: string) => {
     const id = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
     if (assigned) store.props.set('minion', id, p, { assigned }, 'Cara');
@@ -215,6 +217,8 @@ test('a minion assigned under a person\'s sign-in or GitHub login is in their in
   const approvals = new Approvals(() => {});
   const p = store.createProject('One', null).id;
   const josh = store.createUser({ name: 'Josh', login: 'jkatz' });
+  // An assignee counts only while in the scheme (#1449).
+  for (const u of [josh, store.createUser({ name: 'Cara', login: 'cara' })]) store.addMember(p, u.id);
   store.putCredential(josh.id, 'github', 'sealed', { login: 'KatzMeIfYouCan', id: 1, name: null });
   const minion = (title: string, assigned: string) => {
     const id = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;

@@ -114,6 +114,8 @@ test('a database with the old one-per-scheme index gets the per-person one, and 
 test("a minion's owner: assigned, else requestedBy, else nobody; its touched set only grows until someone leaves", () => {
   const { store, Cara, Josh, Rachel, Lee } = people('owner.db');
   const p = store.createProject('Shared', null, Cara.id);
+  // Owners count only while they're in the scheme (#1449).
+  for (const u of [Josh, Rachel, Lee]) store.addMember(p.id, u.id);
   coordinator(store, p.id);
   const assigned = minion(store, p.id, { requestedBy: 'Cara', assigned: 'Josh' });
   const requested = minion(store, p.id, { requestedBy: 'Rachel' });

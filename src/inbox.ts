@@ -35,15 +35,11 @@ const forPerson = (card: { to?: string }, person: string) => !card.to || card.to
  * shouldnt add to the inbox badge count"); only an approval, which a running turn is stuck on, still shows.
  */
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
-  // A value stored before #582 may name the person by their login or GitHub login.
-  const assignee = (id: number) => {
-    const a = String(store.props.forTarget('minion', id).assigned ?? '');
-    return (a && store.props.personName(a) || a).toLowerCase();
-  };
   const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
   // In a split scheme (#919) a person's own Taskmaster is theirs alone; the Overlord's (coordinator_of null) is everyone's.
+  // A minion is its assignee's, the scheme owner's once they're gone (Store.minionPerson, as push, #1449), else everyone's.
   const me = store.findUser('name', person)?.id;
-  const tickets = all.filter((t) => ['', person.toLowerCase()].includes(assignee(t.id)) && (t.coordinator_of == null || t.coordinator_of === me));
+  const tickets = all.filter((t) => [null, me].includes(store.minionPerson(t)) && (t.coordinator_of == null || t.coordinator_of === me));
   // Who asked for a minion (#906): its requestedBy, else who created it.
   const requester = (t: { id: number; created_by: string | null }) => {
     const r = String(store.props.forTarget('minion', t.id).requestedBy ?? '') || t.created_by || '';

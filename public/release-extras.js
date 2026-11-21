@@ -1,5 +1,5 @@
 // Two read-outs on the Releases page (#1060): the claims a scheme holds (the pipeline lane and other single-holder
-// duties, src/claims.ts) with a Release button, and Citadel's post-deploy watch (src/deploy-watch.ts): each deploy's
+// duties, src/claims.ts) with their queues (#1334) and a Release button, and Citadel's post-deploy watch (src/deploy-watch.ts): each deploy's
 // checks at +20 min, +1 h and +24 h, before against after. The server decides every verdict; nothing here knows a threshold.
 import { ago, api, h } from './base.js';
 import { optimistic } from './ui/optimistic.js';
@@ -26,19 +26,84 @@ export async function loadWatch(redraw) {
 
 const OFFSETS = { 1_200_000: '+20 min', 3_600_000: '+1 h', 86_400_000: '+24 h' };
 
+const STAGES = ['Working', 'Reviewing', 'Shipping', 'Live'];
+const STAGE_AT = { working: 0, reviewing: 1, shipping: 2 };
+// A queued minion's chip (src/routes/projects.ts queuedState): [tone, words].
+const QUEUED = { done: ['ok', '✓ Done'], working: ['info', 'Working'], waiting: ['violet', 'Waiting'], new: ['neutral', 'Not started'], gone: ['neutral', 'Dismissed'] };
+
+/** "40 min", "3.5 h": a rough time, as the estimate is. */
+function roughly(ms) {
+  const min = Math.max(1, Math.round(ms / 60_000));
+  return min < 90 ? `${min} min` : `${Math.round(min / 6) / 10} h`;
+}
+
+/** A bar's fill through the CSSOM (the CSP refuses style=""). */
+function filled(el, frac) {
+  el.style.setProperty('--p', `${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%`);
+  return el;
+}
+
+/**
+ * The closed row's line (#1334, Cara picked "Segment bar"): one segment per step of this run (past holders filled, the
+ * holder's filling by its stage, the waiting empty), then "N of M done" and the time left in a fixed-width column, so
+ * nothing moves as they change. With too little history the time says so instead of guessing.
+ */
+function claimProgress(c) {
+  const tip = (q) => `#${q.number} ${q.title}`;
+  const done = c.queue.filter((q) => q.state === 'done');
+  const waiting = c.queue.filter((q) => q.state !== 'done');
+  const holder = h('span', { class: 'h', title: c.holder_name }, filled(h('i'), c.progress ?? 0));
+  const segs = [...done.map((q) => h('span', { class: 'd', title: tip(q) })), holder, ...waiting.map((q) => h('span', { title: tip(q) }))];
+  const time = c.estimate
+    ? h('span', { class: 'claim-est', title: `Estimate: the median time a holder kept ${c.name}, over its last ${c.estimate.of} holders (${roughly(c.estimate.median_ms)} each)` }, `≈ ${roughly(c.estimate.left_ms)} left`)
+    : h('span', { class: 'muted' }, 'time after 3 holders');
+  return h('span', { class: 'claim-prog' }, h('span', { class: 'claim-segs', 'aria-hidden': 'true' }, ...segs),
+    h('span', { class: 'claim-side' }, h('b', {}, `${c.done} of ${c.total} done`), time));
+}
+
+/** The holder's four stages, the one it is in filled by how far along it is. */
+function stageStrip(c) {
+  const at = STAGE_AT[c.stage] ?? 0;
+  return h('div', { class: 'claim-stages' }, ...STAGES.map((name, i) => {
+    const el = h('div', { class: i < at ? 'past' : i === at ? 'on' : null }, name);
+    return i === at ? filled(el, at === 0 ? (c.progress ?? 0) / 0.6 : 0.5) : el;
+  }));
+}
+
+/** The open row: the holder's box, then the line in order, each with its chip and, when history allows, its expected start. */
+function claimBody(c) {
+  const step = c.step ? `plan step ${Math.min(c.step.done + 1, c.step.of)} of ${c.step.of}` : STAGES[STAGE_AT[c.stage] ?? 0];
+  const box = h('div', { class: 'claim-holder' }, h('div', { class: 'claim-who' },
+    h('span', {}, h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)),
+    c.stage ? h('span', { class: 'muted num' }, step) : null), c.stage ? stageStrip(c) : null);
+  const rows = c.queue.map((q, i) => {
+    const [tone, word] = q.state === 'chained' ? ['warn', `After #${q.after}`] : QUEUED[q.state] ?? QUEUED.waiting;
+    return h('li', { class: `claim-q${q.state === 'done' ? ' d' : ''}` }, h('span', { class: 'pos' }, String(i + 1)),
+      h('span', { class: 'nm' }, `#${q.number} ${q.title}`), toneChip(tone, word), h('span', { class: 'eta' }, q.starts_text ?? ''));
+  });
+  return [box, h('div', {}, h('div', { class: 'claim-sub' }, c.estimate ? 'Queue · expected start' : 'Queue'), h('ol', { class: 'claim-qlist' }, ...rows))];
+}
+
 export function claimsBlock(projectId, redraw) {
   const list = claims.get(projectId) ?? [];
   if (!list.length) return '';
-  // Each claim is a row that opens (Citadel's look, #1068): who holds it on the closed line, the note and Release inside.
-  const rows = list.map((c) => settingsRow({ key: `claim:${projectId}/${c.name}`, icon: 'lock', hue: 'held', title: c.name,
-    summary: [toneChip('violet', 'Held'), `${c.holder_name} · ${c.since_text}`] },
-  hueRow({ hue: 'held', meta: h('button', { type: 'button', class: 'btn-small', title: `Free ${c.name}; its holder is told nothing`, onclick: () => optimistic({
-    key: `claim:${projectId}/${c.name}`,
-    apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).filter((x) => x.name !== c.name)); redraw(); },
-    send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}`, { method: 'DELETE' }),
-    undo: () => { claims.set(projectId, list); redraw(); },
-    label: `release ${c.name}`,
-  }) }, 'Release') }, h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)))[0]);
+  // Each claim is a row that opens (Citadel's look, #1068): who holds it and the queue's bar on the closed line, the rest inside.
+  const rows = list.map((c) => {
+    const queued = Array.isArray(c.queue) && c.queue.length > 0;
+    const stage = c.stage ? ` · ${STAGES[STAGE_AT[c.stage]]}` : '';
+    const [row] = settingsRow({ key: `claim:${projectId}/${c.name}`, icon: 'lock', hue: 'held', title: c.name,
+      summary: [toneChip('violet', 'Held'), `${c.holder_name}${queued ? stage : ` · ${c.since_text}`}`] },
+    ...(queued ? claimBody(c) : []),
+    hueRow({ hue: 'held', meta: h('button', { type: 'button', class: 'btn-small', title: queued ? `Pass ${c.name} to the first in its queue, who is told` : `Free ${c.name}; its holder is told nothing`, onclick: () => optimistic({
+      key: `claim:${projectId}/${c.name}`,
+      apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).filter((x) => x.name !== c.name)); redraw(); },
+      send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}`, { method: 'DELETE' }),
+      undo: () => { claims.set(projectId, list); redraw(); },
+      label: `release ${c.name}`,
+    }) }, 'Release') }, queued ? h('span', { class: 'muted' }, 'Release passes it to the first in line.') : [h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)]));
+    if (queued) row.querySelector('.settings-row-text').append(claimProgress(c));
+    return row;
+  });
   return h('section', { class: 'rel-claims' }, h('h3', { class: 'settings-section', 'data-hue': 'held' }, 'Held by one at a time'),
     h('div', { class: 'settings-rows' }, ...rows));
 }

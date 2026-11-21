@@ -92,6 +92,28 @@ function chat(c: SeedCtx, t: Ticket, steps: number) {
 const hex = () => Math.random().toString(16).slice(2, 14).padEnd(12, '0');
 const route = (c: SeedCtx, t: Ticket, eventId?: number) => `#/p/${c.project.id}/t/${t.number}${eventId ? `?e=${eventId}` : ''}`;
 
+/** A claim's queue (#1334): `past` holders an hour apart, a holder mid-plan, and waiting, chained and new minions. */
+function claimQueue(c: SeedCtx, past: number): string {
+  const name = past >= 3 ? 'pipeline-lane' : 'release-lane', now = Date.now(), hour = 3_600_000;
+  const done = Array.from({ length: past }, (_, i) => minion(c, `Lane fix ${i + 1}`, { status: 'closed' }));
+  const holder = minion(c, 'Ship trains for every scheme', { status: 'running', last_activity: 'Self-review and ship… 2/4' });
+  chat(c, holder, 6).plan([['Read the land queue', 3], ['Batch the ships', 8], ['Run the tests', 6], ['Self-review and ship', 12]], 1);
+  const next = minion(c, 'Rollback before fast mode');
+  const leader = minion(c, 'CI runner labels');
+  const chained = minion(c, 'Fast mode lands', { state: 'parked', note: `starts when #${leader.number} is live` });
+  c.store.setSetting('chained-minions', [...(c.store.getSetting<{ ticket: number }[]>('chained-minions') ?? []), { ticket: chained.id, after: leader.id, when: 'live', message: 'Fast mode lands.', from: 'Taskmaster', base: null }]);
+  const fresh = minion(c, 'Deploy dry run', { status: 'new' });
+  let at = now - (past + 1.5) * hour;
+  c.store.claims.take(c.project.id, name, done[0].id, 'Taskmaster', '', at);
+  c.store.claims.setQueue(c.project.id, name, [...done.slice(1), holder].map((t) => t.id), 'Taskmaster', at);
+  for (let i = 0; i < past; i++) c.store.claims.passOn(c.project.id, name, 'live', (at += hour - i * 600_000));
+  c.store.claims.setQueue(c.project.id, name, [next, chained, fresh].map((t) => t.id), 'Taskmaster', at);
+  if (past < 3) return `#/p/${c.project.id}/releases/${c.project.id}`;
+  const old = minion(c, 'Rotate the backup keys');
+  c.store.claims.take(c.project.id, 'backup-keys', old.id, 'Taskmaster', 'until the new key is in every copy', now - 40 * 60_000);
+  return `#/p/${c.project.id}/releases/${c.project.id}`;
+}
+
 /** A code-made PNG "screenshot" (#960): a settings page as plain boxes, `rects` as [x, y, w, h, rgb]. */
 function pngOf(w: number, h: number, rects: [number, number, number, number, number][]): Buffer {
   const raw = Buffer.alloc((w * 3 + 1) * h);
@@ -427,6 +449,14 @@ mock.boards('#takes', { boards: [
       c.store.addEvent(t.id, 'user_message', { text: 'Remember the charm timers too.', author: c.who, mail: true, parked: true });
       return route(c, t);
     },
+  },
+  'claim-queue': {
+    about: 'a claim with a queue on the Releases page (#1334): three past holders for the estimate, a holder on step 2 of 4, then one waiting, one chained and one not started; plus an old claim with a note and no queue',
+    seed(c) { return claimQueue(c, 3); },
+  },
+  'claim-queue-new': {
+    about: 'a claim with a queue and too little history for a time estimate (#1334)',
+    seed(c) { return claimQueue(c, 1); },
   },
   landing: {
     about: 'a minion whose turn ended on hand_off_land while the server ships it: working, by the server (#727)',

@@ -169,3 +169,37 @@ b.waits { color: var(--held); }
 
 /* Claims and the post-deploy watch (#1060) */
 .rel-claims, .rel-watch { margin: 0 0 var(--space-3); }
+/* A claim's queue (#1334, take A): the segment bar beside a fixed-width count, so live updates move nothing. */
+.rel-claims { container-type: inline-size; }
+.claim-prog { display: grid; grid-template-columns: minmax(0, 1fr) 9.5rem; gap: 0.75rem; align-items: center; margin-top: 0.3rem; }
+.claim-segs { display: flex; gap: 3px; height: 10px; }
+.claim-segs > span { flex: 1; min-width: 3px; border-radius: 3px; background: var(--sunk, color-mix(in srgb, var(--ink) 6%, var(--panel))); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.claim-segs > span.d { background: var(--held); box-shadow: none; }
+.claim-segs > span.h { box-shadow: inset 0 0 0 1.5px var(--held); }
+.claim-segs > span.h i { display: block; height: 100%; width: var(--p, 0%); background: var(--held); transition: width var(--citadel-motion, 120ms); }
+.claim-side { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.82em; font-variant-numeric: tabular-nums; line-height: 1.3; white-space: nowrap; }
+.claim-side b { color: var(--ink); font-weight: 650; }
+.claim-est { color: var(--muted); text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+.claim-holder { display: grid; gap: 0.55rem; padding: 0.65rem 0.75rem; border: 1px solid color-mix(in srgb, var(--held) 35%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--held) 6%, var(--panel)); }
+.claim-who { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.claim-who .num { font-variant-numeric: tabular-nums; }
+.claim-stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.claim-stages > div { font-size: 0.78em; color: var(--muted); }
+.claim-stages > div::before { content: ''; display: block; height: 6px; margin-bottom: 0.3rem; border-radius: 3px; background: color-mix(in srgb, var(--ink) 8%, var(--panel)); }
+.claim-stages > .past { color: var(--ink); }
+.claim-stages > .past::before { background: var(--held); }
+.claim-stages > .on { color: var(--held); font-weight: 650; }
+.claim-stages > .on::before { background: linear-gradient(90deg, var(--held) var(--p, 50%), color-mix(in srgb, var(--held) 22%, transparent) var(--p, 50%)); }
+.claim-sub { margin: 0.7rem 0 0.3rem; font-size: 0.72em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.claim-qlist { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.claim-q { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto 8.5rem; gap: 0.6rem; align-items: center; padding: 0.42rem 0.5rem; border-radius: 7px; font-size: 0.9em; line-height: 1.3; }
+.claim-q:hover { background: color-mix(in srgb, var(--ink) 4%, var(--panel)); }
+.claim-q .pos, .claim-q .eta { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; font-size: 0.9em; }
+.claim-q .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.claim-q.d .nm { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent); }
+@container (max-width: 520px) {
+  .claim-prog { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
+  .claim-side { flex-direction: row; justify-content: space-between; align-items: baseline; }
+  .claim-q { grid-template-columns: 1.4rem minmax(0, 1fr) auto; }
+  .claim-q .eta { display: none; }
+}

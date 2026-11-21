@@ -142,15 +142,28 @@ const similar = (a: Set<string>, b: Set<string>) => {
   return both / (a.size + b.size - both || 1) >= SIMILAR;
 };
 
-/** Open lessons of the last 7 days grouped by line similarity (single link), each group with its distinct minion numbers. */
-export function lessonGroups(lessons: Lesson[]): { lessons: Lesson[]; minions: number[] }[] {
-  const lines = lessons.map((l) => l.lines.split('\n').filter(Boolean).map(words));
-  const parent = lessons.map((_, i) => i);
+/** A filler line says nothing: "nothing", "none", "n/a" or "[]" plus a few words, as plain text or the `["nothing"]` JSON shape. */
+export const isFiller = (line: string) => {
+  const t = line.trim().replace(/^[\s[\]"'`*]+|[\s[\]"'`*.!]+$/g, '');
+  return !t || (/^(nothing|none|n\/a|na|no)\b/i.test(t) && t.split(/\s+/).length <= 5);
+};
+
+/**
+ * Open lessons grouped by line similarity (single link over lines, never whole rows, filler lines dropped): each group has
+ * its lines, the lessons they came from and their distinct minion numbers.
+ */
+export function lessonGroups(lessons: Lesson[]): { lessons: Lesson[]; lines: string[]; minions: number[] }[] {
+  const units = lessons.flatMap((l) => l.lines.split('\n').filter((x) => x.trim() && !isFiller(x)).map((text) => ({ l, text, w: words(text) })));
+  const parent = units.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  for (let i = 0; i < lessons.length; i++) for (let j = 0; j < i; j++) if (lines[i].some((a) => lines[j].some((b) => similar(a, b)))) parent[find(i)] = find(j);
-  const by = new Map<number, Lesson[]>();
-  lessons.forEach((l, i) => by.set(find(i), [...(by.get(find(i)) ?? []), l]));
-  return [...by.values()].map((g) => ({ lessons: g, minions: [...new Set(g.map((l) => l.number ?? -l.id))].sort((a, b) => a - b) }));
+  for (let i = 0; i < units.length; i++) for (let j = 0; j < i; j++) if (similar(units[i].w, units[j].w)) parent[find(i)] = find(j);
+  const by = new Map<number, typeof units>();
+  units.forEach((u, i) => by.set(find(i), [...(by.get(find(i)) ?? []), u]));
+  return [...by.values()].map((g) => ({
+    lessons: [...new Set(g.map((u) => u.l))],
+    lines: g.map((u) => u.text),
+    minions: [...new Set(g.map((u) => u.l.number ?? -u.l.id))].sort((x, y) => x - y),
+  }));
 }
 
 type Alerted = { ids: number[]; minions: number };
@@ -171,10 +184,10 @@ export function repeatAlert(store: Store, dataDir: string, projectId: number, no
     if (prior && g.minions.length < prior.minions + REPEAT_MINIONS) continue;
     store.setSetting(key, [...done.filter((d) => d !== prior), { ids, minions: g.minions.length }]);
     const rel = `handoffs/ship-lessons-repeat-${new Date(now).toISOString().slice(0, 10)}-${Math.min(...ids)}.md`;
-    const quote = g.lessons[0].lines.split('\n')[0];
+    const quote = g.lines[0];
     const nums = g.minions.map((n) => `#${n}`).join(', ');
     const file = join(projectSharedDir(dataDir, projectId), rel);
-    void mkdir(join(file, '..'), { recursive: true }).then(() => writeFile(file, `# Handoff: ${quote.slice(0, 80)}\n\n## Goal\nStop the repeated ship lesson below from costing the next minion the same time.\n\n## Their words\nMinions ${nums} each wrote a ship lesson about it:\n${g.lessons.map((l) => `- ${l.number != null ? `#${l.number}` : 'a minion'}: ${l.lines.replace(/\n/g, ' / ')}`).join('\n')}\n\n## Done when\n- (fill in: when X, then Y)\n\n## Ruled out or tried\nNothing yet. Mark these lessons taken (ship_lessons tool, ids ${ids.join(', ')}) once this is started.\n\n## Model and effort\nSonnet 5.5 medium unless the fix touches the ship pipeline.\n`, { flag: 'wx' })).catch((err) => err?.code !== 'EEXIST' && console.error(`Ship lessons repeat handoff failed: ${err?.message ?? err}`));
+    void mkdir(join(file, '..'), { recursive: true }).then(() => writeFile(file, `# Handoff: ${quote.slice(0, 80)}\n\n## Goal\nStop the repeated ship lesson below from costing the next minion the same time.\n\n## Their words\nMinions ${nums} each wrote a ship lesson about it:\n${g.lessons.map((l) => `- ${l.number != null ? `#${l.number}` : 'a minion'}: ${l.lines.split('\n').filter((x) => !isFiller(x)).join(' / ')}`).join('\n')}\n\n## Done when\n- (fill in: when X, then Y)\n\n## Ruled out or tried\nNothing yet. Mark these lessons taken (ship_lessons tool, ids ${ids.join(', ')}) once this is started.\n\n## Model and effort\nSonnet 5.5 medium unless the fix touches the ship pipeline.\n`, { flag: 'wx' })).catch((err) => err?.code !== 'EEXIST' && console.error(`Ship lessons repeat handoff failed: ${err?.message ?? err}`));
     return `Ship lessons repeat: ${g.minions.length} minions (${nums}) wrote the same lesson, e.g. "${quote}". Draft handoff: ${rel} in the shared folder. Start it or mark the lessons taken (ship_lessons tool, ids ${ids.join(', ')}).`;
   }
   return null;

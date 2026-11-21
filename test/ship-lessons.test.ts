@@ -210,3 +210,17 @@ test('3 similar lessons from 3 minions alert once; 3 from one minion do not; gro
   say(8, 'land.sh stale lock file in the CI queue');
   assert.equal(sent.length, 2, 'taken lessons no longer count');
 });
+
+// #1490 follow-up: the first live alert was 11 minions "agreeing" on filler, and two real lessons rode along on a trailing filler line.
+test('filler lines ("nothing new", ["nothing"], n/a) never form a group, and a filler line cannot pull a real lesson in', () => {
+  const dataDir = mkdtempSync(join(root, 'data-'));
+  const store = newStore();
+  const p = store.createProject('Filler', null);
+  const sent: string[] = [];
+  const say = (number: number, lines: string) => queueLesson(store, dataDir, { id: 300 + number, project_id: p.id, number }, lines, [], 'land', (t) => sent.push(t));
+  ['nothing new', '["nothing"]', 'nothing else', 'nothing fought me', 'None.', 'n/a', 'nothing new\nnothing else', '- Nothing.\n["nothing"]', 'nothing fought me', 'nothing else', 'nothing new'].forEach((l, i) => say(10 + i, l));
+  assert.equal(sent.length, 0, '11 filler rows alert nothing');
+  say(1343, 'the preview server needs DATA_DIR set before importing server.ts\nnothing new');
+  say(1208, 'ui-shot waits for a selector that the dev seed never renders\nnothing else');
+  assert.equal(sent.length, 0, 'two real, different lessons are not one group through their filler line');
+});

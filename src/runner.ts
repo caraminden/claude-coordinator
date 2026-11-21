@@ -615,7 +615,7 @@ export class Runner {
   /** The data dir this runner's turns use (beside the database), so a test's or dev copy's stay apart. */
   private dataDir: string;
   /** Each warm session's held system prompt (#1276). */
-  holds: Holds;
+  promptHolds: Holds;
   /** The repos found to hold the live checkout's code: their minions' prompts carry the deploy lines (buildLaunch). */
   private deploysRepos = new Set<string>();
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
@@ -810,7 +810,7 @@ export class Runner {
     this.lanes.onIdle = (ticketId) => this.next(ticketId);
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
     this.dataDir = resolve(dirname(store.path));
-    this.holds = new Holds(join(this.dataDir, 'prompt-holds'), store);
+    this.promptHolds = new Holds(store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
   }
 
@@ -2961,7 +2961,7 @@ export class Runner {
         return;
       }
     }
-    let hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person), !!hold?.decision.held);
+    const hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person), !!hold?.decision.held);
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     // A keepalive changes nothing of the minion's: who it runs for, its state, note and replies stay as the last real turn left them.
@@ -3043,19 +3043,17 @@ export class Runner {
 
     if (hold && !keepalive) {
       let d = hold.decision;
-      // A session that turned out lost starts a new one: on the current prompt, with no note.
+      // A session that turned out lost starts a new one. The held prompt and its note together are the current rules,
+      // so it keeps both and the new session adopts the hold (ran fills in its id); only a note about going back is moot.
       if (lost) {
-        d = decideHold({ record: null, held: null, current: hold.current, session: null, lastEnd: null, now: this.now() });
-        if (hold.decision.held || hold.decision.note) {
-          parts.system = hold.current;
+        d = { ...d, record: { ...d.record, session: null } };
+        if (d.note && !d.held) {
           delete parts.turn.rulesChanged;
-          writeFileSync(join(dir, 'system-prompt.md'), promptText(parts.system));
           context = promptText(parts.turn);
-          hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person));
         }
       }
       // A /compact step carries no note, so it has delivered none.
-      this.holds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
+      this.promptHolds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
       if (d.reload) console.log(`[prompt-hold] minion ${ticket.id}: takes the current prompt (${d.reload})`);
     }
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
@@ -3127,8 +3125,8 @@ export class Runner {
 
   /** Which system prompt a turn runs with (src/prompt-hold.ts): the one its session last ran with while it is warm. */
   private holdFor(ticket: Ticket, current: PromptSections): HoldDecision {
-    const record = this.holds.record(ticket.id);
-    return decideHold({ record, held: record && this.holds.sections(record.hash), current, session: ticket.session_id, lastEnd: this.store.lastTurnEnd(ticket.id), now: this.now() });
+    const record = this.promptHolds.record(ticket.id);
+    return decideHold({ record, held: record && this.promptHolds.sections(record.hash), current, session: ticket.session_id, lastEnd: this.store.lastTurnEnd(ticket.id), now: this.now() });
   }
 
   /**
@@ -3807,9 +3805,9 @@ export class Runner {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
-    if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.holds.compacted(ticketId);
+    if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.promptHolds.compacted(ticketId);
     // Only a turn that ran has read its note: after an error the next turn carries it again.
-    if (ev.type === 'result' && !ev.is_error) this.holds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
+    if (ev.type === 'result' && !ev.is_error) this.promptHolds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
     if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
     if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) ev = this.stripStatus(ticketId, ev);
     if (ev.type === 'result') {

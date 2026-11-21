@@ -2,10 +2,8 @@
 // makes the next call re-write the whole cached conversation. So while a session is warm (its last turn ended under an
 // hour ago), it keeps the system prompt it last ran with, and what changed since reaches it as a short note in the turn
 // message. It takes the new prompt whole when it is next cold, starts a new session, after HOLD_CAP_MS, or when the
-// change is too long for a note (NOTE_MAX). The held texts are kept once per version, in files under the data dir.
+// change is too long for a note (NOTE_MAX). The held texts are kept once per version, in settings.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { promptText, type PromptSections } from './prompts.ts';
 
 /** A prompt cache entry lives an hour after its last read: past that, nothing is saved by holding. */
@@ -19,7 +17,7 @@ export const NOTE_MAX = 8000;
 export const holdKey = (ticketId: number) => `prompt_hold:${ticketId}`;
 
 export interface HoldRecord {
-  /** The held system prompt's hash: its sections are in `<dir>/<hash>.json`. */
+  /** The held system prompt's hash: its sections are in the `prompt_hold_text:<hash>` setting. */
   hash: string;
   /** When the session took this prompt. */
   since: number;
@@ -107,15 +105,15 @@ export function changeNote(held: PromptSections, current: PromptSections, replac
   ].join('\n');
 }
 
-type Settings = { getSetting<T>(key: string): T | null; setSetting(key: string, value: unknown): void };
+type Settings = { getSetting<T>(key: string): T | null; setSetting(key: string, value: unknown): void; deleteSetting(key: string): void };
+const TEXT_KEY = 'prompt_hold_text:';
+const INDEX_KEY = 'prompt_hold_index';
 
 /** The held prompts, one file per version, and each session's record in the settings. */
 export class Holds {
-  private dir: string;
   private settings: Settings;
   private swept = 0;
-  constructor(dir: string, settings: Settings) {
-    this.dir = dir;
+  constructor(settings: Settings) {
     this.settings = settings;
   }
 
@@ -127,16 +125,12 @@ export class Holds {
     return this.settings.getSetting<HoldRecord>(holdKey(ticketId));
   }
 
-  /** A version's sections, or null when its file is gone (swept, or never written). */
+  /** A version's sections, or null when it is gone (swept, or never kept). */
   sections(hash: string): PromptSections | null {
-    try {
-      return JSON.parse(readFileSync(join(this.dir, `${hash}.json`), 'utf8'));
-    } catch {
-      return null;
-    }
+    return this.settings.getSetting<PromptSections>(TEXT_KEY + hash);
   }
 
-  /** Save a launched turn's record, and its prompt's file when it took a new one. */
+  /** Save a launched turn's record, and its prompt's text when it took a new one. */
   save(ticketId: number, d: HoldDecision, now = Date.now()) {
     if (!d.held) this.keep(d.record.hash, d.system, now);
     this.set(holdKey(ticketId), d.record);
@@ -158,33 +152,26 @@ export class Holds {
     this.set(holdKey(ticketId), { ...rest, sent: r.hash });
   }
 
+  // In the database, not files (#1463: no blocking file calls on the server's thread). The text is written once per
+  // version; a small index of when each was last taken is what the sweep reads.
   private keep(hash: string, sections: PromptSections, now: number) {
-    const file = join(this.dir, `${hash}.json`);
-    try {
-      mkdirSync(this.dir, { recursive: true });
-      // Touched on every take, so a file younger than the cap is never swept from under a hold.
-      try {
-        utimesSync(file, now / 1000, now / 1000);
-      } catch {
-        writeFileSync(file, JSON.stringify(sections));
-      }
-      if (now - this.swept > 10 * 60_000) this.sweep(now);
-    } catch (err: any) {
-      // No file: the next turn finds no held text and takes the current prompt, as before #1276.
-      console.error(`[prompt-hold] could not keep ${file}: ${err.message}`);
-    }
+    if (!this.sections(hash)) this.set(TEXT_KEY + hash, sections);
+    const index = this.settings.getSetting<Record<string, number>>(INDEX_KEY) ?? {};
+    // Touched on every take, so a version younger than the cap is never swept from under a hold.
+    index[hash] = now;
+    this.set(INDEX_KEY, index);
+    if (now - this.swept > 10 * 60_000) this.sweep(now);
   }
 
-  /** Files older than the cap (and an hour) belong to no hold that can still be used. */
+  /** Versions not taken for the cap (and an hour) belong to no hold that can still be used. */
   sweep(now = Date.now()) {
     this.swept = now;
-    for (const name of readdirSync(this.dir)) {
-      const file = join(this.dir, name);
-      try {
-        if (now - statSync(file).mtimeMs > HOLD_CAP_MS + HOLD_WARM_MS) rmSync(file, { force: true });
-      } catch {
-        // Gone already.
-      }
+    const index = this.settings.getSetting<Record<string, number>>(INDEX_KEY) ?? {};
+    for (const [hash, at] of Object.entries(index)) {
+      if (now - at <= HOLD_CAP_MS + HOLD_WARM_MS) continue;
+      this.settings.deleteSetting(TEXT_KEY + hash);
+      delete index[hash];
     }
+    this.set(INDEX_KEY, index);
   }
 }

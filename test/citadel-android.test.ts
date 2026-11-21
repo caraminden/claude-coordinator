@@ -329,12 +329,17 @@ test('up starts the far emulator through the starter and points the adb server h
   let asked = 0;
   const starter = createServer((s) => {
     asked++;
-    // The emulator answers a moment after the first ask.
-    setTimeout(() => writeFileSync(join(sdk, 'far-up'), ''), 300);
     s.end('asked the desktop to start citadel-android.service\n');
   });
+  // The emulator answers once the adb server here has been pointed at it (the nudge), as a tunnelled one does.
+  // Not on a timer after the ask: on a loaded runner the helper's first boot check outlasted one, found the
+  // emulator already up and rightly skipped the nudge, so the server heard nothing (#1420).
   let told = '';
-  const adbServer = createServer((s) => { s.on('data', (d) => (told += d)); s.on('error', () => {}); setTimeout(() => s.end('OKAY'), 20); });
+  const adbServer = createServer((s) => {
+    s.on('data', (d) => { told += d; if (/host:emulator:5555/.test(told)) writeFileSync(join(sdk, 'far-up'), ''); });
+    s.on('error', () => {});
+    setTimeout(() => s.end('OKAY'), 20);
+  });
   await new Promise<void>((r) => starter.listen(0, '127.0.0.1', r));
   await new Promise<void>((r) => adbServer.listen(0, '127.0.0.1', r));
   try {

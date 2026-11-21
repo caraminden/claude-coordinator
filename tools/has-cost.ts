@@ -9,10 +9,10 @@
 // Calibration is a fixed busy loop (3e7 steps): compare numbers only between runs with a similar one, and write
 // the box load beside them. test/css-has-cost.test.ts keeps the costly shape out.
 //
-// Numbers on perigee, scheme 2 at 1440 px (2026-11-21):
-//   before (main at 56768f2c), load 62:   16.8 ms as shipped, 0.8 ms with no :has() (calibration 78 then 57)
-//   before, has.mjs run, load 67:         18.9 ms as shipped (calibration 45)
-//   after (#1534), load 67 to 76:         2.1 to 3.4 ms a round, medians 2.8 and 3.1 (calibration 36 to 84)
+// Numbers from this tool on perigee, scheme 2 at 1440 px, 2026-11-21 (dev copy of the live data):
+//   main at 56768f2c, load 62.5:  21.2 ms median as shipped (18.5 to 21.6), 0.8 ms with no :has() (calibration 35 to 84)
+//   #1534, load 57.3:             2.8 ms median (0.8 to 3.5), 0.7 ms with no :has() (calibration 30 to 54)
+//   #1534, load 74.2:             3.1 ms median (2.6 to 3.5), 0.7 ms with no :has() (calibration 37 to 133)
 import { loadavg } from 'node:os';
 import { open } from './ui-shot.ts';
 

@@ -1,6 +1,6 @@
 // Cheap style updates (#1534): a `:has()` before a child or descendant that has nothing to filter on (`X:has(…) > *`,
 // `X:has(…) *`, `X:has(…) > :not(.a)`) made every node added anywhere on the page cost about 20 ms of style, not 1.
-// Four such rules in settings.css were 20 of the 21 ms one chat line cost; tools/has-cost.mjs measures it again.
+// Four such rules in settings.css were 20 of the 21 ms one chat line cost; tools/has-cost.ts measures it again.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';

@@ -1083,6 +1083,11 @@ row.innerHTML =
       <h3>23. Clicks never freeze the UI</h3>
       <p class="doc-why">Cara, 2026-11-08: <q>assume things will work instantly, but recover later if there was an issue</q>. A click shows its result at once and its request runs behind; other controls stay usable and rapid clicks all count. A failure rolls back that one item with a toast and Retry (the failed toast under Status shows it). <code>optimistic()</code> from <code>ui/optimistic.js</code> does it. Only a result that can't be guessed (a calculation, an agent turn) shows busy, on its own region.</p>
     </div>
+
+    <div class="doc-rule">
+      <h3>24. No :has() before a child that names nothing</h3>
+      <p class="doc-why">#1534, 2026-11-21: four rules shaped <code>X:has(…) &gt; *</code> made every node added anywhere on the page cost about 20 ms of style, not 1, so every chat line, list update and keypress paid it. A <code>:has()</code> in a parent or ancestor position may only lead to a child or descendant with a class, id, attribute or type: <code>X:has(…) &gt; .row</code>. For "every child", use the siblings of the one that decides (<code>X &gt; .tabs ~ *</code>, <code>X &gt; :has(~ .tabs)</code>) or a class set by the code that knows. <code>test/css-has-cost.test.ts</code> refuses the shape; <code>tools/has-cost.ts</code> measures it.</p>
+    </div>
   </section>
 
   <section id="questions">

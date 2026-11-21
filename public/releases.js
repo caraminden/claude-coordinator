@@ -96,7 +96,12 @@ export const defaultScope = (id) => (Number(id) === 2 ? 'all' : Number(id));
 
 const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
-const tookText = (r) => (r.started && r.live ? shortSpan(r.live - r.started) : null);
+const tookText = (r) => {
+  if (!(r.started && r.live)) return null;
+  const total = r.live - r.started, line = Number(r.stages?.line) * 1000;
+  // Cara, 2026-11-20: "took 5m after 29m in line": the ship-line wait is pulled out of the release's own work (a wait under a minute stays in "took")
+  return line >= 60000 && line < total ? `${shortSpan(total - line)} after ${shortSpan(line)} in line` : shortSpan(total);
+};
 
 /**
  * "~3m" that counts down on the ticker. Past the estimate it says what's happening rather than "due now", which read as a

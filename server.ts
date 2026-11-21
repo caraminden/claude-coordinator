@@ -415,7 +415,12 @@ function ownScheme(): Project | null {
 }
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
-waiters.prs = githubPrs(githubOf);
+// Commits GitHub said it doesn't have (#1454), kept across restarts so a rebased-away one isn't asked about at every boot.
+const MISSING_COMMITS = 'github-missing-commits';
+waiters.prs = githubPrs(githubOf, {
+  has: (key) => (store.getSetting<string[]>(MISSING_COMMITS) ?? []).includes(key),
+  add: (key) => store.setSetting(MISSING_COMMITS, [...(store.getSetting<string[]>(MISSING_COMMITS) ?? []).filter((k) => k !== key), key].slice(-500)),
+});
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
 services.githubAs = (c) => {

@@ -135,7 +135,7 @@ const UNMERGED_MS = 60_000;
  * about half a second, and checks run at restarts, reloads and dismissals. `as` gives
  * a repo's GitHub login (#321: its scheme owner's, since a private repo may let no one else read it).
  */
-export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): PrLookup {
+export function githubPrs(as: (repo: string) => GithubEnv = () => undefined, missing?: { has(key: string): boolean; add(key: string): void }): PrLookup {
   const merged = new Map<string, PrMerge>();
   const unmerged = new Map<string, number>();
   // Counts forget()s: an answer asked for before one is too old to remember as "not merged".
@@ -143,12 +143,17 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): Pr
   const ask = async (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): Promise<PrMerge | null> => {
     const hit = merged.get(key);
     if (hit) return hit;
-    if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo((await git(repo, ['remote', 'get-url', 'origin'])) ?? '')) return null;
+    if ((unmerged.get(key) ?? 0) > Date.now() || missing?.has(key) || !githubRepo((await git(repo, ['remote', 'get-url', 'origin'])) ?? '')) return null;
     let pr: PrMerge | null = null;
     const asked = forgets;
     try {
       pr = parse(JSON.parse((await run('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000 })).stdout));
     } catch (err: any) {
+      // GitHub doesn't have the commit (a branch commit rebased away and never pushed): asking again can't help, even after a restart (#1454).
+      if (/No commit found/.test(String(err.stderr ?? ''))) {
+        missing?.add(key);
+        return null;
+      }
       console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
     }
     if (pr) merged.set(key, pr);
@@ -700,7 +705,11 @@ export class LiveWaiters {
       // The check finds a relay's commit live; the outbox sends it. One batch per minion, text and commit: they share the Taskmaster's note.
       const found: Delivery[] = [];
       for (const r of this.store.listDeliveries({ kind: 'relay', states: ['waiting'] })) {
-        if (r.met_at == null && (await this.live({ ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.head }))) found.push(r);
+        if (r.met_at != null) continue;
+        const w = { ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.head };
+        const shipped = (await this.live(w)) ? 'live' : await this.shippedRebased(w);
+        if (shipped === 'live') found.push(r);
+        else if (shipped === 'dead') this.outbox.cancel(r.id, `#${this.store.getTicket(w.ticket)?.number ?? w.ticket} was dismissed without shipping \`${(w.commit ?? '').slice(0, 7)}\``);
       }
       const first = new Map<string, number>();
       for (const r of found) {
@@ -771,6 +780,29 @@ export class LiveWaiters {
     if (await has(w.commit)) return true;
     const pr = await this.prs.commit(this.repo, w.commit);
     return !!pr?.commit && (await has(pr.commit));
+  }
+
+  /**
+   * A relay's commit that isn't live (#1454): 'live' when the minion that queued it shipped after making that commit and
+   * the commit main got is live (elsewhere: shipped is merged), since a rebase that resolved a conflict changes the patch
+   * and within() can't match it; 'dead' when it was dismissed over 3 days ago without such a ship (a PR may still merge
+   * meanwhile); else null.
+   */
+  private async shippedRebased(w: Waiter): Promise<'live' | 'dead' | null> {
+    const t = this.store.getTicket(w.ticket);
+    if (!t || !w.commit) return null;
+    const scheme = this.store.getProject(t.project_id)?.repo_dir ?? null;
+    const ship = this.store.lastShip(t.id);
+    let made: string | null = null;
+    for (const dir of [scheme, this.repo]) if (dir && !made) made = await git(dir, ['show', '-s', '--format=%ct', `${w.commit}^{commit}`]);
+    if (ship && (!made || Number(made) * 1000 <= ship.at)) {
+      const other = await this.elsewhere(t.id);
+      if (other) return 'live';
+      const full = ship.commit && (await this.resolve(ship.commit, scheme));
+      if (full && (await this.live({ ...w, commit: full }))) return 'live';
+      return null;
+    }
+    return t.status === 'closed' && t.closed_at != null && t.closed_at < Date.now() - 3 * 86_400_000 ? 'dead' : null;
   }
 
   /**

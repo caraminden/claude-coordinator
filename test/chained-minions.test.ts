@@ -723,3 +723,26 @@ test('a "not merged" answer GitHub gave before forget() is not remembered: the n
     process.env.PATH = path;
   }
 });
+
+test('a commit GitHub says it has not got (422, a branch commit rebased away) is not asked about again, even by a new lookup after a restart (#1454)', async () => {
+  const dir = join(root, 'rebased-away');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/cara/rebased.git'], { cwd: dir });
+  const bin = join(root, 'rebased-bin');
+  mkdirSync(bin);
+  const asked = join(root, 'rebased-asked');
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\necho x >> '${asked}'\necho 'gh: No commit found for SHA: ${'c'.repeat(40)} (HTTP 422)' >&2\nexit 1\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const kept = new Set<string>(); // what the server keeps in its settings
+  const missing = { has: (k: string) => kept.has(k), add: (k: string) => void kept.add(k) };
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    assert.equal(await githubPrs(() => undefined, missing).commit(dir, 'c'.repeat(40)), null);
+    assert.equal(await githubPrs(() => undefined, missing).commit(dir, 'c'.repeat(40)), null, 'a fresh lookup, as after a restart');
+    assert.equal((await import('node:fs')).readFileSync(asked, 'utf8').trim().split('\n').length, 1, 'GitHub asked once');
+  } finally {
+    process.env.PATH = path;
+  }
+});

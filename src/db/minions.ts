@@ -274,6 +274,16 @@ export const minionQueries = {
     return rows.find((r) => /^Shipped [0-9a-f]{7,40} /.test(r.text ?? ''))?.text ?? null;
   },
 
+  /** A minion's newest ship onto main (LandHandoffs' shipped line): the commit main moved to (null for "Shipped the branch") and when, or null (#1454). */
+  lastShip(this: Store, id: number): { commit: string | null; at: number } | null {
+    const rows = this.db.prepare(`SELECT json_extract(data, '$.text') AS text, created_at FROM events WHERE ticket_id = ? AND kind = 'note' AND data LIKE '{"text":"Shipped %' ORDER BY id DESC LIMIT 5`).all(id) as { text: string | null; created_at: number }[];
+    for (const r of rows) {
+      const m = /^Shipped (?:([0-9a-f]{7,40}) |the branch:)/.exec(r.text ?? '');
+      if (m) return { commit: m[1] ?? null, at: r.created_at };
+    }
+    return null;
+  },
+
   /** Change a ticket's activity line without counting it as new activity. */
   setLastActivity(this: Store, id: number, text: string) {
     this.db.prepare('UPDATE tickets SET last_activity = ? WHERE id = ?').run(text, id);

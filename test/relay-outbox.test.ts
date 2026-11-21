@@ -167,3 +167,66 @@ test('a re-check while a relay waits in retry backoff never sends it a second ti
   assert.equal(store.getSetting('relay-when-live') ?? null, null);
   assert.equal(rows().length, 1);
 });
+
+// #1454: a ship rebases the branch, and a conflict fix gives its commits new patches, so the relay's commit never reaches
+// main by hash or by patch. The minion's shipped line names the commit main got: that counts once it is live.
+const branchCommit = (from: string, text: string, env: Record<string, string> = {}) => {
+  git('checkout', '-q', '--detach', from);
+  writeFileSync(join(repo, 'f'), text);
+  git('add', '-A');
+  execFileSync('git', ['commit', '-q', '-m', text], { cwd: repo, env: { ...process.env, ...env } });
+  const sha = git('rev-parse', 'HEAD');
+  git('checkout', '-q', 'main');
+  return sha;
+};
+
+test('a relay on a branch commit that shipped rebased (new patch) fires once its shipped commit is live', async () => {
+  const base = commit();
+  const onBranch = branchCommit(base, 'branch work');
+  const shipped = commit(); // main's copy: the same work, conflict-resolved into a different patch
+  const [from, to] = [minion(), minion()];
+  const s = server(base);
+  await s.outbox.boot();
+  assert.equal((await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: onBranch })).queued, true);
+  store.addEvent(from.id, 'note', { text: `Shipped ${shipped.slice(0, 9)} "c${n}": the work. Risk low: tests. Live now.` });
+  await s.waiters.check(base);
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.delivered.length, 0, 'not before the shipped commit is live');
+  await s.waiters.check(shipped);
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.delivered.length, 1);
+  assert.equal(rows()[0].state, 'sent');
+});
+
+test('an earlier ship does not fire a relay on work committed after it (a minion kept open for its next piece)', async () => {
+  const base = commit();
+  const shipped = commit();
+  const [from, to] = [minion(), minion()];
+  const later = new Date(Date.now() + 3_600_000).toISOString();
+  const next = branchCommit(shipped, 'next piece', { GIT_COMMITTER_DATE: later, GIT_AUTHOR_DATE: later });
+  const s = server(shipped);
+  await s.outbox.boot();
+  store.addEvent(from.id, 'note', { text: `Shipped ${shipped.slice(0, 9)} "c${n}": piece one. Risk low: tests. Live now.` });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: next });
+  await s.waiters.check(shipped);
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.delivered.length, 0);
+  assert.equal(rows()[0].state, 'waiting');
+  void base;
+});
+
+test('a relay whose minion was dismissed without shipping is dropped with a reason after 3 days, not left waiting', async () => {
+  const base = commit();
+  const never = branchCommit(base, 'abandoned');
+  const [from, to] = [minion(), minion()];
+  const s = server(base);
+  await s.outbox.boot();
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: never });
+  store.updateTicket(from.id, { status: 'closed' });
+  await s.waiters.check(base);
+  assert.equal(rows()[0].state, 'waiting', 'a fresh dismissal may still ship (a PR merged later)');
+  (store as any).db.prepare('UPDATE tickets SET closed_at = ? WHERE id = ?').run(Date.now() - 4 * 86_400_000, from.id);
+  await s.waiters.check(base);
+  assert.equal(rows()[0].state, 'dropped');
+  assert.match(rows()[0].reason ?? '', /dismissed without shipping/);
+});

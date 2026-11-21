@@ -154,7 +154,7 @@ test('a share of failed turns that doubles past the floor is a regression', asyn
   const db = new DatabaseSync(file);
   db.prepare('UPDATE events SET created_at = ? WHERE id = ?').run(at + 3 * MIN, err.id);
   db.close();
-  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 11, failed: 3, first: at + 2 * MIN });
+  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 11, failed: 3, first: at + 2 * MIN, loggedOut: [] });
   clock.now = at + 20 * MIN;
   await w.tick();
   assert.equal(woken.length, 1);
@@ -390,7 +390,7 @@ test('turns that stopped on a usage limit are not failed turns, so a burst of th
   for (let i = 0; i < 10; i++) turn(at - 15 * MIN + i, i === 0);
   for (let i = 0; i < 10; i++) turn(at + 2 * MIN + i, false);
   for (let i = 0; i < 8; i++) turn(at + 5 * MIN + i, true, "You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)");
-  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 10, failed: 0, first: null });
+  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 10, failed: 0, first: null, loggedOut: [] });
   clock.now = at + 20 * MIN;
   await w.tick();
   assert.deepEqual(woken, []);
@@ -464,4 +464,16 @@ test('turnOutcomes reads error events through their own index, not every event o
   assert.ok(errs, 'turnOutcomes reads error events');
   const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`).all(...Array(errs.split('?').length - 1).fill(0)).map((r: any) => r.detail).join(' | ');
   assert.match(plan, /USING (COVERING )?INDEX events_errors/);
+});
+
+test('turns that ended "Not logged in" are not failed turns, and turnOutcomes names the account they ran on (#1481)', () => {
+  const { store, a } = setup();
+  const at = 1_000 * MIN;
+  const turn = (ended: number, bad: boolean, account: number, result?: string) => {
+    const e = store.addEvent(a.id, 'result', { type: 'result', is_error: bad, result, total_cost_usd: 0 });
+    store.recordTurn(a.id, { event_id: e.id, ended_at: ended, session_cost_usd: 0, account } as any);
+  };
+  for (let i = 0; i < 3; i++) turn(at + MIN + i, true, 2, 'Not logged in · Please run /login');
+  turn(at + 2 * MIN, false, 1);
+  assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 1, failed: 0, first: null, loggedOut: [2] });
 });

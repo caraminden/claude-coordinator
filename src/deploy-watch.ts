@@ -215,6 +215,9 @@ export class DeployWatch {
     const share = (o: { turns: number; failed: number }) => (o.turns ? o.failed / o.turns : 0);
     const pct = (o: { turns: number; failed: number }) => `${Math.round(100 * share(o))}% (${o.failed} of ${o.turns})`;
     out.push({ name: 'failed turns', before: pct(b), after: pct(a), first: a.first, top: [], worse: a.failed >= TURN_FLOOR && share(a) >= 2 * share(b) });
+    // Informational only (#1481): logged-out turns are left out of the failed share, so say which account, never worse.
+    const who = (o: { loggedOut: number[] }) => (o.loggedOut.length ? `account ${o.loggedOut.join(', ')}` : 'none');
+    out.push({ name: 'logged-out turns (not counted as failed)', before: who(b), after: who(a), first: null, top: [], worse: false });
     return out;
   }
 

@@ -1,21 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, stopTurns, stopProcs } from './helpers.ts';
+import { listeningPort, tempRoot } from './helpers.ts';
 
 // POST /api/tickets/:id/seen with left:true closes a complete minion the person had open at its last update (#811).
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'close-on-seen-route-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('close-on-seen-route-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the server and the detached turns before the folder goes (#271)
 
 let base = '';
 const cookies: Record<string, string> = {};
@@ -30,14 +23,13 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
 }
 
 before(async () => {
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
+  const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  procs.push(server);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),

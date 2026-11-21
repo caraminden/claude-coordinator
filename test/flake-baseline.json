@@ -187,21 +187,9 @@
    "ok": 0
   }
  },
- "contraption-tools.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "contraption-turn-audit.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "contraption-turns.test.ts": {
   "rmTemp": {
-   "n": 3,
+   "n": 2,
    "ok": 0
   },
   "sleep": {
@@ -210,12 +198,6 @@
   }
  },
  "contraptions.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "crash-proof.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -244,12 +226,6 @@
   }
  },
  "edit-instructions.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "every-scheme.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0

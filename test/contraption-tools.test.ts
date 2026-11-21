@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, until, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, tempRoot, until, type Booted } from './helpers.ts';
 
 // Settings → Contraptions as coordinator tools (#246): only the Citadel scheme's Taskmaster, only on a
 // turn an admin asked for (#255), through the same routes the settings page calls, and never showing a key.
-const root = mkdtempSync(join(tmpdir(), 'contraption-tools-'));
+const tmp = tempRoot('contraption-tools-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -44,12 +43,12 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`; `citadel` is the env the runner sets for Citadel's Taskmaster. */
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,

@@ -1,16 +1,15 @@
 // The contraption turn audit (#844, src/contraption-turns.ts): every turn's payload and reply, the verdict its app
 // posts back, and who may read them: members of the contraption's home scheme, nobody else.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, tempRoot } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'turn-audit-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('turn-audit-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 // A stand-in for claude: takes the prompt, streams a short reply with a tool call, ends.
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}
@@ -121,7 +120,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
 
   // Its contraption_turns tool: the turns as text, with the verdict and the payload.
   const tool = async (args: object) => {
-    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(srv.data, tmAlpha), COORDINATOR_PROJECT: String(alpha), COORDINATOR_TICKET: String(tmAlpha), COORDINATOR_ROLE: 'coordinator', COORDINATOR_HOME_CONTRAPTIONS: 'voice' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

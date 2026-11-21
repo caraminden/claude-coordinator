@@ -3,8 +3,8 @@
 // and that Citadel keeps no turn text outside the 14-day audit (#844).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { TurnPlace } from '../src/claude-link.ts';
@@ -14,13 +14,11 @@ import { Store } from '../src/db.ts';
 import { realClock } from '../src/clock.ts';
 import { KILL_AFTER_MS } from '../src/contraption-turns.ts';
 import { FakeClock } from './fake-clock.ts';
-import { bootServer, jsonLines, lines, until, stopTurns, testPins } from './helpers.ts';
+import { bootServer, jsonLines, lines, until, tempRoot, testPins } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('contraption-turns-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // turns are detached: teardown ends them before deleting their folders (#271)
 const data = join(root, 'data');
 process.env.DATA_DIR = data;
 testPins(data);

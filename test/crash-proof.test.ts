@@ -1,13 +1,11 @@
 // Brief 1: no request and no background job can take the server down.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
 
 let srv: Booted;
 before(async () => {
@@ -53,13 +51,13 @@ test('a throwing background job, a stray rejection and an uncaught throw are log
 });
 
 test('a server that can\'t start still exits non-zero, so systemd restarts it', async () => {
-  const busy = createServer();
-  await new Promise<void>((r) => busy.listen(0, '127.0.0.1', r));
-  const root = mkdtempSync(join(tmpdir(), 'crash-proof-'));
+  const tmp = tempRoot('crash-proof-');
+  const root = tmp.dir;
+  const busyPort = await tmp.serve(createServer());
   try {
-    const proc = spawn(process.execPath, [join(REPO, 'server.ts')], {
+    const proc = tmp.spawn(process.execPath, [join(REPO, 'server.ts')], {
       env: {
-        ...process.env, MACHINES_URL: undefined, PORT: String((busy.address() as any).port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+        ...process.env, MACHINES_URL: undefined, PORT: String(busyPort), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
         CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       },
       stdio: 'ignore',
@@ -70,7 +68,6 @@ test('a server that can\'t start still exits non-zero, so systemd restarts it', 
     assert.notEqual(code, 0);
     assert.notEqual(code, null, 'it exited by itself rather than hanging');
   } finally {
-    busy.close();
-    rmSync(root, { recursive: true, force: true });
+    await tmp.teardown();
   }
 });

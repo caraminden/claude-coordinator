@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { claudeLog, codexModelFor, fitLog } from '../src/codex.ts';
 import { codexInput, installSkills, limitWords, mcpServers, parseArgs } from '../src/codex-turn.ts';
-import { jsonLines } from './helpers.ts';
+import { jsonLines, tempRoot } from './helpers.ts';
 
 // Codex turns (#337): src/codex-turn.ts drives `codex app-server` and speaks Claude's stream-json both
 // ways, so the runner, steering, stop and the UI work unchanged. Here against a stand-in app-server.
-const root = mkdtempSync(join(tmpdir(), 'codex-turn-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('codex-turn-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const SHIM = join(import.meta.dirname, '..', 'src', 'codex-turn.ts');
 
 test('a Claude pick maps to the Codex model of the same tier, a Codex pick stays, none is Codex\'s default', () => {
@@ -174,7 +173,7 @@ function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, 'pid'), opts.lockPid);
   }
-  const child = spawn(process.execPath, [SHIM, ...args], { cwd: opts.cwd ?? root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = tmp.spawn(process.execPath, [SHIM, ...args], { cwd: opts.cwd ?? root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
   const events: any[] = [];
   let buf = '';
   child.stdout.on('data', (d) => {

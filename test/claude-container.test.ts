@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
@@ -12,17 +12,15 @@ import { Store } from '../src/db.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
-import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
+import { jsonLines, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
 // so the whole path runs: placeFor, the detached wrapper, its heartbeat, the stream and the finish.
-const root = mkdtempSync(join(tmpdir(), 'claude-container-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('claude-container-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // turns are detached: teardown ends them before deleting their folders (#271)
 process.env.CLAUDE_CONFIG_DIR = join(root, 'host-claude');
 // The server's own login: a container turn must never get it.
 process.env.ANTHROPIC_API_KEY = 'the-servers-key';
@@ -607,10 +605,10 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
   turn('8-2', 0);
   // Frozen with its container at MemoryHigh (#1255): a stale heartbeat, but its wrapper process is still there.
   turn('8-3', 60_000);
-  const frozen = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-3', 'pin', 'turn-wrapper.mjs'), join(person, '8-3')], { stdio: 'ignore' });
+  const frozen = tmp.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-3', 'pin', 'turn-wrapper.mjs'), join(person, '8-3')], { stdio: 'ignore' });
   // One started before #1343, whose wrapper was still turn-wrapper.ts.
   turn('8-4', 60_000);
-  const older = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-4', 'pin', 'turn-wrapper.ts'), join(person, '8-4')], { stdio: 'ignore' });
+  const older = tmp.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-4', 'pin', 'turn-wrapper.ts'), join(person, '8-4')], { stdio: 'ignore' });
   try {
     runner(inContainer).recover();
   } finally {

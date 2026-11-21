@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { hostOps, moveToNoCow, RETRY_AFTER_MS, type NoCowOps } from '../src/db-nocow.ts';
-import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { Store } from '../src/db.ts';
+import { tempRoot } from './helpers.ts';
 
 // #761: the live database moves into a no-COW file at a start, once. Whatever goes wrong partway, the old file
 // stays where it was and the server starts on it.
-const root = mkdtempSync(join(tmpdir(), 'db-nocow-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('db-nocow-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 let n = 0;
 
 /** A data dir with a database the way a stopped server leaves it. */
@@ -167,7 +167,7 @@ test('waits, with no marker, while a reader holds a transaction open', () => {
 
 test('finds another process that has the file open, and waits for it', async () => {
   const db = stopped();
-  const child = spawn(process.execPath, ['-e', `const { DatabaseSync } = require('node:sqlite'); const d = new DatabaseSync(process.argv[1]); d.prepare('SELECT 1').get(); console.log('open'); setInterval(() => {}, 1000);`, db], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const child = tmp.spawn(process.execPath, ['-e', `const { DatabaseSync } = require('node:sqlite'); const d = new DatabaseSync(process.argv[1]); d.prepare('SELECT 1').get(); console.log('open'); setInterval(() => {}, 1000);`, db], { stdio: ['ignore', 'pipe', 'inherit'] });
   try {
     await once(child.stdout!, 'data');
     assert.ok(hostOps.openBy(db).includes(child.pid!));

@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { tempRoot } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
 import { until } from './wait.ts';
 
 // tools/heavy-unit (#1298): a heavy command runs in a scope of its own in citadel-heavy.slice, so memory running out
 // kills that command and never the turn that ran it.
 const unitTool = join(import.meta.dirname, '..', 'tools', 'heavy-unit');
-const root = mkdtempSync(join(tmpdir(), 'heavy-unit-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('heavy-unit-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const inContainer = existsSync('/run/.containerenv') || existsSync('/.dockerenv');
 // Grows until something stops it: a few MB of node, then 10 MB a step, to 1 GB at most, so a box that doesn't enforce
 // the test's 96M (no memory controller for the user's units) fails the test instead of filling up.
@@ -110,7 +112,7 @@ test('without its own unit, the same command takes its whole turn down (what #12
 });
 
 test('--exec becomes the command, so the caller can stop it by the pid it started', { skip: !userSystemd && 'no user systemd with a memory controller here', timeout: 30_000 }, async () => {
-  const child = spawn(unitTool, ['--exec', 'sh', '-c', 'echo $$; cat /proc/self/cgroup; exec sleep 300'], { env: scriptEnv({ CITADEL_HEAVY_SLICE: heavySlice }) });
+  const child = tmp.spawn(unitTool, ['--exec', 'sh', '-c', 'echo $$; cat /proc/self/cgroup; exec sleep 300'], { env: scriptEnv({ CITADEL_HEAVY_SLICE: heavySlice }) });
   let out = '';
   child.stdout!.on('data', (b) => (out += b));
   try {
@@ -125,7 +127,7 @@ test('--exec becomes the command, so the caller can stop it by the pid it starte
 });
 
 test("a TERM to heavy-unit stops its command too, so a script's `kill $!` doesn't leave a dev server running", { skip: !userSystemd && 'no user systemd with a memory controller here', timeout: 30_000 }, async () => {
-  const child = spawn(unitTool, ['sh', '-c', 'echo $$; cat /proc/self/cgroup; exec sleep 300'], { env: scriptEnv({ CITADEL_HEAVY_SLICE: heavySlice }) });
+  const child = tmp.spawn(unitTool, ['sh', '-c', 'echo $$; cat /proc/self/cgroup; exec sleep 300'], { env: scriptEnv({ CITADEL_HEAVY_SLICE: heavySlice }) });
   let out = '';
   child.stdout!.on('data', (b) => (out += b));
   const closed = new Promise((r) => child.on('close', (code) => r(code)));

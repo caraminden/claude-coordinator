@@ -1,9 +1,7 @@
 // #656: the Citadel scheme's Taskmaster reads every scheme (Josh: "the Citadel taskmaster should have full read access
 // to all schemes"), read-only and only on a Citadel member's or admin's ask; other Taskmasters and writes stay as they were.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
@@ -18,16 +16,14 @@ import { Runner } from '../src/runner.ts';
 import { isTurnNote } from '../src/codex.ts';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { coordinatorAccess } from '../src/turn-launch.ts';
-import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot } from './helpers.ts';
 
 const REPO = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'every-scheme-'));
+const tmp = tempRoot('every-scheme-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(async () => {
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+after(() => tmp.teardown());
 
 // Three schemes, Citadel's the second (GLOBAL_OWNER), each with a Taskmaster, and a minion in Peek.
 const store = new Store(join(data, 'coordinator.db'));
@@ -153,7 +149,7 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   const api = (as: { id: number }, method: string, path: string) =>
     fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${tokens.agentToken(as.id)}`, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
   async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean) {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(as.id), COORDINATOR_PROJECT: String(as.project_id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_APP_INSTRUCTIONS: citadelTools ? '1' : undefined },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

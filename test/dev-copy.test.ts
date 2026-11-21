@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { tempRoot } from './helpers.ts';
 
 // citadel-dev-copy (#482): a dev copy of this checkout, started, replaced and stopped by its own pid.
 const repo = join(import.meta.dirname, '..');
 const cmd = join(repo, 'tools', 'citadel-dev-copy');
-const root = mkdtempSync(join(tmpdir(), 'dev-copy-'));
+const scratch = tempRoot('dev-copy-');
+const root = scratch.dir;
 const live = join(root, 'live');
 const tmp = join(root, 'tmp');
 mkdirSync(tmp);
@@ -19,11 +20,11 @@ const run = (args: string[], over: NodeJS.ProcessEnv = {}) => spawnSync(cmd, arg
 const state = () => JSON.parse(readFileSync(join(tmp, 'dev-copy', 'state.json'), 'utf8'));
 const alive = (pid: number) => existsSync(`/proc/${pid}`) && !/\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
 const seen: number[] = [];
-after(() => {
+after(async () => {
   run(['stop']);
   // Whatever a failed assertion left running; never a pid the test didn't start.
   for (const pid of seen) if (alive(pid)) process.kill(pid, 'SIGKILL');
-  rmSync(root, { recursive: true, force: true });
+  await scratch.teardown();
 });
 
 // A "live" database with an admin, to copy.
@@ -161,7 +162,7 @@ test('a copy finishes while the live server keeps writing', async () => {
   db.exec("INSERT INTO settings (key, value) VALUES ('turn:529', '{}')");
   db.exec('CREATE TABLE filler (b BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(4000) FROM n');
   db.close();
-  const writer = spawn(process.execPath, ['-e', `
+  const writer = scratch.spawn(process.execPath, ['-e', `
     const db = new (require('node:sqlite').DatabaseSync)(process.argv[1]);
     db.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = OFF');
     const put = db.prepare('INSERT INTO filler VALUES (randomblob(100))');

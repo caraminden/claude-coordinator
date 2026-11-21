@@ -6,9 +6,8 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
 
 - **Close to no CPU while up (#1353).** That core was Godot's audio thread: the container has no sound
   card, its ALSA default is the null device, which never makes a writer wait, so the thread spun for the
-  editor's whole life. `start.sh` runs the editor with `--audio-driver Dummy`. It also sets the editor's
-  low-processor sleep to 50 ms: the headless window counts as focused, so it woke every 6.9 ms with
-  nothing to draw (18% of a core). Measured in a scratch copy: 89% of a core before, 1% after.
+  editor's whole life. `start.sh` runs the editor with `--audio-driver Dummy`, and with `--frame-delay 45`: the headless
+  window counts as focused, so it woke every 6.9 ms with nothing to draw (18% of a core). Measured in a scratch copy: 89% of a core before, 1% after.
   `start.sh` runs from the live checkout, so a change to it is live at the editor's next start.
 
 - **Start on demand.** The agent's MCP command goes through `godot-on-demand.mjs`, which passes the
@@ -22,7 +21,7 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
   don't: every turn in a scheme the machine is lent to opens a session, about 56 a day, and when those
   counted the editor never went 2 hours quiet (#615). `perigee-godot-idle.timer` runs
   `godot-on-demand.mjs idle-check` every 10 minutes, which stops the unit once both the last call and
-  the unit's start are 30 minutes old (2 hours until #1353). It never touches a frozen unit and never starts anything. Its
+  the unit's start are 30 minutes old. It never touches a frozen unit and never starts anything. Its
   first run after install finds no stamp and starts the clock instead of stopping.
 - **No call lands on a dying editor.** The check decides and stops under an exclusive lock
   (`~/.local/state/perigee-godot/stop.lock`), and a tool call waits on that lock before it looks at the
@@ -49,6 +48,9 @@ cp ~/claude-coordinator/deploy/perigee-godot/perigee-godot-agent.service \
    ~/claude-coordinator/deploy/perigee-godot/perigee-godot-idle.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now perigee-godot-idle.timer
+# Rolling back past #1353 removes start.sh: copy main's old .container back from git first
+# (git -C ~/claude-coordinator show <commit before #1353>:deploy/perigee-godot/perigee-godot.container),
+# daemon-reload, and point Exec at a start.sh that exists.
 # Picks up the new MCP command. Ends the agent's open sessions: do it when no Delve minion is mid-call.
 systemctl --user restart perigee-godot-agent.service
 ```

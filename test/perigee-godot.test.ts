@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createConnection, createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -275,4 +275,24 @@ test('bridge: a tool call and its answer each count as use, with no keep-alive t
   await until('b.seen(8)', () => b.seen(8));
   assert.ok(b.fresh(), 'the answer counts as use');
   assert.equal(await b.close(), 0);
+});
+
+test('start.sh runs the editor with Dummy audio and a frame delay (#1353: the null ALSA device spun a core)', () => {
+  const dir = mkdtempSync(join(root, 'start-'));
+  const args = join(dir, 'args');
+  // A weston that leaves its socket and exits, and a Godot that records how it was run.
+  writeFileSync(join(dir, 'weston'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e "require('net').createServer().listen(process.env.XDG_RUNTIME_DIR + '/wl-0', () => process.exit(0))"\n`);
+  writeFileSync(join(dir, 'godot'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${args}'\n`);
+  chmodSync(join(dir, 'weston'), 0o755);
+  chmodSync(join(dir, 'godot'), 0o755);
+  const r = spawnSync('/bin/sh', [join(import.meta.dirname, '../deploy/perigee-godot/start.sh')], {
+    env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, XDG_RUNTIME_DIR: join(dir, 'xdg'), DELVE_DIR: join(dir, 'delve'), GODOT: join(dir, 'godot') },
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const argv = readFileSync(args, 'utf8').trim().split('\n');
+  assert.deepEqual(argv.slice(argv.indexOf('--audio-driver'), argv.indexOf('--audio-driver') + 2), ['--audio-driver', 'Dummy']);
+  assert.ok(Number(argv[argv.indexOf('--frame-delay') + 1]) >= 30, `a frame delay of 30 ms or more: ${argv.join(' ')}`);
+  assert.deepEqual(argv.slice(0, 3), ['--editor', '--path', join(dir, 'delve', 'godot')]);
 });

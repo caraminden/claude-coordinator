@@ -487,10 +487,13 @@ function keyBar(projectId, tv) {
 function changeRows(tv) {
   const changes = tv.next?.changes ?? [];
   const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
+  // A rider goes right behind its front, whatever waiters sit between them in the line (the server's order for the release).
+  const frontAt = at(changes.find((c) => c.train?.role === 'front')?.ticketId);
+  const place = (c, k) => (c.train?.role === 'rider' && frontAt >= 0 ? frontAt + (k + 1) / (changes.length + 1) : at(c.ticketId));
   return [
-    ...changes.map((c) => ({ c, i: at(c.ticketId) })),
-    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i }])),
-  ].sort((a, b) => a.i - b.i); // stable: the changes past the line (-1) keep their furthest-along-first order
+    ...changes.map((c, k) => ({ c, i: at(c.ticketId), key: place(c, k) })),
+    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i, key: i }])),
+  ].sort((a, b) => a.key - b.key); // stable: the changes past the line (-1) keep their furthest-along-first order
 }
 
 /** Each minion's place in that order across the targets (the minions list's Deploying section sorts by it, #1003): ticketId → index. */
@@ -522,9 +525,11 @@ function changeList(projectId, tv) {
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
   const firstLater = rows.findIndex((r) => r.c?.later);
   const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) && !rows[firstLater]?.c?.train ? ': in line' : '';
-  const after = firstLater > 0 ? `After ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
+  const next = rows[firstLater]?.c?.train;
+  const after = firstLater > 0 ? `${next ? 'Releasing next, after' : 'After'} ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
+  const now = rows[0]?.c?.train?.role === 'front' ? `Releasing now: train of ${rows[0].c.train.size}` : '';
   const waiters = rows.filter((r) => r.wait);
-  const list = h('ol', { class: 'rel-changes' }, rows.flatMap((r, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]));
+  const list = h('ol', { class: 'rel-changes' }, rows.flatMap((r, i) => [...(i === 0 && now ? [h('li', { class: 'rel-after muted' }, now)] : []), ...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]));
   // The landings waiting in line move (#1002): dragged, or sent to the front of the waiters with Land next. The holder
   // and the changes past the line stay put.
   if (waiters.length > 1) {

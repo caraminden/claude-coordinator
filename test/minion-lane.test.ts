@@ -205,7 +205,9 @@ test("a minion whose turn still runs unfollowed (its wrapper is alive in its fol
   try {
     r.send(id, 'Cara', 'hello');
     assert.equal(r.isRunning(id), false, 'no turn starts beside the live one');
-    assert.ok((r as any).lanes.busy(id), 'the turn step holds the lane until it ends');
+    // Its wrapper may never exit: the lane stays free for a dismissal or a sweep, and still no turn starts.
+    await until('the lane to be free again', () => !(r as any).lanes.busy(id));
+    assert.equal(r.isRunning(id), false, 'still no turn beside the live one');
     assert.deepEqual(turnDirs(r, id), [`${id}-1`]);
   } finally {
     stray.kill();

@@ -843,21 +843,31 @@ export class Runner {
   /** How often a start waiting on a turn this server doesn't follow checks whether its wrapper has gone (#1464). */
   strayPollMs = 5_000;
 
+  /** Minions whose next turn waits for a turn nothing here follows to end (liveTurn): their queue starts once it has. */
+  private strayWaits = new Set<number>();
+
   /**
-   * One live turn per minion (#1464): what a new turn of `ticketId` must wait for, or null when none runs. The turn this
-   * server follows, else one whose wrapper still runs in its folder though nothing follows it (#1284's first turn, after
-   * a second replaced it here): checked against /proc (wrapperAlive), not only this server's map or the database.
+   * One live turn per minion (#1464): what a lane step that would start a turn of `ticketId` returns instead, or null
+   * when no turn runs. The turn this server follows holds the lane until it ends. One whose wrapper still runs in its
+   * folder though nothing follows it (#1284's first turn, after a second replaced it here), checked against /proc
+   * (wrapperAlive) and not only this server's map or the database, frees the lane at once, so a dismissal or a sweep
+   * isn't stuck behind a wrapper that may never exit; the queue waits and starts once that wrapper is gone.
    */
   private liveTurn(ticketId: number): Promise<void> | null {
     const followed = this.turns.get(ticketId);
     if (followed) return followed.ended;
+    if (this.strayWaits.has(ticketId)) return Promise.resolve();
     const stray = this.strayTurnDir(ticketId);
     if (!stray) return null;
     console.error(`Minion ${ticketId}: a turn nothing here follows still runs in ${stray}; its next turn waits for it to end (#1464).`);
-    return new Promise((done) => {
-      const check = () => (wrapperAlive(stray) ? setTimeout(check, this.strayPollMs).unref() : done());
-      check();
-    });
+    this.strayWaits.add(ticketId);
+    const check = () => {
+      if (wrapperAlive(stray) && !existsSync(join(stray, 'exit.json'))) return void setTimeout(check, this.strayPollMs).unref();
+      this.strayWaits.delete(ticketId);
+      this.next(ticketId);
+    };
+    setTimeout(check, this.strayPollMs).unref();
+    return Promise.resolve();
   }
 
   /** A turn folder of `ticketId`'s, host or container (<minion>-<ms>), whose wrapper is alive (and hasn't written its exit) though this server follows none. */
@@ -2846,12 +2856,14 @@ export class Runner {
       if (now) this.wakeNow.add(ticketId);
       else if (!this.wakeNow.has(ticketId)) return;
     }
+    // A turn nothing here follows still runs (liveTurn): it calls next() once that turn has ended.
+    if (this.strayWaits.has(ticketId)) return;
     // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
     // turn's save above all: a turn on another login restores from that save (#250). The queue keeps the messages.
     if (this.lanes.busy(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.peekQueue(ticketId));
-    // Nor beside a turn still live (#1464): the lane holds the queue until it ends, then asks again.
+    // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
     this.lanes.run(ticketId, 'turn', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, person, () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);

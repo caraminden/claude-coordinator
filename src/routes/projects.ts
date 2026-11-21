@@ -1248,6 +1248,20 @@ export const projectRoutes: Route[] = [
       if (caller && !planned.type?.length) {
         throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
       }
+      // #1488: a Taskmaster's second start from one handoff (Nov 20: two flake minions) is refused, memory index or not; not_duplicate overrides.
+      if (caller && body.not_duplicate !== true) {
+        const shared = projectSharedDir(app.dataDir, project.id);
+        // A closed minion's handoff is tidied into handoffs/shipped/ or not-picked/ (#1371): the same file either way.
+        const fileOf = (text: string) => handoffIn(text, shared)?.replace(/^handoffs\/(?:shipped|not-picked)\//, 'handoffs/') ?? null;
+        const rel = fileOf(message);
+        const held = new Map(waiters.chains().map((c) => [c.ticket, c.message]));
+        const textOf = (data: string | null) => { try { return String(JSON.parse(data ?? '{}').text ?? ''); } catch { return ''; } };
+        const twins = rel ? store.briefsSince(project.id, Date.now() - 3 * 86_400_000).filter((t) => fileOf(held.get(t.id) ?? textOf(t.data)) === rel) : [];
+        if (twins.length) {
+          throw new HttpError(409, `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). `
+            + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.');
+        }
+      }
       const table = pickFor(planned.type?.[0]);
       // Why it runs on this model (#1061): the table's pick for its type (the Taskmaster picks from the table), or a person's own choice.
       const byHand = !caller && (model !== null || effort !== null);

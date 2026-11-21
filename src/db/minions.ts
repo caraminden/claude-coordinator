@@ -32,6 +32,14 @@ export const minionQueries = {
     return this.db.prepare("SELECT * FROM tickets WHERE branch = ? ORDER BY status = 'closed', id DESC LIMIT 1").get(branch) as unknown as Ticket | undefined;
   },
 
+  /** A scheme's minions open now or closed since `since` (ms), each with its first message's data (its brief, if posted), for the duplicate-start check (#1488). */
+  briefsSince(this: Store, projectId: number, since: number): { id: number; number: number; title: string; status: string; data: string | null }[] {
+    return this.db.prepare(`SELECT t.id, t.number, t.title, t.status,
+      (SELECT data FROM events e WHERE e.ticket_id = t.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1) AS data
+      FROM tickets t WHERE t.project_id = ? AND t.kind = 'ticket' AND (t.status != 'closed' OR t.closed_at >= ?) ORDER BY t.number`)
+      .all(projectId, since) as { id: number; number: number; title: string; status: string; data: string | null }[];
+  },
+
   /** All tickets in a project, including the coordinator. */
   listTickets(this: Store, projectId: number): Ticket[] {
     // In a read scope (#1527) the rows are shared, not copied: copying Citadel's 1,500 rows per call cost more than the

@@ -4,7 +4,8 @@
 # same count, run after run).
 #   citadel-callgrind setup                       build valgrind and fetch the generic libraries, once per account
 #   citadel-callgrind [valgrind options] [--] <program> [args...]
-#                                                 run it under callgrind; the last line is "Ir <count>"
+#                                                 run it under callgrind; the last line is "Ir <count>", and the
+#                                                 profile goes to $TMPDIR/callgrind.out.<pid> unless you name one
 # Why it's needed: perigee runs CachyOS's x86-64-v4 packages, so glibc, its loader and its libc.a are compiled with
 # AVX-512 throughout, and valgrind (3.27.1 included, the newest release when this was written) has no AVX-512 decoder:
 # it stops at the loader's first EVEX instruction ("unhandled instruction bytes: 0x62 0xF1 0x7F 0x48", SIGILL).
@@ -85,9 +86,16 @@ done
 prog=$1; shift
 [[ -f $prog ]] || prog=$(command -v "$prog") || die "no such program: $1"
 
-has_tool=0
-for o in "${opts[@]}"; do [[ $o == --tool=* ]] && has_tool=1; done
-[[ $has_tool == 1 ]] || opts=(--tool=callgrind "${opts[@]}")
+has_tool=0 has_out=0
+for o in "${opts[@]}"; do
+  [[ $o == --tool=* ]] && has_tool=1
+  [[ $o == --callgrind-out-file=* ]] && has_out=1
+done
+if [[ $has_tool == 0 ]]; then
+  opts=(--tool=callgrind "${opts[@]}")
+  # callgrind's default writes callgrind.out.<pid> into the current folder, often a repo: keep it in TMPDIR instead.
+  [[ $has_out == 1 ]] || opts+=("--callgrind-out-file=${TMPDIR:-/tmp}/callgrind.out.$$")
+fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/citadel-callgrind.XXXXXX")
 trap 'rm -rf "${work:?}"' EXIT
@@ -107,5 +115,7 @@ if grep -q 'unhandled instruction bytes' "$log"; then
 fi
 grep -E '^==[0-9]+== (Events|Collected|I +refs)' "$log" | sed 's/^==[0-9]*== //' >&2 || true
 ir=$(grep -oE 'Collected : [0-9]+' "$log" | grep -oE '[0-9]+$' || true)
+out=$(grep -oE -- '--callgrind-out-file=[^ ]+' <<<"${opts[*]}" | tail -1 | cut -d= -f2- || true)
+[[ -n $out && -e $out ]] && echo "profile: $out (callgrind_annotate: $VG/bin/callgrind_annotate)" >&2
 [[ -n $ir ]] && echo "Ir $ir"
 exit "$status"

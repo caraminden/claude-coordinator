@@ -47,7 +47,7 @@ printf '==1== Events    : Ir\\n==1== Collected : 1234\\n' > "$log"
   assert.equal(notDynamic.status, 0, notDynamic.stderr);
 
   const [first, second] = readFileSync(calls, 'utf8').trim().split('\n');
-  assert.match(first, /^--tool=callgrind --dump-instr=yes --log-file=\S+ \S+\/ld-linux-x86-64\.so\.2 --library-path \S+ \S+\/true arg1$/);
+  assert.match(first, /^--tool=callgrind --dump-instr=yes --callgrind-out-file=\S+\/callgrind\.out\.\d+ --log-file=\S+ \S+\/ld-linux-x86-64\.so\.2 --library-path \S+ \S+\/true arg1$/);
   assert.ok(!first.includes(' /bin/true'), 'runs a copy, not the original');
   assert.match(second, new RegExp(`^--tool=cachegrind --log-file=\\S+ ${script}$`));
 });

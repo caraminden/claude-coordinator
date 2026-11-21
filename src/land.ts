@@ -200,9 +200,9 @@ export class Landings {
     return [...this.waiting];
   }
 
-  /** Whether this one minion's hand-off is unreported: from memory, or one stat on its own folder while the start's scan runs. */
+  /** Whether this one minion's hand-off is unreported: from memory, else one stat on its own folder (a turn's start, not the poll). */
   hasHandoff(ticketId: number): boolean {
-    return this.waiting.has(ticketId) || (!this.scanDone && existsSync(join(this.dir(ticketId), HANDOFF)));
+    return this.waiting.has(ticketId) || existsSync(join(this.dir(ticketId), HANDOFF));
   }
 
   /** The hand-off's own file, read off the server's thread (#1463). */

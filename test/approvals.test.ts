@@ -354,7 +354,9 @@ test("through the route, a card is judged with the turn's own TMPDIR, not the se
   writeFileSync(forever, `#!${process.execPath}\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`);
   chmodSync(forever, 0o755);
   // The server has no TMPDIR of its own, as under its systemd unit.
-  const srv = await bootServer({ env: { CLAUDE_BIN: forever, NODE_NO_WARNINGS: '1', TMPDIR: undefined } });
+  // Its HOME holds its data, as on the box: where the temp folders sit beside the runner's home (CI's burn-in), the tripwire reads the data as another person's.
+  const home = tmp.path('srv');
+  const srv = await bootServer({ root: home, env: { CLAUDE_BIN: forever, NODE_NO_WARNINGS: '1', TMPDIR: undefined, HOME: home } });
   try {
     const project = (await srv.call('/api/projects', { name: 'Scheme' })).data;
     const created = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'tidy up' })).data;

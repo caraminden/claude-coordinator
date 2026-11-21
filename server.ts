@@ -1,4 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
@@ -1426,6 +1427,16 @@ const timerAlerts = new TimerAlerts(store, {
 if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
 // Each app's DATA_DIR size for Settings and the app's own read (#847): du in the background, never on a request.
 if (!BOOT_CHECK) services.watchDisk(() => store.listContraptions());
+// Apps with a database but no backup timer or disk_warn_gb are flagged to their scheme's Taskmaster, once each (#1383).
+if (!BOOT_CHECK) {
+  const flagRound = () => void flagUnbacked({
+    apps: () => store.listContraptions(), dataDir: (a) => services.dataDir(a), manifest: (a) => services.manifest(a),
+    taskmaster: (scheme) => store.getCoordinator(scheme)?.id ?? null, mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
+    getState: () => store.getSetting<Record<string, string>>(FLAG_KEY) ?? {}, setState: (s) => store.setSetting(FLAG_KEY, s),
+  }).catch((err) => console.warn(`Checking the apps for backups failed: ${err.message}`));
+  setTimeout(flagRound, 5 * 60_000).unref();
+  setInterval(flagRound, 24 * 3_600_000).unref();
+}
 // Every contraption's errors in a daily file in its home scheme's shared folder (#835): failed agent tool calls, 5xx
 // answers through the proxy (set on the proxy below) and its journals' error lines; list_tickets shows yesterday's count.
 const errorDigest = new ErrorDigest(store, {

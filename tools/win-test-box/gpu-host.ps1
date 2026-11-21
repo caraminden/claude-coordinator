@@ -98,6 +98,22 @@ function Install-InBox($Session) {
   $r | Select-Object -SkipLast 1 | ForEach-Object { Write-Host "  $_" }
   if ($r[-1]) { Stop-With "gpu.ps1 -Install failed in the box (above)." }
 }
+# Restarts Windows in the box from inside (Restart-Computer), then waits until it has booted again and reconnects $s.
+function Restart-Box {
+  $boot = Invoke-Command -Session $script:s { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime }
+  Invoke-Command -Session $script:s { Restart-Computer -Force } -ErrorAction SilentlyContinue
+  Remove-PSSession $script:s
+  $until = (Get-Date).AddMinutes(8)
+  while ($true) {
+    Start-Sleep -Seconds 10
+    # Connect-Box may still reach the old boot while Windows shuts down: only a new boot time counts.
+    $script:s = Connect-Box
+    $now = try { Invoke-Command -Session $script:s { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime } -ErrorAction Stop } catch { $null }
+    if ($now -and $now -ne $boot) { return }
+    Remove-PSSession $script:s -ErrorAction SilentlyContinue
+    if ((Get-Date) -gt $until) { Stop-With "the box didn't come back from its restart in 8 minutes. Look in its window (Hyper-V Manager, Connect), then run this again." }
+  }
+}
 Say 'Reaching the box'
 $s = Connect-Box
 $guest, $boxAdmin = Invoke-Command -Session $s {
@@ -136,9 +152,20 @@ $todo = @($targets | Where-Object { $there[$_.To] -ne $_.Length })
 Write-Host "  $($targets.Count - $todo.Count) of $($targets.Count) file(s) already there; copying $($todo.Count)"
 $dirs = @($todo | ForEach-Object { Split-Path $_.To } | Sort-Object -Unique)
 Invoke-Command -Session $s { $using:dirs | ForEach-Object { New-Item -ItemType Directory -Force $_ | Out-Null } }
+# A file the box holds open frees on a restart: from inside the box, never Restart-VM (README, Day to day: a hard reset).
+$restarted = $false
 foreach ($t in $todo) {
+  try { Copy-Item -ToSession $s -Path $t.From -Destination $t.To -Force; continue }
+  catch { $why = $_.Exception.Message }
+  if ($restarted) { Stop-With "copying $($t.To) failed again after a restart: $why" }
+  Write-Host "  copying $($t.To) failed: $why"
+  Write-Host '  If the file is in use, restarting the box from inside it frees it: Windows shuts down cleanly and starts again, about 3 minutes.'
+  Write-Host '  A CI job or minion job running on it now fails and is run again.'
+  if ((Read-Host '  Restart the box and try again? (y/n)') -notmatch '^y') { Stop-With 'you said no. Run this again once nothing in the box holds the file.' }
+  Restart-Box
+  $restarted = $true
   try { Copy-Item -ToSession $s -Path $t.From -Destination $t.To -Force }
-  catch { Stop-With "copying $($t.To) failed: $($_.Exception.Message) If it says the file is in use, restart the box (Restart-VM -Name $Name in this window) and run this again." }
+  catch { Stop-With "copying $($t.To) failed again after a restart: $($_.Exception.Message)" }
 }
 Write-Host "  driver files copied"
 

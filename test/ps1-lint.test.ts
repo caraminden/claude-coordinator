@@ -279,3 +279,14 @@ test('remove-runner.ps1 has no line that runs a file of the runner folder', () =
   // The call operator starts sc.exe and nothing else.
   assert.deepEqual([...new Set(code.match(/(?<!&)&\s*[^\s&]+/g))], ['& sc.exe']);
 });
+
+test('no test-box script runs or tells a person to run Restart-VM, the hard reset (MA4; README "Day to day")', () => {
+  const dir = join(root, 'tools/win-test-box');
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.ps1'))) {
+    const lines = readFileSync(join(dir, f), 'utf8').split('\n');
+    // The forbidding word may sit at the end of the line before, where a comment wrapped.
+    lines.forEach((line, i) => {
+      if (/Restart-VM/.test(line)) assert.match(`${lines[i - 1] ?? ''} ${line}`, /\b(never|not)\b/i, `${f}:${i + 1} names Restart-VM other than to forbid it: ${line.trim()}`);
+    });
+  }
+});

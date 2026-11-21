@@ -10,6 +10,8 @@ import { keepTitles } from '../src/workspace.ts';
 // The runner's own git config (a comment char, a template, a default branch) must not decide these.
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
+// A runner has no identity of its own, and the rebase's own commit (not only ours) needs one.
+for (const who of ['AUTHOR', 'COMMITTER']) { process.env[`GIT_${who}_NAME`] = 't'; process.env[`GIT_${who}_EMAIL`] = 't@t'; }
 const root = mkdtempSync(join(tmpdir(), 'titles-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' } }).trim();

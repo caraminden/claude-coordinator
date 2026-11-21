@@ -62,14 +62,15 @@ test('the inline-poll guard flags sleep loops and leaves look-alikes alone', () 
 // Five patterns that make a test pass or fail by timing. test/flake-baseline.json holds today's count per file and
 // pattern (`n` bare hits, `ok` hits with a `// timing-ok: <why>` on the row or the row above). A count that rises, or a new
 // file with any, fails. A drop passes with a note (so a flake fix never goes red on a file it didn't touch): lower the numbers
-// when convenient with `FLAKE_BASELINE=write node test/one-until.test.ts`, and commit the JSON.
+// when convenient with `FLAKE_BASELINE=write node test/one-until.test.ts`, and commit the JSON. The baseline is keyed by file
+// name: after a `git mv` of a test file, regenerate it.
 export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: string }> = {
   sleep: {
     re: (r) => /\bawait\b.*\bsetTimeout\b|\bawait\s+(?:sleep|delay|nap|pause)\w*\(\s*\d/.test(r),
     why: 'a bare sleep guesses how long the thing takes. Wait on its done signal: until(\'<what>\', () => cond) from ./wait.ts; to show nothing happens, do a second action and wait for that.',
   },
   elapsed: {
-    re: (r) => /\bassert\b.*(?:(?:Date|performance)\.now\(\)\s*-|\belapsed\w*|\btook\w*|\bwaitedMs\b|\bduration\w*|\.ms\b)[^;]*?<=?\s*\d/.test(r),
+    re: (r) => /\bassert\b.*(?:(?:Date|performance).now\(\)\s*-(?!\s*(?:Date\.parse|new Date))|\belapsed\w*|\btook\w*|\bwaitedMs\b|\bduration\w*|\.ms\b)[^;]*?<=?\s*\d/.test(r),
     why: 'asserting that something was fast fails on a busy box. A deadline means "it hung": give until(..) the wait, or inject a clock and assert on its ticks.',
   },
   freePort: {
@@ -78,7 +79,8 @@ export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: st
   },
   shortUntil: {
     re: (r) => {
-      const m = /\buntil\(.*,\s*(\d[\d_]*)\s*(?:,\s*\(\)\s*=>[^]*)?\)/.exec(r);
+      // the number is the call's own deadline: it follows the closed predicate (`)`, `}`, a quote), not a `, 200)` inside it
+      const m = /\buntil\(.*[)}\]'"`]\s*,\s*(\d[\d_]*)\s*(?:,\s*\(\)\s*=>.*)?\)\s*(?:\.catch\(.*\))?[;,)]*\s*(?:\/\/.*)?$/.exec(r);
       const ms = m ? Number(m[1].replace(/_/g, '')) : 0;
       return ms >= 100 && ms < 30_000;
     },
@@ -163,6 +165,8 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
     'const port = await freePort();',
     "await until('x', () => ok(), 5_000);",
     'rmSync(root, { recursive: true, force: true });',
+    "await until('x', () => buf.slice(0, 200).includes('a'));",
+    "assert.ok(Date.now() - Date.parse(r.at) < 60_000);",
     '// timing-ok: the sleep is the thing under test',
     'await new Promise((r) => setTimeout(r, 50));',
     "await until('x', () => a.slice(0, 2));",
@@ -171,7 +175,7 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
   ].join('\n');
   const h = flakeHits(text);
   assert.deepEqual(Object.fromEntries(Object.entries(h).map(([p, v]) => [p, [v.bare, v.ok]])), {
-    sleep: [[1], [7]], elapsed: [[2], []], freePort: [[3], []], shortUntil: [[4], []], rmTemp: [[5], []],
+    sleep: [[1], [9]], elapsed: [[2], []], freePort: [[3], []], shortUntil: [[4], []], rmTemp: [[5], []],
   });
   const base = toCounts({ 'a.ts': h });
   assert.deepEqual(flakeProblems({ 'a.ts': h }, base), []);

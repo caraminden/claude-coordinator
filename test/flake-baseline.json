@@ -91,7 +91,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 3,
+   "n": 2,
    "ok": 0
   }
  },
@@ -100,16 +100,12 @@
    "n": 4,
    "ok": 0
   },
-  "elapsed": {
-   "n": 2,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
   },
-  "shortUntil": {
-   "n": 3,
+  "elapsed": {
+   "n": 1,
    "ok": 0
   }
  },
@@ -121,12 +117,6 @@
  },
  "approvals.test.ts": {
   "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "apps.test.ts": {
-  "shortUntil": {
    "n": 1,
    "ok": 0
   }
@@ -305,7 +295,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },
@@ -377,7 +367,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 11,
+   "n": 10,
    "ok": 0
   },
   "sleep": {
@@ -424,10 +414,6 @@
  "citadel-test.test.ts": {
   "rmTemp": {
    "n": 3,
-   "ok": 0
-  },
-  "shortUntil": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -563,10 +549,6 @@
  },
  "contraption-asks.test.ts": {
   "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
-  "elapsed": {
    "n": 1,
    "ok": 0
   }
@@ -991,7 +973,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 17,
+   "n": 14,
    "ok": 0
   },
   "sleep": {
@@ -1066,10 +1048,6 @@
   }
  },
  "land-overlap.test.ts": {
-  "shortUntil": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
@@ -1119,10 +1097,6 @@
    "ok": 0
   },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  },
-  "shortUntil": {
    "n": 1,
    "ok": 0
   }
@@ -1223,12 +1197,6 @@
    "ok": 0
   }
  },
- "machine-mcp.test.ts": {
-  "shortUntil": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "machine-notes-cards.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -1321,7 +1289,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 5,
+   "n": 4,
    "ok": 0
   }
  },
@@ -1503,7 +1471,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 6,
+   "n": 5,
    "ok": 0
   },
   "elapsed": {
@@ -2171,7 +2139,7 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },

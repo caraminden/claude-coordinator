@@ -14,7 +14,7 @@ count rises. Write the right-hand column instead.
 | `assert` that an elapsed time is under N | an injected clock (the code takes a `now`/timer knob; the test ticks it). A deadline means "it hung", never "it was fast" |
 | `freePort(` | bind port 0 and read the port the server reports |
 | `until(.., N)` with N under 30 s | no number: the default is the "it hung" deadline |
-| `rmSync(.., { recursive: true })` | teardown through `bootServer` / `stopTurns` in `./helpers.ts` |
+| `rmSync(.., { recursive: true })` | teardown through `bootServer` / `stopTurns` in `./helpers.ts`; a plain unit test's own temp dir goes in a `finally` or `after` with `// timing-ok: own temp dir` |
 
 - To show nothing happens, do a second action and wait for it (the queue drained, the next event arrived),
   then check the first one stayed quiet. A fixed idle proves nothing and costs its whole length.
@@ -22,3 +22,4 @@ count rises. Write the right-hand column instead.
 - The one escape is `// timing-ok: <why>` on the row or the row above. It is counted in the baseline too.
 - A count above the baseline fails; a drop passes with a note. Lower the baseline after a fix: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON.
 - Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.
+- After a `git mv` of a test file the baseline (keyed by name) needs the same regenerate.

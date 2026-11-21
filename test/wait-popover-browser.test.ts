@@ -46,7 +46,7 @@ test('a minion with two waits shows one line each in one popover, and it stays o
   // Another minion's wait changes (a cancelled one appears) while the popover is open: the list redraws, the popover stays on B.
   // (Cause of the jump Cara saw, 2026-11-21: a redraw re-finds the open chip by its data-tip* attributes, and the wait chip had none, so it matched the first chip in the list.)
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...a, outbox_waits: [{ id: 9, state: 'dropped', chip: '⏱ 01:32', what: 'cancelled wake', reason: 'cancelled' }] } }) })`);
-  await new Promise((r) => setTimeout(r, 200));
+  await waitFor(page, 'the redraw', `document.querySelector('.thread-row[data-id="101"]')?.textContent.includes('01:32')`);
   assert.ok(await page.eval<boolean>(`${tip}.includes('check the run') && ${tip}.includes('a second wait') && !${tip}.includes('cancelled wake')`));
   // B's own change shows in the open popover.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: [b.outbox_waits[1]], updated_at: Date.now() } }) })`);

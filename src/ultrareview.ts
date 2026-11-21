@@ -525,7 +525,8 @@ export class UltraReviews {
   /**
    * Prep one area as a draft PR for `uid`. Resolves with its row (state prepping) once its branch names are
    * set; the push and PR run behind it. Throws, with a line people can read, for an area over the CLI's caps
-   * or a person with no GitHub login of their own. Person-only, like start (the route checks).
+   * or a person with no GitHub login of their own. A person, or their chat's own minion for them (the route checks);
+   * start stays person-only.
    */
   async prep(ticketId: number, uid: number, by: string, a: AreaAsk): Promise<BatchRow> {
     if (overLimit(a.size)) throw new Error(`${a.name}: ${fmt(a.size.files)} files, ${fmt(a.size.lines)} lines, over the CLI's limit of ${fmt(LIMITS.files)} files and ${fmt(LIMITS.lines)} lines. Split it.`);

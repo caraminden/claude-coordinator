@@ -8,6 +8,8 @@ import { cleanPaths, diffSize, parseShortstat, prepare, UltraReviews, type Revie
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, until } from './helpers.ts';
+import { Readable } from 'node:stream';
+import { ticketRoutes } from '../src/routes/tickets.ts';
 
 // Ultra review (#432): every test stubs `claude` with a script, so none of them launches a real (billed) review.
 const root = mkdtempSync(join(tmpdir(), 'ultrareview-'));
@@ -266,6 +268,39 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
   } finally {
     await srv.stop();
   }
+});
+
+test("a minion's prep goes out as its turn's person: their GitHub login, their batch, never the minion's or anyone else's (#1399)", async () => {
+  const r = repo();
+  const preps: { uid: number; by: string; name: string }[] = [];
+  const users: Record<number, { id: number; name: string }> = { 5: { id: 5, name: 'Josh' }, 6: { id: 6, name: 'Cara' } };
+  const app: any = {
+    store: { getTicket: () => ({ id: 9, person_id: 5 }), getUser: (id: number) => users[id], getProject: () => ({ repo_dir: r }) },
+    github: { token: (p: { id: number }) => (p.id === 5 ? 'josh-token' : 'cara-token') },
+    ultrareviews: { prep: async (_t: number, uid: number, by: string, a: { name: string }) => void preps.push({ uid, by, name: a.name }), rows: (_t: number, uid: number) => preps.filter((x) => x.uid === uid).map((x) => ({ ...x, repo: r })) },
+  };
+  const route = ticketRoutes.find((x) => x.method === 'POST' && x.path === '/api/tickets/:ticket/ultrareview/batch')!;
+  const post = async (caller: any) => {
+    const req: any = Readable.from([Buffer.from(JSON.stringify({ areas: [{ name: 'Lib', paths: ['lib'] }] }))]);
+    req.headers = { 'content-type': 'application/json' };
+    let status = 0, body = '';
+    const res: any = { destroyed: false, headersSent: false, writeHead: (s: number) => void (status = s), end: (b: Buffer) => void (body = String(b)) };
+    try {
+      await route.handler({ req, res, app, session: { name: 'agent', agent: caller.id, exp: 0 }, caller, ticket: { id: 9, project_id: 1 }, params: { ticket: '9' } } as any);
+    } catch (err: any) {
+      return { status: err.status, body: { error: err.message } };
+    }
+    return { status, body: JSON.parse(body) };
+  };
+  const ok = await post({ id: 9, kind: 'ticket' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.deepEqual(preps, [{ uid: 5, by: 'Josh', name: 'Lib' }], "prepped in Josh's batch, as Josh");
+  assert.equal(ok.body.for, 'Josh');
+  assert.equal(ok.body.rows.length, 1);
+  const tm = await post({ id: 9, kind: 'coordinator' });
+  assert.equal(tm.status, 403, 'a Taskmaster on its own chat preps nothing');
+  assert.match(tm.body.error, /not a Taskmaster/);
+  assert.equal(preps.length, 1);
 });
 
 // #508: the review's CLI runs in a unit of its own, so a restart neither waits for it (interruptible 0) nor

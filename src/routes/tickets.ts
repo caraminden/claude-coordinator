@@ -143,9 +143,10 @@ function pluginPicks(store: App['store'], ticket: { kind: string; project_id: nu
 const ULTRAREVIEW_REFUSE = 'Only a person can start an ultra review: it is billed to their own Claude account';
 const ULTRAREVIEW_PREP_REFUSE = "Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews";
 
-/** Whose batch a prep call works on (#1399): the signed-in person, or for the chat's own thread the person its turn runs for. */
+/** Whose batch a prep call works on (#1399): the signed-in person, or for the chat's own minion the person its turn runs for. */
 function prepper(app: App, session: Session, caller: Ticket | null, ticket: TicketView): { uid: number; name: string } | null {
   if (!caller) return session.uid ? { uid: session.uid, name: session.name } : null;
+  if (caller.kind === 'coordinator') throw new HttpError(403, 'Only a minion preps ultra reviews for its person, not a Taskmaster');
   const uid = app.store.getTicket(ticket.id)?.person_id;
   const user = uid == null ? undefined : app.store.getUser(uid);
   return user ? { uid: user.id, name: user.name } : null;

@@ -4147,7 +4147,7 @@
   "person": "200",
   "member": "200",
   "outsider": "404 No such minion",
-  "tmA": "200",
+  "tmA": "403 Only a minion preps ultra reviews for its person, not a Taskmaster",
   "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
@@ -4157,7 +4157,7 @@
   "person": "400 areas must list at least one area",
   "member": "400 areas must list at least one area",
   "outsider": "404 No such minion",
-  "tmA": "403 No person to prep for: this chat has not run a turn for anyone yet, so nobody would get the Start",
+  "tmA": "403 Only a minion preps ultra reviews for its person, not a Taskmaster",
   "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"

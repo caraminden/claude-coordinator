@@ -65,7 +65,7 @@ test("a changed source file burns in the tests the map gives it, up to the cap; 
   const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, map, { 'src/a.ts': 'export {};\n', 'test/a.test.ts': CLEAN, 'test/b.test.ts': CLEAN, 'test/c.test.ts': CLEAN, 'test/guard.test.ts': CLEAN });
   const r = ship(dir, { BURN_IN_MAPPED: '2', BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: the change maps to 3 tests and 0 more import it; only the first 2 are burned in \(left out: test\/c\.test\.ts\)$/m);
+  assert.match(r.stdout, /^burn-in: 3 tests are mapped to the change or import it; only the first 2 are burned in \(left out: test\/c\.test\.ts\)$/m);
   assert.match(r.stdout, /mapped from the change: test\/a\.test\.ts test\/b\.test\.ts$/m);
   assert.doesNotMatch(r.stdout, /guard\.test\.ts/);
 });
@@ -95,10 +95,21 @@ test('the cap holds over the map and importers together, nearest importers first
   });
   const r = ship(dir, { BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // The map's pick first, then the importer named like the file, then the other direct one; the one through src/b.ts is left out.
-  assert.match(r.stdout, /^burn-in: the change maps to 1 tests and 3 more import it; only the first 3 are burned in \(left out: test\/0via\.test\.ts\)$/m);
+  // The importer named like the file, then the other direct one; the one through src/b.ts is left out.
+  assert.match(r.stdout, /^burn-in: 4 tests are mapped to the change or import it; only the first 3 are burned in \(left out: test\/0via\.test\.ts\)$/m);
   assert.match(r.stdout, /mapped from the change: test\/mapped\.test\.ts; importing the change: test\/a\.test\.ts test\/aa\.test\.ts$/m);
   assert.doesNotMatch(r.stdout, /picked test\/0via/);
+});
+
+test("a full map doesn't crowd importers out: the map's picks and the importers take turns within the cap", () => {
+  const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, 'src/a.ts: test/m1.test.ts test/m2.test.ts test/m3.test.ts\n', {
+    'src/a.ts': 'export {};\n', 'test/m1.test.ts': CLEAN, 'test/m2.test.ts': CLEAN, 'test/m3.test.ts': CLEAN, 'test/a.test.ts': importing('../src/a.ts'),
+  });
+  const r = ship(dir, { BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: 4 tests are mapped to the change or import it; only the first 3 are burned in \(left out: test\/m3\.test\.ts\)$/m);
+  assert.match(r.stdout, /mapped from the change: test\/m1\.test\.ts test\/m2\.test\.ts; importing the change: test\/a\.test\.ts$/m);
+  assert.match(r.stdout, /^burn-in: picked test\/a\.test\.ts: it imports src\/a\.ts$/m);
 });
 
 test('a changed source file no test imports burns in nothing', () => {

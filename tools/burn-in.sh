@@ -7,7 +7,7 @@
 #   tools/burn-in.sh <test file> [copies]   one file, its copies at once (tools/flake-proof.sh's batches: the same shape)
 #   tools/burn-in.sh --ship <base>          a ship's CI run (tests.yml): the test files it adds or changes since <base>,
 #                                           then up to BURN_IN_MAPPED (3) tests tools/affected-map.txt maps its changed
-#                                           source files to or that import them, one file after another, within
+#                                           source files to or that import them (in turns), one file after another, within
 #                                           BURN_IN_LIMIT (150) s
 #   tools/burn-in.sh --importers <path>...  the test files that import those paths, nearest first, with why (no run)
 #
@@ -86,11 +86,12 @@ importers() {
   awk -F'\t' -v changed="$(printf '%s\n' "$@")" '
     BEGIN { n = split(changed, c, "\n"); for (i = 1; i <= n; i++) if (c[i] != "") ch[c[i]] = 1 }
     FNR == 1 { part++ }
-    part == 1 { if ($2 in ch) via[$1] = (($1 in via) ? via[$1] ", " : "") $2; next }
-    $2 in ch { direct[$1] = (($1 in direct) ? direct[$1] ", " : "") $2
+    # Each join is built before it is assigned: awks differ on whether a[k] = ... (k in a) sees k already (mawk does).
+    part == 1 { if ($2 in ch) { v = $2; if ($1 in via) v = via[$1] ", " v; via[$1] = v } next }
+    $2 in ch { v = $2; if ($1 in direct) v = direct[$1] ", " v; direct[$1] = v
                b = $1; sub(/.*\//, "", b); sub(/\.test\.[jt]s$/, "", b); m = $2; sub(/.*\//, "", m); sub(/\.[^.]*$/, "", m)
                if (b == m) named[$1] = 1; next }
-    $2 in via { two[$1] = (($1 in two) ? two[$1] "; " : "") $2 ", which imports " via[$2] }
+    $2 in via { v = $2 ", which imports " via[$2]; if ($1 in two) v = two[$1] "; " v; two[$1] = v }
     END {
       for (t in direct) print (t in named ? 0 : 1) "\t" t "\timports " direct[t]
       for (t in two) if (!(t in direct)) print 2 "\t" t "\timports " two[t]
@@ -130,11 +131,18 @@ while IFS=$'\t' read -r f why; do
   [ -f "$f" ] && [[ $taken != *" $f "* ]] || continue
   imp+=("$f") imp_why+=("$why") taken+="$f "
 done < <([ ${#src_changed[@]} = 0 ] || importers "${src_changed[@]}")
-if [ $((${#mapped[@]} + ${#imp[@]})) -gt "$mapped_max" ]; then
-  more=("${mapped[@]}" "${imp[@]}")
-  echo "burn-in: the change maps to ${#mapped[@]} tests and ${#imp[@]} more import it; only the first $mapped_max are burned in (left out: ${more[*]:$mapped_max})"
-  mapped=("${mapped[@]:0:$mapped_max}")
-  imp=("${imp[@]:0:$((mapped_max - ${#mapped[@]}))}")
+# The map's picks and the importers take turns, so neither fills the cap alone (src/db.ts maps to 3 guard tests).
+picks=()
+for ((i = 0; i < ${#mapped[@]} || i < ${#imp[@]}; i++)); do
+  [ "$i" -ge ${#mapped[@]} ] || picks+=("${mapped[i]}")
+  [ "$i" -ge ${#imp[@]} ] || picks+=("${imp[i]}")
+done
+if [ ${#picks[@]} -gt "$mapped_max" ]; then
+  echo "burn-in: ${#picks[@]} tests are mapped to the change or import it; only the first $mapped_max are burned in (left out: ${picks[*]:$mapped_max})"
+  kept=" ${picks[*]:0:$mapped_max} " was=("${mapped[@]}") mapped=()
+  for f in "${was[@]}"; do [[ $kept != *" $f "* ]] || mapped+=("$f"); done
+  was=("${imp[@]}") whys=("${imp_why[@]}") imp=() imp_why=()
+  for ((i = 0; i < ${#was[@]}; i++)); do [[ $kept != *" ${was[i]} "* ]] || { imp+=("${was[i]}") imp_why+=("${whys[i]}"); }; done
 fi
 for ((i = 0; i < ${#imp[@]}; i++)); do echo "burn-in: picked ${imp[i]}: it ${imp_why[i]}"; done
 files=("${direct[@]}" "${mapped[@]}" "${imp[@]}")

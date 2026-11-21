@@ -501,13 +501,13 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     await sleep(400);
     assert.deepEqual(c.landed(), []);
     // The newest run of slow.yml failed with no failed step (its runner went away); an older green one doesn't count.
-    writeFileSync(join(c.ci, 'failed-steps'), '0\n');
+    writeFileSync(join(c.ci, 'failed-steps'), '1 0\n'); // one job, no failed step
     writeFileSync(join(c.ci, 'runs.once.tsv'), [run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 5, 'completed', 'failure'), run('slow.yml', 1, 'completed', 'success')].join(''));
     await c.tip(a, 2);
     assert.match(a.stderr(), /slow\.yml: completed failure https:\/\/ci\.test\/5/);
     assert.match(a.stderr(), /running it again, once/);
     // The new run fails in a step: red.
-    writeFileSync(join(c.ci, 'failed-steps'), '1\n');
+    writeFileSync(join(c.ci, 'failed-steps'), '1 1\n');
     runs(run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 7, 'completed', 'failure'));
     assert.equal(await a.exit, 1, a.stderr());
     assert.match(a.stderr(), /CI is red on/);
@@ -520,6 +520,26 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
   } finally {
     c.stop();
+  }
+});
+
+// KT6 (#1519): a run GitHub failed before any job started (a workflow file it can't read: "failure" with no jobs, or
+// "startup_failure") is red with its cause named, never run again and parked "for the runners".
+test('CI gate: a run that failed before any job started is red, not a lost runner', async () => {
+  for (const [result, steps] of [['failure', '0 0'], ['startup_failure', '']]) {
+    const c = ciSetup(1, { builtin: true });
+    try {
+      writeFileSync(join(c.ci, 'failed-steps'), `${steps}\n`);
+      writeFileSync(join(c.ci, 'runs.tsv'), `.github/workflows/ci.yml\t2\tcompleted\t${result}\thttps://ci.test/2\n.github/workflows/slow.yml\t3\tcompleted\tsuccess\thttps://ci.test/3\n`);
+      const a = c.land(1);
+      assert.equal(await a.exit, 1, a.stderr());
+      assert.match(a.stderr(), /CI is red on/, result);
+      assert.match(a.stderr(), /failed (before any job started|to start).*not a lost runner/, result);
+      assert.doesNotMatch(a.stderr(), /running it again|runners/, result);
+      assert.deepEqual(c.landed(), []);
+    } finally {
+      c.stop();
+    }
   }
 });
 

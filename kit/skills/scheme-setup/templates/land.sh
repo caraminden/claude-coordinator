@@ -1034,9 +1034,16 @@ ci_runs() {
           # Only a plain 0 is green; a count is told apart from no answer (ci_ask), which is handled as a lost run.
           if [ "$skipped" = 0 ]; then one=0; else one=4; [ "$skipped" -gt 0 ] 2>/dev/null && ci_skipped="$skipped of the jobs in $w's run"; fi ;;
         completed:failure)
-          # Red only when a step failed. A runner that went away mid-run fails its job with the step it was in never finished.
-          failed=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure")] | length' 2>>"$cilog") || return 5
-          if [ "$failed" -gt 0 ] 2>/dev/null; then one=1; else one=4; fi ;;
+          # Red when a step failed. A runner that went away mid-run fails its job with the step it was in never finished:
+          # no verdict. A run with no jobs at all failed before any runner was asked (a workflow file GitHub can't read),
+          # so it is red, never parked for the runners (KT6, #1519).
+          j=$(hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '"\(.jobs | length) \([.jobs[].steps[]? | select(.conclusion == "failure")] | length)"' 2>>"$cilog") || return 5
+          read -r j failed <<<"$j"
+          if [ "$failed" -gt 0 ] 2>/dev/null; then one=1
+          elif [ "$j" = 0 ]; then one=1; echo "$w: its run failed before any job started (a workflow file or account problem, not a lost runner)" >>"$cilog"
+          else one=4; fi ;;
+        # GitHub's own word for a run that failed to start (a reusable workflow it can't find, a spending limit): red.
+        completed:startup_failure) one=1; echo "$w: its run failed to start (startup_failure: a workflow file or account problem, not a lost runner)" >>"$cilog" ;;
         completed:timed_out) one=1 ;;
         completed:*) one=4 ;;
         in_progress:*) one=2 ;;

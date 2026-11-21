@@ -611,16 +611,21 @@ function headTicket(t) {
  */
 function patchParts(parent, want, live, rows = true) {
   want = want.filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : document.createTextNode(String(c))));
+  const sigOf = (n) => (n.nodeType === 1 ? n.outerHTML : n.nodeValue);
   want.forEach((c, i) => {
     const at = parent.childNodes[i];
     if (at === c) return;
-    const sig = c.nodeType === 1 ? c.outerHTML : c.nodeValue;
+    const sig = sigOf(c);
+    // A row's parts are compared one by one next time, so they remember how they were drawn too.
+    if (rows) for (const k of c.childNodes ?? []) k.sig = sigOf(k);
     if (live.has(c) || !at || live.has(at)) parent.insertBefore(c, at ?? null);
-    else if (at.sig === sig) return;
+    // Unchanged, unless it holds a live part: drawing it again moved that part into the new copy.
+    else if (at.sig === sig && ![...live].some((l) => l && c.contains(l))) return;
     else if (rows && c.nodeType === 1 && at.nodeName === c.nodeName && at.className === c.className && /\b(row|head-sub|head-line)\b/.test(c.className)) {
       for (const { name } of [...at.attributes]) if (!c.hasAttribute(name)) at.removeAttribute(name);
       for (const { name, value } of c.attributes) if (at.getAttribute(name) !== value) at.setAttribute(name, value);
-      return void patchParts(at, [...c.childNodes], live, false);
+      patchParts(at, [...c.childNodes], live, false);
+      return void (at.sig = sig);
     } else at.replaceWith(c);
     c.sig = sig;
   });

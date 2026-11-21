@@ -73,3 +73,20 @@ test('reopening a cached chat keeps what it drew and appends what is new, with o
   assert.equal(await page.eval<number>('document.querySelectorAll(\'#log [data-eid]\').length'), 4);
   assert.equal(await page.eval<number>('window.afters'), 1, 'the catch-up asked the server more than once');
 });
+
+test('an update to the open minion keeps the header parts it did not change, and what you typed in find', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1/t/8`, { width: 1280, height: 800 });
+  await waitFor(page, 'the header', `document.querySelector('#ticket-head input') && [...document.querySelectorAll('#ticket-head button')].some((b) => /^Pin/.test(b.textContent.trim()))`);
+  await page.eval(`(() => {
+    const head = document.getElementById('ticket-head');
+    window.kept = [head.querySelector('h1, h2'), ...[...head.querySelectorAll('button')].filter((b) => !/Pin/.test(b.textContent))];
+    const find = head.querySelector('input');
+    find.value = 'fox';
+    find.dispatchEvent(new Event('input', { bubbles: true }));
+    [...head.querySelectorAll('button')].find((b) => /^Pin/.test(b.textContent.trim())).click();
+  })()`);
+  await waitFor(page, 'the header after pinning', `[...document.querySelectorAll('#ticket-head button')].some((b) => /Pinned|Unpin/.test(b.textContent))`);
+  assert.ok(await page.eval<number>('window.kept.length') > 1, 'the header has parts to keep');
+  assert.deepEqual(await page.eval<string[]>(`window.kept.filter((el) => !el.isConnected).map((el) => el.textContent.trim())`), [], 'these were drawn again');
+  assert.equal(await page.eval<string>(`document.querySelector('#ticket-head input')?.value`), 'fox');
+});

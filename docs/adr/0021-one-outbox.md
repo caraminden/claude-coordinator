@@ -118,6 +118,14 @@ step 8, a minion-bound row is `accepted` only when the runner reports that the t
 before then leaves the row in `sending`, and boot resends it. A chain is `accepted` only when its start sends the
 brief (today's `release()`). A start that ends without sending it puts the row back to `waiting`.
 
+As built in step 0 (#1385): a handed row keeps the runner's event id (`event_id`), and `Runner.onTurnStart` (called
+once the turn is saved and marked running) marks the rows of the events it carries `sent`. Every 5 minutes, inside the
+minion's lane, the outbox asks `Runner.holds` whether the next turn still carries the event. If it does (queued, held
+mail, a usage-limit or network wait), the row waits. If not, a row a killed server left is sent again with the
+possible-repeat line, and one this server handed is retried, since its turn was refused when it came to run. So a
+wake held through a week-long limit and six deploys goes once, and a refused start gets the retries and the
+Taskmaster alert instead of sitting in `sending`.
+
 Once seam 1's queue exists, `deliver` becomes `queue.put`. Both are in the same SQLite database, so `put` and
 `sending → sent` commit in one transaction, and the possible-repeat case disappears for every kind that goes
 through the queue.
@@ -196,7 +204,12 @@ Each step moves saved data, so each ships high risk with a member's go. Each add
 test (`test/restart-anywhere.test.ts`): a server killed at each step of the send order loses no row.
 
 0. **The table, the dispatcher and `wake_at`.** The timer, `boot`, the crash rule and the 3-day rule, proved on the
-   simplest timed kind (34 live rows).
+   simplest timed kind (34 live rows). Built in #1385 (`src/outbox.ts`, `src/db/deliveries.ts`, schema 102). What
+   ran: `test/outbox.test.ts` (kill-resend marked across two kills, late at boot, reopen on day 2 and drop on day 4,
+   the retry ladder to the Taskmaster, a limit-held wake never sent twice, a refused start retried, the migration
+   keeping ids with the dual read, the limits and pruning), two `wake_at` flows in `test/restart-anywhere.test.ts`,
+   a real-runner wake in `test/wake.test.ts`, and the affected set (host-check, db-setup, schema-compat, db-areas,
+   db-writer, access-matrix, boot-imports). Not run: a boot against a copy of the live database's 34 rows.
 1. **`wake_when_live`**: the `live`, `merged` and `closed` events.
 2. **`relay_when_live`**, with the grouped note to the sender's Taskmaster.
 3. **Start-after chains**, with the held rule.

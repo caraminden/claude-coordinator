@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
+import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { TM_VIEW } from './mine.js';
 import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
@@ -9,6 +9,8 @@ import { mountTips } from './ui/tip.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
+// Items a person answered here whose answer the server's list hasn't dropped yet: left out of every count at the click (#1409).
+const answeredKeys = new Set();
 // Each scheme's items as last fetched, so a scheme you switch to draws its strip (or none) in its first paint instead of popping it in after.
 const inboxSeen = new Map();
 
@@ -27,6 +29,27 @@ export function mentionMap(items) {
 }
 const mentionKeys = (map) => [...map].map(([id, m]) => `${id}:${m.at}`).sort().join();
 
+/**
+ * A card was answered here (#1409): the strip, the pill, the app badge and the minion's row chip drop it now, not
+ * when the server's list arrives. Returns the undo for a refused answer. shortcut: a minion update already in flight
+ * from before the answer can put the row's chip back for a moment; the server's list settles it.
+ */
+export function answerNow(ticketId, cardId) {
+  const hit = answeredItems(inbox.items, ticketId, cardId);
+  const t = itemTicket(view, ticketId);
+  const was = t?.open_cards;
+  if (!hit.length && !was?.length) return () => {};
+  for (const i of hit) answeredKeys.add(i.key);
+  if (t && was && hit.length) t.open_cards = withoutCards(was, hit);
+  const redraw = () => import('./sidebar.js').then((m) => m.renderSidebar());
+  redraw();
+  return () => {
+    for (const i of hit) answeredKeys.delete(i.key);
+    if (t && was) t.open_cards = was;
+    redraw();
+  };
+}
+
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
@@ -36,6 +59,7 @@ export async function refreshInbox() {
   const items = await fetchInbox(projectId);
   if (!items || view?.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
+  for (const k of answeredKeys) if (!items.some((i) => i.key === k)) answeredKeys.delete(k); // the server caught up
   // A new or gone mention changes its minion's row (#1149), so the whole list redraws; renderSidebar draws the strip too.
   // Imported when needed: sidebar.js imports this module, and loads browser-only code the Node tests can't.
   if (mentionKeys(mentions) !== mentionKeys(mentionMap(items))) import('./sidebar.js').then((m) => m.renderSidebar());
@@ -176,7 +200,7 @@ export function renderInbox() {
   for (const [id, m] of mentionMap(inbox.items)) mentions.set(id, m);
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
   // Nothing else drops: the badge away from the scheme counts the same items (#1400).
-  const items = stripItems(view, inbox.items);
+  const items = stripItems(view, inbox.items, answeredKeys);
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
   const all = items.filter((i) => !faded(i));

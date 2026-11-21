@@ -5,6 +5,7 @@ import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
 import { adoptTicket } from './thread.js';
+import { answerNow } from './inbox.js';
 import { cardAttachments } from './composer.js';
 import { pastedFiles } from './paste.js';
 import { refreshViewerBar, setViewerGallery } from './artifacts.js';
@@ -93,9 +94,11 @@ export function approvalCard(ticketId, card) {
   // Shown as decided at once; the server's outcome (settle) replaces it, and a refusal opens the card again.
   const decide = (allow) => {
     if (settled) return;
+    let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
       apply: () => {
+        unanswer = answerNow(ticketId, card.id);
         approve.hidden = deny.hidden = true;
         status.textContent = allow ? 'Approved' : 'Denied';
       },
@@ -104,6 +107,7 @@ export function approvalCard(ticketId, card) {
         if (settled) return;
         // An expired or already-settled card stays shut; anything else can be tried again.
         if (/expired|already/.test(ex?.message)) return void (status.textContent = ex.message);
+        unanswer();
         approve.hidden = deny.hidden = false;
         status.textContent = '';
       },
@@ -279,9 +283,11 @@ export function planCard(ticketId, card, opts = {}) {
   const decide = (verdict) => {
     if (rank || deciding) return;
     const text = notes.value.trim();
+    let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
       apply: () => {
+        unanswer = answerNow(ticketId, card.id);
         deciding = true;
         editing(false);
         approve.hidden = revise.hidden = drop.hidden = true;
@@ -291,6 +297,7 @@ export function planCard(ticketId, card, opts = {}) {
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
       undo: () => {
+        unanswer();
         deciding = false;
         if (rank) return;
         el.classList.remove('answered');
@@ -494,14 +501,17 @@ export function questionCard(ticketId, card, opts = {}) {
     const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
     const images = atts.items.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const files = atts.items.filter((i) => i.upload?.name).map(({ upload }) => upload);
+    let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
       apply: () => {
+        unanswer = answerNow(ticketId, card.id);
         lock(true);
         status.textContent = `Answered by ${me}`;
       },
       send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) } }),
       undo: () => {
+        unanswer();
         if (confirmed) return;
         lock(false);
         status.textContent = '';
@@ -673,11 +683,12 @@ function noticeCard(ticketId, card, opts) {
   };
   got.addEventListener('click', () => {
     if (seen) return;
+    let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
-      apply: () => { seen = true; got.hidden = true; el.classList.add('answered'); head.done(`seen by ${me}`); },
+      apply: () => { unanswer = answerNow(ticketId, card.id); seen = true; got.hidden = true; el.classList.add('answered'); head.done(`seen by ${me}`); },
       send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id } }),
-      undo: () => { seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on ${card.to === me ? 'you' : card.to}`); },
+      undo: () => { unanswer(); seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on ${card.to === me ? 'you' : card.to}`); },
       label: 'mark the notice seen',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
   });

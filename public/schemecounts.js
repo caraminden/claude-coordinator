@@ -133,4 +133,10 @@ export function itemTicket(view, id) {
  * Nothing else is left out, so the badge never counts what a click doesn't show (#1400: the Overlord's card counted
  * on the rail and vanished from the strip, so the pill popped between the two counts).
  */
-export const stripItems = (view, items) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed');
+export const stripItems = (view, items, answered = new Set()) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed' && !answered.has(i.key));
+
+/** The items a person just answered: that minion's card with that id (an item's `card.id` is the question, plan or approval id). #1409 drops them from every count at the click. */
+export const answeredItems = (items, ticketId, cardId) => items.filter((i) => i.ticketId === ticketId && i.card?.id === cardId);
+
+/** A row's open_cards less the answered items' cards (a card link names its chat event, `?e=<eventId>`, as the item does). */
+export const withoutCards = (cards, answered) => cards.filter((c) => !answered.some((i) => c.href?.endsWith(`?e=${i.eventId}`)));

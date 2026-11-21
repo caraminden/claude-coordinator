@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -175,4 +175,23 @@ test("the open scheme's pill is its strip's, whichever list draws it: a scheme-l
   assert.equal(openPill(server, 3, { projectId: 4, fresh: false, pill: seen.pill }), server, 'not drawn here yet');
   assert.equal(wantsBadge([server], 3, seen), false, 'the badge follows the same pill');
   assert.equal(itemTicket({ projectId: 3, taskmasters: [{ id: 9, person_id: null, status: 'running' }] }, 9).status, 'running', 'an Overlord\'s turn spins it from the first paint');
+});
+
+test('answering a card drops it from the strip count and the row\'s open cards before any server refresh (#1409)', () => {
+  const view = { coordinator: { id: 1 }, tickets: new Map([[9, { id: 9, status: 'idle' }], [8, { id: 8, status: 'idle' }]]) };
+  const items = [
+    { ticketId: 9, key: 'question:50', eventId: 50, card: { id: 'qa' } },
+    { ticketId: 9, key: 'question:51', eventId: 51, card: { id: 'qb' } },
+    { ticketId: 8, key: 'approval:ap', eventId: 60, card: { id: 'ap' } },
+  ];
+  assert.equal(minionCount(stripItems(view, items)), 2);
+  const hit = answeredItems(items, 9, 'qa');
+  assert.deepEqual(hit.map((i) => i.key), ['question:50'], 'only that minion\'s card with that id');
+  const gone = new Set(hit.map((i) => i.key));
+  assert.equal(stripItems(view, items, gone).length, 2);
+  assert.equal(minionCount(stripItems(view, items, gone)), 2, 'it still has its other card');
+  const both = new Set([...gone, 'question:51']);
+  assert.equal(minionCount(stripItems(view, items, both)), 1, 'its last card answered: the minion leaves the count');
+  const cards = [{ href: '#/p/2/t/9?e=50' }, { href: '#/p/2/t/9?e=51' }];
+  assert.deepEqual(withoutCards(cards, hit), [{ href: '#/p/2/t/9?e=51' }]);
 });

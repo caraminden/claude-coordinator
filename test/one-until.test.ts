@@ -177,7 +177,7 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
     "// await new Promise((r) => setTimeout(r, 50));",
   ].join('\n');
   assert.deepEqual(flakeHits('rmSync(d, { recursive: true, force: true });'), {}, 'a file with no bootServer may clean its own temp dir');
-  const h = flakeHits(`import { bootServer } from './helpers.ts';\n${text}`);
+  const h = flakeHits(`${text}\n// a file that uses bootServer`);
   assert.deepEqual(Object.fromEntries(Object.entries(h).map(([p, v]) => [p, [v.bare, v.ok]])), {
     sleep: [[1], [9]], elapsed: [[2], []], freePort: [[3], []], shortUntil: [[4], []], rmTemp: [[5], []],
   });

@@ -1576,7 +1576,7 @@ const app: App = {
     ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })),
     ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
   ],
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {

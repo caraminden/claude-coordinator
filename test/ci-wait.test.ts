@@ -274,3 +274,60 @@ test('a queued run counts the repo\'s older queued runs ahead of it, read once a
   assert.equal(waits.wait(b.id)!.chip, 'CI · step 1/2');
   assert.deepEqual(gh.calls.filter((c) => c.includes('status=queued')), []);
 });
+
+// #1368: a landing's CI job sends its suite's test file counts (POST /api/ci-tests, its run named by its GitHub run
+// token); the wait, and so the Releases Test stage and its riders, read "143/412 test files" and fill by them.
+test('a landing\'s CI shows its suite\'s test files as its job sends them, and its steps again once they stop', async () => {
+  const { generateKeyPairSync, sign } = await import('node:crypto');
+  const { Readable } = await import('node:stream');
+  const { AUDIENCE, CiStore, ISSUER, RunTokens } = await import('../src/ci-store.ts');
+  const { agentRoutes } = await import('../src/routes/machines.ts');
+  const { gh, ci, waits, state, at, now } = setup();
+  const m = minion('running');
+  const f = join(state, 'queue', '0000000001');
+  writeFileSync(f, `100 77\n${now() / 1000 - 30}\n${m.branch}\nwaiting for CI since 12:01\n`);
+  utimesSync(f, now() / 1000, now() / 1000);
+  waits.poll();
+  gh.answers.set('repos/o/r/actions/workflows/tests.yml/runs', { workflow_runs: [{ id: 9, workflow_id: 3, status: 'in_progress', created_at: iso(61) }] });
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(6, 8) })] });
+  at(65);
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.brief, 'CI: step 7', 'no counts yet: its step, as before');
+
+  // The route: the run comes from the job's run token, never from the body.
+  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  store.setProjectUpstream(project.id, 'https://github.com/o/r', null);
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const t = Math.floor(Date.now() / 1000);
+  const body = `${b64({ alg: 'RS256', kid: 'k1', typ: 'JWT' })}.${b64({ iss: ISSUER, aud: AUDIENCE, exp: t + 300, nbf: t - 300, repository: 'o/r', run_id: '9', run_attempt: '1', sha: 'a'.repeat(40), ref: 'refs/heads/land/x', workflow_ref: 'o/r/.github/workflows/tests.yml@refs/heads/land/x' })}`;
+  const token = `${body}.${sign('RSA-SHA256', Buffer.from(body), keys.privateKey).toString('base64url')}`;
+  const app = { ciStore: new CiStore(store, join(root, 'store'), new RunTokens(async () => [{ ...keys.publicKey.export({ format: 'jwk' }), kid: 'k1' }])), ciTests: (repo: string, run: number, c: any) => ci.testCounts(repo, run, c) };
+  const route = agentRoutes.find((r) => r.path === '/api/ci-tests')!;
+  const post = async (sent: unknown, auth = `Bearer ${token}`) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(sent))]), { headers: { 'content-type': 'application/json', authorization: auth } });
+    const res = { status: 0, headersSent: false, setHeader() {}, writeHead(s: number) { this.status = s; return this; }, end() {} };
+    try {
+      await route.handler({ req, res, app } as any);
+      return res.status;
+    } catch (err: any) {
+      return err.status;
+    }
+  };
+  assert.equal(await post({ done: 143, total: 412, file: 'test/releases.test.ts' }, 'Bearer nope'), 401, 'no run token, no count');
+  assert.equal(await post({ done: 413, total: 412 }), 400);
+  assert.equal(await post({ done: 'x', total: 412 }), 400);
+  ci.testCounts('someone/else', 9, { done: 1, total: 2, file: '' });
+  assert.equal(waits.wait(m.id)!.brief, 'CI: step 7', 'another repo\'s run 9 is not this one');
+  assert.equal(await post({ done: 143, total: 412, file: 'test/releases.test.ts' }), 202);
+  const w = waits.wait(m.id)!;
+  assert.deepEqual([w.brief, w.done, w.total, w.chip], ['CI: 143/412 test files', 143, 412, 'ship · CI 7/8'], 'the stage reads and fills by test files; the chip keeps its steps (Josh, #551)');
+  assert.equal(w.text, 'waiting for CI: test step 7 of 8: step 7 (cara-desktop) · 143 of 412 test files · test/releases.test.ts');
+
+  // They stop (the suite ended, or the sender died): its steps again once they're stale.
+  at(65 + 44);
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.brief, 'CI: 143/412 test files');
+  at(65 + 46);
+  await ci.tick();
+  assert.deepEqual([waits.wait(m.id)!.brief, waits.wait(m.id)!.done, waits.wait(m.id)!.total], ['CI: step 7', 6, 8]);
+});

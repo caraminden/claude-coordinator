@@ -1,5 +1,6 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { HeldStarts } from './held-starts.ts';
+import type { TestCounts } from './waits.ts';
 import type { Presence } from './presence.ts';
 import type { ClaudeLink } from './claude-link.ts';
 import type { CodexLink } from './codex-link.ts';
@@ -325,6 +326,8 @@ export interface App {
   chunked: ChunkedUploads;
   /** CI output the schemes' runners upload, kept per scheme and swept by rule (src/ci-store.ts, #658). */
   ciStore: CiStore;
+  /** A CI job's test counts for its run's wait (CiRuns.testCounts, #1368); absent in tests that don't need it. */
+  ciTests?: (repo: string, runId: number, c: TestCounts) => void;
   /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */

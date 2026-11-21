@@ -67,8 +67,15 @@ export function readTestCounts(f: string, since: number): TestCounts | null {
   const at = mtime(f), text = read(f);
   if (at == null || at < since || text == null) return null;
   const [done, total, file = ''] = text.split('\n');
+  return testCounts(done, total, file);
+}
+
+/** Counts as they came (a progress file's lines, or a CI job's POST /api/ci-tests): whole numbers, done of a total. */
+export function testCounts(done: unknown, total: unknown, file: unknown = ''): TestCounts | null {
+  const ok = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0) || (typeof n === 'string' && /^\d{1,9}$/.test(n));
+  if (!ok(done) || !ok(total) || typeof file !== 'string') return null;
   const d = Number(done), t = Number(total);
-  return /^\d+$/.test(done) && /^\d+$/.test(total) && t > 0 && d <= t ? { done: d, total: t, file } : null;
+  return t > 0 && d <= t ? { done: d, total: t, file: file.slice(0, 200) } : null;
 }
 
 const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? ` · ${c.file}` : ''}`;

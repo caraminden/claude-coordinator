@@ -6,6 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
+import { testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
@@ -170,6 +171,19 @@ export const agentRoutes: Route[] = [
   // Not an agent's: a CI job's upload and reads, which check the job's own GitHub run token (#658, #1266).
   ciUploadRoute,
   ...ciJobReadRoutes,
+  // A CI job's test file counts while its suite runs, about every 10 s (#1368): its run comes from its run token, as an
+  // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines.
+  {
+    method: 'POST', path: '/api/ci-tests', who: 'machine',
+    async handler({ req, res, app }) {
+      const { claims } = await app.ciStore.caller(req);
+      const body = await readJson(req, 10_000);
+      const c = testCounts(body?.done, body?.total, body?.file ?? '');
+      if (!c) throw new HttpError(400, 'Send {done, total, file}: whole numbers, done at most total, total over 0');
+      app.ciTests?.(claims.repository, claims.runId, c);
+      return json(res, 202, {});
+    },
+  },
 ];
 
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).

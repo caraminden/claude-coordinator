@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ghGet, type GhGet, type Job } from './ci-health.ts';
-import { median } from './waits.ts';
+import { median, type TestCounts } from './waits.ts';
 import type { PrSnapshot } from './github.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
@@ -19,6 +19,8 @@ export const SLOW_MS = 60_000;
 /** A finished run's pass or fail stays this long, until its minion hears of it. */
 export const KEEP_MS = 5 * 60_000;
 const RATE_LIMITED_MS = 15 * 60_000;
+/** A run's test counts show while its job sent them this recently (it sends about every 10 s while its suite runs). */
+export const TESTS_FRESH_MS = 45_000;
 const USUAL_MS = 60 * 60_000;
 /** land.sh's CI workflow (CI_WORKFLOW there). */
 export const LAND_WORKFLOW = 'tests.yml';
@@ -143,6 +145,8 @@ export class CiRuns {
   /** Each repo's queued runs, read once a poll while one of its watched runs is queued. */
   private queues = new Map<string, { id: number; created_at: string }[] | null>();
   private shown = new Map<number, string>();
+  /** Run id → its suite's test files done, of how many, as its own job last sent them (#1368), and when. */
+  private tests = new Map<string, TestCounts & { at: number }>();
   private pausedUntil = 0;
   private busy = false;
   private said = new Set<string>();
@@ -195,6 +199,16 @@ export class CiRuns {
     return this.watches.get(ticketId)?.runs[0] ?? null;
   }
 
+  /** A CI job's test file counts while its suite runs (POST /api/ci-tests): its run's watches show them at once. */
+  testCounts(repo: string, runId: number, c: TestCounts) {
+    // Run ids are unique per repo, not across repos: the key holds both.
+    const key = `${repo.toLowerCase()}#${runId}`;
+    this.tests.delete(key);
+    this.tests.set(key, { ...c, at: this.now() });
+    if (this.tests.size > 50) this.tests.delete(this.tests.keys().next().value!);
+    for (const [id, w] of this.watches) if (w.slug.toLowerCase() === repo.toLowerCase() && w.runs.includes(runId)) this.check(id);
+  }
+
   /** Where a minion's CI stands, with what it is for ("PR #88", "" for a landing) and the usual length in s. */
   view(ticketId: number): (CiNow & { what: string; usual: number | null }) | null {
     const w = this.watches.get(ticketId);
@@ -202,6 +216,9 @@ export class CiRuns {
     const c = ciNow([...w.jobs.values()].flat(), !!w.ended);
     if (!c) return null;
     const usuals = [...w.usual.values()].filter((u): u is number => u != null);
+    // While its suite runs, the run's test files count instead of its steps: the step's name gives way to them (#1368).
+    const t = c.stage === 'jobs' ? w.runs.map((r) => this.tests.get(`${w.slug.toLowerCase()}#${r}`)).find((t) => t && this.now() - t.at < TESTS_FRESH_MS) : undefined;
+    if (t) Object.assign(c, { step: `${t.done}/${t.total} test files`, text: `${c.text} · ${t.done} of ${t.total} test files${t.file ? ` · ${t.file}` : ''}`, done: t.done, total: t.total });
     if (c.stage === 'queued' && w.ahead != null) {
       c.short = w.ahead ? `${w.ahead} ahead` : 'queued';
       c.text += w.ahead ? `, ${w.ahead} run${w.ahead === 1 ? '' : 's'} ahead` : ', none ahead';

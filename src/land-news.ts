@@ -1,0 +1,131 @@
+/**
+ * What happened so far in the ship under way, for the Releases page's Next bar (#1368): read from the shipping minion's
+ * land.sh output (its `land:` lines), not sent from anywhere new. Ships staying in line, CI red on the train and its
+ * failing tests, flakes run once more, the bisect, the ship it refused and the ones that went back in line, the CI fallback.
+ * Train membership is #1303's (the line and change rows); failed tries after the fact are #1375's (Previous releases).
+ */
+import { openSync, readSync, closeSync, statSync } from 'node:fs';
+import { failureDetail } from './ship-failures.ts';
+
+export interface NewsItem {
+  /** bad: something failed or was dropped; warn: a slower path (a rerun, the bisect, the fallback); info: the rest. */
+  tone: 'bad' | 'warn' | 'info';
+  text: string;
+  /** The minions its text names, "#1331" → ticket id, for links (filled in by the Releases read). */
+  refs?: Record<string, number>;
+}
+
+/** Lines shown, newest kept. */
+const SHOWN = 6;
+/** How much of the log's end is read: a train's lines plus CI's printed failure. */
+const TAIL = 256 * 1024;
+
+const short = (f: string) => f.replace(/^.*\//, '').replace(/\.test\.ts$/, '');
+const clip = (t: string) => (t.length > 60 ? `${t.slice(0, 59)}…` : t);
+const list = (xs: string[], n = 3) => xs.slice(0, n).join(', ') + (xs.length > n ? ` +${xs.length - n} more` : '');
+
+/**
+ * The news in a landing's output, oldest first, at most SHOWN. `name` turns a branch into what people call it ("#1331");
+ * it is only the latest try's: lines before its last rebase belong to a train it rode or a try that went back in line.
+ */
+export function landNews(output: string, name: (branch: string) => string): NewsItem[] {
+  const all = output.split('\n');
+  const start = all.findLastIndex((l) => /^land: rebasing \S+ onto /.test(l));
+  const lines = all.slice(start + 1);
+  const news: NewsItem[] = [];
+  let riders: string[] = [];
+  let stays = new Map<string, string[]>(); // why → branches
+  let bisect: NewsItem | null = null;
+  let ciRuns = 0;
+  let since = 0; // where the current CI wait's output starts
+  let slow: NewsItem | null = null;
+  const flushStays = () => {
+    if (!stays.size) return;
+    news.push({ tone: 'info', text: `Stayed in line: ${[...stays].map(([why, bs]) => `${bs.map(name).join(', ')} (${why})`).join('; ')}` });
+    stays = new Map();
+  };
+  // The bisect's result replaces its progress line.
+  const done = () => {
+    if (bisect) news.splice(news.indexOf(bisect), 1);
+    bisect = null;
+  };
+  const backInLine = (bs: string[]) => (bs.length ? `; back in line: ${list(bs.map(name), 6)}` : '');
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.startsWith('land: ')) continue;
+    const s = l.slice(6);
+    let m: RegExpMatchArray | null;
+    if ((m = s.match(/^ship train: (\S+) stays in line \((?:it )?(.+)\)$/))) {
+      stays.set(m[2], [...(stays.get(m[2]) ?? []), m[1]]);
+      continue;
+    }
+    flushStays();
+    if ((m = s.match(/^ship train: \S+ takes the \d+ ships? waiting behind it \(([^)]*)\)/))) riders = m[1].split(' ').filter(Boolean);
+    else if (/^waiting for CI on /.test(s)) {
+      since = i;
+      slow = null;
+      if (bisect) ciRuns++;
+      if (bisect && !/testing the first/.test(bisect.text)) bisect.text = `Finding the ship that turned the train red: CI run ${ciRuns}`;
+    } else if (/^waiting for CI or a quiet perigee: /.test(s)) {
+      slow = { tone: 'warn', text: 'CI is past its time limit: waiting on CI, or on a quiet perigee to run the suite here' };
+    } else if (/^CI passed on /.test(s)) slow = null;
+    else if ((m = s.match(/^CI is red on the ship train/))) {
+      const d = failureDetail(lines.slice(since, i).join('\n'), 1);
+      const names = d.names.length ? `: ${d.names.map(clip).join(', ')}${d.more ? ` +${d.more} more` : ''}` : '';
+      news.push({ tone: 'bad', text: `CI red on the train${names}` });
+      bisect = { tone: 'warn', text: 'Finding the ship that turned the train red' };
+      ciRuns = 0;
+      news.push(bisect);
+    } else if ((m = s.match(/^bisect: testing the first (\d+) of (\d+) ships/))) {
+      if (bisect) bisect.text = `Finding the ship that turned the train red: testing the first ${m[1]} of ${m[2]}`;
+    } else if ((m = s.match(/^only flakes failed \(([^)]*)\)(.*)$/))) {
+      const files = m[1].split(', ').map(short);
+      news.push(/stays red/.test(m[2])
+        ? { tone: 'bad', text: `Only flakes failed (${list(files)}), but a fresh CI run couldn't start, so it stays red` }
+        : { tone: 'warn', text: `Only flakes failed (${list(files)}): one fresh CI run` });
+    } else if ((m = s.match(/^the bisect found (\S+) the first ship that turned the train red .*?the (\d+) before it ship/))) {
+      done();
+      const at = riders.indexOf(m[1]);
+      news.push({ tone: 'bad', text: `${name(m[1])} dropped: it turned the train red${backInLine(at < 0 ? [] : riders.slice(at + 1))}` });
+    } else if ((m = s.match(/^the bisect found (\S+) itself red/))) {
+      done();
+      news.push({ tone: 'bad', text: `${name(m[1])} itself red${backInLine(riders)}` });
+    } else if ((m = s.match(/^the ship train goes back in line, since CI gave no answer \((.*)\): (\S+) goes on alone/))) {
+      news.push({ tone: 'warn', text: `CI gave no answer (${m[1]}): ${name(m[2])} goes on alone${backInLine(riders)}` });
+    } else if ((m = s.match(/^ship train: (\S+) left the line while the train was tested/))) {
+      const at = riders.indexOf(m[1]);
+      news.push({ tone: 'info', text: `${name(m[1])} left the line during the test${backInLine(at < 0 ? [] : riders.slice(at + 1))}` });
+    } else if ((m = s.match(/^CI FALLBACK: (.*?)\. Running the full suite on perigee instead\./))) {
+      news.push({ tone: 'warn', text: `CI fallback: the full suite runs on perigee (${m[1]})` });
+    }
+  }
+  flushStays();
+  if (slow) news.push(slow);
+  return news.slice(-SHOWN);
+}
+
+let cache: { path: string; size: number; mtime: number; output: string } | null = null;
+
+/** A landing log's end, read again only when it changed (Releases reads it at every poll). */
+export function readTail(path: string): string {
+  let st;
+  try {
+    st = statSync(path);
+  } catch {
+    return '';
+  }
+  if (cache?.path === path && cache.size === st.size && cache.mtime === st.mtimeMs) return cache.output;
+  const len = Math.min(st.size, TAIL);
+  const buf = Buffer.alloc(len);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, buf, 0, len, st.size - len);
+  } finally {
+    closeSync(fd);
+  }
+  const text = buf.toString('utf8');
+  const output = st.size > len ? text.slice(text.indexOf('\n') + 1) : text; // a cut first line is dropped
+  cache = { path, size: st.size, mtime: st.mtimeMs, output };
+  return output;
+}

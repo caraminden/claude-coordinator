@@ -333,10 +333,18 @@ function targetCard(projectId, tv, alone) {
     n ? [
       stageTrack(n.stages, n, { labels: true }),
       h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
+      newsList(n),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     changeList(projectId, tv),
     previousList(projectId, tv),
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
+}
+
+/** What happened so far in the ship under way (#1368): its land.sh lines, oldest first, each #N a link to its minion. */
+function newsList(n) {
+  if (!n.news?.length) return '';
+  const words = (x) => x.text.split(/(#\d+)/).map((t) => (x.refs?.[t] != null ? h('a', { href: `#/t/${x.refs[t]}` }, t) : t));
+  return h('ul', { class: 'rel-news' }, n.news.map((x) => h('li', { class: x.tone }, words(x))));
 }
 
 /** The cards whose Previous releases are open ("projectId/target"): every event redraws the cards, so it's kept here. */

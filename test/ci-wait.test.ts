@@ -323,6 +323,17 @@ test('a landing\'s CI shows its suite\'s test files as its job sends them, and i
   assert.deepEqual([w.brief, w.done, w.total, w.chip], ['CI: 143/412 test files', 143, 412, 'ship · CI 7/8'], 'the stage reads and fills by test files; the chip keeps its steps (Josh, #551)');
   assert.equal(w.text, 'waiting for CI: test step 7 of 8: step 7 (cara-desktop) · 143 of 412 test files · test/releases.test.ts');
 
+  // Files failed so far ride along, and once the suite ends its reruns count (phase rerun): Releases names them (#1368).
+  assert.equal(await post({ done: 1, total: 2, failed: 'test/a.test.ts' }), 400, 'failed is a list');
+  assert.equal(await post({ done: 1, total: 2, phase: 'bisect' }), 400);
+  assert.equal(await post({ done: 200, total: 412, failed: ['test/memory.test.ts'] }), 202);
+  assert.deepEqual(waits.wait(m.id)!.failed, ['test/memory.test.ts']);
+  assert.equal(await post({ done: 1, total: 4, file: 'test/memory.test.ts', failed: ['test/memory.test.ts', 'x'.repeat(300), ...Array(30).fill('t')], phase: 'rerun' }), 202);
+  const r = waits.wait(m.id)!;
+  assert.deepEqual([r.brief, r.done, r.total, r.failed!.length, r.failed![1].length], ['CI: 1/4 failed files rerun alone', 1, 4, 20, 200], 'at most 20 names of 200 characters');
+  assert.equal(await post({ done: 143, total: 412, file: 'test/releases.test.ts' }), 202);
+  assert.equal(waits.wait(m.id)!.failed, undefined, 'none failed: none shown');
+
   // They stop (the suite ended, or the sender died): its steps again once they're stale.
   at(65 + 44);
   await ci.tick();

@@ -30,6 +30,8 @@ export interface Wait {
   total?: number;
   /** A landing's ship train: its front ("front", with how many ride), a rider, or a waiter's train as it reads ("Releasing next"). */
   train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
+  /** A landing's CI test files failed so far (POST /api/ci-tests, #1368). */
+  failed?: string[];
   /** When it ended, ms: a CI run's pass or fail, shown a while after; its time stops there. */
   ended?: number;
 }
@@ -60,7 +62,8 @@ export function procAlive(pidStart: string): boolean {
 }
 
 /** A test run's files done, of how many, and the newest one running (tools/progress-reporter.ts). */
-export interface TestCounts { done: number; total: number; file: string }
+/** `failed`: files failed so far; `rerun`: the counts are the failed files' reruns, each alone (POST /api/ci-tests only). */
+export interface TestCounts { done: number; total: number; file: string; failed?: string[]; rerun?: boolean }
 
 /** The counts in a progress file written since `since` (ms): an older one is a run before this one. */
 export function readTestCounts(f: string, since: number): TestCounts | null {
@@ -71,11 +74,16 @@ export function readTestCounts(f: string, since: number): TestCounts | null {
 }
 
 /** Counts as they came (a progress file's lines, or a CI job's POST /api/ci-tests): whole numbers, done of a total. */
-export function testCounts(done: unknown, total: unknown, file: unknown = ''): TestCounts | null {
+export function testCounts(done: unknown, total: unknown, file: unknown = '', failed: unknown = [], phase: unknown = 'suite'): TestCounts | null {
   const ok = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0) || (typeof n === 'string' && /^\d{1,9}$/.test(n));
   if (!ok(done) || !ok(total) || typeof file !== 'string') return null;
+  if (!Array.isArray(failed) || failed.some((f) => typeof f !== 'string') || (phase !== 'suite' && phase !== 'rerun')) return null;
   const d = Number(done), t = Number(total);
-  return t > 0 && d <= t ? { done: d, total: t, file: file.slice(0, 200) } : null;
+  if (!(t > 0 && d <= t)) return null;
+  const c: TestCounts = { done: d, total: t, file: file.slice(0, 200) };
+  if (failed.length) c.failed = failed.slice(0, 20).map((f: string) => f.slice(0, 200));
+  if (phase === 'rerun') c.rerun = true;
+  return c;
 }
 
 const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? ` · ${c.file}` : ''}`;
@@ -313,7 +321,7 @@ export function landCi(w: Wait, ci: CiView): Wait {
   const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
   // The line keeps one counter, the landing's stage (Cara: "are the tests on step 3/6 or 10/13?"): CI's steps fill its piece.
   const train = w.train?.role === 'front';
-  return { ...w, chip: `ship · ${short}`, text: train ? `Train of ${w.train!.size} (${w.train!.members!.join(', ')}) · ${text}` : text, brief: `${train ? `train of ${w.train!.size} · ` : ''}CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
+  return { ...w, chip: `ship · ${short}`, text: train ? `Train of ${w.train!.size} (${w.train!.members!.join(', ')}) · ${text}` : text, brief: `${train ? `train of ${w.train!.size} · ` : ''}CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}), ...(ci.failed?.length ? { failed: ci.failed } : {}) };
 }
 
 /** A minion's PR waiting on its CI run. */

@@ -39,6 +39,8 @@ export interface CiNow {
   ended?: number;
   done?: number;
   total?: number;
+  /** Test files failed so far in the run's suite (POST /api/ci-tests, #1368). */
+  failed?: string[];
 }
 
 const at = (s: string | null | undefined) => (s ? Date.parse(s) : NaN);
@@ -218,7 +220,11 @@ export class CiRuns {
     const usuals = [...w.usual.values()].filter((u): u is number => u != null);
     // While its suite runs, the run's test files count instead of its steps: the step's name gives way to them (#1368).
     const t = c.stage === 'jobs' ? w.runs.map((r) => this.tests.get(`${w.slug.toLowerCase()}#${r}`)).find((t) => t && this.now() - t.at < TESTS_FRESH_MS) : undefined;
-    if (t) Object.assign(c, { step: `${t.done}/${t.total} test files`, text: `${c.text} · ${t.done} of ${t.total} test files${t.file ? ` · ${t.file}` : ''}`, done: t.done, total: t.total });
+    if (t) {
+      const what = t.rerun ? 'failed files rerun alone' : 'test files';
+      Object.assign(c, { step: `${t.done}/${t.total} ${what}`, text: `${c.text} · ${t.done} of ${t.total} ${what}${t.file ? ` · ${t.file}` : ''}`, done: t.done, total: t.total });
+      if (t.failed) c.failed = t.failed;
+    }
     if (c.stage === 'queued' && w.ahead != null) {
       c.short = w.ahead ? `${w.ahead} ahead` : 'queued';
       c.text += w.ahead ? `, ${w.ahead} run${w.ahead === 1 ? '' : 's'} ahead` : ', none ahead';

@@ -9,6 +9,7 @@ import { placedKey, readState, shipLineKey, type Placed } from './ship-line-stat
 import type { DeployInfo } from './auto-deploy.ts';
 import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
+import type { NewsItem } from './land-news.ts';
 import type { FailureDetail, FailureNext, LastTry } from './ship-failures.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { fixLineIn } from './fix-proof.ts';
@@ -98,6 +99,8 @@ export interface Next extends Progress {
   stages: { name: string; usual: number | null }[];
   /** When the whole release should be live (ms), only when the current stage and every one after it have a usual time and none waits. */
   eta: number | null;
+  /** What happened so far in the ship under way (Citadel's own: its land.sh lines, #1368), oldest first. */
+  news?: NewsItem[];
   /** The changes on their way, the furthest along first; the release's own stage is the first's. */
   changes: Change[];
 }
@@ -351,6 +354,8 @@ export interface CitadelDeps {
   interruptible: () => number;
   /** Whether a minion's landing waits for a CI runner to take its run. */
   ciQueued?: (ticketId: number) => boolean;
+  /** What happened so far in a minion's ship, from its land.sh output (src/land-news.ts, #1368); `name`: a branch's #N. */
+  news?: (ticketId: number, name: (branch: string) => string) => NewsItem[];
   now?: () => number;
 }
 
@@ -464,7 +469,8 @@ export class CitadelServer implements Reader {
 
     const changes: Change[] = [];
     const inLine = new Set(line.flatMap((e) => (e.ticketId != null ? [e.ticketId] : [])));
-    for (const t of store.listTickets(p.id)) {
+    const tickets = store.listTickets(p.id);
+    for (const t of tickets) {
       // A dismissed minion's ship stage isn't looked at again (ShipStatus.poll), so only open ones and the land line count.
       // shortcut: a minion dismissed after landing but before live drops out of next; read its stage afresh if that starts to happen.
       if (t.kind !== 'ticket' || !t.branch || (t.status === 'closed' && !inLine.has(t.id))) continue;
@@ -500,6 +506,21 @@ export class CitadelServer implements Reader {
         ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
       const { ticketId: _i, number: _n, title: _t, ...at } = lead;
       next = { ...at, number: Math.max(total, current?.number ?? 0) + 1, link: null, stages, eta, changes };
+      // The ship holding the line: its land.sh lines say what happened so far (riders, flakes, the bisect).
+      const holder = line.find((e) => e.holds)?.ticketId;
+      if (holder != null && this.d.news) {
+        const names = new Map(tickets.flatMap((t) => (t.branch ? [[t.branch, `#${t.number ?? t.id}`] as const] : [])));
+        const news = this.d.news(holder, (b) => names.get(b) ?? b.replace(/^ticket\//, ''));
+        // CI's files failed so far, live from its job (POST /api/ci-tests), before land.sh hears of them.
+        const failed = this.d.wait(holder)?.failed;
+        if (failed?.length) news.push({ tone: 'bad', text: `Failed so far in CI: ${failed.slice(0, 3).map((f) => f.replace(/^.*\//, '')).join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}` });
+        const ids = new Map(tickets.map((t) => [`#${t.number ?? t.id}`, t.id]));
+        for (const n of news) {
+          const refs = Object.fromEntries((n.text.match(/#\d+/g) ?? []).flatMap((r) => (ids.has(r) ? [[r, ids.get(r)!]] : [])));
+          if (Object.keys(refs).length) n.refs = refs;
+        }
+        if (news.length) next.news = news;
+      }
     }
     return [{ target: { id: CITADEL_TARGET, projectId: p.id, name: 'Server', kind: CITADEL_TARGET, link: null }, current, next, line, recent }];
   }

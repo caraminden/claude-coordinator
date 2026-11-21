@@ -17,7 +17,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 let now = 1_800_000_000_000;
 let dirs = 0;
 
-function world() {
+function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   const store = new Store(join(root, `test-${++dirs}.db`));
   const citadel = store.createProject('Citadel', 'https://github.com/o/citadel');
   const state = join(root, `state-${dirs}`), heavy = join(root, `heavy-${dirs}`);
@@ -31,7 +31,7 @@ function world() {
   let head: string | null = 'live1';
   const server = new CitadelServer({
     store, scheme: () => store.getProject(citadel.id) ?? null, head: () => head, line: () => waits.line, ticketFor: (l) => waits.ticketFor(l),
-    wait: waits.wait, ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now,
+    wait: waits.wait, ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now, news,
   });
   const minion = (title = 'T') => {
     const t = store.createTicket({ project_id: citadel.id, title, permission_mode: 'default', created_by: 'Cara' });
@@ -168,6 +168,25 @@ test('on main with no deploy coming waits for one; a failed deploy says why; a b
   const m = w.server.read()[0].next!;
   assert.equal(m.changes.find((x) => x.ticketId === a.id)!.waitingOn, null);
   assert.deepEqual(w.server.read()[0].line.map((e) => [e.name, e.ticketId]), [['tools/deploy.sh', null]]);
+});
+
+// #1368: the ship holding the line says what happened so far, from its land.sh lines, each #N a link to its minion.
+test('the next release carries the holder\'s news, with its minions linked, and only the holder\'s', () => {
+  const asked: number[] = [];
+  const w = world((id, name) => {
+    asked.push(id);
+    return [{ tone: 'bad', text: `${name(rider.branch)} dropped: it turned the train red; back in line: ${name('ticket/9999-gone')}` }];
+  });
+  const holder = w.minion('Holder'), rider = w.minion('Rider');
+  w.land(1, holder.branch, now / 1000 - 40, 'finding the ship that turned the train red', 30);
+  w.land(2, rider.branch, 0, 'waiting', 20);
+  w.waits.poll();
+  const n = w.server.read()[0].next!;
+  assert.deepEqual(asked, [holder.id], 'only the holder\'s log is read');
+  assert.deepEqual(n.news, [{ tone: 'bad', text: `#${rider.number} dropped: it turned the train red; back in line: 9999-gone`, refs: { [`#${rider.number}`]: rider.id } }]);
+  w.clearLine();
+  w.waits.poll();
+  assert.equal(w.server.read()[0].next?.news, undefined, 'nobody holds the line: no news');
 });
 
 test('an idle target has no next release; no scheme yet, no target', () => {

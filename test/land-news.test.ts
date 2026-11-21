@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict';
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { landNews, readTail } from '../src/land-news.ts';
+
+// src/land-news.ts (#1368): the ship under way's news on Releases, read from its land.sh output. The lines are land.sh's
+// own words, as a real train's log has them (landing 2832, 2026-11-20).
+const root = mkdtempSync(join(tmpdir(), 'land-news-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+
+const name = (b: string) => `#${b.match(/ticket\/(\d+)/)?.[1] ?? b}`;
+const url = 'https://github.com/o/r/actions/runs';
+const T = 'test\tthe full suite\t2026-11-21T03:31:26.1129952Z';
+
+const front = [
+  "land: riding in ticket/1345-x's ship train: waiting for CI on the train",
+  'land: ship train: ticket/1999-old stays in line (it changes the ship pipeline, which ships alone)',
+  'land: back in line on its own: the ship train went without ticket/1311-front',
+  'land: rebasing ticket/1311-front onto main (e4913962 "#1306: something")',
+  'land: guard tests passed on a49185c7 in 3 s',
+  "land: ship train: ticket/1325-a stays in line (it doesn't rebase cleanly onto the train)",
+  'land: ship train: ticket/1337-b stays in line (it changes the ship pipeline, which ships alone)',
+  "land: ship train: ticket/1355-c stays in line (it doesn't rebase cleanly onto the train)",
+  'land: ship train: ticket/1311-front takes the 4 ships waiting behind it (ticket/1348-d ticket/1331-e ticket/1351-f ticket/1350-g): CI runs once on all 5, and they ship together',
+  "land: waiting for CI on 13f924f3: the full suite on Cara's desktop (at most 6 min, then it runs here once perigee is quiet)",
+];
+const red = [
+  `${T} ✖ the Overlord hears of every start, and gets a card when one reads like another person's open minion (14014.300228ms)`,
+  `${T} ✖ checks run one at a time (476.842151ms)`,
+  `${T} run-tests: 4 test file(s) failed; rerunning each alone once to tell load from a real failure`,
+  `land: CI is red on the ship train (${url}/1): finding the first ship that turned it red`,
+];
+
+test('a train: who stayed in line (grouped by why), only its last try, CI red with its tests, then the bisect under way', () => {
+  const n = landNews([...front, ...red].join('\n'), name);
+  assert.deepEqual(n, [
+    { tone: 'info', text: "Stayed in line: #1325, #1355 (doesn't rebase cleanly onto the train); #1337 (changes the ship pipeline, which ships alone)" },
+    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one…, checks run one at a time" },
+    { tone: 'warn', text: 'Finding the ship that turned the train red' },
+  ], 'the old train it rode before its own rebase is left out');
+});
+
+test('the bisect counts its CI runs, or says land.sh\'s K of N; flakes run once more; its result replaces it', () => {
+  const wait = "land: waiting for CI on d66e2d82: the full suite on Cara's desktop";
+  let lines = [...front, ...red, wait];
+  assert.equal(landNews(lines.join('\n'), name).at(-1)!.text, 'Finding the ship that turned the train red: CI run 1');
+  lines.push('land: bisect: testing the first 2 of 4 ships');
+  assert.equal(landNews(lines.join('\n'), name).at(-1)!.text, 'Finding the ship that turned the train red: testing the first 2 of 4');
+  lines = [...front, ...red, wait,
+    'land: flake: test/memory.test.ts · in CI',
+    'land: only flakes failed (test/memory.test.ts, test/minion-index.test.ts, test/overlord.test.ts, test/wake-when-live.test.ts); running CI once more on d66e2d82, the land needs a fully green run',
+    wait, `land: CI passed on d66e2d82 in 337s (${url}/2)`,
+    `land: the bisect found ticket/1331-e the first ship that turned the train red (${url}/3): it is refused, and the 1 before it ship`,
+  ];
+  assert.deepEqual(landNews(lines.join('\n'), name).slice(1), [
+    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one…, checks run one at a time" },
+    { tone: 'warn', text: 'Only flakes failed (memory, minion-index, overlord +1 more): one fresh CI run' },
+    { tone: 'bad', text: '#1331 dropped: it turned the train red; back in line: #1351, #1350' },
+  ]);
+});
+
+test('the other ways a train ends: the front itself red, no answer from CI, a rider leaving; flakes that stay red; the fallback; slow CI', () => {
+  const at = (...l: string[]) => landNews([...front, ...l].join('\n'), name).slice(1);
+  assert.deepEqual(at(...red, 'land: the bisect found ticket/1311-front itself red, so the ships behind it go back in line').map((x) => x.text).slice(1),
+    ['#1311 itself red; back in line: #1348, #1331, #1351, #1350']);
+  assert.deepEqual(at('land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone'),
+    [{ tone: 'warn', text: 'CI gave no answer (a timeout): #1311 goes on alone; back in line: #1348, #1331, #1351, #1350' }]);
+  assert.deepEqual(at('land: ship train: ticket/1351-f left the line while the train was tested, so it ships without it and the ships after it go back in line'),
+    [{ tone: 'info', text: '#1351 left the line during the test; back in line: #1350' }]);
+  assert.equal(at('land: only flakes failed (test/a.test.ts), but deleting land/x on GitHub to start a fresh run failed, so this stays red')[0].tone, 'bad');
+  assert.deepEqual(at('land: CI FALLBACK: no runner took the run. Running the full suite on perigee instead.'),
+    [{ tone: 'warn', text: 'CI fallback: the full suite runs on perigee (no runner took the run)' }]);
+  const slow = "land: waiting for CI or a quiet perigee: CI: CI didn't finish within 360s, but perigee is busy";
+  assert.equal(at(slow).at(-1)!.text, 'CI is past its time limit: waiting on CI, or on a quiet perigee to run the suite here');
+  assert.deepEqual(at(slow, `land: CI passed on a49185c7 in 395s (${url}/4)`), [], 'gone once CI answers');
+});
+
+test('at most six lines, the newest kept; nothing to say, nothing shown', () => {
+  const many = Array.from({ length: 9 }, (_, i) => `land: CI FALLBACK: reason ${i}. Running the full suite on perigee instead.`);
+  const n = landNews(many.join('\n'), name);
+  assert.equal(n.length, 6);
+  assert.match(n.at(-1)!.text, /reason 8/);
+  assert.deepEqual(landNews('land: rebasing ticket/1-x onto main (abc "y")\nland: guard tests passed', name), []);
+});
+
+test('readTail: the log\'s end, read again only once it grows; a cut first line is dropped', () => {
+  const f = join(root, 'output.log');
+  assert.equal(readTail(f), '', 'no log yet');
+  writeFileSync(f, 'land: one\n');
+  assert.equal(readTail(f), 'land: one\n');
+  appendFileSync(f, 'land: two\n');
+  assert.equal(readTail(f), 'land: one\nland: two\n');
+  writeFileSync(f, `${'x'.repeat(300 * 1024)}\nland: last\n`);
+  assert.equal(readTail(f), 'land: last\n');
+});

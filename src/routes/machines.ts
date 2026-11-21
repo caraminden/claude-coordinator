@@ -173,14 +173,15 @@ export const agentRoutes: Route[] = [
   ciUploadRoute,
   ...ciJobReadRoutes,
   // A CI job's test file counts while its suite runs, about every 10 s (#1368): its run comes from its run token, as an
-  // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines.
+  // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines; failed: the
+  // files failed so far; phase 'rerun' while run-tests.sh reruns them alone, the counts then being the reruns'.
   {
     method: 'POST', path: '/api/ci-tests', who: 'machine',
     async handler({ req, res, app }) {
       const { claims } = await app.ciStore.caller(req);
       const body = await readJson(req, 10_000);
-      const c = testCounts(body?.done, body?.total, body?.file ?? '');
-      if (!c) throw new HttpError(400, 'Send {done, total, file}: whole numbers, done at most total, total over 0');
+      const c = testCounts(body?.done, body?.total, body?.file ?? '', body?.failed ?? [], body?.phase ?? 'suite');
+      if (!c) throw new HttpError(400, 'Send {done, total, file, failed?, phase?}: whole numbers, done at most total, total over 0; failed a list of file names; phase suite or rerun');
       app.ciTests?.(claims.repository, claims.runId, c);
       return json(res, 202, {});
     },

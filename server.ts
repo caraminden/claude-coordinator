@@ -378,9 +378,20 @@ async function checkUnitDrift() {
 if (!BOOT_CHECK && !PREVIEW && runner.units) {
   every('unit drift', 6 * 3600_000, checkUnitDrift, 90_000);
 }
+// The one outbox (src/outbox.ts, ADR 0021): saved "send this later" rows. wake_at (#722) and wake_when_live are its kinds; boot moves the
+// old timed-wakes key in, resends what a killed server left mid-send, and sends what came due while it was down.
+const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
+const timedWakes = new TimedWakes(store, outbox);
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
-const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}));
+const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
+// A reopened minion's held waits go back to waiting (the outbox), and one whose deploy came live meanwhile is found now.
+runner.onTurnStart = (ticketId, eventIds) => {
+  const held = store.listDeliveries({ kind: 'wake_when_live', to: ticketId, states: ['held'] }).length > 0;
+  outbox.turnStarted(ticketId, eventIds);
+  if (held) void outbox.poke({ type: 'reopened', ticket: ticketId }).then(() => waiters.check()).catch((err) => console.error('Checking waiters after a reopen failed:', err));
+};
+if (!BOOT_CHECK) void outbox.boot();
 // The scheme whose code this server runs (its repo has the live commit); checked again once a deploy moves the live commit.
 let own: { head: string | null; id: number | null } | null = null;
 function ownScheme(): Project | null {
@@ -391,12 +402,6 @@ function ownScheme(): Project | null {
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
 waiters.prs = githubPrs(githubOf);
-// The one outbox (src/outbox.ts, ADR 0021): saved "send this later" rows. wake_at (#722) is its first kind; boot moves the
-// old timed-wakes key in, resends what a killed server left mid-send, and sends what came due while it was down.
-const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
-const timedWakes = new TimedWakes(store, outbox);
-runner.onTurnStart = (ticketId, eventIds) => outbox.turnStarted(ticketId, eventIds);
-if (!BOOT_CHECK) void outbox.boot();
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
 services.githubAs = (c) => {

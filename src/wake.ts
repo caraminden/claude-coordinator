@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
-import type { Delivery } from './db/deliveries.ts';
+import type { Delivery, DeliveryState } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
 import { type Outbox, span } from './outbox.ts';
 import type { Runner } from './runner.ts';
@@ -246,11 +246,51 @@ export class LiveWaiters {
   private last: Promise<unknown> = Promise.resolve();
   prs: PrLookup = githubPrs();
 
-  constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string, light?: boolean) => void) {
+  private outbox: Outbox | undefined;
+
+  /** With an `outbox` (the server's), waits are rows in it (ADR 0021, step 1); without, they stay in the old key (tests of the check itself). */
+  constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string, light?: boolean) => void, outbox?: Outbox) {
     this.store = store;
     this.repo = repo;
     this.head = head;
     this.send = send;
+    this.outbox = outbox;
+    outbox?.register({
+      kind: 'wake_when_live',
+      migrate: () => this.migrate(),
+      describe: (r) => `wake_when_live: ${r.payload.reason}`,
+      // The check found it live and saved the text (meet); a row whose text is missing was never met.
+      deliver: (rows, ctx) => rows.map((r) => ctx.send(r, r.payload.text ?? r.payload.reason)),
+    });
+  }
+
+  private waiter = (r: Delivery): Waiter => ({ ticket: r.to_id, commit: r.when_arg, reason: r.payload.reason, since: r.payload.since, ...(r.payload.light ? { light: true as const } : {}) });
+
+  /** The table's waiting rows (not yet sent), as waiters. */
+  private rows(states: DeliveryState[] = ['waiting']): Delivery[] {
+    return this.outbox ? this.store.listDeliveries({ kind: 'wake_when_live', states }) : [];
+  }
+
+  /** Move the old settings key's waits into the table, in one transaction that empties the key: none dropped. */
+  private migrate() {
+    const old = this.store.getSetting<Waiter[]>(KEY);
+    if (!old?.length || !this.outbox) return;
+    this.store.importDeliveries(
+      KEY,
+      old.map((w) => ({
+        project_id: this.store.getTicket(w.ticket)?.project_id ?? 0,
+        kind: 'wake_when_live',
+        to_kind: 'minion' as const,
+        to_id: w.ticket,
+        when_kind: 'live',
+        when_arg: w.commit,
+        payload: { reason: w.reason, since: w.since, ...(w.light ? { light: true } : {}) },
+        set_by: `minion:${w.ticket}`,
+        dedupe_key: `${w.ticket}:${w.commit ?? ''}`,
+        origin: `${KEY}:${createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16)}`,
+      })),
+      this.outbox.clock(),
+    );
   }
 
   chains(): Chain[] {
@@ -487,7 +527,12 @@ export class LiveWaiters {
     }
   }
 
+  /** Every wait not yet sent: the table's, and any still in the old key (the dual read). */
   list(): Waiter[] {
+    return [...(this.store.getSetting<Waiter[]>(KEY) ?? []), ...this.rows(['waiting', 'held']).map(this.waiter)];
+  }
+
+  private legacy(): Waiter[] {
     return this.store.getSetting<Waiter[]>(KEY) ?? [];
   }
 
@@ -532,7 +577,16 @@ export class LiveWaiters {
       w = { ticket, commit, reason, since: this.head, ...(light ? { light: true as const } : {}) };
       if (commit && (await this.live(w))) return false;
     } while (w.since !== this.head);
-    this.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== ticket || o.commit !== commit), w]);
+    if (this.outbox) {
+      const t = this.store.getTicket(ticket);
+      this.store.setSetting(KEY, this.legacy().filter((o) => o.ticket !== ticket || o.commit !== commit)); // a re-add replaces an unmigrated one
+      this.outbox.add({
+        project_id: t?.project_id ?? 0, kind: 'wake_when_live', to_kind: 'minion', to_id: ticket, when_kind: (await this.elsewhere(ticket)) ? 'merged' : 'live', when_arg: commit,
+        payload: { reason, since: w.since, ...(light ? { light: true } : {}) }, set_by: `minion:${ticket}`, dedupe_key: `${ticket}:${commit ?? ''}`,
+      });
+      return true;
+    }
+    this.store.setSetting(KEY, [...this.legacy().filter((o) => o.ticket !== ticket || o.commit !== commit), w]);
     return true;
   }
 
@@ -558,32 +612,43 @@ export class LiveWaiters {
 
   private async checkNow(): Promise<number> {
     const head = this.head;
+    const short = (c: string) => c.slice(0, 7);
+    const text = async (w: Waiter) =>
+      w.commit && (await this.elsewhere(w.ticket)) ? `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`
+      : `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`;
+    // The table's waits: the check finds one live, the outbox sends it (and retries a send that throws). A wait of a dismissed minion is the outbox's to hold.
+    let met = 0;
+    for (const r of this.rows()) {
+      const t = this.store.getTicket(r.to_id);
+      const w = this.waiter(r);
+      if (r.met_at != null || !t || t.status === 'closed' || !(await this.live(w))) continue; // a met row is the outbox's, retrying
+      const away = !!w.commit && !!(await this.elsewhere(w.ticket)); // there the wake is not a light one, as before
+      if (this.outbox!.meet(r.id, { text: await text(w), ...(away ? { light: false } : {}) })) met++;
+    }
     const live: Waiter[] = [];
-    for (const w of this.list()) {
+    for (const w of this.legacy()) {
       const t = this.store.getTicket(w.ticket);
       if (t && t.status !== 'closed' && (await this.live(w))) live.push(w);
     }
     const waiting: Waiter[] = [];
     const woken: Waiter[] = [];
     // Read again, and nothing waits until they are stored: a waiter added while git and gh ran stays.
-    for (const w of this.list()) {
+    for (const w of this.legacy()) {
       const t = this.store.getTicket(w.ticket);
       if (!t || t.status === 'closed') continue;
       (live.some((o) => o.ticket === w.ticket && o.commit === w.commit && o.since === w.since) ? woken : waiting).push(w);
     }
     // Dropped before sending, so a send that throws can't wake anyone twice.
     this.store.setSetting(KEY, waiting);
-    const short = (c: string) => c.slice(0, 7);
     for (const w of woken) {
       try {
-        if (w.commit && (await this.elsewhere(w.ticket))) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
-        else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`, !!w.light);
+        this.send(w.ticket, await text(w), w.commit && (await this.elsewhere(w.ticket)) ? undefined : !!w.light);
       } catch (err) {
         console.error(`Waking #${w.ticket} failed:`, err); // the others still get theirs
       }
     }
     await this.checkRelays();
-    return woken.length + (await this.checkChains());
+    return met + woken.length + (await this.checkChains());
   }
 
   /**

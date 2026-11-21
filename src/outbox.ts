@@ -55,7 +55,7 @@ export type Kind = {
 };
 
 export type OutboxRunner = {
-  send(ticketId: number, author: string, text: string): { event: { id: number } };
+  send(ticketId: number, author: string, text: string, images?: never[], extra?: { light?: boolean }): { event: { id: number } };
   /** Whether the minion's next turn still carries this event (Runner.holds). */
   holds(ticketId: number, eventId: number): boolean;
   onLane(ticketId: number, what: string, step: () => unknown): Promise<unknown>;
@@ -123,6 +123,15 @@ export class Outbox {
     } else row = this.store.addDelivery(d, now);
     void this.poke({ type: 'added', ticket: d.to_kind === 'minion' ? d.to_id : undefined });
     return row;
+  }
+
+  /** A condition row came true (its kind's own async check found it): merge `payload` into the row, make it due now, and run a pass. False if it is no longer waiting. */
+  meet(id: number, payload: object = {}): boolean {
+    const r = this.store.getDelivery(id);
+    const now = this.now();
+    const ok = !!r && this.store.updateDelivery(id, { payload: { ...r.payload, ...payload }, met_at: now, due: now }, ['waiting'], now);
+    if (ok) void this.poke({ type: 'met', ticket: r!.to_kind === 'minion' ? r!.to_id : undefined });
+    return ok;
   }
 
   /** Drop a waiting or held row; false if it was already sending, sent or gone. */
@@ -297,7 +306,7 @@ export class Outbox {
   private sendTo(row: Delivery, text: string, repeat: boolean): Outcome {
     const tail = repeat ? `(The server restarted while sending this, so it may repeat delivery #${row.id}.)` : `(delivery #${row.id})`;
     try {
-      return { state: 'handed', event: this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`).event.id };
+      return { state: 'handed', event: this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`, [], row.payload?.light ? { light: true } : {}).event.id };
     } catch (err) {
       return { state: 'retry', reason: String((err as Error)?.message ?? err) }; // this row only: the others in its batch were sent
     }

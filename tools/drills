@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The fault drills (#1326, test/drills/*.drill.ts), one file at a time: each boots and kills real servers. Never on
+# perigee (Josh, 2026-11-12: "the goal is to NOT hammer perigee"): run it through `citadel-heavy tools/drills`, or the
+# nightly fault-drills workflow. Arguments pick drill files; none runs them all.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+(($#)) || set -- 'test/drills/*.drill.ts'
+exec tools/citadel-node --test --test-concurrency=1 --test-reporter=spec --test-global-setup=test/leak-guard.ts "$@"

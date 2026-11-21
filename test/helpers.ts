@@ -1,6 +1,6 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -171,10 +171,13 @@ export type Booted = {
  * caller's to delete) and sign in as `name`. Turns can't run (CLAUDE_BIN is /bin/false) unless `env`
  * says otherwise; `env` entries override the defaults, and an undefined one removes it.
  */
-export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string } = {}): Promise<Booted> {
+export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(tmpdir(), 'boot-'));
   const data = join(root, 'data');
-  const proc = spawn(process.execPath, [opts.script ?? join(REPO, 'server.ts')], {
+  // `wrap`: a command the server runs under, that execs it (systemd-run --scope for a CPU limit); `log`: a file its stdout and stderr are appended to.
+  const [bin, ...pre] = [...(opts.wrap ?? []), process.execPath];
+  const err = opts.log ? openSync(opts.log, 'a') : 'inherit';
+  const proc = spawn(bin, [...pre, opts.script ?? join(REPO, 'server.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false', CITADEL_PSI_CPU: '/nonexistent/psi', CITADEL_PSI_MEMORY: '/nonexistent/psi', // a booted test server never reads the real box's pressure (#1301/#1302): a busy box would pause its indexers and hold its scheduled runs
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
@@ -189,14 +192,16 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       CITADEL_PSI_CPU: join(root, 'no-psi-cpu'), CITADEL_PSI_MEMORY: join(root, 'no-psi-memory'),
       ...opts.env,
     },
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'pipe', err],
   });
+  if (typeof err === 'number') closeSync(err);
   const stop = async ({ keepTurns = false } = {}) => {
     await stopProcs([proc]);
     if (!keepTurns) await stopTurns(data);
     if (!opts.root) rmSync(root, { recursive: true, force: true });
   };
   if (opts.stdout) proc.stdout!.pipe(process.stdout);
+  if (opts.log) proc.stdout!.pipe(createWriteStream(opts.log, { flags: 'a' }));
   const port = await listeningPort(proc).catch(async (err) => {
     await stop();
     throw err;

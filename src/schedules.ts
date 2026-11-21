@@ -10,6 +10,7 @@ import { HttpError } from './http.ts';
 import { pickFor } from '../public/model-table.js';
 import { pacific } from './pacific.ts';
 import { projectSharedDir } from './workspace.ts';
+import { faultPoint } from './fault-points.ts';
 
 export interface Schedule {
   id: number;
@@ -584,6 +585,7 @@ export class ScheduledRuns {
       store.updateTicket(id, { person_id: maker && !maker.disabled_at ? maker.id : null });
       const pinnedFor = pinForOwner(store, id);
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
+      await faultPoint('schedule-started'); // a drill's kill between the minion's start and the slot's ran mark (C3)
       store.schedules.ran(s.id, { ticketId: id }, now);
       store.usage.used('schedule', s.name);
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });

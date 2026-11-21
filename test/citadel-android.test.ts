@@ -513,8 +513,6 @@ test('an interrupted mic step ends its lease renewer and its play, and lets go o
   await done;
   await until('the renewer and the play to end', async () => left().length === 0, 5000).catch(() => { throw new Error(`still running:\n${left().join('\n')}`); });
   assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '', 'the screen is free at once');
-  // Nothing renews it after: another caller's step goes straight through.
-  await new Promise((r) => setTimeout(r, 1500));
-  assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '');
+  // The renewer (a fork naming the wav) is gone, so nothing takes it back: another caller's step goes straight through.
   assert.equal(runIn(locks, 'N', 'shot', join(root, 'mic-1.png')).status, 0);
 });

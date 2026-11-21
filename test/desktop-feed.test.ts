@@ -88,6 +88,26 @@ test('a CI run is published once; publishing an older one again (a roll back) po
   assert.equal((await feeds.index(1, 'app'))!.current, 1, 'the feed names build 1 again, so PCs go back to it');
 });
 
+test('publishing a source again by hand applies a new title and names the settings it ignored (#1522)', async () => {
+  const feeds = new DesktopFeeds(join(root, 'd4b'));
+  await feeds.publish({ projectId: 1, app: 'app', file: await build('b.zip', { 'A.exe': 'v1', 'B.exe': '' }), exe: 'A.exe', version: '1.0', source: 'ci:100' });
+  const same = await feeds.publish({ projectId: 1, app: 'app', file: '/nonexistent.zip', exe: 'A.exe', version: '1.0', source: 'ci:100' });
+  assert.equal(same.ignored, undefined, 'the same settings again ignore nothing');
+  const again = await feeds.publish({ projectId: 1, app: 'app', file: '/nonexistent.zip', exe: 'B.exe', started: 'alive', version: '1.1', title: 'New name', source: 'ci:100' });
+  assert.equal(again.already, true);
+  assert.deepEqual(again.ignored, ['exe', 'started', 'version'], 'the build is already made: its exe, start signal and version stay');
+  const index = (await feeds.index(1, 'app'))!;
+  assert.equal(index.title, 'New name', 'the title is the feed\'s, so it applies');
+  assert.deepEqual([index.builds[0].exe, index.builds[0].started, index.builds[0].version], ['A.exe', 'file', '1.0']);
+});
+
+test('the publish_desktop tool says PCs switch on the start after next (#1522)', async () => {
+  const src = await readFile(new URL('../src/mcp.ts', import.meta.url), 'utf8');
+  const desc = src.slice(src.indexOf("name: 'publish_desktop'"), src.indexOf("name: 'publish_desktop'") + 1500);
+  assert.match(desc, /switch on the start after next/);
+  assert.doesNotMatch(desc, /switch on their next start/);
+});
+
 test('the first-install zip holds the launcher as <app>.exe, its config and the current build unpacked', async () => {
   const feeds = new DesktopFeeds(join(root, 'd5'));
   await feeds.publish({ projectId: 2, app: 'app', file: await build('b.zip', { 'bin/App.exe': 'v1', 'bin/data.txt': 'd' }), exe: 'bin/App.exe', started: 'alive', title: 'App' });
@@ -156,6 +176,7 @@ test("CI's publisher publishes a run's build once and tells the Taskmaster, wait
   await publish(t, { id: 11, sha: 'def0123456' });
   assert.equal(told.length, 1);
   assert.match(told[0], /published desktop build 1 of app from CI run 11/);
+  assert.match(told[0], /PCs switch to it on the start after next/, 'a start downloads it; only the start after tries it (#1522)');
   assert.equal((await feeds.index(3, 'app'))!.builds[0].commit, 'def0123456');
   await publish(t, { id: 12, sha: 'f' });
   await publish(t, { id: 12, sha: 'f' });

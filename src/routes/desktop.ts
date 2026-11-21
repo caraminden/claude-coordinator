@@ -96,7 +96,7 @@ export const desktopRoutes: Route[] = [
         const out = await d.feeds.publish(ask);
         const base = origin(ctx.req);
         const said = out.already
-          ? `${ask.app} build ${out.build.build} was already published from that run; the feed names it again.`
+          ? `${ask.app} build ${out.build.build} was already published from that run; the feed names it again.${out.ignored ? ` Its ${out.ignored.join(', ')} can't change on a build that's already made, so they stay as they were: publish a new build to change them.` : ''}`
           : `Published ${ask.app} build ${out.build.build} (${out.build.size} bytes, sha256 ${out.build.sha256.slice(0, 12)}…). PCs running it get it on their next start but one.`;
         return json(res, 200, { ...out, feed_url: base + out.feed, install_url: base + out.install, said: `${said} Feed: ${base}${out.feed} First install: ${base}${out.install}` });
       } catch (err) {

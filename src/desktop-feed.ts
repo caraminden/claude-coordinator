@@ -77,6 +77,8 @@ export interface Published {
   build: DesktopBuild;
   /** That source was already published: nothing new was made, and the feed now names that build. */
   already?: boolean;
+  /** With already: the settings asked for that differ from that build's, which keeps its own (its title does apply). */
+  ignored?: ('exe' | 'started' | 'version')[];
   /** The feed's and the first-install zip's paths on Citadel's address. */
   feed: string;
   install: string;
@@ -155,6 +157,7 @@ export class DesktopFeeds {
     if (ask.exe !== undefined && !exeName(ask.exe)) throw new DesktopError(`exe is a path to an .exe inside the build, like "App.exe" or "bin/App.exe": not "${ask.exe}"`);
     await mkdir(dir, { recursive: true });
     const index: DesktopIndex = (await this.index(ask.projectId, ask.app)) ?? { app: ask.app, current: 0, builds: [] };
+    const was = index.title;
     if (ask.title?.trim()) index.title = ask.title.trim().slice(0, 80);
     const paths = desktopPaths(ask.projectId, ask.app);
     // A CI run (or a roll back to one) that is already here: the feed names it again, no new number.
@@ -162,8 +165,11 @@ export class DesktopFeeds {
     if (seen) {
       if (ask.follow && index.ci === ask.source) return { build: seen, already: true, ...paths };
       const next = { ...index, current: seen.build, ...(ask.follow ? { ci: ask.source } : {}) };
-      if (index.current !== next.current || index.ci !== next.ci) await writeIndex(dir, next);
-      return { build: seen, already: true, ...paths };
+      if (index.current !== next.current || index.ci !== next.ci || index.title !== was) await writeIndex(dir, next);
+      // The build's zip is already made, so its own settings stay; the reply names any asked to change (#1522).
+      const asked = { exe: ask.exe, started: ask.started, version: ask.version && String(ask.version).slice(0, 40) };
+      const ignored = (Object.keys(asked) as (keyof typeof asked)[]).filter((k) => asked[k] !== undefined && asked[k] !== seen[k]);
+      return { build: seen, already: true, ...(ignored.length ? { ignored } : {}), ...paths };
     }
     const st = await stat(ask.file).catch(() => null);
     if (!st?.isFile()) throw new DesktopError(`No file at ${ask.file}`);
@@ -343,7 +349,7 @@ export function ciPublisher(d: CiPublishDeps) {
       if (!file) return;
       try {
         const out = await d.feeds.publish({ projectId: t.projectId, app: t.desktop.app, file, exe: t.desktop.exe, started: t.desktop.started, title: t.desktop.title ?? t.name, commit: run.sha, source: `ci:${run.id}`, by: 'ci', follow: true });
-        if (!out.already) d.tell(t.projectId, `${t.name}: published desktop build ${out.build.build} of ${t.desktop.app} from CI run ${run.id} (${run.sha.slice(0, 9)}). PCs pick it up on their next start; a first install is at ${out.install}.`);
+        if (!out.already) d.tell(t.projectId, `${t.name}: published desktop build ${out.build.build} of ${t.desktop.app} from CI run ${run.id} (${run.sha.slice(0, 9)}). PCs switch to it on the start after next (one start downloads it, the next tries it); a first install is at ${out.install}.`);
       } catch (err) {
         failed.add(key);
         d.log?.(`desktop: publishing ${key} failed: ${(err as Error).message}`);

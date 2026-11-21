@@ -4,9 +4,17 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
 `perigee-godot.service`) plus the machine agent that lends godot-ai to minions
 (`perigee-godot-agent.service`). The editor held a full core around the clock, so now:
 
+- **Close to no CPU while up (#1353).** That core was Godot's audio thread: the container has no sound
+  card, its ALSA default is the null device, which never makes a writer wait, so the thread spun for the
+  editor's whole life. `start.sh` runs the editor with `--audio-driver Dummy`. It also sets the editor's
+  low-processor sleep to 50 ms: the headless window counts as focused, so it woke every 6.9 ms with
+  nothing to draw (18% of a core). Measured in a scratch copy: 89% of a core before, 1% after.
+  `start.sh` runs from the live checkout, so a change to it is live at the editor's next start.
+
 - **Start on demand.** The agent's MCP command goes through `godot-on-demand.mjs`, which passes the
-  MCP lines through untouched. A request that needs the editor (a tool call; not the handshake or
-  the tool list) starts the unit if it is down and holds until the editor has dialled in to
+  MCP lines through untouched. A request that needs the editor (`tools/call` or `resources/read`,
+  nothing else: Claude Code opens every session with a `server/discover` probe, and when unknown
+  methods counted, every turn kept the editor up or started it, #1353) starts the unit if it is down and holds until the editor has dialled in to
   godot-ai's WebSocket port 9500 (at most 180 s, then 5 s more for the plugin's handshake), so the
   minion's call waits instead of failing.
 - **Stop when idle.** A tool call and its answer stamp `~/.local/state/perigee-godot/last-call`, and a
@@ -14,8 +22,8 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
   don't: every turn in a scheme the machine is lent to opens a session, about 56 a day, and when those
   counted the editor never went 2 hours quiet (#615). `perigee-godot-idle.timer` runs
   `godot-on-demand.mjs idle-check` every 10 minutes, which stops the unit once both the last call and
-  the unit's start are 2 hours old. It never touches a frozen unit and never starts anything. Its
-  first run after install finds no stamp and starts the 2-hour clock instead of stopping.
+  the unit's start are 30 minutes old (2 hours until #1353). It never touches a frozen unit and never starts anything. Its
+  first run after install finds no stamp and starts the clock instead of stopping.
 - **No call lands on a dying editor.** The check decides and stops under an exclusive lock
   (`~/.local/state/perigee-godot/stop.lock`), and a tool call waits on that lock before it looks at the
   editor, so a call arriving mid-stop starts it again.
@@ -28,12 +36,13 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
 Socket activation doesn't fit: the port the minions reach (8000) is the host backend's, which is
 already up, and the editor is a *client* of port 9500, not a server.
 
-Settings, as environment variables on either unit: `GODOT_IDLE_S` (7200), `GODOT_READY_S` (180),
+Settings, as environment variables on either unit: `GODOT_IDLE_S` (1800), `GODOT_READY_S` (180),
 `GODOT_SETTLE_S` (5), `GODOT_UNIT`, `GODOT_WS_PORT`, `GODOT_ACTIVITY`.
 
 ## Install (by hand, once this is in the live checkout)
 
 ```sh
+# The Quadlet runs start.sh from the live checkout (#1353): copy it once more if you installed it before then.
 cp ~/claude-coordinator/deploy/perigee-godot/perigee-godot.container ~/.config/containers/systemd/
 cp ~/claude-coordinator/deploy/perigee-godot/perigee-godot-agent.service \
    ~/claude-coordinator/deploy/perigee-godot/perigee-godot-idle.service \
@@ -46,7 +55,7 @@ systemctl --user restart perigee-godot-agent.service
 
 The Quadlet no longer has `[Install]`, so the editor isn't started at boot, and the agent no longer
 `Wants=` it. While the editor is frozen (`systemctl --user freeze`) the idle check leaves it alone.
-After a thaw, if nothing has called it in 2 hours, the next check (within 10 minutes) stops it.
+After a thaw, if nothing has called it in 30 minutes, the next check (within 10 minutes) stops it.
 
 Check it: `systemctl --user list-timers perigee-godot-idle.timer`,
 `journalctl --user -u perigee-godot-idle.service` (one line per check: "used N min ago" or

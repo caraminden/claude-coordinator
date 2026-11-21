@@ -10,7 +10,7 @@ import { bridge, editorConnected, ensureEditor, idleCheck, idleVerdict, needsEdi
 import { until } from './wait.ts';
 
 // deploy/perigee-godot/godot-on-demand.mjs (#505): the Godot editor starts on the first tool call and stops
-// after 2 hours unused. Against a stub systemctl, a fake activity file and a fake clock.
+// after 30 minutes unused. Against a stub systemctl, a fake activity file and a fake clock.
 const root = mkdtempSync(join(tmpdir(), 'perigee-godot-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const H = 3600_000;
@@ -40,14 +40,14 @@ test('idleVerdict: stops only an active, unfrozen unit with neither a call nor i
   assert.equal(v({ state: 'activating' }, 0), false);
 });
 
-test('idle-check stops the unit after 2 hours unused, and leaves a used or frozen one alone', () => {
+test('idle-check stops the unit after 30 minutes unused, and leaves a used or frozen one alone', () => {
   const idle = stub('idle', { ActiveState: 'active', since: NOW - 3 * H });
-  idle.used(NOW - 2 * H - 5 * 60_000);
+  idle.used(NOW - 35 * 60_000);
   assert.equal(idleCheck(idle.cfg, NOW).stop, true);
   assert.deepEqual(idle.log().filter((l) => !l.startsWith('show')), ['stop perigee-godot.service']);
 
   const busy = stub('busy', { ActiveState: 'active', since: NOW - 3 * H });
-  busy.used(NOW - 90 * 60_000);
+  busy.used(NOW - 20 * 60_000);
   assert.equal(idleCheck(busy.cfg, NOW).stop, false);
   assert.deepEqual(busy.log().filter((l) => !l.startsWith('show')), []);
 
@@ -59,7 +59,8 @@ test('idle-check stops the unit after 2 hours unused, and leaves a used or froze
   const fresh = stub('fresh', { ActiveState: 'active', since: NOW - 14 * 24 * H });
   assert.equal(idleCheck(fresh.cfg, NOW).stop, false);
   assert.equal(statSync(fresh.cfg.activity).mtimeMs, NOW);
-  assert.equal(idleCheck(fresh.cfg, NOW + 2 * H + 60_000).stop, true, 'and stops it 2 hours on');
+  assert.equal(idleCheck(fresh.cfg, NOW + 29 * 60_000).stop, false);
+  assert.equal(idleCheck(fresh.cfg, NOW + 31 * 60_000).stop, true, 'and stops it 30 minutes on');
 });
 
 test('idle-check run as the timer runs it holds the stop lock while it stops the editor', async () => {
@@ -80,6 +81,9 @@ test('needsEditor: tool calls wait for the editor, the handshake and listings do
   assert.equal(needsEditor({ jsonrpc: '2.0', id: 4, method: 'resources/read' }), true);
   assert.equal(needsEditor({ jsonrpc: '2.0', id: 0, method: 'initialize' }), false);
   assert.equal(needsEditor({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), false);
+  // Claude Code 2.1.330 opens every session with this probe: counting it kept the editor up all day (#1353).
+  assert.equal(needsEditor({ jsonrpc: '2.0', id: 'server-discover-probe-1', method: 'server/discover' }), false);
+  assert.equal(needsEditor({ jsonrpc: '2.0', id: 5, method: 'some/future-probe' }), false, 'an unknown method is not editor work');
   assert.equal(needsEditor({ jsonrpc: '2.0', method: 'notifications/initialized' }), false);
   assert.equal(needsEditor({ jsonrpc: '2.0', id: 1, result: {} }), false, 'a reply to the server');
   assert.equal(needsEditor(null), false);

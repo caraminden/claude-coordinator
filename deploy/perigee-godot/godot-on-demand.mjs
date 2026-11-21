@@ -8,7 +8,7 @@
 // The bridge sits between the machine agent and `godot-ai attach`, passing MCP lines through untouched.
 // A tool call and its answer stamp the activity file, and so does a call still waiting on its answer
 // (once a minute), so a session in progress never looks idle. The handshake, listings and pings don't
-// (#615). A request that needs the editor (anything but the handshake and the listings) first starts
+// (#615). A request that needs the editor (a tool call or a resource read, nothing else) first starts
 // the unit if it is down and holds until the editor has dialled in to godot-ai's WebSocket port (READY seconds at most, then SETTLE), so the minion's call waits
 // rather than fails. The godot-ai backend runs here on the host, owned by the attach bridges, not in
 // the editor's container: stopping the editor leaves every session open, and the editor reconnects to
@@ -28,7 +28,7 @@ export function settings(env = process.env) {
   const num = (name, def) => (env[name] && Number.isFinite(Number(env[name])) ? Number(env[name]) : def);
   return {
     unit: env.GODOT_UNIT || 'perigee-godot.service',
-    idleS: num('GODOT_IDLE_S', 2 * 3600),
+    idleS: num('GODOT_IDLE_S', 30 * 60),
     readyS: num('GODOT_READY_S', 180),
     wsPort: num('GODOT_WS_PORT', 9500),
     activity: env.GODOT_ACTIVITY || join(homedir(), '.local', 'state', 'perigee-godot', 'last-call'),
@@ -40,9 +40,11 @@ export function settings(env = process.env) {
 
 const lockFile = (cfg) => join(dirname(cfg.activity), 'stop.lock');
 
-// Methods a session sends before it uses the editor: answered by the backend alone.
-const HANDSHAKE = new Set(['initialize', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list', 'logging/setLevel']);
-export const needsEditor = (msg) => !!msg && typeof msg.method === 'string' && msg.id !== undefined && !HANDSHAKE.has(msg.method) && !msg.method.startsWith('notifications/');
+// The only requests that use the editor. An allowlist: Claude Code began opening every session with a
+// `server/discover` probe, and when anything unlisted counted, each turn of a scheme the machine is lent to
+// kept the editor up (or started it) (#1353).
+const EDITOR_WORK = new Set(['tools/call', 'resources/read']);
+export const needsEditor = (msg) => !!msg && msg.id !== undefined && EDITOR_WORK.has(msg.method);
 
 /** The unit's state from `systemctl --user show`: active, activating, frozen, and when it last started (ms). */
 export function unitState(cfg) {

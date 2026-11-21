@@ -3,7 +3,7 @@
 # bridges run on the host (MCP on 127.0.0.1:8000). See ~/.local/share/perigee-godot. Threads reach it as
 # the "perigee-godot" machine (#28).
 # Started on demand, not at boot (#505): godot-on-demand.mjs starts it on the first tool call, and
-# perigee-godot-idle.timer stops it after 2 hours with no godot-ai traffic. Install: deploy/perigee-godot/README.md.
+# perigee-godot-idle.timer stops it after 30 minutes with no godot-ai call. Install: deploy/perigee-godot/README.md.
 [Unit]
 Description=Godot editor + godot-ai for Delve threads (starts on demand, stops when idle)
 
@@ -16,7 +16,8 @@ Network=host
 PodmanArgs=--init
 Volume=%h:%h
 WorkingDir=%h
-Exec=%h/.local/share/perigee-godot/start.sh
+# start.sh runs from the live checkout, so its changes need no copy (#1353).
+Exec=/bin/sh %h/claude-coordinator/deploy/perigee-godot/start.sh
 Environment=HOME=%h XDG_RUNTIME_DIR=/tmp/xdg-godot DELVE_DIR=%h/delve-godot
 Environment=GODOT=%h/.local/godot/4.7.2/Godot_v4.7.2-stable_mono_linux_x86_64/Godot_v4.7.2-stable_mono_linux.x86_64
 Environment=DOTNET_ROOT=%h/.dotnet DOTNET_CLI_TELEMETRY_OPTOUT=1 GODOT_AI_DISABLE_TELEMETRY=1

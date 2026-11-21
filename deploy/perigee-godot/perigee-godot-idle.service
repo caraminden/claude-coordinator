@@ -1,7 +1,7 @@
-# Stops perigee-godot.service after 2 hours with no godot-ai call (#505); run by perigee-godot-idle.timer.
+# Stops perigee-godot.service after 30 minutes with no godot-ai call (#505, #1353); run by perigee-godot-idle.timer.
 # Leaves a frozen unit alone and never starts anything. The next call starts the editor again.
 [Unit]
-Description=Stop the perigee-godot editor when nobody has used it for 2 hours
+Description=Stop the perigee-godot editor when nobody has used it for 30 minutes
 
 [Service]
 Type=oneshot

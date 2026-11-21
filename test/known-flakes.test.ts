@@ -105,3 +105,36 @@ test("its retro-log parsing matches src/flakes.ts's parseRetroFlakes on the line
   writeFileSync(join(dir, 'land.md'), md.replace(/^- \d\d:\d\d:\d\d/gm, `- ${stamp(Date.now() - MIN).time}`));
   for (const [f, known] of [['test/a.test.ts', 0], ['test/b.test.ts', 1], ['test/c.test.ts', 0]] as const) assert.equal(run('ticket/1-me', f).status, known, f);
 });
+
+// #1487 (Cara, 2026-11-21: "how do we know its a flake ..."): a file red in a big share of the last hours' runs is broken.
+const raw = (ago: number, rest: string) => { const s = stamp(Date.now() - ago); return { day: s.day, text: `- ${s.time}Z · ${rest}` }; };
+/** `n` test runs (a landing's timing line with a CI run) in the last few hours. */
+const runs = (n: number) => Array.from({ length: n }, (_, i) => raw((i + 1) * MIN, `timing · ticket/${100 + i}-r · line 0 · rebase 1 · ci-queue 8 · ci-run 107 · fallback - · deploy 7 · live 42 · landed`));
+const reds = (n: number, ago = MIN) => Array.from({ length: n }, (_, i) => line(ago + i * MIN, `test/x.test.ts · load 3 · ticket/${10 + i}-o · in CI`));
+
+test('a file red in 20% or more of the last 6 h of runs is a broken test, not a flake; under that share it still ships as known', () => {
+  // 3 reds of 21 runs (20 logged, and the one being judged): 14%, a known flake.
+  const under = setup([...runs(20), ...reds(3)])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(under.status, 0, under.out);
+  assert.equal(under.out, 'test/x.test.ts (seen on 3 other branches in 14 days)');
+  // 3 reds of 11 runs: 27%.
+  const over = setup([...runs(10), ...reds(3)])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(over.status, 1);
+  assert.equal(over.out, 'broken test, not a flake: test/x.test.ts red in 3 of 11 runs in the last 6 h');
+  // Exactly 20% is broken; a fresh rerun line is a run too; the ship's own red counts, as it reddened a run.
+  const edge = setup([...runs(13), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · green'), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · not started'), ...reds(2), line(MIN, 'test/x.test.ts · load 3 · ticket/1-me · in CI')])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(edge.out, 'broken test, not a flake: test/x.test.ts red in 3 of 15 runs in the last 6 h');
+});
+
+test('a broken test is not excused by its fix minion; too few runs or reds, or reds older than 6 h, give no verdict', () => {
+  const fixing = setup([...runs(10), ...reds(3)], [{ file: 'test/x.test.ts', ticket: 41, state: 'open', status: 'running' }])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(fixing.status, 1, 'a minion fixing it does not make a broken test a flake');
+  assert.equal(fixing.out, 'broken test, not a flake: test/x.test.ts red in 3 of 11 runs in the last 6 h');
+  assert.equal(setup([...runs(3), ...reds(3)])('ticket/1-me', 'test/x.test.ts').status, 0, '4 runs: too few to call');
+  assert.equal(setup([...runs(5), ...reds(2)])('ticket/1-me', 'test/x.test.ts').status, 0, '2 reds: one quiet hour is no proof');
+  assert.equal(setup([...runs(10), ...reds(3, 7 * 60 * MIN)])('ticket/1-me', 'test/x.test.ts').status, 0, 'reds from 7 h ago');
+  // Reds from before its fix passed its proof don't count against it either.
+  assert.equal(setup([...runs(10), ...reds(3, 30 * MIN)], [{ file: 'test/x.test.ts', ticket: 41, state: 'held', status: 'closed', heldAgo: 10 * MIN }])('ticket/1-me', 'test/x.test.ts').status, 1, 'no sightings since the fix: not known');
+  const held = setup([...runs(10), ...reds(3, 30 * MIN), line(MIN, 'test/x.test.ts · load 3 · ticket/7-a · in CI')], [{ file: 'test/x.test.ts', ticket: 41, state: 'held', status: 'closed', heldAgo: 10 * MIN }])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(held.out, 'test/x.test.ts (seen on 1 other branch in 14 days)', 'one red since the fix: a flake again, not broken');
+});

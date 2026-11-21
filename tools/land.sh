@@ -73,7 +73,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results). A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), a `broken test` line per file tools/known-flakes.ts calls a broken test, not a flake (#1487), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results). A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -1764,7 +1764,7 @@ train_label() {
 # Known flakes (#1419, Cara 2026-11-20, "Known flakes only": "Skip the extra run when each failed test has already flaked on
 # other ships in the last 2 weeks, or a minion is fixing it"; ADR 0006's amendment). <files, comma-separated>, each of
 # which passed alone: whether every one is a known flake (tools/known-flakes.ts: the retro log's sightings on other
-# branches, an open fix minion) that no ship on the train changed, nor what it imports (the suspects' map). Says why
+# branches, an open fix minion, and not a broken test) that no ship on the train changed, nor what it imports (the suspects' map). Says why
 # not; on yes, sets $known_why ("<file> (<why>), ..."). Anything it can't tell keeps today's fresh run.
 known_flakes() {
   local files=() f m out hits=() chg=() ok=1 who
@@ -1776,7 +1776,15 @@ known_flakes() {
   out=$(LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
     "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$branch ${train_br[*]}" "${files[@]}" 2>/dev/null) || ok=''
   [ -n "$out" ] || { say "couldn't tell whether $1 are known flakes (tools/known-flakes.ts gave no answer)"; return 1; }
-  [ -n "$ok" ] || { while read -r f; do [[ $f != *'(not seen on another branch'* ]] || say "$f is no known flake"; done <<<"$out"; return 1; }
+  # A broken test (#1487: red in a big share of the last hours' runs) is said as known-flakes.ts words it, and logged, so the
+  # server moves its fix minion to the front of the line (src/flake-fixes.ts) and Releases calls it one (src/land-news.ts).
+  [ -n "$ok" ] || { while read -r f; do
+    if [[ $f == 'broken test, not a flake: '* ]]; then
+      say "$f"
+      m=${f#broken test, not a flake: }
+      retro_log "broken test · ${m%% *} · ${m#* } · $branch"
+    elif [[ $f == *'(not seen on another branch'* ]]; then say "$f is no known flake"; fi
+  done <<<"$out"; return 1; }
   train_chg
   for f in "${files[@]}"; do
     mapfile -t hits < <(train_suspects_of "$f")

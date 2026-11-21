@@ -203,3 +203,22 @@ test('a second red with a real failure, a flake the ship changed, or leftover pr
     assert.equal(pushes(c), 2, how);
   }
 });
+
+test('a file red in a big share of the last 6 h of runs is a broken test: land.sh says so, logs it, and gives it the one fresh run, not a pass', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  seen(shared, ['test/slow.test.ts'], 'ticket/8-another');
+  for (const b of ['ticket/7-a', 'ticket/8-b', 'ticket/9-c']) seen(shared, ['test/busy.test.ts'], b);
+  const day = readdirSync(join(shared, 'retro-log'))[0];
+  const runLine = `- ${new Date().toISOString().slice(11, 19)}Z · timing · ticket/5-r · line 0 · rebase 1 · ci-queue 8 · ci-run 107 · fallback - · deploy 7 · live 42 · landed\n`;
+  writeFileSync(join(shared, 'retro-log', day, 'land.md'), runLine.repeat(9), { flag: 'a' });
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', FAKE_LOG_RERUN: 'mixed', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  // 4 reds (3 other branches and this run's own) of 10 runs: 9 logged and this one.
+  assert.match(res.stderr, /^land: broken test, not a flake: test\/busy\.test\.ts red in 4 of 10 runs in the last 6 h$/m);
+  assert.match(landLog(shared), /· broken test · test\/busy\.test\.ts · red in 4 of 10 runs in the last 6 h · ticket\/1-x$/m);
+  assert.doesNotMatch(res.stderr, /shipped past|only known flakes failed/);
+  assert.equal(pushes(c), 2, 'the one fresh run, as for any file that is no known flake');
+});

@@ -194,15 +194,17 @@ test("main catches up through a fetch that runs as the scheme owner's GitHub log
 test('a fetch from a remote that stalls gives up after its own limit, and main is caught up from what is there (#468 S07-4)', async () => {
   const r = join(root, 'stalled');
   git(['clone', '--quiet', remote, r], root);
-  // A remote that answers and then says nothing: the "ssh" notes its pid and sleeps far longer than the test (exec'd,
-  // so nothing names this folder). Its stderr goes away so a sleep that outlives git can't hold the fetch open.
+  // A remote that answers and then says nothing: the "ssh" notes its pid and sleeps 30 s (exec'd, so nothing names this
+  // folder). That is under the default 45 s limit, so a fetch that ignored fetchMs would outlast the sleep and see it
+  // gone. Its stderr goes away so a sleep that outlives git can't hold the fetch open.
   const ssh = join(root, 'ssh-stall');
   const pidFile = join(root, 'ssh-stall.pid');
   const sshPid = () => { try { return Number(readFileSync(pidFile, 'utf8')) > 0 ? Number(readFileSync(pidFile, 'utf8')) : 0; } catch { return 0; } }; // never 0: kill(0) is our own group
-  writeFileSync(ssh, `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 60 2>/dev/null\n`, { mode: 0o755 });
+  writeFileSync(ssh, `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 30 2>/dev/null\n`, { mode: 0o755 });
   git(['config', 'core.sshCommand', ssh], r);
   git(['remote', 'set-url', 'origin', 'ssh://stall.invalid/x.git'], r);
   const was = mainSync.fetchMs;
+  assert.ok(was > 30_000, 'the default limit outlasts the 30 s stall, so only fetchMs can end it early');
   mainSync.fetchMs = 300;
   try {
     await syncMain(r);

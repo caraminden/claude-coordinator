@@ -53,6 +53,8 @@ const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|AT
 export const READ_WAIT_MS = 50;
 /** How long a write on the server's thread waits for the queue (it must come after it) before it is refused. */
 const DRAIN_MS = 30_000;
+/** A write here that waits this long for the queue goes in the health log, named (#1495): the stall stacks stop short of it. */
+export const SLOW_DRAIN_MS = 500;
 
 const owner = (store: any, name: string) => {
   const dot = name.indexOf('.');
@@ -60,8 +62,8 @@ const owner = (store: any, name: string) => {
 };
 
 export type Writer = {
-  /** Wait for every queued write, at most `ms`. True if they all ran. */
-  drain(ms?: number): boolean;
+  /** Wait for every queued write, at most `ms`. True if they all ran. `what` names the waiting write in the slow-wait log. */
+  drain(ms?: number, what?: string): boolean;
   /** Writes sent and not yet run. */
   queued(): number;
   /** Stop the worker: writes run on the store's connection again. */
@@ -119,10 +121,16 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (stalled && applied() < stalled) return;
     stalled = waitFor(target, READ_WAIT_MS) ? 0 : target;
   };
-  const drain = (ms = drainMs) => {
+  const drain = (ms = drainMs, what = 'a drain') => {
     const t0 = Date.now(), target = seq, took = target - applied();
     const ok = !alive || waitFor(target, ms);
-    if (Date.now() - t0 > 1000) console.error(`DB write on the server's thread waited ${Date.now() - t0} ms for ${took} queued writes${ok ? '' : ' and gave up'}.`);
+    const waited = Date.now() - t0;
+    if (waited >= SLOW_DRAIN_MS) {
+      const text = `${what} on the server's thread waited ${waited} ms for ${took} queued writes${ok ? '' : ' and gave up'}`;
+      console.error(`DB write: ${text}.`);
+      // Sent to the worker behind the writes it waited for, so it adds no wait; inside a write here it would run here.
+      if (alive && !inline) try { void store.addHealthEvent('db-write-wait', t0, null, text); } catch { /* best effort */ }
+    }
     return ok;
   };
   // After its own request's writes (landed, below), a response waits a moment for everyone else's, as a read does.
@@ -143,8 +151,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   };
   // A write here after a queue it can't wait out would land before writes made earlier: refuse it instead. If the
   // worker is gone, the queue is lost anyway and its 'exit' puts writes back on this thread.
-  const beforeWrite = () => {
-    if (alive && applied() < seq && !drain() && Atomics.load(shared, 1) === 1n) {
+  const beforeWrite = (what: string) => {
+    if (alive && applied() < seq && !drain(drainMs, what) && Atomics.load(shared, 1) === 1n) {
       throw new Error(`DB write refused: the write worker is still ${seq - applied()} writes behind after ${drainMs} ms`);
     }
   };
@@ -154,7 +162,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const prepare = db.prepare.bind(db);
   db.prepare = ((sql: string, ...rest: any[]) => {
     const st = prepare(sql, ...rest) as StatementSync;
-    const before = WRITE_SQL.test(sql) ? beforeWrite : beforeRead;
+    const before = WRITE_SQL.test(sql) ? () => beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`) : beforeRead;
     for (const m of ['run', 'get', 'all', 'iterate'] as const) {
       const f = (st as any)[m].bind(st);
       (st as any)[m] = (...a: any[]) => {
@@ -166,7 +174,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   }) as typeof db.prepare;
   const exec = db.exec.bind(db);
   db.exec = ((sql: string) => {
-    if (!db.isTransaction) beforeWrite();
+    if (!db.isTransaction) beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`);
     return exec(sql);
   }) as typeof db.exec;
 
@@ -187,7 +195,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const f = obj[method];
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to run on the server's thread`);
     obj[method] = function (this: unknown, ...args: any[]) {
-      beforeWrite();
+      beforeWrite(name);
       inline++;
       // Only its synchronous part: memory.index awaits embeddings for minutes, and other writes meanwhile go to the worker.
       try { return f.apply(this, args); } finally { inline--; }
@@ -206,7 +214,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       } catch (e: any) {
         // An argument postMessage can't copy: run it here, after the queue.
         console.error(`DB write ${name} can't go to the write worker (${e?.message ?? e}): run on the server's thread.`);
-        beforeWrite();
+        beforeWrite(name);
         return f.apply(this, args);
       }
       seq = n;
@@ -253,7 +261,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // However the server stops, what it queued is written first (the worker runs until the process is gone), and
   // writes made later at exit (the runner-load samples, #791) run here.
   process.on('exit', () => {
-    if (alive && !drain(10_000)) console.error(`DB write worker: ${seq - applied()} queued writes not written by exit.`);
+    if (alive && !drain(10_000, 'the exit')) console.error(`DB write worker: ${seq - applied()} queued writes not written by exit.`);
     alive = false;
   });
   worker.unref(); // after the listeners: adding one refs the worker again

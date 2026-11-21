@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
-import { READ_WAIT_MS, VALUE_WRITES, WRITES, writeOffThread, type Writer } from '../src/db-writer.ts';
+import { READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { json, ownWrites, writes } from '../src/http.ts';
 import { until } from './wait.ts';
@@ -110,6 +110,16 @@ test('a write on the server\'s thread that can\'t wait out the queue is refused,
   assert.ok(w.drain(2000));
   assert.equal(store.createProject('late', null).name, 'late');
   assert.equal(store.getSetting('k'), 'queued');
+});
+
+test('a write on the server\'s thread that waits long for the queue is named in the health log (#1495)', () => {
+  const { store, w } = open(SLOW_DRAIN_MS + 200);
+  store.setSetting('k', 'queued');
+  store.createProject('late', null); // a VALUE_WRITES call: waits out the slow write ahead of it
+  assert.ok(w.drain(5000), 'the wait record, queued behind it, lands');
+  const rows = store.healthEventsSince(['db-write-wait'], 0);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].detail, /^createProject on the server's thread waited \d+ ms for 1 queued writes$/);
 });
 
 test('a void write returns a promise of its own write; a failed one rejects and is in the health log', async () => {

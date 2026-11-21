@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
 import { pacificStamp } from './pacific.ts';
 
@@ -31,6 +32,8 @@ export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, o
 
 const HANDOFF = 'handoff.json';
 const STOPPED = 'stopped.json';
+/** The steps a hand-off's report already did (C2, #1406); a new landing's folder starts without it. */
+const REPORTED = 'reported.json';
 
 /** What the minion says about the change it hands off (hand_off_land), for the shipped line. */
 export interface Handoff {
@@ -190,6 +193,22 @@ export class Landings {
     } catch {
       return null;
     }
+  }
+
+  /** The steps this hand-off's report already did, each with what it gave, so a report cut off by a throw or a kill doesn't do them again (C2, #1406). */
+  reported(ticketId: number): Record<string, { v?: unknown }> {
+    try {
+      return JSON.parse(readFileSync(join(this.dir(ticketId), REPORTED), 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
+  /** Save the report's steps, written aside and renamed in so a kill mid-write keeps the last whole copy. */
+  markReported(ticketId: number, steps: Record<string, { v?: unknown }>) {
+    const file = join(this.dir(ticketId), REPORTED);
+    writeFileSync(`${file}.tmp`, JSON.stringify(steps));
+    renameSync(`${file}.tmp`, file);
   }
 
   /** Reported: it no longer counts as a hand-off. */
@@ -493,7 +512,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 }
 
 export interface HandoffDeps {
-  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew'> & Partial<Pick<Landings, 'stopped'>>;
+  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew' | 'reported' | 'markReported'> & Partial<Pick<Landings, 'stopped'>>;
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
@@ -609,7 +628,17 @@ export class LandHandoffs {
   private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
     const { store, runner, from } = this.d;
     const r = landResult(run.output, run.code!);
-    try { this.d.flakes?.(id, run.output); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }
+    // Each step that says, counts or deploys something runs once per hand-off, even when a throw or a kill cuts the
+    // report off and the next poll or server runs it again (C2, #1406). Setting the ticket's state is safe to repeat.
+    const done = this.d.landings.reported(id);
+    const once = async <T>(step: string, fn: () => T | Promise<T>): Promise<T> => {
+      if (step in done) return done[step].v as T;
+      const v = await fn();
+      done[step] = { v };
+      this.d.landings.markReported(id, done);
+      return v;
+    };
+    try { await once('flakes', () => this.d.flakes?.(id, run.output)); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
     if (stop) {
@@ -618,21 +647,21 @@ export class LandHandoffs {
       runner.broadcastTicket(id);
       const at = pacificStamp(stop.at);
       const moved = /^land: \S+ is now at [0-9a-f]{7,40} /m.test(run.output);
-      runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`);
+      await once('told', () => runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`));
       return;
     }
-    if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
+    if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
       const why = r.smoke ? `its smoke check refused it before it got in line, in seconds (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
-      try { this.d.failed?.(id, cls?.kind ?? null); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
-      runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`);
+      try { await once('failed', () => this.d.failed?.(id, cls?.kind ?? null)); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
+      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).
     if (r.kind !== 'failed' && r.kind !== 'no-ci') {
-      try { this.d.learned?.(id, h); } catch (err: any) { console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`); }
+      try { await once('learned', () => this.d.learned?.(id, h)); } catch (err: any) { console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`); }
     }
     if (r.kind === 'unpushed') {
       // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.
@@ -640,18 +669,18 @@ export class LandHandoffs {
       const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
       store.updateTicket(id, { state: null, note: 'shipped locally; push to origin failed' });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Shipped locally, not pushed to origin: the push failed.` });
-      runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`);
+      await once('noted', () => runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Shipped locally, not pushed to origin: the push failed.` }));
+      await once('told', () => runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`));
       return;
     }
     if (r.kind === 'no-ci') {
       store.updateTicket(id, { state: 'parked', note: 'ship parked: waiting for CI runners' });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `Shipping parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` });
+      await once('noted', () => runner.emit(id, 'note', { text: `Shipping parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` }));
       return;
     }
     const into = h.args[0] === '--into' ? h.args[1] : null;
-    if (!into && r.commit) this.d.landed?.(id, r.commit);
+    if (!into && r.commit) await once('landed', () => this.d.landed?.(id, r.commit!));
     const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
     const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
@@ -661,12 +690,13 @@ export class LandHandoffs {
       store.updateTicket(id, { note: `shipped: deploying ${apps.join(', ')}` });
       runner.broadcastTicket(id);
     }
-    const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
+    const deploys = apps.length ? await once('deployed', () => deployApps(id, apps, r.commit, this.d.deployOps!)) : [];
     const failed = deploys.filter((d) => !d.ok);
     const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
     const flakeKept = (run.output.match(/^land: refused on flakes only .*not your change: keeping its place in line/gm) ?? []).length; // #1419 part 2
-    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
-    this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
+    await once('noted', () => runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` }));
+    await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)
+    await once('woke', () => this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`));
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
     if (r.kind === 'restart' && !h.stayOpen) {
@@ -680,7 +710,7 @@ export class LandHandoffs {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`);
+      await once('told', () => runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`));
       return;
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
@@ -690,7 +720,7 @@ export class LandHandoffs {
         runner.broadcastTicket(id);
       }
       // light (#951): a land that landed is a success notice; whoever wrote meanwhile keeps the minion's own effort.
-      runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true });
+      await once('told', () => runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true }));
       return;
     }
     if (h.stayOpen && h.waitingOn) {
@@ -699,10 +729,10 @@ export class LandHandoffs {
       const restart = r.kind === 'restart' && !(await this.d.liveAlready(id));
       const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then parked.`;
       // true: the waiter wakes it at live; false: live already; undefined: no waiter here, so it hears now.
-      const queued = restart ? await this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now')) : undefined;
+      const queued = restart ? await once('waiter', () => this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now'))) : undefined;
       store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'shipped, wakes once live' : 'shipped'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
       runner.broadcastTicket(id);
-      if (!queued) runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true });
+      if (!queued) await once('told', () => runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true }));
       return;
     }
     if (h.stayOpen) {
@@ -720,14 +750,14 @@ export class LandHandoffs {
     if (kept) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      runner.emit(id, 'note', { text: `It shipped, but ${kept}, so this minion stays open.` });
+      await once('told', () => runner.emit(id, 'note', { text: `It shipped, but ${kept}, so this minion stays open.` }));
       return;
     }
     const why = r.kind === 'live' ? 'Shipped and live' : 'Shipped';
     if (runner.isRunning(id) || runner.queued(id)) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
+      await once('told', () => { if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` }); });
       return;
     }
     store.updateTicket(id, { state: null, note: into ? `merged into Build ${into.slice('build/'.length)}` : null });

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../../src/db.ts';
 import { until } from '../helpers.ts';
-import { Drill, gap } from './harness.ts';
+import { Drill } from './harness.ts';
 
 const d = new Drill('kill-points');
 after(() => d.cleanup());
@@ -35,7 +35,7 @@ test("a kill between a schedule's minion start and its ran mark starts one minio
 });
 
 // C2: settling a hand-off isn't safe to repeat: a kill after the shipped line and before the rename says it again.
-test("a kill between a ship's shipped line and its rename reports the ship once", gap('C2'), async () => {
+test("a kill between a ship's shipped line and its rename reports the ship once", async () => {
   if (d.srv) {
     await d.srv.stop({ keepTurns: true });
     d.srv = null;

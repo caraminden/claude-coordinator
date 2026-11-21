@@ -881,3 +881,36 @@ test('a ship that kept its place after reds of flakes only says how many in its 
   await s.handoffs.poll();
   assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Kept its place in line after 2 reds of flakes only. Live now.']);
 });
+
+// C2 (#1406): a report cut off after its shipped line (a throw here, a kill in a drill) is finished by the next poll or
+// server, and each step it already did (flakes, lines, the landed mark, app deploys, the shipped line) isn't done again.
+test('a report cut off after its shipped line finishes once: no second line, deploy, flake or lesson row (C2)', async () => {
+  const d = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff0000' }));
+  const s = setup('settle-once', { apps: ['peek-auras'], deployOps: d.ops });
+  const counts = { flakes: 0, learned: 0, landed: 0 };
+  let cut = true;
+  const getTicket = s.deps.store.getTicket;
+  const deps: HandoffDeps = {
+    ...s.deps,
+    flakes: () => { counts.flakes++; },
+    learned: () => { counts.learned++; },
+    landed: () => { counts.landed++; },
+    // The first read after the shipped line throws, as a kill there would stop it.
+    store: { ...s.deps.store, getTicket: (id: number) => { if (id === 1 && cut && s.notes.length) { cut = false; throw new Error('cut off'); } return getTicket(id); } },
+  };
+  await s.land(APP_LAND);
+  await new LandHandoffs(deps).poll();
+  assert.equal(s.notes.length, 1, 'the shipped line went out before the cut');
+  assert.deepEqual(s.landings.handoffs(), [1], 'and the hand-off is still unreported');
+  await new LandHandoffs({ ...deps, landings: new Landings(s.data) }).poll();
+  assert.equal(s.notes.length, 1, `C2: the shipped line was posted ${s.notes.length} times`);
+  assert.deepEqual(d.started, ['peek-auras for 1'], 'the app deployed once');
+  assert.deepEqual(counts, { flakes: 1, learned: 1, landed: 1 }, 'one flake, lesson and landed mark each');
+  assert.ok(s.did.some((x) => x.startsWith('close: Shipped')), s.did.join('\n'));
+  // The next hand-off starts afresh: its report runs every step again.
+  s.ticket.status = 'idle';
+  await s.land(APP_LAND);
+  await new LandHandoffs({ ...deps, landings: s.landings }).poll();
+  assert.equal(s.notes.length, 2, "the next ship's line goes out");
+  assert.deepEqual(counts, { flakes: 2, learned: 2, landed: 2 }, 'and its flakes, lines and landed mark');
+});

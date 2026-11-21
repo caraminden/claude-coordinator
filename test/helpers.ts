@@ -282,17 +282,17 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   const err = opts.log ? openSync(opts.log, 'a') : 'inherit';
   const proc = spawn(bin, [...pre, opts.script ?? join(REPO, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false', CITADEL_PSI_CPU: '/nonexistent/psi', CITADEL_PSI_MEMORY: '/nonexistent/psi', // a booted test server never reads the real box's pressure (#1301/#1302): a busy box would pause its indexers and hold its scheduled runs
+      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       // No scheme has id 0, so none is indexed: a test server never calls the box's live embedding service.
       CITADEL_MEMORY_SCHEMES: '0',
       // A CI runner that is itself a systemd service sets INVOCATION_ID, which turns the shared tool server on (#1259):
       // test turns keep their own helpers unless a test asks for the pool.
       TURN_POOL: '0',
-      // The background passes (indexers, sweeps) skip while the box's CPU or memory pressure is high (#1301): a test
-      // server reads a pressure file that isn't there (no reading, so never starved), or the full suite's own load would
-      // hold back the index a test waits on (overlord.test.ts, #1349). A test of the gate passes its own file.
-      CITADEL_PSI_CPU: join(root, 'no-psi-cpu'), CITADEL_PSI_MEMORY: join(root, 'no-psi-memory'),
+      // The box's pressure, load, memory, cgroups and Pacific day are fixed (src/host-signals.ts, #1485): a busy box paused a
+      // test server's indexers (#1301, #1349) and a test went red after midnight (#1421). A test of the gate passes its own
+      // CITADEL_PSI_CPU file; test/host-signals.test.ts checks every test that starts server.ts itself sets this too.
+      CITADEL_HOST_SIGNALS: 'fixed',
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
       ...opts.env,

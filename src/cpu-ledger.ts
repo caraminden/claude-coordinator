@@ -9,7 +9,7 @@
 //
 // Reads are async (fs/promises, run in parallel), a few dozen small files, well under 50 ms of CPU a sample
 // (test/cpu-ledger.test.ts times it on the real tree).
-import { readFile, readdir } from 'node:fs/promises';
+import { CGROUP_ROOT, hostDir, hostText, PROC_STAT } from './host-signals.ts';
 import { join } from 'node:path';
 
 /** Stored readings: `s` is source key → [usage_usec, system_usec] (cumulative); `h` is the host's [busy_ms, kernel_ms, iowait_ms, processes started]. */
@@ -44,7 +44,7 @@ export const groupOf = (key: string) => CPU_SOURCES.find((s) => s.key === key)?.
 /** "usage_usec 123\nsystem_usec 45 ..." as [usage, system]; null when the file isn't there (a unit that ended). */
 async function readStat(file: string): Promise<[number, number] | null> {
   try {
-    const t = await readFile(file, 'utf8');
+    const t = await hostText(file);
     const num = (k: string) => Number(new RegExp(`^${k} (\\d+)`, 'm').exec(t)?.[1] ?? NaN);
     const u = num('usage_usec'), s = num('system_usec');
     return Number.isFinite(u) && Number.isFinite(s) ? [u, s] : null;
@@ -52,9 +52,9 @@ async function readStat(file: string): Promise<[number, number] | null> {
 }
 
 /** The first line of /proc/stat (jiffies, 100 a second) and `processes` (started since boot): busy, kernel and iowait in ms. */
-export async function readHost(file = '/proc/stat'): Promise<CpuLedger['h']> {
+export async function readHost(file = PROC_STAT): Promise<CpuLedger['h']> {
   try {
-    const t = await readFile(file, 'utf8');
+    const t = await hostText(file);
     const f = (t.split('\n')[0] ?? '').trim().split(/\s+/).slice(1).map(Number);
     const forks = Number(/^processes (\d+)/m.exec(t)?.[1] ?? NaN);
     if (f.length < 7 || f.some((n) => !Number.isFinite(n)) || !Number.isFinite(forks)) return null;
@@ -70,7 +70,7 @@ export interface ReadOptions { root?: string; uid?: number; procStat?: string }
  * out; remainders (the rest of a slice) are the slice's total less its named children, never below zero.
  */
 export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
-  const root = o.root ?? '/sys/fs/cgroup';
+  const root = o.root ?? CGROUP_ROOT;
   const uid = o.uid ?? process.getuid?.() ?? 0;
   const userSlice = join(root, 'user.slice');
   const mineSlice = join(userSlice, `user-${uid}.slice`);
@@ -84,10 +84,10 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
     ['embed', join(app, 'citadel-embed.service')], ['godot', join(app, 'perigee-godot.service')],
   ];
   const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, godotAgent, host, ...reads] = await Promise.all([
-    readdir(citadel).catch(() => [] as string[]),
+    hostDir(citadel).catch(() => [] as string[]),
     readStat(join(userSlice, 'cpu.stat')), readStat(join(mineSlice, 'cpu.stat')), readStat(join(mgr, 'cpu.stat')),
     readStat(join(citadel, 'cpu.stat')), readStat(join(app, 'cpu.stat')), readStat(join(app, 'perigee-godot-agent.service', 'cpu.stat')),
-    readHost(o.procStat ?? '/proc/stat'),
+    readHost(o.procStat ?? PROC_STAT),
     ...named.map(([, dir]) => readStat(join(dir, 'cpu.stat'))),
   ]);
   const s: Record<string, [number, number]> = {};

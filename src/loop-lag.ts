@@ -3,13 +3,12 @@
 // With `profile` on (the live server, #609), a CPU sampler runs all along at one sample per 10 ms, and each
 // stall's line names the code that ran during it, as its commonest stacks:
 //   The event loop was held for 1.2 s: ... Running: 70% listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 20% (garbage collector)
-import { readFileSync } from 'node:fs';
-import { cpus } from 'node:os';
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { Session } from 'node:inspector/promises';
 import { basename } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { ZONE } from './pacific.ts';
+import { CGROUP_ROOT, hostTextSync, PSI_FILES, SELF_CGROUP } from './host-signals.ts';
 
 const SAMPLE_US = 10_000;
 /** A fresh profile this often keeps its samples bounded (about 60,000) when nothing stalls. */
@@ -78,9 +77,9 @@ export function namedStacks(profiles: Profile[], from: number, to: number, top =
 }
 
 /** Microseconds the box has spent with every task stalled on disk I/O since boot (Linux PSI), or null where it can't say. */
-export function ioStalledUs(file = '/proc/pressure/io'): number | null {
+export function ioStalledUs(file: string = PSI_FILES.io): number | null {
   try {
-    const us = Number(/^full .*total=(\d+)/m.exec(readFileSync(file, 'utf8'))?.[1]);
+    const us = Number(/^full .*total=(\d+)/m.exec(hostTextSync(file))?.[1]);
     return Number.isFinite(us) ? us : null;
   } catch {
     return null;
@@ -105,8 +104,8 @@ let cgroupDir: string | null | undefined;
 function cgroupOf(): string | null {
   if (cgroupDir !== undefined) return cgroupDir;
   try {
-    const rel = /^0::(.*)$/m.exec(readFileSync('/proc/self/cgroup', 'utf8'))?.[1];
-    cgroupDir = rel ? `/sys/fs/cgroup${rel}` : null;
+    const rel = /^0::(.*)$/m.exec(hostTextSync(SELF_CGROUP))?.[1];
+    cgroupDir = rel ? `${CGROUP_ROOT}${rel}` : null;
   } catch {
     cgroupDir = null;
   }
@@ -115,10 +114,10 @@ function cgroupOf(): string | null {
 
 /** Microseconds of "some" pressure in `kind` (cpu, io or memory) for the server's cgroup, else the box; null if unreadable. */
 export function pressureUs(kind: 'cpu' | 'io' | 'memory', dir = cgroupOf()): number | null {
-  for (const file of [dir && `${dir}/${kind}.pressure`, `/proc/pressure/${kind}`]) {
+  for (const file of [dir && `${dir}/${kind}.pressure`, PSI_FILES[kind]]) {
     if (!file) continue;
     try {
-      const us = Number(/^some .*total=(\d+)/m.exec(readFileSync(file, 'utf8'))?.[1]);
+      const us = Number(/^some .*total=(\d+)/m.exec(hostTextSync(file))?.[1]);
       if (Number.isFinite(us)) return us;
     } catch {}
   }

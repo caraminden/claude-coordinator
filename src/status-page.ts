@@ -2,8 +2,9 @@
 // it last restarted, stalls, memory and disk, ships, CI, its units, the CI desktop) and each app the viewer can see
 // (deploys, errors, agent turns, who used it, disk), each with a week of daily history. Read-only: it only reads
 // what other parts already record, plus perigee's memory and disk, which HostSampler samples every 5 minutes.
-import { readFile, statfs } from 'node:fs/promises';
-import { availableParallelism, homedir, loadavg } from 'node:os';
+import { statfs } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { cores as hostCores, hostText, loadavg, MEMINFO } from './host-signals.ts';
 import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
@@ -162,7 +163,7 @@ export function recordBoot(store: Store, commit: string, at: number, stop?: Stop
 
 /** Bytes of memory free for new work, from MemAvailable (free alone leaves out reclaimable cache), and swap in use (#1325). */
 async function readMem(): Promise<{ total: number; avail: number; swap?: number }> {
-  const text = await readFile('/proc/meminfo', 'utf8');
+  const text = await hostText(MEMINFO);
   const kb = (k: string) => Number(new RegExp(`^${k}:\\s+(\\d+)`, 'm').exec(text)?.[1] ?? NaN) * 1024;
   return { total: kb('MemTotal'), avail: kb('MemAvailable'), swap: kb('SwapTotal') - kb('SwapFree') };
 }
@@ -449,7 +450,7 @@ export class StatusPage {
     const cpuSteps = ledgerSteps(samples); // each row's JSON parsed once
     const cpuWindows = { hour: cpuTable(cpuSteps, now, 3_600_000), day: cpuTable(cpuSteps, now, 86_400_000), week: cpuTable(cpuSteps, now, 7 * 86_400_000) };
     // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
-    const cores = this.deps.cores ?? availableParallelism();
+    const cores = this.deps.cores ?? hostCores();
     const today = samples.filter((s) => dayOf(s.at) === days.at(-1));
     const peak = today.reduce<HostSample | null>((p, s) => (!p || s.load1 > p.load1 ? s : p), null);
     // Readings must cover the window (the first within one sample of its start), so two high readings 5 min apart aren't 15 min.

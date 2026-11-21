@@ -8,6 +8,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { every, type Job } from './every.ts';
+import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
 
 export const STORM_EVERY_MS = 15_000;
 /**
@@ -54,9 +55,9 @@ export interface Storm {
 }
 
 /** The cgroup dir named citadel.slice above (or at) this process's own, from /proc/self/cgroup; null when there is none. */
-export async function citadelSliceDir(cgroupFile = '/proc/self/cgroup', root = '/sys/fs/cgroup'): Promise<string | null> {
+export async function citadelSliceDir(cgroupFile = SELF_CGROUP, root = CGROUP_ROOT): Promise<string | null> {
   try {
-    const path = (await readFile(cgroupFile, 'utf8')).match(/^0::(\/.*)$/m)?.[1];
+    const path = (await hostText(cgroupFile)).match(/^0::(\/.*)$/m)?.[1];
     if (!path) return null;
     const parts = path.split('/');
     const at = parts.indexOf('citadel.slice');

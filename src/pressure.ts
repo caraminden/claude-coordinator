@@ -5,7 +5,7 @@
 // (turn starts never read this).
 //
 // Small API: `pressure.read()` (the reading), `pressure.gate(name)` (true: run this pass), `createPressure()` (tests).
-import { readFile } from 'node:fs/promises';
+import { hostText, PSI_FILES } from './host-signals.ts';
 
 /** CPU pressure at or above this percent is starved: tools/citadel-heavy's CITADEL_HEAVY_MAX_PRESSURE default. */
 export const MAX_CPU_PRESSURE = 50;
@@ -26,15 +26,15 @@ export interface PressureOptions {
 /** "some avg60=63.21" as a whole percent, like citadel-heavy's read_pressure; null when the file is missing or odd. */
 export async function readPsi(file: string): Promise<number | null> {
   try {
-    const m = (await readFile(file, 'utf8')).match(/^some .*avg60=([\d.]+)/m);
+    const m = (await hostText(file)).match(/^some .*avg60=([\d.]+)/m);
     return m ? Math.floor(Number(m[1])) : null;
   } catch { return null; }
 }
 
 export function createPressure(opts: PressureOptions = {}) {
-  const cpuFile = opts.cpuFile ?? process.env.CITADEL_PSI_CPU ?? '/proc/pressure/cpu';
-  const memFile = opts.memFile ?? process.env.CITADEL_PSI_MEMORY ?? '/proc/pressure/memory';
-  const ioFile = opts.ioFile ?? process.env.CITADEL_PSI_IO ?? '/proc/pressure/io';
+  const cpuFile = opts.cpuFile ?? process.env.CITADEL_PSI_CPU ?? PSI_FILES.cpu;
+  const memFile = opts.memFile ?? process.env.CITADEL_PSI_MEMORY ?? PSI_FILES.memory;
+  const ioFile = opts.ioFile ?? process.env.CITADEL_PSI_IO ?? PSI_FILES.io;
   const maxCpu = opts.maxCpu ?? (Number(process.env.CITADEL_HEAVY_MAX_PRESSURE) || MAX_CPU_PRESSURE);
   const maxMem = opts.maxMem ?? (Number(process.env.CITADEL_HEAVY_MAX_MEM_PRESSURE) || MAX_MEM_PRESSURE);
   const runAnywayMs = opts.runAnywayMs ?? RUN_ANYWAY_MS;

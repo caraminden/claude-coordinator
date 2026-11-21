@@ -8,6 +8,7 @@ import { accountUsageKey } from '../src/account-pick.ts';
 import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
 import { clockTime, parseResetTime } from '../src/pacific.ts';
+import { RETRIES } from '../src/turn-outcome.ts';
 import { lines, releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -446,6 +447,33 @@ test('a restart after a switch to the next account, before its resume starts, st
     assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
     assert.equal(store.getTicket(id)!.status, 'idle');
     assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null, 'the debt is paid once the resume starts');
+  } finally {
+    noAccounts();
+  }
+});
+
+test('accounts that keep hitting the limit stop switching after RETRIES.switch.cap in a row and wait out the limit (#1379)', async () => {
+  const pat = store.findUser('name', 'Pat')!;
+  const s = accountsFor(pat.id, LIMIT);
+  // Each limit finds the other account ready again: unbounded, this ping-pongs forever.
+  runner.onLimit = (_p, n, until) => {
+    s.limited.set(n, until);
+    const next = n === 1 ? { n: 2, label: 'two@x' } : { n: 1, label: 'one@x' };
+    s.inUse = next.n;
+    return { next, resetAt: until };
+  };
+  try {
+    const id = minion();
+    const before = turnsRun();
+    setRelease(LIMIT);
+    runner.send(id, 'Pat', 'go');
+    await until('the switches to stop', () => store.getTicket(id)!.state === 'limited' && !runner.isRunning(id));
+    assert.equal(turnsRun(), before + 1 + RETRIES.switch.cap, 'the first turn and one per switch');
+    assert.equal(events(id, 'note').filter((n) => n.includes('Carrying on with')).length, RETRIES.switch.cap);
+    assert.match(events(id, 'note').join('\n'), new RegExp(`already switched Claude accounts ${RETRIES.switch.cap} times in a row, so it stops switching`));
+    assert.ok(runner.view(store.getTicket(id)!).limit_resume_at, 'it waits for the reset, as with no account ready');
+    assert.deepEqual(events(id, 'error'), []);
+    runner.stop(id);
   } finally {
     noAccounts();
   }

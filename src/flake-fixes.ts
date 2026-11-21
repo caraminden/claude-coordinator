@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
+import { classifyFlake } from './flake-evidence.ts';
 import { ALARM_QUIET_MS, ALARM_WINDOW_MS, FLAKE_REPEAT, sameFlake, suspectCommits, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
@@ -33,6 +34,8 @@ export interface FlakeFixDeps {
   wake?: (project: Project, text: string) => boolean;
   /** The commits most likely to have brought the flake (default: git in the scheme's repo). */
   suspect?: (project: Project, file: string, firstAt: number) => Promise<string | null>;
+  /** The failing test's name and error from the CI run behind a flake line (#1438); null when the log can't say. server.ts reads the scheme's GitHub repo with gh; without it no row keeps one. */
+  evidence?: (project: Project, branch: string, file: string, at: number) => Promise<{ name: string; message: string } | null>;
   now?: () => number;
 }
 
@@ -41,15 +44,19 @@ export class FlakeFixes {
   private d: FlakeFixDeps;
   constructor(d: FlakeFixDeps) { this.d = d; }
 
+  private evidence(p: Project, branch: string, file: string, at: number) {
+    return this.d.evidence ? this.d.evidence(p, branch, file, at) : Promise.resolve(null);
+  }
+
   /** Retro-log flake lines of the last 14 days that no counted sighting covers become flake_events rows; how many. */
-  ingest(project: Project, now: number): number {
+  async ingest(project: Project, now: number): Promise<number> {
     const dir = this.d.sharedDir(project.id);
     if (!dir) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
     try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
     const since = now - FLAKE_WINDOW_MS;
-    const fresh: { file: string; at: number; source: string }[] = [];
+    const fresh: { file: string; at: number; source: string; branch?: string }[] = [];
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < since) continue;
       let md: string;
@@ -59,7 +66,11 @@ export class FlakeFixes {
       }
     }
     // After the check, so two log lines of one file close together both count the first time.
-    for (const s of fresh) this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '' }]);
+    for (const s of fresh) {
+      // Only a CI run has a log the server can read; perigee's own runs and smoke lines keep no message. A failed read never holds the row back.
+      const found = s.source === 'in CI' && s.branch ? await this.evidence(project, s.branch, s.file, s.at).catch(() => null) : null;
+      this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '', ...(found ? { testName: found.name, message: found.message, cls: classifyFlake(found.message) } : {}) }]);
+    }
     return fresh.length;
   }
 
@@ -188,7 +199,7 @@ export class FlakeFixes {
       for (const p of projects) {
         try {
           this.seedPast(p);
-          this.ingest(p, now);
+          await this.ingest(p, now);
           await this.alarm(p, now);
           await this.escalate(p, now);
           await this.prove(p, now);

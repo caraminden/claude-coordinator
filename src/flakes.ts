@@ -89,14 +89,16 @@ export function cleanRuns(steps: { name?: string; conclusion?: string | null }[]
 }
 
 /** What the "Start a minion" button sends as a new minion's first message. */
-export function flakeBrief(file: string, count: number, details: { at: number; detail: string }[]): { title: string; message: string } {
+export function flakeBrief(file: string, count: number, details: { at: number; detail: string }[], errors: { message: string; test: string; cls: string; count: number }[] = []): { title: string; message: string } {
   const when = pacificStamp;
+  const seen = errors.length ? `How it fails (the error CI printed, most common first):\n\n${errors.map((e) => `${e.count}× ${e.cls || 'other'}${e.test ? ` · ${e.test}` : ''}:\n\`\`\`\n${e.message}\n\`\`\``).join('\n\n')}\n\n` : '';
   const outputs = details.length ? details.map((d) => `${when(d.at)}:\n\`\`\`\n${d.detail}\n\`\`\``).join('\n\n') : '(no failing output was kept for it)';
   return {
     title: `Flaky test: ${file}`,
     message: `Fix the flaky test file ${file}. It failed in a full run and then passed alone ${count} time${count === 1 ? '' : 's'} in the last 14 days (the Test health tab on the CI page counts these).\n\n`
       + `Open the citadel:diagnosing-bugs skill first: a flake has a cause (shared state, a fixed port, a timing assumption, load), and a longer wait or a retry is not the fix. Find the cause, fix it in the test or the code under test, and show the file passing repeatedly under load.\n\n`
       + `**Prove the fix held before you ship it** (#1120): a fix counts only after ${PROOF_RUNS} clean runs in a row of this file on the desktop runner. Rebase your branch onto main (the run uses your branch's copy of the workflow, and main's keeps the ship runner free: #1240), push it and dispatch the \`flake-proof.yml\` workflow on it with \`file=${file}\` (\`gh workflow run flake-proof.yml --ref <your branch> -f file=${file}\`); the Test health tab shows its clean-run count, and the run's result wakes you. Ship only on a green run. Do not skip, quarantine or loosen the test (Cara, 2026-11-10: "Keep failing, log it").\n\n`
+      + seen
       + `The last ${details.length || 'no'} failing output${details.length === 1 ? '' : 's'}:\n\n${outputs}\n`,
   };
 }

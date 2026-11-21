@@ -1372,7 +1372,7 @@ export const projectRoutes: Route[] = [
         const ft = fx?.ticket_id == null ? undefined : store.getTicket(fx.ticket_id);
         // The fix (#1120): its minion's number and person, its age, and the clean runs of the 50 the desktop proof needs.
         const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : store.getUser(ft.person_id)?.name ?? null, startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
-        return { ...f, before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
+        return { ...f, ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS), before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
       });
       json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, now: Date.now() });
     },
@@ -1384,7 +1384,7 @@ export const projectRoutes: Route[] = [
       const file = url.searchParams.get('file') ?? '';
       const row = app.store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file);
       if (!row) throw new HttpError(404, 'No flake of that file in the last 14 days');
-      json(res, 200, flakeBrief(file, row.count, app.store.flakeDetails(project.id, file)));
+      json(res, 200, flakeBrief(file, row.count, app.store.flakeDetails(project.id, file), app.store.flakeMessages(project.id, file, Date.now() - FLAKE_WINDOW_MS).messages));
     },
   },
 

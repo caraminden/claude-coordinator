@@ -22,6 +22,7 @@ import { deliveryQueries } from './db/deliveries.ts';
 import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
+import { flakeQueries } from './db/flakes.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
@@ -1372,7 +1373,10 @@ CREATE TABLE IF NOT EXISTS flake_events (
   commit_sha TEXT,
   ticket_id INTEGER,
   source TEXT NOT NULL DEFAULT '',
-  detail TEXT NOT NULL DEFAULT ''
+  detail TEXT NOT NULL DEFAULT '',
+  test_name TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  class TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
 -- One row per fix of a flaky test file (#1120): started by the file's third sighting in 7 days, held only after 50 clean runs in a row
@@ -1542,6 +1546,9 @@ export class StateDb {
 
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
+  ['flake_events', 'test_name', "ALTER TABLE flake_events ADD COLUMN test_name TEXT NOT NULL DEFAULT ''"],
+  ['flake_events', 'message', "ALTER TABLE flake_events ADD COLUMN message TEXT NOT NULL DEFAULT ''"],
+  ['flake_events', 'class', "ALTER TABLE flake_events ADD COLUMN class TEXT NOT NULL DEFAULT ''"],
   ['contraptions', 'static_paths', 'ALTER TABLE contraptions ADD COLUMN static_paths TEXT'],
   ['contraptions', 'subdir', 'ALTER TABLE contraptions ADD COLUMN subdir TEXT'],
   ['host_samples', 'cpu_psi', 'ALTER TABLE host_samples ADD COLUMN cpu_psi INTEGER'],
@@ -1746,6 +1753,7 @@ export const SCHEMA_HISTORY = [
   [103, 'machines.token_sealed (#1355)'],
   [104, 'deliveries (#1385)'],
   [105, 'ci_numbers, ci_number_steps (#1369)'],
+  [106, 'flake_events.test_name, message, class (#1438)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3617,9 +3625,9 @@ export class Store {
   }
 
   /** Record the flakes of one run (#1063); rows older than FLAKE_KEEP_MS go with each write. */
-  addFlakeEvents(projectId: number, ticketId: number | null, commit: string | null, at: number, flakes: { file: string; source: string; detail: string }[]) {
-    const add = this.db.prepare('INSERT INTO flake_events (project_id, file, at, commit_sha, ticket_id, source, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    for (const f of flakes) add.run(projectId, f.file.slice(0, 200), at, commit, ticketId, f.source.slice(0, 40), f.detail.slice(0, 1500));
+  addFlakeEvents(projectId: number, ticketId: number | null, commit: string | null, at: number, flakes: { file: string; source: string; detail: string; testName?: string; message?: string; cls?: string }[]) {
+    const add = this.db.prepare('INSERT INTO flake_events (project_id, file, at, commit_sha, ticket_id, source, detail, test_name, message, class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const f of flakes) add.run(projectId, f.file.slice(0, 200), at, commit, ticketId, f.source.slice(0, 40), f.detail.slice(0, 1500), (f.testName ?? '').slice(0, 200), (f.message ?? '').slice(0, 600), (f.cls ?? '').slice(0, 40));
     if (flakes.length) this.db.prepare('DELETE FROM flake_events WHERE at < ?').run(at - FLAKE_KEEP_MS);
   }
 
@@ -3839,9 +3847,9 @@ export class Store {
  */
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
-type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof settingQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries;
+type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof settingQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries & typeof flakeQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, minionQueries, pushQueries, settingQueries, viewQueries, deliveryQueries, ciNumberQueries]) {
+for (const area of [machineQueries, minionQueries, pushQueries, settingQueries, viewQueries, deliveryQueries, ciNumberQueries, flakeQueries]) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

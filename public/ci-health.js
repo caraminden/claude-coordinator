@@ -71,6 +71,13 @@ async function startFix(projectId, f, refresh) {
   });
 }
 
+/** A file's top error messages with counts and class (#1438); sightings that kept none say so. */
+function errorLines(f) {
+  const lines = (f.messages ?? []).map((m) => h('span', { class: 'ci-detail-line muted', title: m.message }, `${m.count}× ${m.cls || 'other'}: ${m.message.split('\n')[0].slice(0, 140)}`));
+  if (f.none) lines.push(h('span', { class: 'ci-detail-line muted' }, `${f.none} no message kept`));
+  return lines;
+}
+
 function flakeBlock(s, flakes, refresh) {
   const total = flakes.reduce((n, f) => n + f.count, 0);
   // The fix (#1120): owner and age, and the clean runs of the 50 in a row the desktop needs before it counts as held.
@@ -86,6 +93,7 @@ function flakeBlock(s, flakes, refresh) {
       : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it') },
   h('strong', { title: f.file }, f.file),
   h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.ticketId}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
+  ...errorLines(f),
   f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null);
   const [row] = settingsRow({ key: `health-flakes-${s.id}`, icon: 'chart', hue: flakes.length ? 'waiting' : 'done', title: 'Flaky tests, last 14 days',
     summary: flakes.length ? [toneChip('warn', `${flakes.length} file${flakes.length === 1 ? '' : 's'}`), `${total} flake${total === 1 ? '' : 's'}`] : [toneChip('ok', 'None'), 'no flaky test file reported'] },

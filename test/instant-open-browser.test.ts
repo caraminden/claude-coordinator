@@ -9,7 +9,7 @@ import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { bootServer, until, type Booted } from './helpers.ts';
+import { bootServer, until, PASSWORD, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
@@ -110,6 +110,22 @@ test('signing out forgets the kept chat, and what was asked, so the next person 
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
   assert.equal(await page.eval(`localStorage.getItem('cc-last-chat')`), null);
   assert.equal(await page.eval(asked), 0);
+});
+
+test('signed out, the top bar has no usage meter or chips (#1439); signing back in brings them back with no reload', { skip }, async () => {
+  const { srv, hash } = await server();
+  const page = await openOnce(srv, hash);
+  const seen = `({ chips: document.querySelectorAll('.topbar .meters .ci-chip, .topbar .meters .status-chip, .topbar .meters .releases-chip').length, usage: !!document.querySelector('.topbar .meters .usage:not([hidden])') })`;
+  await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
+  await waitFor(page, 'the chips and meter', `${seen}.chips === 3 && ${seen}.usage`);
+  await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
+  assert.deepEqual(await page.eval(seen), { chips: 0, usage: false }, 'the login screen shows none');
+  await shoot(page, 'signed-out.png');
+  await page.eval(`(() => { const f = document.getElementById('login-form'); f.login.value = 'Cara'; f.password.value = ${JSON.stringify(PASSWORD)}; f.requestSubmit(); })()`);
+  await waitFor(page, 'the chips back', `${seen}.chips === 3`);
+  await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
+  assert.equal((await page.eval(seen)).usage, true, 'the meter shows again');
+  await shoot(page, 'signed-in-again.png');
 });
 
 test('a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker\'s kept files', { skip }, async () => {

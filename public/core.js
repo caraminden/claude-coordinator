@@ -1123,6 +1123,16 @@ for (const type of ['pointerover', 'focusin']) {
 
 setShowLogin(renderLogin);
 
+/** Signed out, the top bar shows no usage meter or chips: they are one person's, and start() brings them back. */
+export function clearTopbarMeters() {
+  const meters = document.querySelector('.topbar .meters');
+  if (!meters) return;
+  for (const el of meters.querySelectorAll('.usage, .ci-chip, .status-chip, .releases-chip')) {
+    if (el.matches('.usage')) el.hidden = true; // the markup's own bar stays, hidden, for renderUsage to show again
+    else el.remove();
+  }
+}
+
 function renderLogin() {
   reconnecting(false); // signed out: the stream's 401s aren't a restart
   setView(null);
@@ -1130,6 +1140,7 @@ function renderLogin() {
   dropFrames();
   crumbs.replaceChildren();
   meEl.replaceChildren();
+  clearTopbarMeters();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
   const form = document.getElementById('login-form');
   // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
@@ -1156,6 +1167,7 @@ export function renderInvite(token) {
   setView(null);
   crumbs.replaceChildren();
   meEl.replaceChildren();
+  clearTopbarMeters();
   app.replaceChildren(document.getElementById('invite-tpl').content.cloneNode(true));
   const form = document.getElementById('invite-form');
   const who = document.getElementById('invite-who');

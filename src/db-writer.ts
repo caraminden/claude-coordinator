@@ -128,8 +128,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (waited >= SLOW_DRAIN_MS) {
       const text = `${what} on the server's thread waited ${waited} ms for ${took} queued writes${ok ? '' : ' and gave up'}`;
       console.error(`DB write: ${text}.`);
-      // Sent to the worker behind the writes it waited for, so it adds no wait; inside a write here it would run here.
-      if (alive && !inline) try { void store.addHealthEvent('db-write-wait', t0, null, text); } catch { /* best effort */ }
+      // Sent to the worker behind the writes it waited for, so it adds no wait; inside a write or transaction here it would run here.
+      if (alive && !inline && !db.isTransaction) try { void store.addHealthEvent('db-write-wait', t0, null, text); } catch { /* best effort */ }
     }
     return ok;
   };

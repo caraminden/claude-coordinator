@@ -7,6 +7,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { execResult } from './exec.ts';
@@ -369,18 +370,19 @@ export class ClaudeLink {
     }) };
   }
 
+  /** Each folder's Claude organization as last read, by its .claude.json path (orgOf). */
+  private orgs = new Map<string, string | null>();
+
   /**
    * The Claude organization account `n`'s folder is signed in to, from its .claude.json (never the credentials). The
    * organization, not the email: one email can sign in to two organizations, each with its own allowance.
+   * The server has one thread (#1463), so it answers from the last read and rereads behind: the note shows a call late.
    */
   private orgOf(uid: number, n: number): string | null {
     // The server login's own account keeps .claude.json beside its folder, unless CLAUDE_CONFIG_DIR moved it in.
     const file = this.serverLogin(uid) && n === 1 && !process.env.CLAUDE_CONFIG_DIR ? join(this.home, '.claude.json') : join(this.configDir(uid, n) ?? '', '.claude.json');
-    try {
-      return JSON.parse(readFileSync(file, 'utf8')).oauthAccount?.organizationUuid ?? null;
-    } catch {
-      return null;
-    }
+    readFile(file, 'utf8').then((text) => JSON.parse(text).oauthAccount?.organizationUuid ?? null, () => null).then((org) => this.orgs.set(file, org), () => this.orgs.set(file, null));
+    return this.orgs.get(file) ?? null;
   }
 
   /** limited() for the runner (Runner.onLimit): the account turns move on to, and the first of the accounts to reset. */

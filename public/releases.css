@@ -158,6 +158,7 @@ b.waits { color: var(--held); }
 .rel-prev-name { font-variant-numeric: tabular-nums; }
 .rel-failed { color: var(--error); }
 .rel-prev-changes { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.rel-prev-ship { display: block; padding-left: 0.6rem; border-left: 2px solid var(--line); }
 .rel-prev-changes a { color: var(--accent); text-decoration: none; }
 .rel-prev-changes a:hover { text-decoration: underline; }
 .rel-after { padding: 0.35rem 0.5rem; font-size: 0.92em; }

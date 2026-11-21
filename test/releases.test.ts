@@ -77,10 +77,10 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.equal(n.waitingOn, null);
   assert.equal(n.eta, now - 30_000 + (90 + 10 + 40) * 1000);
   assert.deepEqual(n.changes.map((c) => [c.ticketId, c.stage]), [[a.id, 'test'], [b.id, 'line']]);
-  assert.equal(n.changes[1].waitingOn, `2nd in line, behind #${a.number} (waiting for CI)`, 'the line is a wait: it says what it waits on');
+  assert.equal(n.changes[1].waitingOn, `Releasing next: 2nd in line, behind #${a.number} (waiting for CI)`, 'the line is a wait: it says what it waits on');
   assert.equal(n.changes[1].usual, null);
   // One list on the card (Josh, 2026-11-13): its order says the line, so a waiting change's short words are its place alone.
-  assert.equal(n.changes[1].brief, '2nd');
+  assert.equal(n.changes[1].brief, 'Releasing next', 'its train, not a place');
   assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
   assert.deepEqual(n.changes.map((c) => !!c.later), [false, true], 'the one waiting for the lock goes out in the release after, so it has no number');
 });
@@ -358,4 +358,21 @@ test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-
   again = new Store(path);
   assert.ok(left().includes('peek ci:windows:release run:1291'));
   again.db.close();
+});
+
+test('a ship train (#1303): the riders are in the release under way, right behind the front, not later and not movable', () => {
+  const w = world();
+  const f = w.minion('Front'), r1 = w.minion('Rider one'), r2 = w.minion('Rider two'), x = w.minion('Waiter');
+  w.land(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  w.land(2, r1.branch, 0, `riding in ${f.branch}'s ship train`, 20);
+  w.land(3, x.branch, 0, 'waiting', 15);
+  w.land(4, r2.branch, 0, `riding in ${f.branch}'s ship train`, 10); // joined the train after a plain waiter
+  w.waits.poll();
+  const n = w.server.read()[0].next!;
+  assert.deepEqual(n.changes.map((c) => [c.ticketId, c.train?.role, !!c.later]), [
+    [f.id, 'front', false], [r1.id, 'rider', false], [r2.id, 'rider', false], [x.id, 'waiting', true],
+  ]);
+  assert.equal(n.changes[0].train?.size, 3);
+  assert.equal(n.changes[1].waitingOn, null, 'a rider is being tested, not waiting for a place');
+  assert.deepEqual(w.server.read()[0].line.map((e) => e.movable), [false, false, false, false]);
 });

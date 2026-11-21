@@ -201,6 +201,16 @@ const nowWords = (p, eta, full = false) => {
 };
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
+/** A row's "now" words with its ship train: the front says how many ride, a rider whose train it is in, a waiter which train it will be in. */
+function trainNow(next, c, waits) {
+  const t = c.train;
+  if (!t) return waits ? [waits] : changeNow(next, c);
+  const members = `Releasing now: ${t.members?.join(', ')}`;
+  if (t.role === 'rider') return [h('b', { class: 'work' }, 'Riding'), ' ', h('span', { class: 'muted', title: members }, `in ${t.front}'s train`)];
+  if (t.role === 'front') return [h('span', { title: members }, changeNow(next, c))];
+  return [h('b', { class: 'waits' }, t.label)];
+}
+
 function changeNow(next, c) {
   return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
 }
@@ -344,7 +354,8 @@ function previousList(projectId, tv) {
         r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),
         failed ? h('span', { class: 'rel-failed' }, r.outcome) : '',
         h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
-        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.flatMap((c, i) => [i ? ', ' : '', h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '');
+        r.changes.length > 1 ? h('span', { class: 'rel-together muted' }, `${r.changes.length} ships went out together`) : '',
+        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title)) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '');
     })));
 }
 
@@ -510,7 +521,7 @@ function changeList(projectId, tv) {
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
   const firstLater = rows.findIndex((r) => r.c?.later);
-  const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) ? ': in line' : '';
+  const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) && !rows[firstLater]?.c?.train ? ': in line' : '';
   const after = firstLater > 0 ? `After ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
   const waiters = rows.filter((r) => r.wait);
   const list = h('ol', { class: 'rel-changes' }, rows.flatMap((r, i) => [...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]));
@@ -537,7 +548,7 @@ function changeList(projectId, tv) {
     if (c) {
       return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...(i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? [waiting()] : changeNow(n, c))),
+        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)),
         landNext(wait), stuck(why), tryIt(projectId, tv, c)));
     }
     return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
@@ -747,7 +758,7 @@ export function releaseChip(t) {
       return h('span', { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
         h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, 'in line'), ' ', h('span', { class: 'muted' }, c.brief ?? 'next release')] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
+          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? [] : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
     }
   }
   if (t.ship?.stage === 'build' && t.build) {
@@ -770,7 +781,7 @@ export function pendingRelease(t) {
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
     // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
     const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
-    return { name: inLine ? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
+    return { name: inLine ? c.train?.label ?? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
   }
   return null;
 }

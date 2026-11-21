@@ -11,7 +11,7 @@ import type { Ship } from './branch.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
-import { behindOld, landPhase, ordinal, TRACK, type LandTicket, type Wait } from './waits.ts';
+import { behindOld, landPhase, ordinal, ridingOf, TRACK, type LandTicket, type Wait } from './waits.ts';
 
 export interface Target {
   /** Unique within its scheme: "citadel-server". */
@@ -61,6 +61,8 @@ export interface Progress {
   brief?: string;
   done?: number;
   total?: number;
+  /** Its ship train (Citadel's land line): the front with its riders, a rider, or a waiter's train ("Releasing next"). */
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
 }
 
 export interface Change extends Progress {
@@ -349,7 +351,7 @@ export class CitadelServer implements Reader {
     const w = this.d.wait(id);
     if (w?.kind === 'land') {
       const waits = w.stage === 'line' || (w.stage === 'test' && !!this.d.ciQueued?.(id));
-      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }) };
+      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }), ...(w.train && { train: w.train }) };
       if (w.total) Object.assign(p, { done: w.done, total: w.total });
       return p;
     }
@@ -415,7 +417,7 @@ export class CitadelServer implements Reader {
       const ticket = id != null ? store.getTicket(id) : undefined;
       return {
         name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
-        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
         ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };
     });
@@ -432,10 +434,19 @@ export class CitadelServer implements Reader {
       if (!inLine.has(t.id) && !ship) continue;
       const pr = this.progress(t.id, ship, loneDeploy);
       const at = line.find((e) => e.ticketId === t.id);
-      if (pr?.stage === 'line' && at) pr.brief = at.place;
+      if (pr?.stage === 'line' && at && !pr.train) pr.brief = at.place;
       if (pr) changes.push({ ticketId: t.id, number: t.number, title: t.title, ...pr, ...(t.status !== 'closed' && t.cwd ? { canPreview: true } : {}) });
     }
     changes.sort((a, b) => TRACK.indexOf(b.stage) - TRACK.indexOf(a.stage) || a.since - b.since);
+    // A train's riders sit right behind their front (they are in the release it carries), in line order.
+    const lineAt = (c: Change) => line.findIndex((e) => e.ticketId === c.ticketId);
+    const front = changes.find((c) => c.train?.role === 'front');
+    if (front) {
+      const rs = changes.filter((c) => c.train?.role === 'rider').sort((a, b) => lineAt(a) - lineAt(b));
+      const rest = changes.filter((c) => c !== front && !rs.includes(c));
+      const at = changes.indexOf(front) - changes.slice(0, changes.indexOf(front)).filter((c) => rs.includes(c)).length;
+      changes.splice(0, changes.length, ...rest.slice(0, at), front, ...rs, ...rest.slice(at));
+    }
     // Lands go one at a time and each starts its own deploy, so only the lead is in the release under way (#888).
     changes.forEach((c, i) => { if (i > 0 && c.stage === 'line') c.later = true; });
     this.track(changes);

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
-import { landPhase, median, moveIn, procAlive, slotHeld, Waits } from '../src/waits.ts';
+import { landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
 import { spawn } from 'node:child_process';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
@@ -63,11 +63,11 @@ test('the land line: the holder by its phase, each waiter by its place and who i
 
   assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'ship · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
-  assert.equal(wb.chip, 'line · 2nd');
-  assert.equal(wb.text, `2nd in line, behind #${a.number} (testing)`);
+  assert.equal(wb.chip, 'line · next train');
+  assert.equal(wb.text, `Releasing next: 2nd in line, behind #${a.number} (testing)`);
   // B joined before A took the lock, so a whole landing (the median of 100, 200, 150) is ahead of it.
   assert.equal(wb.usual, 150);
-  assert.equal(waits.wait(c.id)!.text, `3rd in line, behind #${a.number} (testing) and 1 more`);
+  assert.equal(waits.wait(c.id)!.text, `Releasing next: 3rd in line, behind #${a.number} (testing) and 1 more`);
   // C joined 30 s into A's hold: 120 s of it were left, then B's whole landing.
   assert.equal(waits.wait(c.id)!.usual, 120 + 150);
   assert.equal(waits.wait(d.id), null);
@@ -249,8 +249,8 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   ticket(5, e.branch, 0, 'waiting', 1); // joined after: the back
   waits.poll();
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 4, 2, 3, 5]);
-  assert.equal(waits.wait(d.id)!.text, `2nd in line, behind #${a.number} (waiting for CI)`);
-  assert.equal(waits.wait(b.id)!.chip, 'line · 3rd');
+  assert.equal(waits.wait(d.id)!.text, `Releasing next: 2nd in line, behind #${a.number} (waiting for CI)`);
+  assert.equal(waits.wait(b.id)!.chip, 'line · next train');
   // Only part of the line named (a stale page): those first, the rest keep their order behind.
   assert.deepEqual(waits.setOrder([3], 'Josh moved #3 to land next'), [3, 4, 2, 5]);
   // A landing from a branch before #1002 runs the old queue_lock (it waits for every lower ticket): never put in the
@@ -294,4 +294,35 @@ test('a move on a target that shows part of the line moves only that landing (#1
 test("a ship waiting for CI or a quiet perigee shows that wait, how long so far included, not a plain CI wait (#1254)", () => {
   assert.deepEqual(landPhase('waiting for CI or a quiet perigee, 5 min so far'), { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI or a quiet perigee, 5 min so far' });
   assert.equal(landPhase('waiting for CI since 14:02').text, 'waiting for CI on the rebased commit');
+});
+
+test('a ship train (#1303): the front reads "Train of N", a rider reads riding in its front, a sent-back rider and a plain waiter read as waiting, by which train they will be in', () => {
+  const { waits, ticket } = setup();
+  const f = minion(), r1 = minion(), r2 = minion(), w = minion(), back = minion();
+  ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  ticket(2, r1.branch, 0, `riding in ${f.branch}'s ship train`, 20);
+  ticket(3, r2.branch, 0, `riding in ${f.branch}'s ship train`, 19);
+  ticket(4, back.branch, 0, 'waiting', 18); // the train went without it
+  ticket(5, w.branch, 0, `riding in ticket/9-gone's ship train`, 17); // its front is gone: waiting in line again
+  waits.poll();
+  const front = waits.wait(f.id)!;
+  assert.equal(front.train?.role, 'front');
+  assert.equal(front.train?.size, 3);
+  assert.match(front.brief!, /^train of 3 · CI: starting$/);
+  const rider = waits.wait(r1.id)!;
+  assert.equal(rider.train?.role, 'rider');
+  assert.equal(rider.stage, 'test', "a rider is in the front's CI, not in line");
+  assert.equal(rider.brief, `riding in #${f.number}'s train`);
+  assert.doesNotMatch(rider.text, /in line/);
+  assert.equal(waits.wait(back.id)!.train?.label, 'Releasing next');
+  assert.equal(waits.wait(back.id)!.chip, 'line · next train');
+  assert.equal(waits.wait(w.id)!.train?.role, 'waiting');
+});
+
+test('a red train under bisect reads as the front bisecting; later trains say how many are ahead', () => {
+  assert.equal(landPhase('finding the ship that turned the train red').key, 'bisect');
+  assert.equal(trainLabel(0), 'Releasing next');
+  assert.equal(trainLabel(1), 'Train 3, after 2 ahead');
+  assert.equal(ridingOf("riding in ticket/1-x's ship train since 14:05"), 'ticket/1-x');
+  assert.equal(ridingOf('waiting'), null);
 });

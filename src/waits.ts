@@ -28,6 +28,8 @@ export interface Wait {
   usual: number | null;
   done?: number;
   total?: number;
+  /** A landing's ship train: its front ("front", with how many ride), a rider, or a waiter's train as it reads ("Releasing next"). */
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
   /** When it ended, ms: a CI run's pass or fail, shown a while after; its time stops there. */
   ended?: number;
 }
@@ -162,32 +164,60 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit' };
   // land.sh runs the suite itself only when CI couldn't answer (its CI FALLBACK, #523).
   if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee' };
+  if (/^finding the ship that turned the train red/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: 'the train went red in CI: finding the ship that turned it red' };
   if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying' };
   return { stage: 'rebase', word: 'rebase', key: 'rebase', text: p === 'starting' ? 'starting' : 'rebasing onto main' };
 }
 
 // The one-line readout's words for a landing's test phases (#630): the stage and its count say the rest, and the
 // suite's file counts fill its piece of the track.
-const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee' };
-const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', ci: 'waiting for CI', tests: 'testing', deploy: 'deploying' };
+const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee', bisect: 'bisecting the red train' };
+const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', ci: 'waiting for CI', tests: 'testing', bisect: 'bisecting', deploy: 'deploying' };
+
+/** A rider's queue phase (tools/land.sh's queue_phase while it rides): the branch of the front it rides with. A rider sent back reads "waiting" again. */
+export const ridingOf = (phase: string): string | null => /^riding in (.+)'s ship train$/.exec(phase.replace(/ since \d\d:\d\d$/, ''))?.[1] ?? null;
+
+/** Ships in one train: the front and up to LAND_TRAIN_MAX (6) behind it (tools/land.sh). Only used to say which later train a waiter is likely in. */
+export const TRAIN_SHIPS = 7;
+
+/** A waiter's train as people read it: the one forming is "Releasing next", the ones after say how many are ahead. */
+export const trainLabel = (g: number) => (g === 0 ? 'Releasing next' : `Train ${g + 2}, after ${g + 1} ahead`);
 
 /** Each land-line ticket's wait, by its label (a branch, or "tools/deploy.sh"). `name` turns a label into "#513". */
 export function landWaits(line: LandTicket[], took: number[], now: number, usual: (key: string) => number | null, name: (label: string) => string): Map<string, Wait> {
   const out = new Map<string, Wait>();
   const typical = median(took) ?? TYPICAL_LANDING;
   const holder = line.find((t) => t.got > 0);
+  // A train is its front (the holder) and the waiters whose phase says they ride with it; a rider of a front that is gone is a plain waiter.
+  const riders = line.filter((t) => t.got === 0 && holder && ridingOf(t.phase) === holder.label);
+  const members = holder ? [holder, ...riders].map((t) => name(t.label)) : [];
+  const train = (role: 'front' | 'rider') => ({ role, label: 'Releasing now', size: members.length, members, front: holder ? name(holder.label) : undefined });
+  let forming = 0; // waiters past the train, in line order: they fill the next trains
   line.forEach((t, i) => {
     if (t.got > 0) {
       const ph = landPhase(t.phase), c = t.tests;
+      const size = riders.length ? `Train of ${members.length} (${members.join(', ')}) · ` : '';
+      const brief = BRIEF[ph.key] ?? (riders.length ? ph.text : undefined);
       out.set(t.label, {
         kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
-        chip: `ship · ${c ? `${c.done}/${c.total}` : ph.word}`, text: c ? `${ph.text}: ${countsText(c)}` : ph.text,
-        ...(BRIEF[ph.key] && { brief: BRIEF[ph.key] }), ...(c && { done: c.done, total: c.total }),
+        chip: `ship · ${c ? `${c.done}/${c.total}` : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : ph.text}`,
+        ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }), ...(c && { done: c.done, total: c.total }),
+        ...(riders.length && { train: train('front') }),
       });
       return;
     }
-    const ahead = line.slice(0, i);
+    if (holder && riders.includes(t)) {
+      const hp = landPhase(holder.phase);
+      out.set(t.label, {
+        kind: 'land', stage: hp.stage, since: holder.mtime, usual: usual(`land:${hp.key}`), chip: 'ship · riding',
+        text: `riding in ${name(holder.label)}'s train (${members.join(', ')}): ${hp.text}`, brief: `riding in ${name(holder.label)}'s train`,
+        train: train('rider'),
+      });
+      return;
+    }
+    const ahead = line.slice(0, i).filter((a) => !riders.includes(a));
     const place = ordinal(ahead.length + 1);
+    const label = trainLabel(Math.floor(forming++ / TRAIN_SHIPS));
     let text: string, usualS: number | null = null;
     if (!ahead.length) {
       text = 'next in line, waiting for a queued restart or an older ship to let go of the lock';
@@ -199,7 +229,8 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       const joined = t.mtime / 1000;
       usualS = Math.round(ahead.reduce((s, a) => s + (a === holder ? Math.max(0, typical - Math.max(0, joined - a.got)) : typical), 0));
     }
-    out.set(t.label, { kind: 'land', stage: 'line', chip: `line · ${place}`, text, since: t.mtime, usual: usualS });
+    const shortLabel = label.replace(/^Releasing next$/, 'next train').replace(/^Train (\d+).*/, 'train $1');
+    out.set(t.label, { kind: 'land', stage: 'line', chip: `line · ${shortLabel}`, text: `${label}: ${text}`, brief: label, since: t.mtime, usual: usualS, train: { role: 'waiting', label } });
   });
   return out;
 }
@@ -269,10 +300,13 @@ type CiView = NonNullable<ReturnType<CiRuns['view']>>;
 
 /** A landing waiting for CI, with the run's jobs and steps; its usual stays the landing's own. */
 export function landCi(w: Wait, ci: CiView): Wait {
+  // A rider's own CI run (if an old one lingers) is not its train's: it reads as the front's, riding.
+  if (w.train?.role === 'rider') return w;
   const short = `CI ${ci.short.replace(/^step /, '')}`;
   const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
   // The line keeps one counter, the landing's stage (Cara: "are the tests on step 3/6 or 10/13?"): CI's steps fill its piece.
-  return { ...w, chip: `ship · ${short}`, text, brief: `CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
+  const train = w.train?.role === 'front';
+  return { ...w, chip: `ship · ${short}`, text: train ? `Train of ${w.train!.size} (${w.train!.members!.join(', ')}) · ${text}` : text, brief: `${train ? `train of ${w.train!.size} · ` : ''}CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
 }
 
 /** A minion's PR waiting on its CI run. */

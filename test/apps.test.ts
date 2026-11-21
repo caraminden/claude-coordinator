@@ -339,17 +339,15 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
 
 test('a 5xx answer counts in the error digest, grouped by path with ids out and no query (#835)', async () => {
   for (const id of [17, 9000]) assert.equal((await get(`/apps/stub/boom/${id}?token=abc`, asCara())).status, 500);
-  // The count goes through the DB write worker (#1244) and a proxied answer isn't held for it: wait for both to land.
-  const rows = () => {
-    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
-    try {
-      return db.prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
-    } finally {
-      db.close();
-    }
-  };
-  await until('both 5xx answers counted', () => rows().reduce((n, r) => n + Number(r.count), 0) >= 2);
-  assert.deepEqual(rows(), [{ kind: 'http', key: '500 GET /apps/stub/boom/#', count: 2 }]);
+  // The count goes through the DB write worker (#1244) and a proxied answer isn't held for it: wait until both are written.
+  await srv.settled();
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+  try {
+    const rows = db.prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
+    assert.deepEqual(rows, [{ kind: 'http', key: '500 GET /apps/stub/boom/#', count: 2 }]);
+  } finally {
+    db.close();
+  }
 });
 
 test('unknown contraptions are 404 and the bare name gets its slash', async () => {

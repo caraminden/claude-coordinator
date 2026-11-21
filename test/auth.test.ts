@@ -156,3 +156,85 @@ test("a contraption host's cookie signs its person in on that app only, and is n
   people.set(7, { id: 7, name: 'Josh', disabled_at: 'now' });
   assert.equal(auth.appSession(req(jar), 'mandate'), null, 'disabled');
 });
+
+/** A real people table in a scratch folder, for the sign-in, invite and cookie checks below. */
+function withStore(body: (store: Store, auth: Auth) => void | Promise<void>) {
+  return async () => {
+    const root = mkdtempSync(join(tmpdir(), 'auth-checks-'));
+    try {
+      const store = new Store(join(root, 'coordinator.db'));
+      await body(store, new Auth('a-password-long-enough', 'x'.repeat(32), undefined, store));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+}
+
+test("a cookie follows its person's id, not their name: a new person with a removed person's name isn't signed in", withStore((store, auth) => {
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const bob = store.createUser({ name: 'Bob', login: 'bob' });
+  const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
+  assert.equal(auth.session(request)?.uid, bob.id);
+  store.deleteUser(bob.id, cara.id);
+  store.createUser({ name: 'Bob', login: 'bob2' });
+  assert.equal(auth.session(request), null);
+}));
+
+test('an invite link works for a week, not a second, and not for a disabled person', withStore((store, auth) => {
+  const bob = store.createUser({ name: 'Bob', login: 'bob' });
+  const token = auth.newInvite(bob.id);
+  const now = Date.now();
+  assert.ok(store.getUser(bob.id)!.invite_expires! > now + 6.9 * 86400_000, 'the expiry is about 7 days out');
+  const real = Date.now;
+  try {
+    Date.now = () => now + 3600_000;
+    assert.equal(auth.inviteUser('c1', token)?.id, bob.id, 'still good an hour on');
+    Date.now = () => now + 8 * 86400_000;
+    assert.equal(auth.inviteUser('c2', token), null, 'expired after 8 days');
+  } finally {
+    Date.now = real;
+  }
+  store.updateUser(bob.id, { disabled_at: Date.now() });
+  assert.equal(auth.inviteUser('c3', token), null, 'a disabled person\'s link is refused');
+}));
+
+test('a login with a trailing space (a phone autocomplete) still signs in, and a wrong password does not', withStore(async (store, auth) => {
+  const { hashPassword } = await import('../src/auth.ts');
+  const bob = store.createUser({ name: 'Bob', login: 'bob' });
+  store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
+  assert.equal((await auth.signIn('c1', 'bob ', 'bobs-own-password'))?.id, bob.id);
+  assert.equal((await auth.signIn('c1', ' bob', 'bobs-own-password'))?.id, bob.id);
+  assert.equal(await auth.signIn('c1', 'bob', 'wrong-password'), null);
+}));
+
+test('ten wrong tries lock a client out, and the lock lifts after the failure window', withStore(async (store, auth) => {
+  const { hashPassword } = await import('../src/auth.ts');
+  const bob = store.createUser({ name: 'Bob', login: 'bob' });
+  store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
+  const now = Date.now();
+  const real = Date.now;
+  try {
+    for (let i = 0; i < 9; i++) await auth.signIn('c1', 'bob', 'nope');
+    assert.equal(auth.limited('c1'), false, 'nine failures are still allowed');
+    await auth.signIn('c1', 'bob', 'nope');
+    assert.equal(auth.limited('c1'), true, 'the tenth locks it');
+    assert.equal(auth.limited('c2'), false, 'another client is not locked');
+    Date.now = () => now + 14 * 60_000;
+    assert.equal(auth.limited('c1'), true, 'still locked inside the window');
+    Date.now = () => now + 16 * 60_000;
+    assert.equal(auth.limited('c1'), false, 'free again after the window');
+  } finally {
+    Date.now = real;
+  }
+}));
+
+test('a contraption cookie over 7 days old is renewed on use, so friends stay signed in to apps', () => {
+  const DAY = 86400_000;
+  const users = { getUser: (id: number) => ({ id, name: 'Josh' }), findUser: () => undefined, isAdmin: () => false } as any;
+  const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
+  const now = Date.now();
+  const old = { name: 'Josh', uid: 7, exp: now + (180 - 8) * DAY };
+  assert.match(auth.appRenewal('mandate', old, true) ?? '', /^cc_app=[^;]+; Path=\/; HttpOnly; Max-Age=15552000/);
+  assert.equal(auth.appRenewal('mandate', { ...old, exp: now + 179 * DAY }, true), null, 'a day-old one is left alone');
+  assert.equal(auth.appRenewal('mandate', null, true), null);
+});

@@ -187,12 +187,11 @@ test('a file killed from outside when rerun alone is a lost rerun with no label,
 // #999: one test that hangs (a client waiting on a tool server that died) held the land line for the whole 10 minutes
 // and read as CI trouble. Each test now has its own limit, so the hang fails in a minute, by name.
 test('a test that hangs fails at its own time limit, by name, long before the whole run\'s limit', async () => {
-  const t0 = Date.now();
   const r = await run(['ok.test.mjs', 'hang.test.mjs'], { CITADEL_TEST_TIMEOUT: '2', DEPLOY_TEST_TIMEOUT: '80' });
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /✖ hangs \(\d+(\.\d+)?ms\)[\s\S]*test timed out after 2000ms/);
   assert.match(r.log, /test\/hang\.test\.mjs: failed again alone: a real failure/, 'the rerun has the same limit');
-  assert.ok(Date.now() - t0 < 40_000, `took ${Date.now() - t0} ms`);
+  // exit 1 (not 124) is the proof: the whole run's 80 s limit never fired
 });
 
 // #993's three failed lands: a .ts file that didn't parse hung every test that started it. Now it fails the run first.
@@ -272,11 +271,10 @@ test("with CI's deadline passed, a failed file is not rerun and stays unlabelled
 });
 
 test("a rerun alone is cut at CI's deadline, well before its own limit, and counts as a real failure", async () => {
-  const t0 = Date.now();
   const r = await run(['once-then-hang.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '60', DEPLOY_RERUN_DEADLINE: inSeconds(10) });
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /test\/once-then-hang\.test\.mjs: rerun alone stopped after \d+s, when CI's answer was due: counts as a real failure/);
-  assert.ok(Date.now() - t0 < 40_000, `took ${Date.now() - t0} ms`);
+  assert.doesNotMatch(r.log, /rerun alone hung|hung when rerun alone \(stopped after 60s\)/, 'its own 60 s limit never fired');
   assert.deepEqual(flakeLines(r.retro), []);
 });
 

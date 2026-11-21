@@ -904,14 +904,14 @@ test('a deploy fills an empty rail icon from its manifest, and hands back what i
 test('a build past its time is stopped, and counts as failing', async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
-  r.push({ 'citadel-app.json': appManifest(['sleep 30'], { build_timeout: 1 }) });
+  const marker = join(mkdtempSync(join(tmpdir(), 'past-')), 'ran-on');
+  r.push({ 'citadel-app.json': appManifest([`sleep 30; touch ${marker}`], { build_timeout: 1 }) });
   const c = { ...row(name, 1), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
-  const t = Date.now();
   services.deploy(c, 'Cara');
   const d = await done(name);
-  assert.ok(Date.now() - t < 10_000, 'not the whole sleep');
+  assert.equal(existsSync(marker), false, 'stopped before the sleep ended');
   assert.equal(d.state, 'failed');
-  assert.ok(d.said.some((l) => /ran past its 1 minutes at: sleep 30/.test(l)), d.said.join('\n'));
+  assert.ok(d.said.some((l) => /ran past its 1 minutes at: sleep 30; touch /.test(l)), d.said.join('\n'));
   assert.ok(d.said.some((l) => /Nothing to roll back to/.test(l)));
 });
 

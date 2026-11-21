@@ -31,10 +31,6 @@
   "sleep": {
    "n": 2,
    "ok": 0
-  },
-  "elapsed": {
-   "n": 1,
-   "ok": 0
   }
  },
  "approvals.test.ts": {
@@ -842,10 +838,6 @@
  "run-tests.test.ts": {
   "sleep": {
    "n": 3,
-   "ok": 0
-  },
-  "elapsed": {
-   "n": 2,
    "ok": 0
   }
  },

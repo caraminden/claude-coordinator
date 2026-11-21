@@ -222,7 +222,7 @@ test('a turn the supervisor can\'t take starts in its wrapper at once', async ()
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(unitAt() - t0 < 1_000, `its wrapper unit started ${unitAt() - t0} ms after the message`);
+    assert.ok(unitAt() >= t0 && unitAt() - t0 < 1_000, `its wrapper unit started ${unitAt() - t0} ms after the message`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -238,7 +238,7 @@ test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, 
     const t0 = Date.now();
     const dir = await started(r, t);
     // The hand-off waits 500 ms for an answer.
-    assert.ok(unitAt() - t0 < 1_500, `its wrapper unit started ${unitAt() - t0} ms after the message: the wait for an answer is short`);
+    assert.ok(unitAt() >= t0 && unitAt() - t0 < 1_500, `its wrapper unit started ${unitAt() - t0} ms after the message: the wait for an answer is short`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });

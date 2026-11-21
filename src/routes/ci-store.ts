@@ -4,10 +4,11 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
+import { LIMITS } from '../ci-numbers.ts';
 import { KINDS, uploadAsk } from '../ci-store.ts';
 import type { CiFile } from '../db.ts';
 import { LastGreen } from '../last-green.ts';
-import { HttpError, json, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
 
 /**
  * PUT /api/ci-store/<name>?kind=build|report|release[&target=<name>], the body the file, Authorization: Bearer <the
@@ -25,6 +26,21 @@ export const ciUploadRoute: Route = {
       res.setHeader('Connection', 'close');
       throw err;
     }
+  },
+};
+
+/**
+ * POST /api/ci-numbers, `{ "numbers": [{ "name", "value", "unit" }] }`, Authorization: Bearer <the job's GitHub run token>
+ * (#1369, src/ci-numbers.ts): a run's bench timings and sizes, kept per commit for months. As with an upload, the
+ * scheme, workflow, run, commit and ref come from the token.
+ */
+export const ciNumbersRoute: Route = {
+  method: 'POST', path: '/api/ci-numbers', who: 'machine',
+  async handler({ req, res, app }) {
+    if (app.preview) throw new HttpError(403, 'CI numbers go to the live app, not a preview');
+    const { project, claims } = await app.ciStore.caller(req);
+    const { stored, steps } = app.ciNumbers.take(project, claims, await readJson(req, LIMITS.bodyBytes));
+    return json(res, 201, { stored, steps: steps.map((s) => s.name) });
   },
 };
 
@@ -92,6 +108,13 @@ export const ciStoreRoutes: Route[] = [
         return [{ target, workflow: p.build.workflow, run_id: p.build.run, sha: p.build.sha, green: p.sha, from: p.from, by: p.by, at: p.at, files: files.filter((f) => f.run_id === p.build!.run && f.kind !== 'report').map((f) => ciFileView(app, f)) }];
       });
       return json(res, 200, { pins });
+    },
+  },
+  {
+    // The scheme's CI numbers for the CI page's Numbers tab (#1369): each series' points with their commits, and its steps up.
+    method: 'GET', path: '/api/projects/:project/ci-numbers', ...readers,
+    handler({ app, res, project }) {
+      return json(res, 200, app.ciNumbers.view(project.id));
     },
   },
   {

@@ -31,6 +31,8 @@ export const VALUE_WRITES = [
   'createProject', 'renameProject', 'createUser', 'addOpenrouterCall', 'createContraption', 'deleteContraptionSession',
   'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'claimBrief', 'recap',
   'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView', 'addFlakeFix',
+  // CI numbers: the step-up check reads them back at once, so they never wait in the queue behind a stalled disk.
+  'putCiNumbers', 'addCiNumberStep', 'pruneCiNumbers',
   'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
   'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index', 'reviews.create', 'reviews.save', 'reviews.restore',
   'addDelivery', 'updateDelivery', 'pruneDeliveries', 'importDeliveries',

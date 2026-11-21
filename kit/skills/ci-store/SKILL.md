@@ -1,6 +1,6 @@
 ---
 name: ci-store
-description: Citadel's own store for what CI builds, in place of GitHub's artifact storage. Use when writing or changing a workflow that keeps a file from a run (actions/upload-artifact, a build, test reports, a release), when a turn needs a file a CI run made (in place of `gh run download`), or when an upload fails on GitHub's artifact quota.
+description: Citadel's own store for what CI builds, in place of GitHub's artifact storage. Use when writing or changing a workflow that keeps a file from a run (actions/upload-artifact, a build, test reports, a release), when a turn needs a file a CI run made (in place of `gh run download`), when an upload fails on GitHub's artifact quota, or to keep bench numbers per run.
 ---
 
 # The CI store
@@ -86,6 +86,44 @@ permission as an upload:
 - The routes it calls, on the store's address: `GET /api/ci-store?commit=&workflow=&kind=&target=&name=&run=`
   lists the matches as JSON, and each file's `url` (`/api/ci-store/<id>/<name>`) is the bytes, both with
   `Authorization: Bearer <run token>`.
+
+## Keeping numbers per run
+
+A few numbers a run measures (a bench timing, a binary's size, a test count) are kept per commit for
+400 days, charted on the CI page's Numbers tab (one row per series, each point linking its commit),
+and watched for a step up. Copy `ci-numbers.sh` from this skill's folder to the repo's
+`tools/ci-numbers.sh` (keep it executable and unchanged); the job needs the same `id-token: write`
+permission as an upload:
+
+```yaml
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # …bench…
+      - name: Keep the bench numbers
+        run: tools/ci-numbers.sh startup=412ms frame-p95=16.4ms apk-size=12.5MB
+```
+
+- Each number is `name=value[unit]`: the name is letters, digits and `. _ + -` (one series per
+  name, per scheme), the unit the letters (or `%`, `/`) after the value. `--file bench.txt` reads
+  one a line as `name value [unit]`, `#` for a comment, for a bench that writes its own file.
+- The commit, run, workflow and branch come from the run token, as for an upload. Each branch is its
+  own line (a ship's `land/…` run counts as main's); the chart shows, and the flag watches, the
+  branch most runs are on (the default branch, in practice).
+- A re-run attempt of the same run replaces its numbers. A number that can't be sent warns and never
+  fails the job; a GitHub-hosted runner skips.
+- Limits: at most 50 numbers a run, 100 series a scheme (a new series past that is refused, an old
+  one keeps taking numbers), 16 KiB a request. Numbers, not reports.
+- **The step-up flag.** When 3 runs in a row on that branch are each over 5% above the median of the 10
+  runs before, and past those runs' usual wobble (3 × their median distance from that median), the
+  series is flagged once, at the step's first run, and the scheme's Taskmaster is woken with the
+  numbers and the commit. One noisy run never flags. It is a flag, not a gate: nothing waits on it.
+  A step down is never flagged, so send numbers where higher is worse (a time, a size), not a score.
+- The read route, for a page or a script: `GET /api/projects/<scheme id>/ci-numbers` (a person's
+  session or a contraption key, as for `ci-files`) gives each series' points and steps. The send
+  route the script calls is `POST /api/ci-numbers` on the store's address, with
+  `Authorization: Bearer <run token>` and `{ "numbers": [{ "name", "value", "unit" }] }`.
 
 ## Reading a run's files
 

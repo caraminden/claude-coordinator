@@ -30,6 +30,7 @@ import type { CiLoad } from './ci-load.ts';
 import type { CiHealth } from './ci-health.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
+import type { CiNumbers } from './ci-numbers.ts';
 import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
 import type { Reaper } from './reaper.ts';
@@ -333,6 +334,8 @@ export interface App {
   ciStore: CiStore;
   /** A CI job's test counts for its run's wait (CiRuns.testCounts, #1368); absent in tests that don't need it. */
   ciTests?: (repo: string, runId: number, c: TestCounts) => void;
+  /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
+  ciNumbers: CiNumbers;
   /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */

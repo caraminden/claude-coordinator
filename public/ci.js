@@ -9,6 +9,7 @@ import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
+import { numbersTab, readNumbers } from './ci-numbers.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
@@ -234,9 +235,12 @@ function overview(s, pcs, now, ui) {
 export function ciPage(projectId, startTab = 'overview', all = false) {
   let picked = projectId;
   // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
-  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' ? 'health' : 'overview';
+  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' || startTab === 'numbers' ? startTab : 'overview';
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
-  const readTab = async (id) => { try { health.set(id, await readHealth(id)); draw(); } catch { health.set(id, { error: true }); draw(); } };
+  const numbers = new Map(); // scheme id -> its Numbers read (#1369), kept the same way
+  const read = (cache, fetch) => async (id) => { try { cache.set(id, await fetch(id)); } catch { cache.set(id, { error: true }); } draw(); };
+  const readers = { health: read(health, readHealth), numbers: read(numbers, readNumbers) };
+  const readTab = (id) => readers[tab]?.(id);
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let data = null;
   let host = null; // citadel-heavy's slots and waits (#1060)
@@ -261,7 +265,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
     const rows = schemes.map((x) => {
       const st = stateOf(x, now);
       const n = x.problems.length;
-      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); if (tab === 'health') readTab(x.id); } },
+      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); readTab(x.id); } },
         h('span', { class: `dot ${st}` }), h('span', { class: 'ci-li-name' }, x.name),
         h('span', { class: 'ci-li-state muted' }, n ? `${n} problem${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]));
     });
@@ -289,11 +293,11 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
         h('div', { class: 'ci-block ci-desktops' }, pcCard(pcPicked)), hostLoadBlock(host));
       return;
     }
-    const tabs = [['overview', 'Overview'], ['history', 'History'], ['health', 'Test health']];
+    const tabs = [['overview', 'Overview'], ['history', 'History'], ['health', 'Test health'], ['numbers', 'Numbers']];
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
-      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k, how) => { tab = k; draw(); if (how?.keyboard) detail.querySelector('.ci-tabs [aria-selected="true"]')?.focus(); if (k === 'health') readTab(s.id); } }).element,
+      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k, how) => { tab = k; draw(); if (how?.keyboard) detail.querySelector('.ci-tabs [aria-selected="true"]')?.focus(); readTab(s.id); } }).element,
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
         host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
@@ -301,6 +305,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
         openPc: (host) => { picked = `pc:${host}`; draw(); },
       })
         : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, () => readTab(s.id))
+        : tab === 'numbers' ? numbersTab(s, numbers.get(s.id) ?? null, () => readTab(s.id))
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
   };
   let tried = false;
@@ -311,7 +316,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
       data = await api('api/ci');
       host = await api('api/host-load').catch(() => host);
       draw();
-      if (tab === 'health') readTab((data.schemes.find((x) => x.id === picked) ?? data.schemes[0])?.id);
+      readTab((data.schemes.find((x) => x.id === picked) ?? data.schemes[0])?.id);
     } catch (err) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
     }

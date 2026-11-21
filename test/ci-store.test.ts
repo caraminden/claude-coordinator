@@ -296,9 +296,10 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     // The kit's upload script, as a job runs it: it asks "GitHub" for the run token, then sends a file and a folder.
     const SCRIPT = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store', 'ci-upload.sh');
     const asked: string[] = [];
+    let tokenRun = '4500';
     const githubSays = createServer((req, res) => {
       asked.push(`${req.headers.authorization} ${req.url}`);
-      res.end(JSON.stringify({ count: 1, value: runToken({ run_id: '4500' }) }));
+      res.end(JSON.stringify({ count: 1, value: runToken({ run_id: tokenRun }) }));
     }).listen(0, '127.0.0.1');
     await new Promise((r) => githubSays.once('listening', r));
     const work = join(root, 'job');
@@ -341,6 +342,39 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     const hosted = (await job(['--kind', 'release', 'app.apk'], { RUNNER_ENVIRONMENT: 'github-hosted' }));
     assert.equal(hosted.status, 0);
     assert.match(hosted.stdout, /skipped, a GitHub-hosted runner/);
+
+    // CI numbers (#1369): the kit's ci-numbers.sh sends a run's numbers in one line; a deliberate slowdown, run by run,
+    // shows on the Numbers tab's series as a step once it has held for three runs.
+    const NUMBERS = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store', 'ci-numbers.sh');
+    const numbers = (args: string[]) => new Promise<{ status: number | null; stdout: string }>((done) => {
+      const p = spawn('bash', [NUMBERS, ...args], { cwd: work, env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret' } });
+      let stdout = '';
+      p.stdout.on('data', (d) => (stdout += d));
+      p.on('close', (status) => done({ status, stdout }));
+    });
+    const runs = [16.0, 16.1, 15.9, 16.0, 16.2, 15.8, 16.0, 16.1, 15.9, 16.0, 17.6, 17.7, 17.6];
+    for (const [i, v] of runs.entries()) {
+      tokenRun = String(5000 + i);
+      const r = await numbers([`frame-p95=${v}ms`, 'binary=31.5MB']);
+      assert.equal(r.status, 0, r.stdout);
+      assert.doesNotMatch(r.stdout, /::warning::/, r.stdout);
+    }
+    writeFileSync(join(work, 'bench.txt'), '# from a bench run\nstartup 412 ms\nmemory 88.2 MB\n');
+    tokenRun = '5013';
+    assert.match((await numbers(['--file', 'bench.txt'])).stdout, /sent 2 numbers/);
+    const charted = (await srv.call(`/api/projects/${id}/ci-numbers`)).data;
+    assert.deepEqual(charted.series.map((s: any) => `${s.name} ${s.points.length} ${s.unit}`), ['binary 13 MB', 'frame-p95 13 ms', 'memory 1 MB', 'startup 1 ms']);
+    const frame = charted.series.find((s: any) => s.name === 'frame-p95');
+    assert.deepEqual(frame.steps.map((s: any) => `${s.run_id} ${s.baseline} ${s.level}`), ['5010 16 17.6']);
+    assert.equal(frame.points[10].sha, SHA);
+    // Odd input and a missing token warn and never fail the job; the route refuses what the script would never send.
+    const odd = await numbers(['frame p95=12']);
+    assert.equal(odd.status, 0);
+    assert.match(odd.stdout, /^::warning::ci-numbers: 'frame p95=12' isn't name=value/m);
+    const big = await fetch(`${srv.base}/api/ci-numbers`, { method: 'POST', headers: { Authorization: `Bearer ${runToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ numbers: [{ name: 'x', value: 1, unit: 'y'.repeat(20000) }] }) });
+    assert.equal(big.status, 413);
+    assert.equal((await fetch(`${srv.base}/api/ci-numbers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
+    assert.deepEqual(readdirSync(work).sort(), ['app.apk', 'bench.txt', 'reports'], 'nothing left in the runner\'s temp folder');
     githubSays.close();
 
     // Not signed in, another scheme's id, or a name that isn't the file's: nothing.

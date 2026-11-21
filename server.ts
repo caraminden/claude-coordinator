@@ -64,6 +64,7 @@ import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, ownWri
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
+import { CiNumbers } from './src/ci-numbers.ts';
 import { desktopRoutes } from './src/routes/desktop.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
@@ -485,6 +486,7 @@ const jobs = new MachineJobs({
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
+const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
 runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
@@ -1501,8 +1503,13 @@ ciStore.onFull = (project, text) => {
   const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
+// A step up in a scheme's CI numbers that held (#1369) wakes its Taskmaster, as a CI alert does (#983); never a gate.
+ciNumbers.onStep = (project, _step, text) => {
+  const coordinator = store.getOverlord(project.id);
+  if (coordinator) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+};
 if (!BOOT_CHECK && !PREVIEW) {
-  every('ci store sweep', 24 * 60 * 60_000, () => ciStore.sweep(true), 15 * 60_000);
+  every('ci store sweep', 24 * 60 * 60_000, () => (ciNumbers.sweep(), ciStore.sweep(true)), 15 * 60_000);
 }
 runnerJobs.onNote = (project, text, detail) => {
   const coordinator = store.getOverlord(project.id);
@@ -1623,7 +1630,7 @@ const app: App = {
     ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })),
     ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
   ],
-  store, runner, auth, waiters, timedWakes, outbox, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, outbox, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciNumbers, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
   reaper,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },

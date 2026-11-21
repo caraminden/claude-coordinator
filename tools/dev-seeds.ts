@@ -1384,6 +1384,22 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}`;
     },
   },
+  'ci-numbers': {
+    about: "the CI page's Numbers tab (#1369): the ci seed, plus three series of numbers over 40 runs, frame-p95 with a step up that held from run 1030 and one noisy run before it",
+    seed(c) {
+      SCENARIOS.ci.seed(c);
+      const now = Date.now();
+      const frame = (i: number) => (i === 18 ? 19.2 : i >= 30 ? 17.6 + (i % 3) * 0.1 : 16 + ((i * 7) % 5 - 2) * 0.1);
+      for (let i = 0; i < 40; i++) {
+        const at = now - (40 - i) * 8 * 3_600_000;
+        const row = (name: string, value: number, unit: string) => ({ project_id: c.project.id, name, value, unit, workflow: 'bench.yml', run_id: 1000 + i, run_attempt: 1, sha: `${(1000 + i).toString(16)}${'5e7a'.repeat(10)}`.slice(0, 40), ref: 'refs/heads/main', created_at: at });
+        c.store.putCiNumbers([row('frame-p95', +frame(i).toFixed(1), 'ms'), row('startup', 410 + ((i * 13) % 9), 'ms'), row('apk-size', +(12.4 + i * 0.01).toFixed(2), 'MB')]);
+      }
+      const at = now - 10 * 8 * 3_600_000;
+      c.store.addCiNumberStep({ project_id: c.project.id, name: 'frame-p95', ref: 'refs/heads/main', run_id: 1030, sha: `${(1030).toString(16)}${'5e7a'.repeat(10)}`.slice(0, 40), created_at: at, baseline: 16, level: 17.7, flagged_at: at + 16 * 3_600_000 });
+      return `#/p/${c.project.id}/ci/numbers`;
+    },
+  },
   'inbox-full': {
     about: 'a Needs-you inbox of 25 minions waiting on people, enough to scroll it open (#668)',
     seed(c) {

@@ -20,6 +20,7 @@ import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { deliveryQueries } from './db/deliveries.ts';
 import { viewQueries } from './db/views.ts';
+import { ciNumberQueries } from './db/ci-numbers.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
@@ -201,6 +202,35 @@ export interface MachineJob {
   outputs: string;
   upload_bytes: number;
   swept_at: number | null;
+}
+
+/** One number a CI run sent (#1369, src/ci-numbers.ts). */
+export interface CiNumber {
+  id: number;
+  project_id: number;
+  name: string;
+  value: number;
+  unit: string;
+  workflow: string;
+  run_id: number;
+  run_attempt: number;
+  sha: string;
+  ref: string;
+  created_at: number;
+}
+
+/** A step up that held (#1369): its first run, the level before and after. */
+export interface CiNumberStep {
+  id: number;
+  project_id: number;
+  name: string;
+  ref: string;
+  run_id: number;
+  sha: string;
+  created_at: number;
+  baseline: number;
+  level: number;
+  flagged_at: number;
 }
 
 /** A file in the CI store (#658, src/ci-store.ts). */
@@ -752,6 +782,37 @@ CREATE TABLE IF NOT EXISTS ci_files (
   published_at INTEGER,
   UNIQUE (project_id, workflow, run_id, run_attempt, name)
 );
+-- Numbers a scheme's CI sends per run (#1369, src/ci-numbers.ts): bench timings, sizes. One row per series (name) and
+-- run; a re-run attempt replaces it. Kept CI_NUMBERS_KEEP_MS, far past the CI store's files.
+CREATE TABLE IF NOT EXISTS ci_numbers (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  name TEXT NOT NULL,
+  value REAL NOT NULL,
+  unit TEXT NOT NULL DEFAULT '',
+  workflow TEXT NOT NULL,
+  run_id INTEGER NOT NULL,
+  run_attempt INTEGER NOT NULL,
+  sha TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (project_id, name, run_id)
+);
+CREATE INDEX IF NOT EXISTS ci_numbers_series ON ci_numbers(project_id, name, created_at);
+-- A step up in a series that held for three runs (#1369): run_id and created_at are the step's first run's.
+CREATE TABLE IF NOT EXISTS ci_number_steps (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  name TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  run_id INTEGER NOT NULL,
+  sha TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  baseline REAL NOT NULL,
+  level REAL NOT NULL,
+  flagged_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ci_number_steps_series ON ci_number_steps(project_id, name, created_at);
 -- Who published which Android build of a contraption, from which run, and when (#663): the Releases page's Deploy
 -- button, auto-deploy and publish_release all write it. published_by is a person's name, '#N' for a minion, or 'auto-deploy';
 -- uid the person it was for (a minion's turn: whoever asked for it), or null.
@@ -1683,6 +1744,7 @@ export const SCHEMA_HISTORY = [
   [102, 'host_samples.cpu_ledger (#1332)'],
   [103, 'machines.token_sealed (#1355)'],
   [104, 'deliveries (#1385)'],
+  [105, 'ci_numbers, ci_number_steps (#1369)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3813,9 +3875,9 @@ export class Store {
  */
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
-type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof viewQueries & typeof deliveryQueries;
+type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, minionQueries, pushQueries, viewQueries, deliveryQueries]) {
+for (const area of [machineQueries, minionQueries, pushQueries, viewQueries, deliveryQueries, ciNumberQueries]) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

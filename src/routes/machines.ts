@@ -8,7 +8,7 @@ import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
 import { testCounts } from '../waits.ts';
-import { ciJobReadRoutes, ciUploadRoute } from './ci-store.ts';
+import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
@@ -171,6 +171,7 @@ export const agentRoutes: Route[] = [
   }),
   // Not an agent's: a CI job's upload and reads, which check the job's own GitHub run token (#658, #1266).
   ciUploadRoute,
+  ciNumbersRoute,
   ...ciJobReadRoutes,
   // A CI job's test file counts while its suite runs, about every 10 s (#1368): its run comes from its run token, as an
   // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines; failed: the

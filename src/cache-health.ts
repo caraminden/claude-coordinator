@@ -2,7 +2,7 @@
 // re-reading file cache. A cold database (the #1492 deep dive) took two days to find because nothing recorded it. Every source
 // is read asynchronously (a file read or a child process), never on the server's thread. Rates are per second since the last
 // reading, so the first reading after a start has none.
-import { readFile } from 'node:fs/promises';
+import { hostText, SELF_CGROUP, CGROUP_ROOT } from './host-signals.ts';
 import { execFile } from 'node:child_process';
 
 /** Counters that only go up, from /proc/vmstat and the server's own cgroup, in pages (thp in faults, pgpgin in KiB). */
@@ -72,7 +72,7 @@ export class CacheSampler {
   async read(now: number): Promise<CacheReading> {
     const d = this.deps;
     const [vm, srv, fin] = await Promise.all([
-      (d.vmstat ?? (() => readFile('/proc/vmstat', 'utf8')))().catch(() => null),
+      (d.vmstat ?? (() => hostText('/proc/vmstat')))().catch(() => null),
       (d.serverStat ?? serverMemoryStat)().catch(() => null),
       (d.fincore ?? ((p) => run('fincore', ['-b', '-n', '-o', 'RES,SIZE', p])))(d.dbPath).catch(() => null),
     ]);
@@ -86,6 +86,6 @@ export class CacheSampler {
 
 /** The server's own cgroup's memory.stat (its refaults), or null where cgroup 2 can't be read. */
 async function serverMemoryStat(): Promise<string | null> {
-  const own = /^0::(.*)$/m.exec(await readFile('/proc/self/cgroup', 'utf8'))?.[1];
-  return own ? readFile(`/sys/fs/cgroup${own}/memory.stat`, 'utf8') : null;
+  const own = /^0::(.*)$/m.exec(await hostText(SELF_CGROUP))?.[1];
+  return own ? hostText(`${CGROUP_ROOT}${own}/memory.stat`) : null;
 }

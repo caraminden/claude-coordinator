@@ -23,3 +23,9 @@ test('the stretch stops at its cap, so the 3-minute backstop still decides a han
   assert.equal(s.by, MAX_STRETCH);
   assert.equal(s.ms(30_000), 30_000 * MAX_STRETCH);
 });
+
+test('the default core count is the box\'s, not the service cgroup quota (#1539)', async () => {
+  const { cpus } = await import('node:os');
+  const { boxCores } = await import('../src/load-stretch.ts');
+  assert.equal(boxCores(), cpus().length);
+});

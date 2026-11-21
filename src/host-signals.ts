@@ -5,7 +5,7 @@
 // The clock is not here: a test seeds its fixtures from the same real clock, so shifting only the server's broke them (handoffs/test-clock-shared.md).
 import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { availableParallelism, loadavg as realLoadavg } from 'node:os';
+import { cpus, loadavg as realLoadavg } from 'node:os';
 
 export const FIXED = process.env.CITADEL_HOST_SIGNALS === 'fixed';
 
@@ -44,5 +44,5 @@ export const hostDir = async (path: string): Promise<string[]> => {
 
 /** The 1, 5 and 15 minute load averages. */
 export const loadavg = (): number[] => (FIXED ? [0, 0, 0] : realLoadavg());
-/** The cores this process may use. */
-export const cores = (): number => (FIXED ? FIXED_CORES : availableParallelism());
+/** The box's cores, for load. Not `availableParallelism()`: inside the service's CPUQuota that reads the cgroup cap (8 of perigee's 16), while load counts the whole box (#1539). */
+export const cores = (): number => (FIXED ? FIXED_CORES : Math.max(1, cpus().length));

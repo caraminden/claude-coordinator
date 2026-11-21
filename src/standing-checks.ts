@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
 import { nextRun } from './schedules.ts';
+import { ZONE } from './pacific.ts';
 
 /** One broken promise. `key` names it across runs (check, minion, subject), so one stays one health row. */
 export interface Finding {
@@ -311,7 +312,7 @@ function jobAlive(dir: string, now: number): boolean {
 
 /** The weekly integrity check runs between 03:00 and 05:00 Pacific, once six days have passed since the last. */
 export function integrityDue(now: number, lastAt: number | null): boolean {
-  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(now));
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', hourCycle: 'h23' }).format(now));
   return hour >= 3 && hour < 5 && (lastAt === null || now - lastAt > 6 * 86_400_000);
 }
 

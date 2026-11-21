@@ -178,6 +178,6 @@ test('a re-add while the row is sending leaves one row, and the retry or boot le
   (t.outbox as any).opts.log = (m: string) => errors.push(m);
   await t.outbox.poke({ type: 'tick' });
   assert.deepEqual(errors, []);
-  assert.equal(rows(id).filter((r) => r.state === 'waiting' || r.state === 'held' || r.state === 'sending').length <= 1, true);
+  assert.deepEqual(rows(id).map((r) => r.state), ['dropped', 'sending']); // the old row is the twin's duplicate; the twin was handed to the runner
   assert.equal(t.r.sent.some((x) => x.id === other), true, 'the other due row in the pass is still sent');
 });

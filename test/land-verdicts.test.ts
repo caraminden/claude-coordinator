@@ -27,7 +27,7 @@ after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
 const BENCHED = [
-  'cut_off', 'flake_only', 'burn_lines', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on',
+  'cut_off', 'flake_only', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on',
   'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes',
   'train_pin', 'train_alone',
 ];
@@ -83,6 +83,7 @@ git() {
 }
 tools=$TOOLS state=$OUT burn_red='' branch=front label=front ci_url=https://example.invalid/run train_n=() train_br=() train_tip=() train_was=()
 main_red='' main_red_other='' main_red_mine='' main_red_riders=0
+declare -A through_by=() known_by=()
 # The guess as land.sh's callers take it: in a process substitution, so a walk that stops early names nobody.
 guess() { local hits; mapfile -t hits < <(train_suspects_of "$1"); echo "\${hits[*]}"; }
 ${BENCHED.map(fn).join('\n')}
@@ -141,15 +142,22 @@ test('A: a run killed with no failing test is no verdict', () => {
 
 // B: runs 44884401354 and 44884849606 (Nov 21 00:25 and 00:32 PST, report 0019): status-page red on main's own clock
 // (3147c858), and #1414's train of 6 behind it. Before #1430 the suspects refused #1356 and #1378 for it. Verdict: main
-// red, nobody refused, the riders go back in line.
-for (const ci of ['44884401354', '44884849606']) {
+// red, nobody refused. Since #1478 (Cara, "Ship through"), the first, whose only failure is main's, ships through main's
+// red; the second also has wake-when-live "not rerun", which may be the train's own, so the riders go back in line.
+for (const [ci, through] of [['44884401354', true], ['44884849606', false]] as const) {
   test(`B: a red main's tip also fails refuses nobody (run ${ci})`, () => {
     const t = `${log(ci)}\ntip=3147c858 old=3147c858 own=own1414 branch=ticket/1414-x label=ticket/1414-x train_n=(2 3 4 5 6 7) SHIPS=()\ntrain_real`;
     assert.equal(run({ script: t }).out, 'test/status-page.test.ts\n', 'wake-when-live, "not rerun", is no real failure');
     const r = run({ script: `${t} >/dev/null\ntrain_main_red && echo "main red: $main_red, mine: \${main_red_mine:-none}"`, red: 'test/status-page.test.ts', failsAt: '3147c858' });
     assert.equal(r.out, 'main red: test/status-page.test.ts, mine: none\n');
-    assert.match(r.log, /drop: the riders go back in line/);
-    assert.match(r.log, /retro: red on main too: not this train's/);
+    assert.match(r.log, through ? /ships as green, all 7 ships/ : /none is refused: the 6 riders go back in line/);
+    if (through) {
+      assert.match(r.log, /SHIPPING THROUGH MAIN'S RED: test\/status-page\.test\.ts/);
+      assert.match(r.log, /retro: shipped through main's red/);
+    } else {
+      assert.match(r.log, /drop: the riders go back in line/);
+      assert.match(r.log, /retro: red on main too: not this train's .* also red: test\/wake-when-live\.test\.ts/);
+    }
     // Green on main: not main's red, so the suspects judge it.
     const g = run({ script: `${t} >/dev/null\ntrain_main_red || echo 'not main'`, red: 'test/status-page.test.ts' });
     assert.equal(g.out, 'not main\n');
@@ -226,7 +234,7 @@ test('every function that reads $failed is benched here or says why it decides n
   for (const l of land.split('\n')) {
     const m = /^([a-z_]+)\(\) [{(]/.exec(l);
     if (m) cur = m[1];
-    if (cur && /\$failed\b|\$\{failed/.test(l) && !names.includes(cur)) names.push(cur);
+    if (cur && !/^\s*#/.test(l) && /\$failed\b|\$\{failed/.test(l) && !names.includes(cur)) names.push(cur);
   }
   const loose = names.filter((f) => !BENCHED.includes(f) && !(f in NOT_VERDICTS));
   assert.deepEqual(loose, [], 'bench these in test/land-verdicts.test.ts with a real run, or list them in NOT_VERDICTS with why');

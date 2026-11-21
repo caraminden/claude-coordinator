@@ -287,3 +287,38 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   assert.equal(said(acolyte.id).filter((e) => e.text.includes('one too many')).length, 0);
   assert.equal(said(acolyte.id).length, 9);
 });
+
+test("an ask to the Taskmaster runs on its asker's login, split or not (#1449 P1)", { timeout: 60_000 }, async () => {
+  // Olive last ran the Taskmaster; nobody has linked Claude, so each ask's note names whose login its turn would run on.
+  const Olive = store.createUser({ name: 'Olive', login: 'olive' });
+  const Lanterns = store.createProject('Lanterns', null, Cara.id);
+  for (const u of [Rachel, Olive]) store.addMember(Lanterns.id, u.id);
+  const lanterns = keys.register({ name: 'lanterns', title: 'Lanterns', port: 9104, icon: null, home_scheme: Lanterns.id, open_paths: '[]', default_model: null, turn_cap: null });
+  for (const u of [Josh, Rachel, Olive]) store.setContraptionUser(lanterns.id, u.id, true, Cara.id);
+  const key = readFileSync(join(data, 'contraptions', 'lanterns', 'contraption.key'), 'utf8');
+  mkdirSync(projectSharedDir(data, Lanterns.id), { recursive: true });
+  const srv = await bootServer({ root, ...slowWrites });
+  after(() => srv.stop());
+  /** Send an ask and return the note the Taskmaster's chat got right after it. */
+  const noteAfter = async (person: number, text: string) => {
+    const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ person, kind: 'bug', text }) });
+    assert.equal(res.status, 202, await res.text());
+    return (await until(`the note after "${text}"`, () => {
+      for (const tm of store.listCoordinators(Lanterns.id)) {
+        const all = store.listEvents(tm.id);
+        const at = all.findIndex((e) => e.kind === 'user_message' && e.data.includes(text));
+        if (at >= 0 && all[at + 1]?.kind === 'note') return JSON.parse(all[at + 1].data).text as string;
+      }
+      return undefined;
+    }))!;
+  };
+  await noteAfter(Olive.id, 'Wicks burn out');
+  const tm = store.getCoordinator(Lanterns.id)!;
+  store.updateTicket(tm.id, { person_id: Olive.id });
+  // Not split: Rachel's ask runs on hers, not Olive's; a non-member's on the owner's.
+  assert.match(await noteAfter(Rachel.id, 'Glass cracks'), /^Turns for Rachel start once/);
+  assert.match(await noteAfter(Josh.id, 'Smoke everywhere'), /^Turns in this scheme start once its owner, Cara,/);
+  // Split, and Rachel has no Taskmaster of her own: the Overlord takes it, still on hers, not the owner's.
+  store.splitScheme(Lanterns.id, Olive.id);
+  assert.match(await noteAfter(Rachel.id, 'Handles too hot'), /^Turns for Rachel start once/);
+});

@@ -441,6 +441,30 @@ test("a land the server runs for a minion (hand_off_land, the land tool) pushes 
   await finish(r, t);
 });
 
+test("a land or fast-mode verify outside a turn pushes as a person still in the scheme, else as its owner (#1449 P2)", async () => {
+  const t = newTicket();
+  const r = runner();
+  r.send(t.id, 'Josh', 'build it');
+  await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
+  await finish(r, t);
+  assert.equal(r.hostEnv(store.getTicket(t.id)!, '').GH_TOKEN, 'gho_new', "Josh's, while he's in the scheme");
+  // Taken out of the scheme, or disabled: the owner's (Cara hasn't linked, so no token at all), never Josh's.
+  store.removeMember(project.id, josh.id);
+  try {
+    const gone = r.hostEnv(store.getTicket(t.id)!, '');
+    assert.equal(gone.GH_TOKEN, undefined);
+    assert.equal(gone.GIT_AUTHOR_NAME, 'Cara');
+  } finally {
+    store.addMember(project.id, josh.id);
+  }
+  store.updateUser(josh.id, { disabled_at: Date.now() });
+  try {
+    assert.equal(r.hostEnv(store.getTicket(t.id)!, '').GIT_AUTHOR_NAME, 'Cara');
+  } finally {
+    store.updateUser(josh.id, { disabled_at: null });
+  }
+});
+
 test('a message from someone else waits for its own turn instead of steering; a relay carries its sender\'s person', async () => {
   const t = newTicket();
   const r = runner();

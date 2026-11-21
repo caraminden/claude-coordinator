@@ -2,7 +2,7 @@
 // them only through here (test/host-signals.test.ts checks), so a server a test boots (CITADEL_HOST_SIGNALS=fixed,
 // bootServer's default) never sees the real box: a busy box paused a test server's indexers (#1301). Pinned, it reads
 // fixed text for the files below and finds no other /proc or /sys file (so no cgroup). Live, every read is the real one.
-// The clock is not here: a test seeds its fixtures from the same real clock, so shifting only the server's broke them. Live, every read is the real one.
+// The clock is not here: a test seeds its fixtures from the same real clock, so shifting only the server's broke them (handoffs/test-clock-shared.md).
 import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { availableParallelism, loadavg as realLoadavg } from 'node:os';

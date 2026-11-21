@@ -65,5 +65,6 @@ jobs:
           # Niced, so the scheme's ship tests on the same PC get the CPU first.
           if command -v nice >/dev/null; then nice -n 19 bash -c "$COMMAND"; else bash -c "$COMMAND"; fi
           rc=$?
-          echo "=== citadel-heavy: the command exited $rc ==="
+          # A newline first: output with none at its end would hide the marker mid-line (heavy-ci.ts drops this line again).
+          printf '\n=== citadel-heavy: the command exited %s ===\n' "$rc"
           exit $rc

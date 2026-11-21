@@ -41,27 +41,43 @@ export function commandOutput(log: string): { lines: string[]; code: number | nu
   const lines = log.replace(/\r/g, '').split('\n').map((l) => l.replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''));
   const from = lines.findIndex((l) => l === BEGIN);
   if (from < 0) return { lines: [], code: null };
-  const to = lines.findIndex((l, i) => i > from && l.startsWith(END));
+  // The marker can share its line with output that had no newline at its end (CB3, #1519): the workflow prints a newline
+  // before it now, and that added line goes again here; a workflow copied before that still ends mid-line.
+  const to = lines.findIndex((l, i) => i > from && l.includes(END));
   if (to < 0) return { lines: lines.slice(from + 1), code: null };
-  const code = Number(/(\d+)/.exec(lines[to].slice(END.length))?.[1]);
-  return { lines: lines.slice(from + 1, to), code: Number.isInteger(code) ? code : null };
+  const at = lines[to].indexOf(END);
+  const code = Number(/^(\d+) ===/.exec(lines[to].slice(at + END.length))?.[1]);
+  const out = lines.slice(from + 1, to);
+  if (at > 0) out.push(lines[to].slice(0, at));
+  else if (out.length && out[out.length - 1] === '') out.pop();
+  return { lines: out, code: Number.isInteger(code) ? code : null };
 }
 
 class Fallback extends Error {}
 
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 }).trim();
-function gh(args: string[], what: string): any {
-  try {
+const pollSeconds = () => Number(process.env.CITADEL_HEAVY_CI_POLL) || 10;
+const sleepSync = (s: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s * 1000);
+/** A gh call, tried up to `tries` times a poll apart: one blip in GitHub's answers isn't an answer (CB1, #1519). A POST
+ *  that starts something (the dispatch) passes 1, since a try that timed out may have started it. */
+function retried<T>(what: string, tries: number, call: () => T): T {
+  for (let n = 1; ; n++) {
+    try { return call(); }
+    catch (e: any) {
+      if (n >= tries) throw new Error(`${what}: ${String(e.stderr || e.message).trim().split('\n').pop()}`);
+      sleepSync(pollSeconds());
+    }
+  }
+}
+function gh(args: string[], what: string, tries = 3): any {
+  return retried(what, tries, () => {
     const out = execFileSync('gh', ['api', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     return out.trim() ? JSON.parse(out) : null;
-  } catch (e: any) {
-    throw new Error(`${what}: ${String(e.stderr || e.message).trim().split('\n').pop()}`);
-  }
+  });
 }
 function ghText(path: string, what: string): string {
   // gh refuses to print a body with terminal escapes in it unless told to, and job logs carry colour codes.
-  try { return execFileSync('gh', ['api', '--allow-escape-sequences', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000, maxBuffer: 256 << 20 }); }
-  catch (e: any) { throw new Error(`${what}: ${String(e.stderr || e.message).trim().split('\n').pop()}`); }
+  return retried(what, 3, () => execFileSync('gh', ['api', '--allow-escape-sequences', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000, maxBuffer: 256 << 20 }));
 }
 
 /** The repo's slug when it can take heavy jobs on CI; a Fallback says why not. */
@@ -171,7 +187,8 @@ function queueLong(argv: string[]): number {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const poll = Number(process.env.CITADEL_HEAVY_CI_POLL) || 10;
+  const poll = pollSeconds();
+  const findLimit = Number(process.env.CITADEL_HEAVY_CI_FIND) || 60;
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
   const slug = repo();
   const command = remoteCommand(argv);
@@ -187,50 +204,67 @@ async function main(argv: string[]): Promise<number> {
   }
   const unref = () => { try { git('push', '-q', '--no-verify', 'origin', `:${ref}`); } catch { /* a stray ref costs nothing */ } };
   let runId: number | null = null;
+  let dispatched = false;
   let started = false;
+  let completed = false;
   let cancelled = false;
-  /** False when a run exists and GitHub refused to cancel it: it may still run, so nothing runs here too. */
+  /** The dispatch answers with no run id: the run is found by its name, which carries the id. */
+  const findRun = (): number | null => {
+    const runs = gh([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run').workflow_runs ?? [];
+    return runs.find((r: any) => r.display_title === `heavy ${id}`)?.id ?? null;
+  };
+  /** False when a run exists, or may, and GitHub refused to cancel it: it may still run, so nothing runs here too. A run
+   *  dispatched but not found yet is looked for a while first, so a stop or a fallback can't leave it to start later (CB4). */
   const cancel = () => {
+    for (let n = 0; dispatched && !runId && n < 15; n++) {
+      try { runId = findRun(); } catch { /* looked again below */ }
+      if (!runId) sleepSync(Math.min(2, poll));
+    }
+    if (dispatched && !runId) return false;
     if (!runId || cancelled) return true;
     try { gh(['-X', 'POST', `repos/${slug}/actions/runs/${runId}/cancel`], 'cancel'); return (cancelled = true); }
     catch { try { return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed'; } catch { return false; } }
   };
-  const stop = (signal: number) => { say(`stopped; cancelling the CI run`); cancel(); unref(); process.exit(128 + signal); };
+  const stop = (signal: number) => {
+    say(`stopped; cancelling the CI run`);
+    if (!cancel()) say(`GitHub wouldn't cancel the CI run, or it couldn't be found yet: look for "heavy ${id}" in ${slug}'s Actions and cancel it there`);
+    unref();
+    process.exit(128 + signal);
+  };
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
   try {
     await waitForShips(slug, poll);
     try {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
+      // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.
+      dispatched = true;
       gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`,
-        '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow');
+        '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow', 1);
     } catch (e: any) {
+      // GitHub answering 4xx refused it outright: no run to look for.
+      if (/HTTP 4\d\d/.test(e.message)) dispatched = false;
       throw new Fallback(`${e.message} (is ${WORKFLOW} on the default branch yet?)`);
     }
-    // The dispatch answers with no run id: the run is found by its name, which carries the id.
-    for (let i = 0; !runId; i++) {
-      const runs = gh([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run').workflow_runs ?? [];
-      runId = runs.find((r: any) => r.display_title === `heavy ${id}`)?.id ?? null;
-      if (!runId && i * 2 >= 60) throw new Fallback('GitHub took the workflow but showed no run for it in a minute');
-      if (!runId) await sleep(2);
+    for (const from = Date.now(); !runId;) {
+      try { runId = findRun(); } catch { /* a blip: looked again until the limit */ }
+      if (!runId && Date.now() - from >= findLimit * 1000) throw new Fallback(`GitHub took the workflow but showed no run for it in ${findLimit} s`);
+      if (!runId) await sleep(Math.min(2, poll));
     }
     let queued = Date.now();
     const asked = queued;
-    // A blip in GitHub's answers is waited out: three misses in a row end it.
-    const read = async () => {
-      for (let miss = 1; ; miss++) {
-        try { return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run'); }
-        catch (e) { if (miss >= 3) throw e; await sleep(poll); }
-      }
-    };
+    // A blip in GitHub's answers is waited out: three misses in a row end it (gh tries three times).
+    const read = async () => gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run');
     let run = await read();
     say(`running on ${slug}'s CI, not here: ${run.html_url}`);
     let told = 0;
     for (;;) {
-      if (run.status === 'completed') break;
+      if (run.status === 'completed') { completed = true; break; }
       if (!started && run.status !== 'queued' && run.status !== 'waiting' && run.status !== 'pending' && run.status !== 'requested') {
         started = true;
-        const job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
+        // Only for the runner's name: an unread answer here must not cancel a run a runner just took.
+        let job: any;
+        try { job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0]; } catch { /* named nowhere, that's all */ }
         say(`a runner took it${job?.runner_name ? ` (${job.runner_name})` : ''}; its output comes when it ends`);
       }
       if (!started && Date.now() - queued >= queueLimit * 1000) {
@@ -261,7 +295,9 @@ async function main(argv: string[]): Promise<number> {
     }
     return out.code;
   } catch (e) {
-    if (e instanceof Fallback || !started) {
+    // Once the run completed it never runs here: a read that failed after that can't tell whether the command ran on
+    // CI (a run can go from queued to completed between two looks, leaving `started` false: CB1, #1519).
+    if (e instanceof Fallback || (!started && !completed)) {
       // A run still queued must not start after this runs here.
       if (!cancel()) { say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run; nothing runs here`); return 1; }
       throw e instanceof Fallback ? e : new Fallback(String((e as Error).message));

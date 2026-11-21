@@ -24,6 +24,25 @@ test('commandLine quotes for bash, and commandOutput takes the lines between the
   assert.deepEqual(commandOutput(log), { lines: ['one', '', 'two'], code: 3 });
   assert.deepEqual(commandOutput([ts(BEGIN), ts('half')].join('\n')), { lines: ['half'], code: null });
   assert.deepEqual(commandOutput(ts('nothing')), { lines: [], code: null });
+  // CB3 (#1519): output with no newline at its end. A workflow copied before the fix ends it mid-line; the fixed one
+  // prints a newline first, and that added line goes again.
+  assert.deepEqual(commandOutput([ts(BEGIN), ts('one'), ts(`no newline${END}0 ===`), ts('Post job cleanup.')].join('\n')), { lines: ['one', 'no newline'], code: 0 });
+  assert.deepEqual(commandOutput([ts(BEGIN), ts('done'), ts(''), ts(`${END}0 ===`)].join('\n')), { lines: ['done'], code: 0 });
+});
+
+// CB3 (#1519): the workflow's own step, Citadel's and the kit template's, run with a command whose output has no newline
+// at its end: the end marker still comes on a line of its own, so the status reads.
+test("both citadel-heavy workflows' command step keeps the end marker readable after output with no trailing newline", () => {
+  for (const f of ['.github/workflows/citadel-heavy.yml', 'kit/skills/scheme-setup/templates/citadel-heavy.yml']) {
+    const yml = readFileSync(join(import.meta.dirname, '..', f), 'utf8');
+    const step = /- name: the command\n(?:.*\n)*?\s+run: \|\n((?:\s{10}.*\n|\n)+)/.exec(yml);
+    assert.ok(step, f);
+    const script = step[1].replace(/^ {10}/gm, '');
+    const res = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, COMMAND: 'printf "last words"; exit 4' } });
+    assert.equal(res.status, 4, f);
+    const log = res.stdout.split('\n').map((l) => `2026-11-20T10:00:00Z ${l}`).join('\n');
+    assert.deepEqual(commandOutput(log), { lines: ['last words'], code: 4 }, f);
+  }
 });
 
 const root = mkdtempSync(join(tmpdir(), 'heavy-ci-'));
@@ -49,7 +68,13 @@ else if (url.endsWith('/dispatches')) {
   const f = {}; for (let i = 0; i < a.length; i += 2) { const [k, ...v] = a[i + 1].split('='); f[k] = v.join('='); }
   f.shipLooks = fs.existsSync(path.join(dir, 'ship-looks')) ? fs.readFileSync(path.join(dir, 'ship-looks'), 'utf8') : '0';
   fs.writeFileSync(state, JSON.stringify(f));
-} else if (url.includes('/workflows/citadel-heavy.yml/runs')) out({ workflow_runs: fs.existsSync(state) ? [{ id: 7, display_title: 'heavy ' + id() }] : [] });
+} else if (url.includes('/workflows/citadel-heavy.yml/runs')) {
+  // mode late: the run shows only from the 9th look; lost: never.
+  const f = path.join(dir, 'finds'), k = Number(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : 0) + 1;
+  fs.writeFileSync(f, String(k));
+  const hidden = mode === 'lost' || (mode === 'late' && k < 9);
+  out({ workflow_runs: fs.existsSync(state) && !hidden ? [{ id: 7, display_title: 'heavy ' + id() }] : [] });
+}
 else if (url.includes('/actions/runs?status=')) {
   // mode ship: a ship's run is queued for the first three looks, then gone; each look is counted, and the dispatch notes the count.
   const f = path.join(dir, 'ship-looks'), n = Number(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : 0) + (url.includes('status=queued') ? 1 : 0);
@@ -61,8 +86,13 @@ else if (url.endsWith('/runs/7/cancel')) fs.writeFileSync(path.join(dir, 'cancel
 else if (url.endsWith('/runs/7')) {
   const n = Number(fs.existsSync(path.join(dir, 'polls')) ? fs.readFileSync(path.join(dir, 'polls'), 'utf8') : 0) + 1;
   fs.writeFileSync(path.join(dir, 'polls'), String(n));
-  const status = mode === 'queued' || (mode === 'busy' && n < 12) ? 'queued' : mode === 'busy' ? 'completed' : ['queued', 'in_progress'][n - 1] ?? 'completed';
+  // mode skip: queued, then completed at the next look, never seen in progress.
+  const status = mode === 'queued' || (mode === 'busy' && n < 12) ? 'queued' : mode === 'busy' ? 'completed' : mode === 'skip' ? (n < 2 ? 'queued' : 'completed') : ['queued', 'in_progress'][n - 1] ?? 'completed';
   out({ id: 7, status, conclusion: status === 'completed' ? 'failure' : null, html_url: 'https://github.com/o/r/actions/runs/7' });
+} else if (/\\/runs\\/7\\/jobs$|\\/jobs\\/9\\/logs$/.test(url) && (mode === 'skip' || (mode === 'blip' && !fs.existsSync(path.join(dir, 'blip-' + url.split('/').pop()))))) {
+  // mode blip: the first read of the jobs and of the log each fail once; skip: the jobs never read.
+  fs.writeFileSync(path.join(dir, 'blip-' + url.split('/').pop()), '');
+  process.stderr.write('HTTP 502: Bad Gateway\\n'); process.exit(1);
 } else if (url.endsWith('/runs/7/jobs')) out({ jobs: [{ id: 9, runner_name: mode === 'queued' ? null : 'ci-r-1' }] });
 else if (url.endsWith('/jobs/9/logs') && !escapes) { process.stderr.write('the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway\\n'); process.exit(1); }
 else if (url.endsWith('/jobs/9/logs')) out(['2026-11-20T10:00:00Z \x1b[36;1mset -e\x1b[0m', '2026-11-20T10:00:01Z ${BEGIN}', '2026-11-20T10:00:02Z hello from CI', '2026-11-20T10:00:03Z ${END}3 ==='].join('\\n'));
@@ -218,4 +248,33 @@ test('--long pushes the snapshot, writes the job for the server and returns at o
   const huge = spawnSync(heavy, ['--long', 'echo', 'x'.repeat(20_001)], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env });
   assert.equal(huge.status, 2, 'a command the server would drop is refused, not queued to wait forever');
   assert.match(huge.stderr, /at most 20000/);
+});
+
+// CB1 (#1519): one failed read of the job or its log is tried again, not the run reported lost; and once the run has
+// completed the command never runs here as well, even when it went queued to completed between two looks.
+test("a blip reading the job or its log is tried again, and a run that completed is never run here too", () => {
+  const blip = run(repo(), 'blip');
+  assert.equal(blip.status, 3, blip.stderr);
+  assert.equal(blip.stdout, 'hello from CI\n');
+  const r = repo();
+  const skip = run(r, 'skip');
+  assert.equal(skip.status, 1, skip.stderr);
+  assert.doesNotMatch(skip.stdout, /ran here/);
+  assert.doesNotMatch(skip.stderr, /running it here/);
+  assert.match(skip.stderr, /reading the job: HTTP 502/);
+});
+
+// CB4 (#1519): a fallback before the dispatched run was found looks for it and cancels it, so the command doesn't run
+// on CI later as well as here; one that can't be found at all runs nothing here.
+test('a dispatched run found only after the fallback is cancelled before it runs here; one never found runs nothing here', () => {
+  const r = repo();
+  const late = run(r, 'late', { CITADEL_HEAVY_CI_FIND: '0.1' });
+  assert.equal(late.status, 5, late.stderr);
+  assert.equal(late.stdout, 'ran here\n');
+  assert.ok(existsSync(join(r.gh, 'cancelled')), 'the run found late is cancelled');
+  const l = repo();
+  const lost = run(l, 'lost', { CITADEL_HEAVY_CI_FIND: '0.1' });
+  assert.equal(lost.status, 1, lost.stderr);
+  assert.doesNotMatch(lost.stdout, /ran here/);
+  assert.match(lost.stderr, /GitHub wouldn't cancel the CI run; nothing runs here/);
 });

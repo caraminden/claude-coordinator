@@ -271,7 +271,8 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     const made = await srv.call('/api/projects', { name: 'Mandate', source: 'none' });
     assert.equal(made.status, 201, JSON.stringify(made.data));
     const id = made.data.id ?? made.data.project?.id;
-    const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+    // busy timeout: the server's writer may hold the lock (#1171)
+    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
     db.prepare('UPDATE projects SET repo_url = ? WHERE id = ?').run('https://github.com/caraminden/mandate', id);
     db.close();
 
@@ -400,7 +401,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     assert.equal(await (await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release`, { headers: mandateApp })).text(), 'apk from the script');
     // The builds a roll back holds its CI packages at (ADR 0012): its app's updater reads them with its key.
     assert.deepEqual((await (await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp })).json()).pins, []);
-    const pinDb = new DatabaseSync(join(srv.data, 'coordinator.db'));
+    const pinDb = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
     pinDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('last-green:pins', JSON.stringify({
       [`${id}/ci:android:build`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), at: 5, by: 'Cara', build: { run: 4500, sha: 'c'.repeat(40), workflow: 'android.yml' } },
       [`${id}/app:mandate`]: { sha: 'a'.repeat(40), from: 'b'.repeat(40), at: 5, by: 'Cara' },
@@ -424,7 +425,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     // A job reads its own scheme's files for its own commit, from any workflow (#1266: Peek's desktop e2e job takes
     // the build windows.yml made of the same commit), at the address it uploads to, with its run token.
     const peekMade = (await srv.call('/api/projects', { name: 'Peek', source: 'none' })).data;
-    const repoDb = new DatabaseSync(join(srv.data, 'coordinator.db'));
+    const repoDb = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
     repoDb.prepare('UPDATE projects SET repo_url = ? WHERE id = ?').run('https://github.com/caraminden/peek-auras', peekMade.id ?? peekMade.project?.id);
     repoDb.close();
     const LATER = 'b'.repeat(40);

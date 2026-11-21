@@ -113,7 +113,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   const checks = (await srv.call(`/api/projects/${alpha}/schedules`)).data.schedules.filter((s: any) => s.template === 'app-turns');
   assert.equal(checks.length, 1);
   const { DatabaseSync } = await import('node:sqlite');
-  const rw = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  const rw = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   rw.prepare('UPDATE schedules SET last_ticket_id = ? WHERE id = ?').run(minion, checks[0].id);
   rw.close();
   assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 200, "the check's run");

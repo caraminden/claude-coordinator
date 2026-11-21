@@ -244,7 +244,7 @@ const STAYS_ON_THREAD: Record<string, string> = {
   // Not moved yet: rare, or they write only now and then and would wait for the queue on every call as a VALUE_WRITE.
   ...Object.fromEntries(['putSecret', 'deleteSecret', 'splitScheme', 'putClaudeState', 'forgetJobKind', 'props.backfill', 'schedules.setBrief',
     'schedules.categorize', 'reviews.ensureAgents', 'reviews.recordRun', 'reviews.recordVerdict', 'reviews.removeVerdict', 'reviews.recordRefutes',
-    'reviews.removeLesson', 'reviews.backfill', 'claims.take', 'claims.release', 'claims.releaseHeldBy', 'lessons.add', 'lessons.take', 'ideas.upsert',
+    'reviews.removeLesson', 'reviews.backfill', 'claims.take', 'claims.release', 'claims.releaseHeldBy', 'claims.setQueue', 'claims.passOn', 'lessons.add', 'lessons.take', 'ideas.upsert',
     'ideas.restatus', 'ideas.linkStarts', 'ideas.sync', 'ideas.laterNote', 'minionIndex.indexTicket', 'minionIndex.syncHandoffs',
     'minionIndex.deleteTicket', 'memoryProposals.create', 'memoryProposals.decide', 'memoryProposals.restored', 'memoryProposals.prune', 'props.propose', 'ideas.edit',
     'ideas.linkHandoff', 'ideas.fromHandoff', 'ideas.join', 'ideas.readPage', 'ideas.now', 'ideas.fromChat', 'ideas.soon', 'minionIndex.indexClosed'].map((m) => [m, 'not moved yet'])),

@@ -156,7 +156,16 @@ test('handoffs (#1463): a pass that finds nothing changed touches no table, a fi
   assert.equal(sql, 0, 'nothing changed: no statement prepared');
   // The tidy moves a live handoff into shipped/ (a rename keeps its mtime): the filed folder's own mtime moved, so it is listed again.
   renameSync(join(dir, 'live.md'), join(dir, 'shipped', 'live.md'));
-  const after = await store.minionIndex.syncHandoffs(A.id, data);
+  // That pass looks in the same ms as the rename, whatever pauses a loaded box adds between them (#1483).
+  const filedMs = Math.floor(statSync(join(dir, 'shipped')).mtimeMs);
+  const realNow = Date.now;
+  Date.now = () => filedMs;
+  let after: (rel: string) => boolean;
+  try {
+    after = await store.minionIndex.syncHandoffs(A.id, data);
+  } finally {
+    Date.now = realNow;
+  }
   (store.db as any).prepare = prepare;
   assert.ok(sql > 0);
   assert.ok(after('handoffs/shipped/live.md') && !after('handoffs/live.md'));
@@ -164,9 +173,8 @@ test('handoffs (#1463): a pass that finds nothing changed touches no table, a fi
   assert.deepEqual((store.minionIndex.search(A.id, 'narwhal') as any[]).map((h) => h.name), ['shipped/old.md']);
   // #1483: a second file filed in the same mtime tick as that listing (a coarse clock, a 1 s filesystem) leaves the
   // folder's mtime where the pass saw it; putting it back pins that case. A folder listed moments after a change is listed again.
-  const listed = Math.floor(statSync(join(dir, 'shipped')).mtimeMs) / 1000; // the ms the pass saw (a Date rounds, the pass floors)
   writeFileSync(join(dir, 'shipped', 'late.md'), '# Handoff: dugong');
-  utimesSync(join(dir, 'shipped'), listed, listed);
+  utimesSync(join(dir, 'shipped'), filedMs / 1000, filedMs / 1000); // seconds from the ms the pass saw (a Date rounds, the pass floors)
   assert.ok((await store.minionIndex.syncHandoffs(A.id, data))('handoffs/shipped/late.md'), 'filed in the same tick, still found');
   // A restart: the new Store reads the rows once and rewrites none of them.
   store.db.close();

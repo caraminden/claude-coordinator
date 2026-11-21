@@ -115,9 +115,10 @@ export class MinionIndex {
   /**
    * Bring the scheme's handoffs/ rows in line with the folder: new and changed files in, gone ones out. Every file call
    * is async (#1463: its readdir, stat and the table read held the server's thread for 3.4 s in 11 stalls on Nov 21).
-   * The filed folders (shipped/, not-picked/) are listed again only when their own mtime moves: files are moved into
-   * them, not edited. handoffs/ itself is stat'ed file by file, since a live handoff is edited in place. Returns whether
-   * a handoff file is at `rel` (relative to the shared folder), as of this listing.
+   * The filed folders (shipped/, not-picked/) are listed again only when their own mtime moves, or when the last listing
+   * came within RACY_MS of their last change (#1483): files are moved into them, not edited. handoffs/ itself is stat'ed
+   * file by file, since a live handoff is edited in place. Returns whether a handoff file is at `rel` (relative to the
+   * shared folder), as of this listing.
    */
   async syncHandoffs(projectId: number, dataDir: string): Promise<(rel: string) => boolean> {
     const dir = join(projectSharedDir(dataDir, projectId), 'handoffs');
@@ -126,6 +127,7 @@ export class MinionIndex {
     const files = new Map<string, number>();
     // Filed handoffs (src/handoff-tidy.ts) stay searchable under their folder: "shipped/x.md", "not-picked/x.md".
     for (const sub of ['', 'shipped', 'not-picked']) {
+      const looked = Date.now(); // before the stat: a stall after the listing must not make a racy listing look settled
       const at = await stat(join(dir, sub)).then((s) => Math.floor(s.mtimeMs), () => null);
       if (at === null) continue; // no such folder
       const prefix = sub ? `${sub}/` : '';
@@ -145,7 +147,7 @@ export class MinionIndex {
       // Noted only once listed: a folder whose listing failed is listed again next pass. A folder changed moments before
       // its listing may change again within the same mtime tick (a coarse clock, a 1 s filesystem), which would leave
       // its mtime where it was, so it is noted as unseen and listed again next pass (git's "racy" entries; #1483).
-      dirs.set(sub, Date.now() - at < RACY_MS ? -1 : at);
+      dirs.set(sub, looked - at < RACY_MS ? -1 : at);
       // A few stats at a time: the thread pool is shared with every other file call the server makes.
       for (let i = 0; i < names.length; i += 8) {
         const batch = names.slice(i, i + 8);

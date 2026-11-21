@@ -400,7 +400,7 @@ function setAudit(slug, on) {
 function whenLine(e) {
   const t = e.triggers ?? {};
   const parts = [];
-  if (t.diff?.length) parts.push(`Changes in ${t.diff.join(', ')}`);
+  if (t.diff?.length) parts.push(`Changes in ${t.diff.join(', ')}${t.lines ? ` (${t.lines}+ lines)` : ''}`);
   if (t.types?.length) parts.push(`${t.types.join(' or ')} minions`);
   if (t.creative) parts.push(t.creative);
   if (t.in_app) parts.push(`In the app: ${t.in_app}`);

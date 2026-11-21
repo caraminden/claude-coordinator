@@ -165,7 +165,7 @@ new page, view or flow also gets that skill's dogfood pass (`references/dogfood.
 When the turn's "Review set:" line names rubrics, run `citadel:critique` for each one whose `when:` matches
 this diff, after the reviewer's fixes. Its blockers are findings like the reviewer's: fixed, or in
 "Not fixed" with a reason; a `gate: blocks-ready` rubric holds the change until it passes or a
-person decides (Citadel holds it too: `hand_off_land` refuses while its last recorded run is a fail).
+person decides (Citadel holds it too: `hand_off_land` refuses while its last recorded run is a fail, and refuses any matching critic with no run on record).
 Record each round with `review_set` (slug, `run: {round, verdict}`), and the reviewer's and the
 finding checker's too, as slugs `pre-ship-review` and `finding-checker`. The critic doesn't set the label: you do, in 4.
 
@@ -196,7 +196,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 ## 5. Report and ship
 
 - **Alongside the ship:** the steps, in one turn:
-  1. `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`.
+  1. Run any critic whose `when:` matches first (section 3's rubrics), then `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`. Code review runs alongside a ship, critics don't: the hand-off refuses a change a critic matches until its run is on record (Cara, 2026-11-21: "Code review can be simultaneous, but critics not").
   2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check, Codex and any fresh eyes in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
   3. Nothing real found: end the turn with the report line below. The server dismisses you once the ship is clean.
   4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.

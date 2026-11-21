@@ -31,7 +31,9 @@ loaded). Every Grunt brief starts with the Grunt line from your system prompt, q
 
 Read each rubric in the review set's folder (frontmatter first) and keep those whose `when:` matches:
 
-- `diff:` a changed path of `git diff --name-only main...HEAD` matches a glob;
+- `diff:` a changed path of `git diff --name-only main...HEAD` matches a glob; with `lines: <n>`, the matched
+  files' lines added plus removed (`git diff --numstat main...HEAD`) come to n or more. A critic
+  that matches must run before you ship: `hand_off_land` refuses until it has a run on record from you;
 - `creative:` the work is a new piece, take or rework that makes creative choices. A small change to
   a design a person already saw (a size, a colour, one detail they named) skips it, and what you show
   them says the critic didn't judge it;

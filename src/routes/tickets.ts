@@ -30,6 +30,7 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
+import { criticRefusal } from '../critic-gate.ts';
 import { fixLine, fixProofProblem, parseFixProof } from '../fix-proof.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -1415,6 +1416,8 @@ export const ticketRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
+      const unjudged = await criticRefusal(app.store.reviews, ticket, args, body?.fix === true);
+      if (unjudged) throw new HttpError(400, unjudged);
       return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
     },
   },
@@ -1519,6 +1522,9 @@ export const ticketRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
+      // The critic gate (#1504): a critic this change matches runs before the ship, a feeder's merge too.
+      const unjudged = await criticRefusal(app.store.reviews, { ...ticket, cwd: ticket.cwd! }, args, body.fix === true);
+      if (unjudged) throw new HttpError(400, unjudged);
       // The build minion's take-in of main isn't the end of its work: a clean one would dismiss it mid-build.
       if (args.includes('--full')) throw new HttpError(400, 'A build minion takes main in within its turn: run tools/land.sh --into build/<n> --full yourself (in a container, the land tool)');
       // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.

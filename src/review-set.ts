@@ -115,7 +115,8 @@ const EFFORTS = ['low', 'medium', 'high'];
 /** The kit's rubric starters; example.md is the format's worked example, not a starter. */
 export const STARTER_DIR = join(import.meta.dirname, '..', 'kit', 'skills', 'critique', 'rubrics');
 
-export interface Triggers { diff?: string[]; creative?: string; schedule?: string; in_app?: string; types?: string[]; ask?: boolean }
+/** `lines` (#1504): the diff fires only with at least this many lines added plus removed in files its globs match. */
+export interface Triggers { diff?: string[]; lines?: number; creative?: string; schedule?: string; in_app?: string; types?: string[]; ask?: boolean }
 export interface Context { guides?: { label: string; href: string }[]; paths?: string[]; verdicts?: boolean; requester?: boolean }
 /** One hand-off step (Q7): after `after` failed rounds the item goes `to` the professor, a person, or another entry by slug. */
 export interface OnFail { after: number; to: string }
@@ -208,9 +209,13 @@ export class ReviewError extends Error {}
 export function parseWhen(when: string): Triggers {
   const t: Triggers = {};
   for (const part of when.split('|').map((s) => s.trim()).filter(Boolean)) {
-    const m = part.match(/^(diff|creative|schedule|in-app|type)\s*:\s*(.*)$/s);
+    const m = part.match(/^(diff|lines|creative|schedule|in-app|type)\s*:\s*(.*)$/s);
     if (part === 'ask') t.ask = true;
-    else if (!m) throw new ReviewError(`"${part}" isn't a when: part (diff: <globs>, creative: <what>, schedule: <cadence>, in-app: <step>, type: <minion types>, or ask)`);
+    else if (!m) throw new ReviewError(`"${part}" isn't a when: part (diff: <globs>, lines: <at least>, creative: <what>, schedule: <cadence>, in-app: <step>, type: <minion types>, or ask)`);
+    else if (m[1] === 'lines') {
+      if (!/^\d+$/.test(m[2].trim())) throw new ReviewError(`"${part}": lines is a whole number, the diff's lines in its diff: globs that fire it`);
+      t.lines = Number(m[2].trim());
+    }
     else if (m[1] === 'diff' || m[1] === 'type') t[m[1] === 'diff' ? 'diff' : 'types'] = m[2].split(',').map((s) => s.trim()).filter(Boolean);
     else t[m[1] === 'in-app' ? 'in_app' : (m[1] as 'creative' | 'schedule')] = m[2].trim();
   }
@@ -220,6 +225,7 @@ export function parseWhen(when: string): Triggers {
 export function whenText(t: Triggers): string {
   return [
     t.diff?.length ? `diff: ${t.diff.join(', ')}` : '',
+    t.diff?.length && t.lines ? `lines: ${t.lines}` : '',
     t.creative ? `creative: ${t.creative}` : '',
     t.schedule ? `schedule: ${t.schedule}` : '',
     t.in_app ? `in-app: ${t.in_app}` : '',
@@ -438,7 +444,8 @@ function check(f: Partial<EntryFields>): void {
     if (!ok) throw new ReviewError('on_fail is up to 4 steps [{after: failed rounds 1 to 10, rising, to: professor, person or an entry\'s slug}]');
   }
   const t = f.triggers as Record<string, unknown> | undefined;
-  if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], types: [minion types], creative, schedule, in_app: text, ask: true or false}');
+  if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], lines: N, types: [minion types], creative, schedule, in_app: text, ask: true or false}');
+  if (t && t.lines !== undefined && !(Number.isInteger(t.lines) && (t.lines as number) >= 1 && (t.lines as number) <= 100_000 && (t.diff as string[] | undefined)?.length)) throw new ReviewError('lines is a whole number from 1, and goes with diff: globs');
 }
 
 export class ReviewSet {
@@ -793,6 +800,12 @@ export class ReviewSet {
       rec.stuck = !f.teacher && f.n >= 5 && (f.pass === f.n || f.pass === 0) ? (f.pass ? 'pass' : 'fail') : null;
     }
     return out;
+  }
+
+  /** The entries this minion recorded a run of (not a backfilled one): the critic gate's record (#1504). */
+  ranOn(projectId: number, ticketId: number): Set<number> {
+    const rows = this.db.prepare('SELECT DISTINCT r.entry_id FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND r.ticket_id = ? AND r.source IS NULL').all(projectId, ticketId) as Row[];
+    return new Set(rows.map((r) => Number(r.entry_id)));
   }
 
   /**

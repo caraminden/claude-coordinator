@@ -5,7 +5,7 @@ import { after, test } from 'node:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
-import { Runner } from '../src/runner.ts';
+import { Runner, wrapperAlive } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
 import { holds, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -197,6 +197,8 @@ test("a minion whose turn still runs unfollowed (its wrapper is alive in its fol
   mkdirSync(dir, { recursive: true });
   const stray = tmp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', dir], { stdio: 'ignore' });
   writeFileSync(join(dir, 'pid.json'), JSON.stringify({ wrapper: stray.pid }));
+  // spawn() returns before the child's exec: until then /proc shows this process's cmdline, so the wrapper looks gone and a turn starts.
+  await until('the stray wrapper to run in its folder', () => wrapperAlive(dir));
   writeFileSync(go, '');
   try {
     r.send(id, 'Cara', 'hello');

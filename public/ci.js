@@ -252,6 +252,8 @@ export const tabOf = (t) => (t === 'runs' ? 'history' : t === 'runners' ? 'overv
 /** The page's address for `scope` and `tab`: what a click on its list or tabs goes to, so Back steps through them. */
 export const releasesHash = (projectId, scope, tab = 'releases') => `#/p/${projectId}/releases/${scope}${tab === 'releases' ? '' : `/${tab}`}`;
 
+/** GET /api/ci; an answer without its schemes (an old server, a test's stub) counts as a failed read, so nothing reads `.schemes` off it. */
+const readCi = async () => { const r = await api('api/ci'); if (!Array.isArray(r?.schemes)) throw new Error('no CI in the answer'); return r; };
 let ciRead = null; // the last /api/ci read, the page's or the chips', so a page opened again draws at once
 let hostRead = null;
 let shell = null; // the open page
@@ -426,7 +428,7 @@ export function releasesShell() {
     if (tried && !el.isConnected) return;
     tried = true;
     try {
-      ciRead = await api('api/ci');
+      ciRead = await readCi();
       hostRead = await api('api/host-load').catch(() => hostRead);
       paintChips();
       draw();
@@ -489,7 +491,7 @@ async function readChips() {
   if (!chips.size) return;
   chipBusy = true;
   try {
-    ciRead = await api('api/ci');
+    ciRead = await readCi();
     paintChips();
   } catch {
     // The last colour stays: the next minute asks again.

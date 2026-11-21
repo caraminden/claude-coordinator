@@ -179,6 +179,7 @@ pipeline_tier() {
   done <<<"$changed"
   gated=()
   for entry in "${entries[@]}"; do [[ $entry == test/*.test.* ]] && gated+=("$entry"); done
+  return 0 # not the loop's last test: a list ending in a file that is no test read as "tier all" (#1477)
 }
 targets=(test/)
 list=tools/pipeline-files.txt

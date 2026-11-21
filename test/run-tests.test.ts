@@ -408,9 +408,10 @@ test('leaves a process', () => {
 const RAN = (name: string) => `import test from 'node:test';\nimport { writeFileSync } from 'node:fs';\ntest('${name}', () => writeFileSync('ran-${name}', ''));\n`;
 FIXTURES['pipe.test.mjs'] = RAN('pipe');
 FIXTURES['product.test.mjs'] = RAN('product');
-function tierRepo(change?: (dir: string) => void, mainName = 'main') {
+const TIER_LIST = '# the pipeline\r\n  tools/land.sh \r\nkit/templates/ # a folder\ntest/pipe.test.mjs\n';
+function tierRepo(change?: (dir: string) => void, mainName = 'main', list = TIER_LIST) {
   return (dir: string) => {
-    writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), '# the pipeline\r\n  tools/land.sh \r\nkit/templates/ # a folder\ntest/pipe.test.mjs\n');
+    writeFileSync(join(dir, 'tools', 'pipeline-files.txt'), list);
     writeFileSync(join(dir, 'tools', 'land.sh'), 'v1\n');
     mkdirSync(join(dir, 'kit', 'templates'), { recursive: true });
     writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v1\n');
@@ -434,6 +435,15 @@ test('a change that touches only product files leaves out the pipeline test file
   assert.equal(r.code, 0, r.log);
   assert.deepEqual(ran(r.dir), ['product']);
   assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\): this change touches nothing in tools\/pipeline-files\.txt$/);
+});
+
+// #1477: the tier was read from the list's last line. Since #1160 put a workflow there (Nov 20), every ship ran
+// every test file, with an empty reason in the log.
+test('a list that ends in a file that is not a test still leaves the pipeline test files out of a product change (#1477)', async () => {
+  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'main', `${TIER_LIST}.github/workflows/heavy.yml\n`));
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(ran(r.dir), ['product']);
+  assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\)/);
 });
 
 test('a red pipeline test file never fails a product change: it does not run (#581)', async () => {

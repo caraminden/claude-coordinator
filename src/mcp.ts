@@ -91,6 +91,28 @@ const WAKE_AT = {
     },
   },
 };
+/** A minion preps ultra reviews for its turn's person (#1399, Cara 2026-11-20 "Yes, minions prep too"); only they can Start one. */
+const PREP_ULTRA_REVIEWS = {
+  name: 'prep_ultra_reviews',
+  description: `Prep ultra reviews for the person this turn runs for: each area becomes a draft pull request on their own GitHub login (\`review/*\` branches, [skip ci]), waiting in this chat's Ultra review dialog for them to press Start, which bills their own Claude account. You can never start one, and \`claude ultrareview\` stays blocked. Only on a person's ask. An area over 8,000 lines or 500 files is refused with its size: split it. Unstarted PRs are closed after 7 days. Without \`areas\` it lists this chat's prepped rows.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      areas: {
+        type: 'array', maxItems: 20, description: 'Up to 20 areas, one draft PR each',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', maxLength: 80, description: 'A short label, e.g. "Land pipeline"' },
+            paths: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Repo-relative files or folders, e.g. ["tools/land.sh", "src/land.ts"]' },
+            question: { type: 'string', maxLength: 2000, description: 'Optional: what the review should look hardest at' },
+          },
+          required: ['paths'],
+        },
+      },
+    },
+  },
+};
 const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, about 30 characters (at most 120), e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
@@ -2356,6 +2378,14 @@ async function runTool(name: string, args: any): Promise<string> {
       if (r.id) return r.queued ? `Queued as #${r.id}${r.ids?.length > 1 ? ` (relays #${r.ids.join(', #')}, one per recipient)` : ''}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
       return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
     }
+    case 'prep_ultra_reviews': {
+      const path = `/api/tickets/${C().TICKET}/ultrareview/batch`;
+      const r = Array.isArray(args.areas) && args.areas.length ? await call('POST', path, { areas: args.areas }) : await call('GET', path);
+      const rows = r.rows.map((x: any) => `${x.name}: ${x.state}${x.pr?.number ? `, draft PR #${x.pr.number}${x.pr.url ? ` ${x.pr.url}` : ''}` : ''} (${x.size.lines} lines, ${x.size.files} files)${x.error ? `: ${x.error}` : ''}`);
+      const refused = (r.refused ?? []).map((x: any) => `Refused ${x.name || `area ${x.index + 1}`}: ${x.error}`);
+      const head = r.for ? `Prepped for ${r.for}: the rows wait in this chat's Ultra review dialog for their Start; tell them so in your reply. You cannot start one.` : '';
+      return [head, ...refused, rows.length ? `Rows:\n${rows.join('\n')}` : 'No prepped ultra reviews in this chat.'].filter(Boolean).join('\n');
+    }
     case 'wake_at': {
       const r = await call('POST', `/api/tickets/${C().TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
       const lines = r.wakes.map((w: any) => `#${w.id} ${w.when}: ${w.note}`);
@@ -2474,7 +2504,7 @@ function toolListAll() {
   const memory = [...(C().MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
   if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, PREP_ULTRA_REVIEWS, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
 }
 
 /** One JSON-RPC request's answer, or null for a notification: a turn's own helper writes it to stdout, the shared tool server (src/mcp-pool.ts) sends it over HTTP. */

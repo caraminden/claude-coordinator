@@ -3357,9 +3357,9 @@
   "person": "200",
   "member": "200",
   "outsider": "404 No such minion",
-  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "m1": "403 A minion may only update itself",
+  "tmA": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
+  "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
+  "m1": "200",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/ultrareview/batch": {
@@ -3367,9 +3367,9 @@
   "person": "400 areas must list at least one area",
   "member": "400 areas must list at least one area",
   "outsider": "404 No such minion",
-  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "m1": "403 A minion may only update itself",
+  "tmA": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
+  "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
+  "m1": "403 No person to prep for: this chat has not run a turn for anyone yet, so nobody would get the Start",
   "m2": "403 A minion may only update itself"
  },
  "DELETE /api/tickets/:minion1/ultrareview/batch/nope": {
@@ -4147,8 +4147,8 @@
   "person": "200",
   "member": "200",
   "outsider": "404 No such minion",
-  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmA": "200",
+  "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -4157,8 +4157,8 @@
   "person": "400 areas must list at least one area",
   "member": "400 areas must list at least one area",
   "outsider": "404 No such minion",
-  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
-  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmA": "403 No person to prep for: this chat has not run a turn for anyone yet, so nobody would get the Start",
+  "tmB": "403 Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

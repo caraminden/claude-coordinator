@@ -131,6 +131,21 @@ test('wake_when_runners_back posts to its own internal id, which its token may d
   assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-runners`));
 });
 
+test('prep_ultra_reviews posts to its own internal id and lists what waits for the Start (#1399)', async () => {
+  calls.length = 0;
+  respond = () => [200, { for: 'Josh', rows: [{ name: 'Land', state: 'ready', size: { lines: 120, files: 3 }, pr: { number: 7, url: 'https://github.com/o/r/pull/7' } }], refused: [{ index: 1, name: 'Big', error: '9,000 lines in 40 files: over the limit' }] }];
+  const r = await tool('prep_ultra_reviews', { areas: [{ name: 'Land', paths: ['tools/land.sh'] }, { name: 'Big', paths: ['src'] }] });
+  assert.ok(!r.isError, r.content[0].text);
+  assert.match(r.content[0].text, /^Prepped for Josh: .*You cannot start one\.$/m);
+  assert.match(r.content[0].text, /^Refused Big: 9,000 lines/m);
+  assert.match(r.content[0].text, /^Land: ready, draft PR #7 https:\/\/github\.com\/o\/r\/pull\/7 \(120 lines, 3 files\)$/m);
+  await tool('prep_ultra_reviews', {});
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/ultrareview/batch`, `GET /api/tickets/${ID}/ultrareview/batch`]);
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/ultrareview/batch`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/ultrareview/batch`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/ultrareview/batch/x/start`), 'the Start stays a person\'s');
+});
+
 test('wake_at posts to its own internal id, which its token may do (#722)', async () => {
   calls.length = 0;
   respond = () => [200, { set: { id: 1, when: 'Wed 18 Nov, 09:00 PST' }, wakes: [{ id: 1, when: 'Wed 18 Nov, 09:00 PST', note: 'start it' }] }];

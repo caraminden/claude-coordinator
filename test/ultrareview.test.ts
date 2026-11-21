@@ -202,6 +202,9 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
   const TM = store.createTicket({ project_id: P.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
   const M = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Thing', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(M.id, r, 'ticket/9-thing');
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  store.updateTicket(M.id, { person_id: josh.id });
+  const M2 = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Other', permission_mode: 'default', created_by: 'Cara' });
   store.db.close();
   const srv = await bootServer({ root: dir, env: { CLAUDE_BIN: bin } });
   try {
@@ -211,13 +214,21 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
       ...(method === 'POST' ? { body: JSON.stringify({ mode: 'branch', confirm: true }) } : {}),
     });
     for (const id of [M.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await asAgent(id, method)).status, 403, `${id} ${method}`);
-    // The batch routes (#1399) too: nothing can be prepped, started or discarded for a person by a turn.
-    for (const id of [M.id, TM.id]) {
-      for (const [method, path] of [['GET', 'batch'], ['POST', 'batch'], ['POST', 'batch/x/start'], ['DELETE', 'batch/x']]) {
-        const res = await fetch(`${srv.base}/api/tickets/${M.id}/ultrareview/${path}`, { method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ areas: [{ paths: 'lib' }], confirm: true }) }) });
-        assert.equal(res.status, 403, `${id} ${method} ${path}`);
-      }
+    // The batch routes (#1399): no turn starts or discards one, and only the chat's own minion preps, for its turn's person.
+    const batchAs = (id: number, method: string, path: string, on = M.id) => fetch(`${srv.base}/api/tickets/${on}/ultrareview/${path}`, { method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ areas: [{ paths: 'lib' }], confirm: true }) }) });
+    for (const id of [M.id, M2.id, TM.id]) {
+      for (const [method, path] of [['POST', 'batch/x/start'], ['DELETE', 'batch/x']]) assert.equal((await batchAs(id, method, path)).status, 403, `${id} ${method} ${path}`);
     }
+    for (const id of [M2.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await batchAs(id, method, 'batch')).status, 403, `another thread ${id} ${method} batch`);
+    const own = await batchAs(M.id, 'GET', 'batch');
+    assert.equal(own.status, 200);
+    assert.deepEqual((await own.json()).rows, []);
+    const noGithub = await batchAs(M.id, 'POST', 'batch');
+    assert.equal(noGithub.status, 409);
+    assert.match((await noGithub.json()).error, /^Josh has no GitHub login linked .*never borrow someone else's/, "preps go out as the turn's person, never the server's login");
+    const nobody = await batchAs(M2.id, 'POST', 'batch', M2.id);
+    assert.equal(nobody.status, 403);
+    assert.match((await nobody.json()).error, /No person to prep for/);
     const batch = await srv.call(`/api/tickets/${M.id}/ultrareview/batch`, { areas: [{ name: 'Lib', paths: 'lib' }, { paths: 'nope' }] });
     assert.equal(batch.status, 200, JSON.stringify(batch.data));
     assert.deepEqual(batch.data.rows, []);

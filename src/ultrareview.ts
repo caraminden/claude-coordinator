@@ -3,6 +3,7 @@
 // minion's branch or on an area of the repo, and posts the findings in the chat it came from.
 // It's billed per run once an account's 3 free runs are gone, so only a person starts one: its route is
 // person-only (src/routes/tickets.ts), no MCP tool reaches it, and the tripwire stops a turn running the CLI.
+// A minion may only prep a batch for its turn's person (MCP prep_ultra_reviews); the Start stays theirs.
 //
 // Area mode: a scratch clone gets a base branch that is the repo minus the area's paths and a branch
 // that adds them back, so the diff is just the area while the reviewer still sees the whole repo.

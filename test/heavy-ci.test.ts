@@ -47,9 +47,16 @@ if (/^repos\\/o\\/r$/.test(url)) out({ default_branch: 'main' });
 else if (url.endsWith('/dispatches')) {
   if (mode === 'refuse') { process.stderr.write('HTTP 404: Not Found\\n'); process.exit(1); }
   const f = {}; for (let i = 0; i < a.length; i += 2) { const [k, ...v] = a[i + 1].split('='); f[k] = v.join('='); }
+  f.shipLooks = fs.existsSync(path.join(dir, 'ship-looks')) ? fs.readFileSync(path.join(dir, 'ship-looks'), 'utf8') : '0';
   fs.writeFileSync(state, JSON.stringify(f));
 } else if (url.includes('/workflows/citadel-heavy.yml/runs')) out({ workflow_runs: fs.existsSync(state) ? [{ id: 7, display_title: 'heavy ' + id() }] : [] });
-else if (url.includes('/actions/runs?status=in_progress')) out({ total_count: mode === 'busy' ? 1 : 0, workflow_runs: [] });
+else if (url.includes('/actions/runs?status=')) {
+  // mode ship: a ship's run is queued for the first three looks, then gone; each look is counted, and the dispatch notes the count.
+  const f = path.join(dir, 'ship-looks'), n = Number(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : 0) + (url.includes('status=queued') ? 1 : 0);
+  fs.writeFileSync(f, String(n));
+  const ship = mode === 'ship' && url.includes('status=queued') && n <= 3 ? [{ head_branch: 'land/ticket/1-x', created_at: new Date().toISOString() }] : [];
+  out({ total_count: mode === 'busy' && url.includes('in_progress') ? 1 : ship.length, workflow_runs: ship });
+}
 else if (url.endsWith('/runs/7/cancel')) fs.writeFileSync(path.join(dir, 'cancelled'), '');
 else if (url.endsWith('/runs/7')) {
   const n = Number(fs.existsSync(path.join(dir, 'polls')) ? fs.readFileSync(path.join(dir, 'polls'), 'utf8') : 0) + 1;
@@ -153,6 +160,22 @@ test('busy runners keep the job waiting on CI: it never comes back to perigee', 
   assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, 'hello from CI\n');
   assert.ok(!existsSync(join(r.gh, 'cancelled')));
+});
+
+test("a ship's CI run goes first: a new heavy job waits for it before it is dispatched, and never runs on perigee", () => {
+  const r = repo();
+  const res = run(r, 'ship', { CITADEL_HEAVY_CI_POLL: '0.05' });
+  assert.equal(res.status, 3, res.stderr);
+  assert.equal(res.stdout, 'hello from CI\n');
+  assert.equal(JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8')).shipLooks, '4', 'dispatched only once the ship run was gone');
+  assert.match(res.stderr, /waiting for 1 ship run\(s\) on CI/);
+});
+
+test("a ship run that never ends holds the job only up to the limit, then it goes to CI's queue", () => {
+  const r = repo();
+  const res = run(r, 'ship', { CITADEL_HEAVY_SHIP_WAIT: '0.01' });
+  assert.equal(res.status, 3, res.stderr);
+  assert.match(res.stderr, /starting anyway/);
 });
 
 test('from a subfolder it runs there on CI, with every edit in the repo and no untracked secrets', () => {

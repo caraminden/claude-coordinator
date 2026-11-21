@@ -95,6 +95,35 @@ function snapshot(): string {
   }
 }
 
+/** How many ship runs (land/* branches, tools/land.sh) are queued or running on the repo's CI now; 0 when GitHub doesn't say. */
+function shipRuns(slug: string): number {
+  // Only runs from the last 15 minutes count, as in tests.yml's wait for the lands: GitHub keeps some abandoned ones queued.
+  const since = Date.now() - 15 * 60_000;
+  let n = 0;
+  for (const status of ['queued', 'in_progress']) {
+    try {
+      const runs = gh([`repos/${slug}/actions/runs?status=${status}&per_page=50`], 'reading the ship runs').workflow_runs ?? [];
+      n += runs.filter((r: any) => String(r.head_branch || '').startsWith('land/') && Date.parse(r.created_at) >= since).length;
+    } catch { /* unread: the job goes ahead rather than wait on a blip */ }
+  }
+  return n;
+}
+
+/** Ships first (#1347, Cara 2026-11-20: "maybe heavy jobs should wait if they are slowing down the ship train?"): while a
+ *  ship's run is queued or running, a new heavy job waits here, up to CITADEL_HEAVY_SHIP_WAIT s (default 1800), before it
+ *  is dispatched. It waits rather than run on perigee, where a ship that fell back runs its suite too; a job already on
+ *  CI goes on. After the limit it goes to CI's queue anyway, so a stuck run never holds it for good. */
+async function waitForShips(slug: string, poll: number) {
+  const limit = Number(process.env.CITADEL_HEAVY_SHIP_WAIT) || 1800;
+  const from = Date.now();
+  let told = 0;
+  for (let n = shipRuns(slug); n > 0; n = shipRuns(slug)) {
+    if (Date.now() - from >= limit * 1000) { say(`a ship's CI run is still going after ${Math.round(limit / 60)} min; starting anyway`); return; }
+    if (Date.now() - told >= 300_000) { say(`waiting for ${n} ship run(s) on CI to finish first (${Math.round((Date.now() - from) / 60000)} min)`); told = Date.now(); }
+    await sleep(poll);
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const poll = Number(process.env.CITADEL_HEAVY_CI_POLL) || 10;
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
@@ -125,6 +154,7 @@ async function main(argv: string[]): Promise<number> {
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
   try {
+    await waitForShips(slug, poll);
     try {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
       gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`,

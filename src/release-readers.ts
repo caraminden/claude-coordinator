@@ -371,8 +371,12 @@ class RunsCache {
    */
   out(t: Found, r: RunJobs): boolean {
     if (!this.released(t, r)) return false;
-    if (!t.desktop) return true;
+    if (!this.gated(t)) return true;
     return this.onFeed(t, r.run.id) || !!this.feeds.get(tkey(t))?.counted.has(runKey(r));
+  }
+  /** A desktop target whose feed was read, so its runs wait for the feed; with no publisher (a dev copy) nothing is read. */
+  gated(t: Found): boolean {
+    return !!t.desktop && this.feeds.has(tkey(t));
   }
   /** Whether a desktop target's feed holds run `id`'s build now. */
   onFeed(t: Found, id: number): boolean {
@@ -578,7 +582,7 @@ export class CiPackageReader implements Reader {
   async refresh() {
     for (const t of this.d.finder.list('ci')) {
       // A desktop target's build is out once its feed has it, not when CI ships it (#1522): read the feed first.
-      if (t.desktop) {
+      if (t.desktop && this.d.desktop) {
         const index = await this.d.feeds?.index(t.projectId, t.desktop.app).catch(() => null);
         this.cache.feed(t, new Set((index?.builds ?? []).flatMap((b) => (/^ci:\d+$/.test(b.source ?? '') ? [Number(b.source!.slice(3))] : []))));
       }
@@ -643,7 +647,8 @@ export class CiPackageReader implements Reader {
       const installs = (r: RunJobs | undefined) => (r && t.desktop ? desktopPaths(t.projectId, t.desktop.app).install : r ? file(r) : null);
       const out = (r: RunJobs) => this.cache.out(t, r);
       // A desktop target's run CI released that its feed hasn't taken: on its way, or refused (#1522).
-      const unpublished = (r: RunJobs) => !!t.desktop && this.cache.released(t, r) && !out(r);
+      const gated = this.cache.gated(t);
+      const unpublished = (r: RunJobs) => gated && this.cache.released(t, r) && !out(r);
       const publishFailed = (r: RunJobs) => unpublished(r) && !!this.d.desktop?.failed?.(t.projectId, t.desktop!.app, r.run.id);
       const tried = (r: RunJobs) => out(r) || failedShip(r) || publishFailed(r);
       const was = (r: RunJobs) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), out(r) || !t.desktop ? file(r) : null, num.of(r));
@@ -651,7 +656,7 @@ export class CiPackageReader implements Reader {
       // card's roll back line says what waits. A desktop app's pinned build is that only once its feed has it.
       const pinned = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
       const heldRun = pinned && runs.find((r) => r.run.id === pinned.run);
-      const held = pinned && (!t.desktop || (heldRun ? out(heldRun) : this.cache.onFeed(t, pinned.run))) ? pinned : null;
+      const held = pinned && (!gated || (heldRun ? out(heldRun) : this.cache.onFeed(t, pinned.run))) ? pinned : null;
       if (held) {
         const recent = runs.filter((r) => r !== heldRun && tried(r)).slice(0, PREVIOUS).map(was);
         // Newer runs can push the held one out of the page GitHub lists: it is still what people get, so show it from the pin.
@@ -686,7 +691,7 @@ export class CiPackageReader implements Reader {
       const lead = running ?? waiting;
       // A target numbered by run knows its number once its run exists.
       const number = t.numbering?.number === 'run' ? (moving?.run.run_number ?? null) : num.total + 1;
-      const track = [...CI_TRACK.slice(0, -1), ...(t.needs ?? []).map(needName), ...(t.desktop ? ['publish'] : []), 'live'];
+      const track = [...CI_TRACK.slice(0, -1), ...(t.needs ?? []).map(needName), ...(gated ? ['publish'] : []), 'live'];
       return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), installs(cur), num.of(cur)) : null, next: lead ? nextOf(track, usual, lead, changes, number) : null, line: [], recent };
     });
   }

@@ -53,20 +53,28 @@ function compounds(sel: string): string[] {
   return out;
 }
 
-/** Drops the arguments of `:not()` and `:has()` (they never narrow which elements a compound is tried on). */
-function withoutNegations(compound: string): string {
+/** The compound with every functional pseudo-class (`:not()`, `:nth-child()`, `:is()` …) cut out, and the arguments
+ *  of each `:is()` / `:where()` it held. */
+function cutFunctions(compound: string): { rest: string, groups: string[] } {
   let s = compound;
+  const groups: string[] = [];
   for (;;) {
-    const at = s.search(/:(not|has)\(/);
-    if (at < 0) return s;
+    const at = s.search(/::?[a-z-]+\(/);
+    if (at < 0) return { rest: s.replace(/::?[a-z-]+/g, ''), groups };
     let i = s.indexOf('(', at), depth = 0;
     for (; i < s.length; i++) { if (s[i] === '(') depth++; else if (s[i] === ')' && --depth === 0) break; }
+    if (/^:(is|where)\(/.test(s.slice(at))) groups.push(s.slice(s.indexOf('(', at) + 1, i));
     s = s.slice(0, at) + s.slice(i + 1);
   }
 }
 
-/** True when a compound names something to filter on: a type, class, id or attribute (an :is() or :where() of them counts). */
-const narrows = (compound: string) => /^[a-zA-Z]|[.#[]/.test(withoutNegations(compound).replace(/::?[a-z-]+(?!\()/g, ''));
+/** True when a compound names something to filter on: a type, class, id or attribute, or an :is() / :where() whose
+ *  every branch does (`:not()`, `:has()` and `:nth-child()` never narrow which elements it is tried on). */
+function narrows(compound: string): boolean {
+  const { rest, groups } = cutFunctions(compound);
+  if (/^[a-zA-Z]|[.#[]/.test(rest)) return true;
+  return groups.some((g) => splitTop(g, ',').every((branch) => { const c = compounds(branch); return narrows(c[c.length - 1]); }));
+}
 
 /** The costly shape: a `:has()` in an ancestor or parent compound, and a subject with nothing to filter on. */
 function costlyHas(sel: string): boolean {
@@ -94,6 +102,8 @@ test('the checker flags the four rules that cost 20 ms, and passes their rewrite
     '.zzz:has(.get-app) *',
     ':where(.foot:has(.get-app)) > *',
     'body:has(.split) *::before',
+    '.panel:has(.flag) > :nth-child(2)',
+    '.panel:has(.flag) > :is(*, .row)',
   ]) assert.ok(costlyHas(bad), `flags ${bad}`);
   for (const ok of [
     '.artifacts-main > .ticket-head:has(> .settings-tabs) ~ :not(.ticket-head)',
@@ -106,6 +116,7 @@ test('the checker flags the four rules that cost 20 ms, and passes their rewrite
     '.progress-line .text:has(.doing) > :is(.stepname, .arrow)',
     '.qcard.answered .tile:not(:has(.opt.picked))',
     '.foo:has(.x) + *',
+    '.panel:has(.flag) > :is(.row, .head):nth-child(2)',
   ]) assert.ok(!costlyHas(ok), `passes ${ok}`);
 });
 

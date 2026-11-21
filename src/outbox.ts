@@ -81,6 +81,8 @@ export class Outbox {
   private kinds = new Map<string, Kind>();
   /** Rows a killed server left `sending`, found again at each boot (the state is saved, so a second kill finds them too). */
   private leftover = new Set<number>();
+  /** Events whose turn started while deliverTarget was sending: on an idle minion runner.send starts the turn before it returns, so before the row has its event_id. */
+  private started: Set<number> | null = null;
   /** Targets with a lane step queued or running: no second one, and the timer skips their rows until it ends. */
   private busy = new Set<string>();
   private inflight = new Set<Promise<unknown>>();
@@ -167,6 +169,7 @@ export class Outbox {
   turnStarted(ticketId: number, eventIds: number[]) {
     const now = this.now();
     const ids = new Set(eventIds);
+    for (const id of ids) this.started?.add(id);
     const rows = this.store.listDeliveries({ to: ticketId, states: ['sending', 'held'] });
     for (const r of rows) if (r.state === 'sending' && r.event_id != null && ids.has(r.event_id)) this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
     if (rows.some((r) => r.state === 'held')) void this.poke({ type: 'reopened', ticket: ticketId });
@@ -264,6 +267,9 @@ export class Outbox {
       const left = this.leftover.delete(r.id);
       if (r.event_id != null && toKind === 'minion' && this.runner.holds(toId, r.event_id)) {
         this.store.updateDelivery(r.id, { due: now + RECHECK_MS }, ['sending'], now);
+      } else if (r.event_id != null && toKind === 'minion' && this.store.turnSince(toId, r.event_id)) {
+        // Not queued any more and a turn ran after it was posted: that turn carried it (a restart, or a missed hook).
+        this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
       } else if (left) {
         // A killed server left it: its turn may have started before the kill, so the copy sent now says it may repeat.
         if (this.store.updateDelivery(r.id, { state: 'waiting', due: now }, ['sending'], now)) repeats.add(r.id);
@@ -291,15 +297,20 @@ export class Outbox {
     }
     const claimed = rows.filter((r) => this.store.updateDelivery(r.id, { state: 'sending', met_at: r.met_at ?? now }, ['waiting'], now));
     const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text, repeats.has(row.id)) };
-    for (const kindName of new Set(claimed.map((r) => r.kind))) {
-      const batch = claimed.filter((r) => r.kind === kindName).map((r) => this.store.getDelivery(r.id)!);
-      let outcomes: Outcome[];
-      try {
-        outcomes = this.kinds.get(kindName)!.deliver(batch, ctx);
-      } catch (err) {
-        outcomes = batch.map(() => ({ state: 'retry', reason: String((err as Error)?.message ?? err) }));
+    this.started = new Set();
+    try {
+      for (const kindName of new Set(claimed.map((r) => r.kind))) {
+        const batch = claimed.filter((r) => r.kind === kindName).map((r) => this.store.getDelivery(r.id)!);
+        let outcomes: Outcome[];
+        try {
+          outcomes = this.kinds.get(kindName)!.deliver(batch, ctx);
+        } catch (err) {
+          outcomes = batch.map(() => ({ state: 'retry', reason: String((err as Error)?.message ?? err) }));
+        }
+        batch.forEach((r, i) => this.settle(r, outcomes[i] ?? { state: 'retry', reason: 'no outcome' }, now));
       }
-      batch.forEach((r, i) => this.settle(r, outcomes[i] ?? { state: 'retry', reason: 'no outcome' }, now));
+    } finally {
+      this.started = null;
     }
   }
 
@@ -314,6 +325,7 @@ export class Outbox {
 
   private settle(r: Delivery, o: Outcome, now: number) {
     if (o.state === 'accepted') this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
+    else if (o.state === 'handed' && this.started?.has(o.event)) this.store.updateDelivery(r.id, { state: 'sent', event_id: o.event }, ['sending'], now);
     else if (o.state === 'handed') this.store.updateDelivery(r.id, { event_id: o.event, due: now + RECHECK_MS }, ['sending'], now);
     else if (o.state === 'drop') this.store.updateDelivery(r.id, { state: 'dropped', reason: o.reason }, ['sending'], now);
     else this.retry(r, o.reason, now);

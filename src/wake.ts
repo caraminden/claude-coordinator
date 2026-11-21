@@ -762,9 +762,9 @@ export class TimedWakes {
 
   private wake = (r: Delivery): TimedWake => ({ id: r.id, ticket: r.to_id, at: Number(r.when_arg), note: r.payload.note, setBy: r.payload.setBy });
 
-  /** Wakes not yet sent, in id order: every chat's, or one chat's. */
+  /** Wakes not yet handed to the chat, in id order: every chat's, or one chat's. The ones cancel() can still stop. */
   list(ticket?: number): TimedWake[] {
-    return this.store.listDeliveries({ kind: 'wake_at', to: ticket, states: ['waiting', 'held', 'sending'] }).map(this.wake);
+    return this.store.listDeliveries({ kind: 'wake_at', to: ticket, states: ['waiting', 'held'] }).map(this.wake);
   }
 
   /** The soonest wake of `ticket`, for its list note, or null. */

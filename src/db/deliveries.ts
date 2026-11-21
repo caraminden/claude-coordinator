@@ -83,6 +83,11 @@ export const deliveryQueries = {
    * "Steps"). A row keeps its old id when the table never used it, so an id a minion remembers still names its wake; an
    * `origin` already moved is skipped. Returns the rows added.
    */
+  /** Whether a turn of `ticketId` has run since event `eventId` was posted (any Claude output after it). */
+  turnSince(this: Store, ticketId: number, eventId: number): boolean {
+    return !!this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? LIMIT 1").get(ticketId, eventId);
+  },
+
   importDeliveries(this: Store, key: string, rows: NewDelivery[], now = Date.now()): Delivery[] {
     const ids: number[] = [];
     this.db.exec('BEGIN IMMEDIATE');

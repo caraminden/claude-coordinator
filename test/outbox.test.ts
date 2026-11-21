@@ -60,6 +60,14 @@ function fakeRunner(firstEvent = 0) {
       return r.stall ? new Promise(() => {}) : Promise.resolve().then(step);
     },
     refuseTurn: () => r.refuse,
+    /** Set: an idle minion's turn starts inside send, as the real runner's does, and reports its events. */
+    starts: null as Outbox | null,
+  };
+  const send = r.send;
+  r.send = (ticketId, author, text) => {
+    const out = send(ticketId, author, text);
+    if (!r.holding.has(out.event.id)) r.starts?.turnStarted(ticketId, [out.event.id]);
+    return out;
   };
   return r;
 }
@@ -357,4 +365,58 @@ test('limits still hold, cancel works only in its own chat, and sent rows are pr
   now.t += 7 * DAY;
   await outbox.poke({ type: 'tick' });
   assert.equal(rows(b).length, 0);
+});
+
+test('a wake whose turn starts inside the send is marked sent at once and never sent again (#1385 follow-up)', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const r = fakeRunner();
+  const { outbox, wakes } = server(r, now);
+  r.starts = outbox;
+  await outbox.boot();
+  const w = wakes.add(id, T0 + HOUR, 'once only', `minion:${id}`);
+  now.t = T0 + HOUR;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(r.sent.length, 1);
+  assert.equal(store.getDelivery(w.id)!.state, 'sent');
+  for (const m of [6, 30, 120, 400]) {
+    now.t = T0 + HOUR + m * 60_000;
+    await outbox.poke({ type: 'tick' });
+  }
+  assert.equal(r.sent.length, 1, 'the 5-minute check never sends it again');
+});
+
+test('a wake handed to a busy minion is off the list, as cancel says', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const r = fakeRunner();
+  const { outbox, wakes } = server(r, now);
+  await outbox.boot();
+  const w = wakes.add(id, T0 + HOUR, 'queued behind a turn', `minion:${id}`);
+  r.holding.add(1); // the first event: queued behind the minion's running turn
+  now.t = T0 + HOUR;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(store.getDelivery(w.id)!.state, 'sending');
+  assert.equal(wakes.cancel(id, w.id), false);
+  assert.deepEqual(wakes.list(id), [], 'the list shows only what cancel can still stop');
+});
+
+test('a row left sending whose turn already ran is marked sent, not sent again, at boot', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const first = fakeRunner();
+  const a = server(first, now);
+  await a.outbox.boot();
+  const w = a.wakes.add(id, T0 + HOUR, 'already read', `minion:${id}`);
+  const posted = store.addEvent(id, 'user_message', { author: 'Citadel', text: 'Wake you set' }).id;
+  store.updateDelivery(w.id, { state: 'sending', event_id: posted, attempts: 1, due: T0 + HOUR + 5 * 60_000 }, undefined, T0 + HOUR);
+  store.addEvent(id, 'claude', { type: 'system', subtype: 'init' });
+  a.outbox.stop();
+
+  now.t = T0 + 2 * HOUR;
+  const second = fakeRunner();
+  const b = server(second, now);
+  await b.outbox.boot();
+  assert.deepEqual(second.sent, [], 'its turn ran: no repeat');
+  assert.equal(store.getDelivery(w.id)!.state, 'sent');
 });

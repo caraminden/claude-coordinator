@@ -290,6 +290,7 @@ export class LiveWaiters {
     const open = this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held', 'sending'] });
     const done = this.store.listDeliveries({ kind: 'relay', states: ['sent'] });
     for (const batch of new Set(rows.filter((_, i) => outcomes[i].state === 'accepted').map((r) => r.payload.batch))) {
+      if (rows.some((r, i) => r.payload.batch === batch && outcomes[i].state !== 'accepted')) continue; // one is retrying: the note goes with the last
       if (open.some((o) => o.payload.batch === batch && !rows.some((r) => r.id === o.id))) continue;
       const group = [...done.filter((d) => d.payload.batch === batch), ...rows.filter((r, i) => r.payload.batch === batch && outcomes[i].state === 'accepted')];
       try {
@@ -589,9 +590,10 @@ export class LiveWaiters {
       }
     }
     const ready: Relay[] = [];
-    for (const r of this.relays()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
+    const old = () => this.store.getSetting<Relay[]>(RELAYS) ?? []; // the table's rows are the outbox's: only the old key is delivered here
+    for (const r of old()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
     // Dropped before sending, so a send that throws can't deliver one twice; read again: one cancelled meanwhile stays cancelled.
-    const now = this.relays();
+    const now = old();
     const go = ready.filter((r) => now.some((o) => o.id === r.id));
     if (!go.length) return;
     this.store.setSetting(RELAYS, now.filter((r) => !go.some((o) => o.id === r.id)));

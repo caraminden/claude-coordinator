@@ -227,7 +227,7 @@ export class Outbox {
     for (const [key, r] of due) {
       this.busy.add(key);
       const step = () => this.deliverTarget(r.to_kind, r.to_id);
-      // shortcut: a Taskmaster target (a project) has no lane of its own here; the kinds that send to one (relays, step 2) give it one.
+      // shortcut: a Taskmaster target (a project) has no lane of its own here; relays to a Taskmaster run unlaned, which is fine for held mail.
       const run = r.to_kind === 'minion' ? this.runner.onLane(r.to_id, 'outbox', step) : Promise.resolve().then(step);
       const p: Promise<unknown> = run
         .catch((err) => this.opts.log?.(`outbox: delivery to ${key} failed: ${(err as Error)?.stack ?? err}`))

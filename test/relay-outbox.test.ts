@@ -150,3 +150,20 @@ test('cancelRelay drops a pending row, only for its sender', async () => {
   assert.ok(s.waiters.cancelRelay(from.id, relay.id));
   assert.equal(s.waiters.relays().length, 0);
 });
+
+test('a re-check while a relay waits in retry backoff never sends it a second time', async () => {
+  const before = commit();
+  const pending = commit();
+  const [from, to] = [minion(), minion()];
+  const s = server(before);
+  await s.outbox.boot();
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: pending });
+  s.r.failFirst = true;
+  await s.waiters.check(pending);
+  await s.outbox.poke({ type: 'tick' });
+  s.r.failFirst = false;
+  await s.waiters.check(pending);
+  assert.equal(s.r.delivered.length, 0, 'the old path does not send a table row');
+  assert.equal(store.getSetting('relay-when-live') ?? null, null);
+  assert.equal(rows().length, 1);
+});

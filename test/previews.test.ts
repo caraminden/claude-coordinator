@@ -16,9 +16,12 @@ const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'previews-test-'));
 const procs: ChildProcess[] = [];
 after(async () => {
+  // The server's last writes land before it is stopped and its folder deleted (#1437, CITADEL_TEST_SETTLED below).
+  const busy: string[] = base ? await fetch(`${base}/api/test/settled`).then((r) => r.json()).then((r) => r.busy, () => []) : [];
   await stopProcs(procs);
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
+  assert.deepEqual(busy, [], 'the server was still busy when the test stopped it');
 });
 
 /** A minion's worktree: here, a copy of this checkout's app. */
@@ -57,7 +60,7 @@ before(async () => {
     cwd: repo,
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET, CITADEL_TEST_SETTLED: '1',
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -181,7 +184,7 @@ test('dismissing the minion stops its preview and deletes its copy', async () =>
   const dir = join(data, 'previews', String(ticket.id));
   assert.equal(existsSync(join(dir, 'coordinator.db')), true);
   const res = await fetch(`${base}/api/tickets/${ticket.id}/status`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'closed' }) });
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 200, await res.clone().text());
   assert.equal(existsSync(dir), false);
   assert.equal((await page(`/preview/${ticket.id}/`)).status, 404);
 });

@@ -18,9 +18,13 @@ const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'machines-'));
 const procs: ChildProcess[] = [];
 after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
+  try {
+    await srv?.settled(); // the server's last writes land before it is stopped and its folder deleted (#1437)
+  } finally {
+    await stopProcs(procs);
+    await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const { mcpServer, fakeClaude, turns, startMachineAgent } = machineFakes(root, procs);
@@ -106,6 +110,8 @@ test('a shared machine\'s token shows again to admins, a relink shows the new on
   assert.notEqual(relinked.token, token);
   assert.equal((await call(`/api/machines/${machine.id}/token`)).token, relinked.token);
   // The sealed copy is bound to its row: moved onto another machine, it doesn't open.
+  // The server's own writes go through its write worker: let them land before this test writes the file itself (#1437).
+  await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const old = store.createMachine('linked-before', hashToken(newToken(999)), 'Cara');
   assert.equal((await call('/api/machines')).find((m: any) => m.id === old.id).token_showable, false);
@@ -381,6 +387,7 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   assert.equal(nowB.status, 200);
   await nowB.body!.cancel();
   // The scheme's old machine tools switch is retired: off in the table, B's minions still get it.
+  await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   store.db.prepare('UPDATE projects SET machine_tools = 0 WHERE id = ?').run(b.id);
   store.db.close();
@@ -424,6 +431,7 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   const josh = await person('Josh');
   const dana = await person('Dana');
   // Their turns run on the server's login here, as the first admin's do: a stand-in for linking their own Claude.
+  await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   for (const p of [josh, dana]) store.updateUser(p.id, { server_login: 1 });
   const shared = await call('/api/projects', { method: 'POST', body: { name: 'Shared' } });
@@ -504,6 +512,7 @@ test('a contraption turn gets its person\'s own machines, and no one else\'s or 
   const key = readFileSync(join(made.keys_dir, 'contraption.key'), 'utf8');
   const me = await call('/api/me');
   const olive = await call('/api/people', { method: 'POST', body: { name: 'Olive' } });
+  await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   store.updateUser(olive.person.id, { server_login: 1 });
   for (const id of [me.id, olive.person.id]) await call(`/api/contraptions/tally/people/${id}`, { method: 'PUT', body: { enabled: true } });
@@ -543,6 +552,7 @@ test('a contraption turn gets its person\'s own machines, and no one else\'s or 
 });
 
 test('a Taskmaster lists the machines its scheme can see and checks one through a turn\'s path (#307)', async () => {
+  await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const josh = store.findUser('name', 'Josh')!;
   const dana = store.findUser('name', 'Dana')!;
@@ -635,6 +645,7 @@ test('an older machine learns what it runs from its agent, and a known one keeps
   assert.equal(mcpFromAgent(''), null);
   assert.equal(mcpFromAgent('x'.repeat(200)), null, 'cut at the route\'s 200 characters');
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'kept-box' } });
+  await srv.settled();
   new Store(join(root, 'data', 'coordinator.db')).updateMachine(machine.id, { mcp_kind: 'none' });
   startAgent(token, ['--', process.execPath, mcpServer]);
   const online = await until('kept-box to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'kept-box' && m.online));

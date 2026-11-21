@@ -1795,9 +1795,10 @@ setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref(
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
-// Requests not yet answered, for settled() (src/settled.ts): an event stream stays open by design, so it doesn't count.
+// Requests not yet answering, for settled() (src/settled.ts). Busy only until its headers go out: send() holds those until
+// the request's own writes land, and a stream (an agent's connect, a page's events) stays open by design once it answers.
 const inFlight = new Map<ServerResponse, string>();
-busySource(() => [...inFlight].filter(([res]) => !/^text\/event-stream/.test(String(res.getHeader('content-type') ?? ''))).map(([, what]) => `request ${what}`));
+busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]) => `request ${what}`));
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
 const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
 

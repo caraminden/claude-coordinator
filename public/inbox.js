@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { cardEvent, countMoved, isShipping, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
+import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -11,7 +11,8 @@ const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
 // Each scheme's items as last fetched, so a scheme you switch to draws its strip (or none) in its first paint instead of popping it in after.
 const inboxSeen = new Map();
 
-const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
+// Another Taskmaster session of a split scheme (#919) included: the Overlord's cards count for everyone (#1400).
+const ticketOf = (id) => itemTicket(view, id);
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
 // A mention (#1149) goes once you've opened its chat since it came.
 const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))
@@ -58,7 +59,10 @@ export function refreshSchemeCounts() {
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
     for (const p of projects) {
-      for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+      // The open scheme's pill is the strip's (renderInbox, from refreshInbox below): drawing the server's here too would
+      // flip it between the two answers whenever they disagree for a moment (#1400).
+      const own = p.id === view?.projectId && inbox.projectId === p.id;
+      if (!own) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
       // A favicon a merge added or changed since the page drew it.
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
@@ -172,13 +176,14 @@ export function renderInbox() {
   mentions.clear();
   for (const [id, m] of mentionMap(inbox.items)) mentions.set(id, m);
   // A dismissed minion is never in your inbox (#589), even while the server's list still has it: your own dismiss shows at once.
-  const items = inbox.items.filter((i) => ticketOf(i.ticketId) && ticketOf(i.ticketId).status !== 'closed');
+  // Nothing else drops: the badge away from the scheme counts the same items (#1400).
+  const items = stripItems(view, inbox.items);
   const strip = inboxStrip();
   // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
   const all = items.filter((i) => !faded(i));
   const waiting = all;
-  const count = new Set(waiting.map((i) => i.ticketId)).size;
-  const shown = new Set(all.map((i) => i.ticketId)).size;
+  const count = minionCount(waiting);
+  const shown = minionCount(all);
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
@@ -189,6 +194,9 @@ export function renderInbox() {
   const keys = seenInScheme(seenHere.keys, waiting, view.id, moved);
   Object.assign(seenHere, { projectId: view.projectId, chatId: view.id ?? seenHere.chatId, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
   if (!hidden) markItemsSeen(view.projectId, [...keys]);
+  // The scheme list's next redraw (hidden.js) draws the open scheme's pill from this count too, not the server's older one.
+  const listed = view.projects?.find((p) => p.id === view.projectId);
+  if (listed) Object.assign(listed, { inbox: hidden ? 0 : count, running, working, shipping });
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working, shipping }));
   updateBadge();
   strip.hidden = false;
@@ -235,7 +243,9 @@ export function renderInbox() {
 let inboxTips = null;
 export function inboxRow(items) {
   const { from } = items[0];
-  const t = ticketOf(items[0].ticketId) ?? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title };
+  // A minion the page hasn't heard of yet still gets a row, by its id, until its first update names it.
+  const t = ticketOf(items[0].ticketId) ?? (from ? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title }
+    : { id: items[0].ticketId, project_id: view.projectId, number: null, kind: 'ticket', title: '' });
   const asks = new Map();
   for (const i of items) {
     const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;

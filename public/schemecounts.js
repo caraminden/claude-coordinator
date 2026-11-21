@@ -102,3 +102,28 @@ export function rowTarget(items) {
   const oldest = items.reduce((a, b) => (b.at < a.at ? b : a));
   return oldest.eventId ?? (['replies', 'loop'].includes(oldest.kind) ? 'latest' : null);
 }
+
+/** How many minions a scheme's Needs-you badge counts: minions, not items (Cara, 2026-11-01). The server's pills and the open scheme's own use this one count (#1400). */
+export const minionCount = (items) => new Set(items.map((i) => i.ticketId)).size;
+
+/**
+ * The minion or Taskmaster a Needs-you item is on, as the open scheme's page knows it (`view`): your Taskmaster, the
+ * minions list, or another Taskmaster session of a split scheme (#919), which the page lists in `taskmasters` without
+ * its ticket. Undefined for a minion the page hasn't heard of yet.
+ */
+export function itemTicket(view, id) {
+  if (view?.coordinator?.id === id) return view.coordinator;
+  const t = view?.tickets?.get(id);
+  if (t) return t;
+  const tm = view?.taskmasters?.find((x) => x.id === id);
+  if (!tm) return undefined;
+  return tm.ticket ?? { id, kind: 'coordinator', project_id: view.projectId, status: 'idle', updated_at: tm.updated_at ?? 0 };
+}
+
+/**
+ * What the open scheme's strip lists and its pill counts: every item the server sent (src/inbox.ts, the same list the
+ * badge away from the scheme counts), less those on a minion this page has seen dismissed (#589), which drop at once.
+ * Nothing else is left out, so the badge never counts what a click doesn't show (#1400: the Overlord's card counted
+ * on the rail and vanished from the strip, so the pill popped between the two counts).
+ */
+export const stripItems = (view, items) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed');

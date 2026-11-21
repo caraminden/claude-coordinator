@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isShipping, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -138,4 +138,30 @@ test('a minimized scheme never lights the icon badge (#1243)', () => {
   const p = { id: 1, inbox: 1, fresh: true };
   assert.equal(wantsBadge([p], null, null), true);
   assert.equal(wantsBadge([{ ...p, minimized: true }], null, null), false);
+});
+
+// #1400: Peek Auras' rail said 2 away from it and 1 inside it. It's split (#919): the page lists Cara's own Taskmaster
+// and the minions, while the Overlord's Taskmaster (everyone's, so the server counts its card) is only in `taskmasters`.
+test("the open scheme's strip shows every item the badge counts, a card on a Taskmaster the page doesn't list included (#1400)", () => {
+  const own = { id: 258, kind: 'coordinator', project_id: 3, status: 'idle', updated_at: 1 };
+  const shipping = { id: 2955, number: 768, kind: 'ticket', project_id: 3, status: 'running', state: 'outside', note: 'landing: in line', updated_at: 1 };
+  const view = {
+    projectId: 3, coordinator: own, tickets: new Map([[shipping.id, shipping]]),
+    taskmasters: [{ id: 2287, person_id: null, person_name: null, updated_at: 5 }, { id: 258, person_id: 1, person_name: 'Cara', updated_at: 1 }],
+  };
+  // What /api/projects/3/inbox sent, and what the rail's badge counts (inboxCount: minions, not items).
+  const items = [
+    { kind: 'question', ticketId: 2287, at: 3, key: 'question:996318', eventId: 996318 },
+    { kind: 'question', ticketId: 2955, at: 4, key: 'question:1000476', eventId: 1000476 },
+  ];
+  assert.equal(minionCount(items), 2, 'the badge away from the scheme');
+  assert.equal(minionCount(stripItems(view, items)), 2, 'the same count once you open it');
+  const overlord = itemTicket(view, 2287);
+  assert.equal(overlord.kind, 'coordinator', 'its row is the Taskmaster');
+  assert.equal(overlord.project_id, 3, 'and links into this scheme, where Mine shows the Overlord\'s cards');
+  assert.equal(itemTicket(view, 2955), shipping, 'a shipping minion\'s card stays too');
+
+  // A minion you dismissed here drops at once, before the server's next list (#589).
+  view.tickets.set(2955, { ...shipping, status: 'closed' });
+  assert.equal(minionCount(stripItems(view, items)), 1);
 });

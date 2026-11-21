@@ -2,6 +2,7 @@
 import type { Approvals } from './approvals.ts';
 import type { Project, Store, Ticket } from './db.ts';
 import { inOrder } from '../public/reorder.js';
+import { minionCount as sharedMinionCount } from '../public/schemecounts.js';
 import { openMentions } from './mentions.ts';
 import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
@@ -86,8 +87,8 @@ export function inboxWaiting(store: Store, approvals: Approvals, projectId: numb
     .filter((i) => !(i.kind === 'replies' && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
 }
 
-/** How many minions the badge counts: one with any item left in `inboxWaiting` (minions, not items: Cara, 2026-11-01). */
-export const minionCount = (items: InboxItem[]) => new Set(items.map((i) => i.ticketId)).size;
+/** How many minions the badge counts: one with any item left in `inboxWaiting`; the open scheme's strip counts with the same function (#1400). */
+export const minionCount: (items: InboxItem[]) => number = sharedMinionCount;
 
 /** How many minions the scheme's Needs-you badge counts for `person` (inboxWaiting says which items count). */
 export function inboxCount(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): number {

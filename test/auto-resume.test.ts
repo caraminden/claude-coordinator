@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -212,4 +212,25 @@ test("messages queued behind a cut-off turn that isn't resumed outlive a second 
   r.recover();
   await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('queued behind it'));
   await finish(r, id);
+});
+
+// C8 (#1406): a turn that wrote while no server read it, then died before its end, keeps those words: boot recovery
+// reads the rest of its stream before it deletes the folder, as the live path does for a turn gone without a word.
+test("a turn that vanished while the server was down keeps the text it wrote meanwhile (C8)", async () => {
+  const id = newTicket();
+  const before = server();
+  before.send(id, 'Cara', 'write something');
+  const dir: string = (before as any).turns.get(id).dir;
+  await crash(before, id);
+  const words = 'Words written while the server was down.';
+  appendFileSync(join(dir, 'stream.jsonl'), `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: words }] } })}\n`);
+  const after = server();
+  after.recover();
+  const events = store.listEvents(id);
+  const said = events.findIndex((e) => e.data.includes(words));
+  const restart = events.findIndex((e) => e.kind === 'note' && /restart/.test(e.data));
+  assert.ok(said >= 0, "the turn's last text reached the chat");
+  assert.ok(restart < 0 || said < restart, "and before recovery's note on the cut-off turn");
+  await until('after.isRunning(id)', () => after.isRunning(id));
+  await finish(after, id);
 });

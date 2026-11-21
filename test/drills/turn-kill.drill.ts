@@ -36,7 +36,7 @@ test("a turn whose wrapper is SIGKILLed is resumed and finishes", gap('A1'), asy
 });
 
 // C8: at boot, a turn with no process and no exit.json is cleared without reading its stream.
-test("a turn that died while the server was down keeps the text it wrote meanwhile", gap('C8'), async () => {
+test("a turn that died while the server was down keeps the text it wrote meanwhile", async () => {
   d.fake.setRelease(null);
   if (!d.srv) await d.boot();
   const p = await d.project('Vanished');

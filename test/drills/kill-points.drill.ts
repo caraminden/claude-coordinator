@@ -13,7 +13,7 @@ const d = new Drill('kill-points');
 after(() => d.cleanup());
 
 // C3: the slot's skip guard reads the "ran" mark, so a kill before it lets the next server start the slot's minion again.
-test("a kill between a schedule's minion start and its ran mark starts one minion for the slot", gap('C3'), async () => {
+test("a kill between a schedule's minion start and its ran mark starts one minion for the slot", async () => {
   await d.boot();
   const p = await d.project('Scheduled');
   await d.srv!.stop({ keepTurns: true });

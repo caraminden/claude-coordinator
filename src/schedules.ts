@@ -4,7 +4,7 @@ import type { HeldStarts } from './held-starts.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Project, Store, User } from './db.ts';
+import type { Project, Store, Ticket, User } from './db.ts';
 import type { Runner } from './runner.ts';
 import { HttpError } from './http.ts';
 import { pickFor } from '../public/model-table.js';
@@ -415,6 +415,16 @@ export class Schedules {
     }
   }
 
+  /**
+   * The minion a run made for this slot before a kill cut its start off, ahead of the slot's ran mark (C3, #1406): made
+   * by Citadel (`by`) under the schedule's name since the slot came due. A run that got its ran mark moved next_run_at
+   * past its own minion's making, so an older run's minion never matches.
+   */
+  cutOff(s: Schedule, by: string): { id: number; number: number; status: string } | null {
+    if (s.next_run_at == null) return null;
+    return (this.db.prepare("SELECT id, number, status FROM tickets WHERE project_id = ? AND kind = 'ticket' AND title = ? AND created_by = ? AND created_at >= ? AND id IS NOT ? ORDER BY id LIMIT 1").get(s.project_id, s.name, by, s.next_run_at, s.last_ticket_id) as { id: number; number: number; status: string } | undefined) ?? null;
+  }
+
   /** The newest `limit` slots, newest first. */
   runs(id: number, limit = 10): ScheduleRun[] {
     return this.db.prepare('SELECT * FROM schedule_runs WHERE schedule_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(id, limit) as unknown as ScheduleRun[];
@@ -530,6 +540,10 @@ export class ScheduledRuns {
     const project = store.getProject(s.project_id);
     const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
     if (!project) return store.schedules.remove(s.id);
+    // A kill after this slot's minion was made and before its ran mark (C3, #1406): finish that start, not a second one.
+    const cut = store.schedules.cutOff(s, by);
+    if (cut?.status === 'closed') return store.schedules.ran(s.id, { ticketId: cut.id }, now);
+    if (cut) return this.begin(s, project, cut, last, store.schedules.minionsSince(s, by), now);
     // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
     // or waits to resume after a usage limit, an outage or a kill. Not state 'limited': a run that gave up keeps it for good.
     if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
@@ -581,7 +595,19 @@ export class ScheduledRuns {
       }
       // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
       const maker = store.findUser('name', s.created_by);
-      const { id, number } = await this.d.newMinion(project, runMinion(s, maker), by);
+      const made = await this.d.newMinion(project, runMinion(s, maker), by);
+      await this.begin(s, project, made, last, minions, now);
+    } catch (err: any) {
+      console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
+      store.schedules.ran(s.id, { error: err.message }, now);
+    }
+  }
+
+  /** A run's minion exists: give it to the maker, pin it, mark the slot ran and send its brief. Safe to repeat up to the ran mark. */
+  private async begin(s: Schedule, project: Project, { id, number }: { id: number; number: number }, last: Ticket | null | undefined, minions: number, now: number) {
+    const { store, runner, by } = this.d;
+    try {
+      const maker = store.findUser('name', s.created_by);
       store.updateTicket(id, { person_id: maker && !maker.disabled_at ? maker.id : null });
       const pinnedFor = pinForOwner(store, id);
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });

@@ -259,3 +259,39 @@ test("a run's brief reads its start time in Pacific with the zone, whatever the 
   await runs.run(s, Date.UTC(2026, 10, 20, 11, 0)); // 03:00 PST
   assert.match(sent[0], /Nov 20, 03:00 PST/);
 });
+
+// C3 (#1406): a server killed after a run made its minion and before the slot's "ran" mark left the slot due. The next
+// server finds that minion and finishes its start (the ran mark, the brief), rather than starting a second one.
+test("a slot whose minion was made before a kill finishes with that minion, not a second one (C3)", async () => {
+  const store = new Store(':memory:');
+  const p = store.createProject('One', null);
+  const sent: { id: number; text: string }[] = [];
+  let made = 0;
+  const deps = {
+    store,
+    newMinion: async (project: any, m: any, by: string) => {
+      made++;
+      const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
+      return { id: t.id, number: t.number! };
+    },
+    runner: { emit: () => {}, send: (id: number, _by: string, text: string) => sent.push({ id, text }), limitWait: () => null, netWait: () => null, killWait: () => null } as any,
+    broadcast: () => {},
+    by: 'Citadel',
+    dataDir: '/data',
+  };
+  const now = Date.now();
+  const s = store.schedules.create({ project_id: p.id, name: 'Nightly', cron: '* * * * *', brief: 'Is main healthy?', type: 'chore', created_by: 'Cara' }, now - 120_000);
+  // An earlier run's minion, already marked: it never counts as this slot's.
+  const before = store.createTicket({ project_id: p.id, title: 'Nightly', permission_mode: 'bypassPermissions', created_by: 'Citadel' });
+  store.db.prepare('UPDATE tickets SET created_at = ?, status = ? WHERE id = ?').run(now - 600_000, 'closed', before.id);
+  // The killed run's minion: made after the slot came due, never marked or briefed.
+  const orphan = store.createTicket({ project_id: p.id, title: 'Nightly', permission_mode: 'bypassPermissions', created_by: 'Citadel' });
+  await new ScheduledRuns(deps).run(store.schedules.get(s.id)!, now);
+  assert.equal(made, 0, 'no second minion for the slot');
+  assert.equal(store.schedules.get(s.id)!.last_ticket_id, orphan.id, "the slot's ran mark names the minion the killed run made");
+  assert.ok(store.schedules.get(s.id)!.next_run_at! > now, 'the slot is handled');
+  assert.deepEqual(sent.map((m) => m.id), [orphan.id], 'its brief goes to that minion');
+  // The next slot starts its own minion as usual.
+  await new ScheduledRuns(deps).run(store.schedules.get(s.id)!, store.schedules.get(s.id)!.next_run_at!);
+  assert.equal(made, 1, 'the next slot makes a fresh minion');
+});

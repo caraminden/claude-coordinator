@@ -1579,6 +1579,8 @@ export class Runner {
     if (turn.container && turn.dir && !wrapperInProc(turn.dir, true) && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f)))) return false;
     const live = this.follow(ticketId, turn);
     if (this.gone(live)) {
+      // What it wrote while no server read it reaches the chat before recovery deletes its folder, as poll's does (C8, #1406).
+      this.readStream(ticketId, live, true);
       clearInterval(live.timer);
       this.turns.delete(ticketId);
       return false;

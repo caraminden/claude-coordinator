@@ -130,12 +130,13 @@ test('order_ship_line is on the Taskmaster tool list and not on a minion\'s', ()
 test("#1487: a broken test's fix goes to the front as a Taskmaster's move, once; a person's pin ahead of it stays put", () => {
   const { app, p, order, line, q, ids } = scheme('Peek Auras');
   const by = { name: 'The broken-test rule', taskmaster: true };
-  assert.deepEqual(shipFirst(app, p.id, ids[3], by, 'test/x.test.ts is a broken test'), [4, 2, 3, 5]);
+  assert.equal(shipFirst(app, p.id, ids[3], by, 'test/x.test.ts is a broken test'), 'moved');
+  assert.deepEqual(order(), [4, 2, 3, 5]);
   assert.match(readFileSync(join(q, '.order'), 'utf8'), /^# The broken-test rule moved #4 to ship next: test\/x\.test\.ts is a broken test\n/);
-  assert.equal(shipFirst(app, p.id, ids[3], by, 'again'), null, 'already first: no second move, no history line');
+  assert.equal(shipFirst(app, p.id, ids[3], by, 'again'), 'first', 'already first: no second move, no history line');
   assert.equal(shipFirst(app, p.id, ids[0], by, 'x'), null, 'the ship holding the lock is not waiting');
   moveShip(app, p.id, 2, [2, 4, 3, 5], CARA);
-  assert.equal(shipFirst(app, p.id, ids[4], by, 'x'), null, "it doesn't pass Cara's pin");
+  assert.equal(shipFirst(app, p.id, ids[4], by, 'x'), 'refused', "it doesn't pass Cara's pin");
   assert.deepEqual(order(), [2, 4, 3, 5]);
   assert.equal(line().find((x) => x.name === '#5')?.placed, undefined);
 });

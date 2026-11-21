@@ -21,8 +21,8 @@ const MAX_STARTS_PER_PASS = 2;
 const MAX_EVIDENCE_PER_PASS = 10;
 const EVIDENCE_MAX_AGE_MS = 6 * 3_600_000;
 const SAME_SIGHTING_MS = 30 * 60_000;
-/** A broken-test line (tools/known-flakes.ts, #1487) moves its file's fix to the front of the line for this long: its window. */
-const BROKEN_FRONT_MS = 6 * 3_600_000;
+/** A broken-test line (tools/known-flakes.ts, #1487) moves its file's fix to the front of the line once it waits there, for a day. */
+const BROKEN_FRONT_MS = 24 * 3_600_000;
 
 export interface FlakeFixDeps {
   store: Store;
@@ -41,8 +41,8 @@ export interface FlakeFixDeps {
   shippedAt?: (project: Project, branch: string) => Promise<number | null | undefined>;
   /** The commits most likely to have brought the flake (default: git in the scheme's repo). */
   suspect?: (project: Project, file: string, firstAt: number) => Promise<string | null>;
-  /** Move minion `ticketId`'s waiting ship to the front of the line (#1487; src/ship-line.ts shipFirst); true when it moved. */
-  front?: (project: Project, ticketId: number, reason: string) => boolean;
+  /** Move minion `ticketId`'s waiting ship to the front of the line (#1487; src/ship-line.ts shipFirst); null when it isn't waiting there. */
+  front?: (project: Project, ticketId: number, reason: string) => 'moved' | 'first' | 'refused' | null;
   /** The failing test's name and error from the CI run behind a flake line (#1438); null when the log can't say. server.ts reads the scheme's GitHub repo with gh; without it no row keeps one. */
   evidence?: (project: Project, branch: string, file: string, at: number) => Promise<{ name: string; message: string } | null>;
   now?: () => number;
@@ -50,6 +50,7 @@ export interface FlakeFixDeps {
 
 export class FlakeFixes {
   private busy = false;
+  private fronted = new Set<string>(); // broken(): "<minion> <file> <line time>" already moved, or tried (#1487)
   private d: FlakeFixDeps;
   constructor(d: FlakeFixDeps) { this.d = d; }
 
@@ -135,8 +136,8 @@ export class FlakeFixes {
 
   /**
    * A broken test (#1487: tools/known-flakes.ts's verdict, a `broken test` line in the retro log) reddens a big share of every
-   * ship's runs, so its fix minion's ship goes to the front of the line once it waits there, for BROKEN_FRONT_MS after the line.
-   * How many it moved.
+   * ship's runs, so its fix minion's ship goes to the front of the line once it waits there, for BROKEN_FRONT_MS after the line:
+   * once per line, so a later move by a Taskmaster stands, and two broken files' fixes don't swap places every pass. How many it moved.
    */
   async broken(project: Project, now: number): Promise<number> {
     const dir = this.d.sharedDir(project.id);
@@ -144,20 +145,24 @@ export class FlakeFixes {
     const root = join(dir, 'retro-log');
     let days: string[];
     try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
-    const why = new Map<string, string>(); // file -> its newest line's "red in N of M runs in the last 6 h"
+    const why = new Map<string, [number, string]>(); // file -> its newest line's time and "red in N of M runs in the last 6 h"
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < now - BROKEN_FRONT_MS) continue;
       let md: string;
       try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
       for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · broken test · (\S+) · (.+?) · \S+$/gm)) {
         const at = Date.parse(`${day}T${m[1]}Z`);
-        if (at >= now - BROKEN_FRONT_MS && at <= now + 60_000) why.set(m[2], m[3]);
+        if (at >= now - BROKEN_FRONT_MS && at <= now + 60_000) why.set(m[2], [at, m[3]]);
       }
     }
     let moved = 0;
-    for (const [file, red] of why) {
+    for (const [file, [at, red]] of why) {
       const owner = this.owner(project, file, this.d.store.flakeFix(project.id, file));
-      if (owner && this.d.front(project, owner.id, `it fixes ${file}, a broken test, not a flake: ${red}`)) moved++;
+      const key = `${owner?.id} ${file} ${at}`;
+      if (!owner || this.fronted.has(key)) continue;
+      const did = this.d.front(project, owner.id, `it fixes ${file}, a broken test, not a flake: ${red}`);
+      if (did) this.fronted.add(key); // null: not in the line yet, so the next pass tries again
+      if (did === 'moved') moved++;
     }
     return moved;
   }

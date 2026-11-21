@@ -89,18 +89,22 @@ export function seqsFor(line: LineEntry[], ship: number, before?: number): numbe
 /**
  * Minion `ticketId`'s waiting ship to the front of its scheme's line (#1487: the fix of a broken test, so every ship behind it
  * stops paying for that test's reds), as a Taskmaster's move: a ship a person placed stays put, and it doesn't go past one.
- * The order written, or null when it isn't waiting, can't move, is already first, or a person's pin is in the way.
+ * 'moved'; 'first' when it already is; 'refused' when a person's pin is in the way or the write failed (logged); null when it
+ * isn't waiting in the line (not handed off yet, shipping now, or a land script too old to move it).
  */
-export function shipFirst(app: Pick<App, 'store' | 'releases' | 'waits'>, projectId: number, ticketId: number, by: Mover, reason: string): number[] | null {
+export function shipFirst(app: Pick<App, 'store' | 'releases' | 'waits'>, projectId: number, ticketId: number, by: Mover, reason: string): 'moved' | 'first' | 'refused' | null {
   app.releases.poll();
   const line = app.releases.view((id) => id === projectId)[0]?.targets.flatMap((t) => t.line) ?? [];
   const waiting = line.filter((e) => !e.holds && e.movable);
   const e = waiting.find((x) => x.ticketId === ticketId);
-  if (!e || waiting[0] === e) return null;
+  if (!e) return null;
+  if (waiting[0] === e) return 'first';
   try {
-    return moveShip(app, projectId, e.seq, seqsFor(line, e.seq), { ...by, taskmaster: true }, reason);
+    moveShip(app, projectId, e.seq, seqsFor(line, e.seq), { ...by, taskmaster: true }, reason);
+    return 'moved';
   } catch (err) {
-    if (err instanceof HttpError) return null;
-    throw err;
+    if (!(err instanceof HttpError)) throw err;
+    console.warn(`Ship line: ${by.name} couldn't move #${e.seq} to the front: ${err.message}`); // a pin ahead, or the .order write failed
+    return 'refused';
   }
 }

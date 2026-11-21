@@ -9,12 +9,13 @@
 // least one other branch (the scheme's retro log, the lines the Test health tab counts: flake_events rows keep no branch),
 // or an open fix minion has it (flake_fixes, read-only from LAND_FLAKE_DB, the scheme taken from COORDINATOR_TICKET).
 // "havent been fixed": a file whose fix passed its proof (a held flake_fixes row) counts only sightings since then.
-// A broken test is never known (#1487; Cara, 2026-11-21: "how do we know its a flake if it is the first time weve seen
-// it?"): a file red in BROKEN_SHARE or more of the last BROKEN_MS of test runs, at least BROKEN_REDS reds of BROKEN_RUNS
-// runs, every branch's reds counted, the ship's own too. Runs are the retro log's timing lines with a test phase, its fresh
-// reruns that ended green or red, and the run being judged (its timing line comes later). The brief started at 24 h; over
-// Nov 12-21's log no file but one of 3 runs reached 20% at 24 h (review-set-api, a real missing busy timeout, peaked at 12%),
-// while at 6 h with 3 reds 20% catches exactly the four files that got real fixes (review-set-api, apps, no-reflow-browser, checkpoint).
+// A broken test is never known (#1487; Cara, 2026-11-21, after #1419: "how much of our "flakes" were actual flakes vs this
+// case?"): a file red in BROKEN_SHARE or more of the last BROKEN_MS of test runs, at least BROKEN_REDS reds of BROKEN_RUNS
+// runs, every branch's reds counted, the ship's own too. Runs are the retro log's timing lines with a full-suite phase (CI
+// or the perigee fallback; a feeder's merge runs only its files), its fresh reruns that ended green or red, each bisect
+// run, and the run being judged (its timing line comes later). The brief started at 24 h, where over Oct 29-Nov 21's log
+// no file reached 20% (apps peaked at 14%, review-set-api, a real missing busy timeout, at 13%); at 6 h with 3 reds, 20%
+// catches 3 of the 57 files with sightings (no-reflow-browser 40%, apps 32%, review-set-api 29%), all three really fixed.
 // Prints one line per file, "<file> (<why>)", or "broken test, not a flake: <file> red in N of M runs in the last 6 h",
 // and exits 0 only when every file is known. Anything it can't read counts
 // as not known: the ship keeps today's rerun.
@@ -46,10 +47,10 @@ for (const day of days) {
   if (Date.parse(`${day}T23:59:59Z`) < now - WINDOW_MS) continue;
   let md = '';
   try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
-  for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · (timing|flake rerun) · (.+)$/gm)) {
+  for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · (timing|flake rerun|bisect run) · (.+)$/gm)) {
     const at = Date.parse(`${day}T${m[1]}Z`);
     if (Number.isNaN(at) || at < now - BROKEN_MS) continue;
-    if (m[2] === 'flake rerun' ? /· (green|red)$/.test(m[3]) : / · (ci-run|fallback|tests) \d/.test(m[3])) runs++;
+    if (m[2] === 'bisect run' || (m[2] === 'flake rerun' ? /· (green|red)$/.test(m[3]) : / · (ci-run|fallback) \d/.test(m[3]))) runs++;
   }
   for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · flake · (.+)$/gm)) {
     const parts = m[2].split(' · ');

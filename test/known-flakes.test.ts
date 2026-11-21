@@ -121,8 +121,11 @@ test('a file red in 20% or more of the last 6 h of runs is a broken test, not a 
   const over = setup([...runs(10), ...reds(3)])('ticket/1-me', 'test/x.test.ts');
   assert.equal(over.status, 1);
   assert.equal(over.out, 'broken test, not a flake: test/x.test.ts red in 3 of 11 runs in the last 6 h');
-  // Exactly 20% is broken; a fresh rerun line is a run too; the ship's own red counts, as it reddened a run.
-  const edge = setup([...runs(13), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · green'), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · not started'), ...reds(2), line(MIN, 'test/x.test.ts · load 3 · ticket/1-me · in CI')])('ticket/1-me', 'test/x.test.ts');
+  // Exactly 20% is broken; a fresh rerun and a bisect run are runs too, a feeder's merge (its own files only) is not; the
+  // ship's own red counts, as it reddened a run.
+  const edge = setup([...runs(12), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · green'), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · not started'),
+    raw(MIN, 'bisect run · ticket/9-y · 1 of 3'), raw(MIN, 'timing · ticket/5-f · line 0 · rebase 1 · tests 40 · deploy - · merged'),
+    ...reds(2), line(MIN, 'test/x.test.ts · load 3 · ticket/1-me · in CI')])('ticket/1-me', 'test/x.test.ts');
   assert.equal(edge.out, 'broken test, not a flake: test/x.test.ts red in 3 of 15 runs in the last 6 h');
 });
 

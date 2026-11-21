@@ -63,8 +63,7 @@ export function failureDetail(output: string, code: number | null): FailureDetai
     : cls === 'ci' ? 'CI or runner problem'
     : cls === 'boot-copy' ? 'boot check'
     : /^land: smoke: .*, before the line/m.test(output) ? 'smoke check'
-    : broken.length ? 'broken test, not a flake' // #1487: red too often to be a flake
-    : cls === 'passed-alone' ? 'failed together, passed alone'
+    : cls === 'passed-alone' ? broken.length ? 'broken test, not a flake' : 'failed together, passed alone' // #1487: red too often to be a flake
     : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output) ? 'tests failed'
     : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output) ? 'deploy or boot'
     : 'failed';

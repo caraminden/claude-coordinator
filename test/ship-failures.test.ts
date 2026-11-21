@@ -30,8 +30,13 @@ test('a failed ship sums up as its kind, the first three names and "+N more", an
   assert.equal(failureDetail('land: smoke: src/x.ts fails its test, before the line (12 s), so nothing landed', 1).kind, 'smoke check');
   assert.equal(failureDetail('land: waiting for CI on abc', 75).kind, 'CI timeout');
   assert.equal(failureDetail('land: main is now at abc "x"\ndeploy: boot check failed: /api/health never answered', 1).kind, 'deploy or boot');
-  assert.deepEqual(failureDetail('land: broken test, not a flake: test/x.test.ts red in 4 of 10 runs in the last 6 h\nland: failed in the full run but passed alone (test/x.test.ts)\n✖ x breaks (3ms)', 1),
-    { kind: 'broken test, not a flake', names: ['test/x.test.ts'], more: 0, ci: null }, '#1487');
+  // #1487: red twice on a broken test, which passed alone each time; the fresh run red on another file that failed again alone is that file's.
+  const broken = (again: string) => `run-tests: test/x.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 3)\nland: broken test, not a flake: test/x.test.ts red in 4 of 10 runs in the last 6 h\n${again}\nland: tests failed on the rebased branch in CI again (https://x/2), on the one fresh run after a red whose files all passed alone (test/x.test.ts), so main is untouched`;
+  assert.deepEqual(failureDetail(broken('run-tests: test/x.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 4)'), 1),
+    { kind: 'broken test, not a flake', names: ['test/x.test.ts'], more: 0, ci: null });
+  assert.equal(failureDetail(broken('run-tests: test/y.test.ts: failed again alone\n✖ y breaks (3ms)'), 1).kind, 'tests failed');
+  assert.equal(failureDetail('land: broken test, not a flake: test/x.test.ts red in 4 of 10 runs in the last 6 h\nland: failed in the full run but passed alone (test/x.test.ts); running CI once more\nland: main is now at abc "x"\ndeploy: boot check failed: /api/health never answered', 1).kind,
+    'deploy or boot', 'a fresh run that passed and a deploy that failed: the deploy is the cause');
   assert.deepEqual(failureDetail('something odd', 1), { kind: 'failed', names: [], more: 0, ci: null });
   // The smoke check names its test with no time; a green CI run before a failed deploy isn't the try's CI run.
   assert.deepEqual(failureDetail('land: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed', 1),

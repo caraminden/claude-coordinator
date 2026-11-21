@@ -81,20 +81,32 @@ test('one alarm per test until a day passes or the file changes on main', async 
   assert.equal(day.woke.length, 1, 'a day later, with no new sightings, nothing new to say');
 });
 
-test("#1487: a broken-test line moves its open fix minion's ship to the front for 6 h; no fix, no move", async () => {
+test("#1487: a broken-test line moves its open fix minion's ship to the front, once per line, for a day; no fix, no move", async () => {
   const dir = mkdtempSync(join(root, 'b-'));
   const store = new Store(join(dir, 'c.db'));
   const project = store.createProject('P', null);
   const fix = store.createTicket({ project_id: project.id, title: 'Fix the flaky test/review-set-api.test.ts', permission_mode: 'default', created_by: 'x' });
   store.addFlakeFix(project.id, F, fix.id, at('04:00:00'));
+  const log = join(dir, 'shared', 'retro-log', '2026-11-20', 'land.md');
   mkdirSync(join(dir, 'shared', 'retro-log', '2026-11-20'), { recursive: true });
-  writeFileSync(join(dir, 'shared', 'retro-log', '2026-11-20', 'land.md'), [
+  writeFileSync(log, [
     `- 05:48:23Z · broken test · ${F} · red in 15 of 43 runs in the last 6 h · ticket/1061-models`,
     '- 05:50:00Z · broken test · test/nobody.test.ts · red in 3 of 9 runs in the last 6 h · ticket/1061-models',
   ].join('\n') + '\n');
   const moved: [number, string][] = [];
-  const fixes = new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: (_p, id, why) => (moved.push([id, why]), true) });
-  assert.equal(await fixes.broken(project, at('06:00:00')), 1);
-  assert.deepEqual(moved, [[fix.id, `it fixes ${F}, a broken test, not a flake: red in 15 of 43 runs in the last 6 h`]]);
-  assert.equal(await fixes.broken(project, at('11:49:00')), 0, 'past 6 h the line no longer moves it');
+  let said: 'moved' | 'first' | 'refused' | null = null; // not handed off yet
+  const fixes = new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: (_p, id, why) => (moved.push([id, why]), said) });
+  assert.equal(await fixes.broken(project, at('06:00:00')), 0, 'not in the line yet');
+  said = 'moved';
+  assert.equal(await fixes.broken(project, at('06:05:00')), 1, 'in the line now: the next pass moves it');
+  assert.deepEqual(moved.at(-1), [fix.id, `it fixes ${F}, a broken test, not a flake: red in 15 of 43 runs in the last 6 h`]);
+  assert.equal(await fixes.broken(project, at('06:10:00')), 0, 'once per line: a Taskmaster may move it back');
+  assert.equal(moved.length, 2);
+  writeFileSync(log, `- 06:12:00Z · broken test · ${F} · red in 16 of 44 runs in the last 6 h · ticket/1062-x\n`, { flag: 'a' });
+  assert.equal(await fixes.broken(project, at('06:15:00')), 1, 'a newer line moves it again');
+  // A day on (a server that restarted, so nothing remembered), the newest line still moves it; a minute past the day, not.
+  const later = new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: () => 'moved' });
+  assert.equal(await later.broken(project, Date.parse('2026-11-21T06:13:00Z')), 0, 'past a day the line no longer moves it');
+  assert.equal(await later.broken(project, Date.parse('2026-11-21T06:11:00Z')), 1);
+  assert.equal(moved.length, 3);
 });

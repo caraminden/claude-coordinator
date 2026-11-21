@@ -7,7 +7,11 @@
 @media (max-aspect-ratio: 1/1) { .login-map ~ .login { margin-top: calc(84px - 1.25rem); } }
 @media (prefers-color-scheme: dark) { .login-map ~ .login { box-shadow: 0 0 0 1px rgb(255 255 255 / .04), 0 16px 48px rgb(0 0 0 / .55); } }
 /* The map reaches the window's edge: no empty scrollbar gutter beside it. */
-html:has(#app > .login-map), html:has(#splash) { scrollbar-gutter: auto; }
+html:has(#app > .login-map) { scrollbar-gutter: auto; }
+/* The splash keeps the gutter (dropping it would move the app's panes 15 px as the splash lifts: test/no-reflow-browser)
+   and paints it the map's paper instead. */
+html:has(#splash) { background: #f3e9d2; }
+@media (prefers-color-scheme: dark) { html:has(#splash) { background: #16142a; } }
 
 /* The splash on every cold open: the map with Citadel's mark, over everything, lifted by login-map-art.js. */
 #splash { --login-map-top: 0px; z-index: 100; transition: opacity .5s ease, visibility 0s .5s; }

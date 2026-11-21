@@ -63,3 +63,28 @@ test('tools/citadel-node makes its link folder private, and refuses one that is 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('tools/citadel-node sets a compile cache under TMPDIR, keeps a caller\'s own, and an edited file at the same path runs its new code', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'citadel-node-cc-'));
+  try {
+    const bin = join(import.meta.dirname, '..', 'tools', 'citadel-node');
+    const run = (args: string[], extra: Record<string, string> = {}) =>
+      spawnSync(bin, args, { env: { ...process.env, TMPDIR: dir, NODE_COMPILE_CACHE: '', ...extra }, encoding: 'utf8' });
+    const show = 'process.stdout.write(process.env.NODE_COMPILE_CACHE ?? "")';
+    assert.equal(run(['-e', show]).stdout, join(dir, 'citadel-node-cache'));
+    assert.equal(run(['-e', show], { NODE_COMPILE_CACHE: '/x/mine' }).stdout, '/x/mine');
+    const file = join(dir, 'm.ts');
+    writeFileSync(file, 'const n: number = 1; process.stdout.write(String(n));');
+    assert.equal(run([file]).stdout, '1');
+    assert.equal(run([file]).stdout, '1');
+    writeFileSync(file, 'const n: number = 2; process.stdout.write(String(n));');
+    assert.equal(run([file]).stdout, '2');
+    // An unwritable cache folder changes nothing but speed.
+    writeFileSync(join(dir, 'blocker'), '');
+    const bad = run([file], { NODE_COMPILE_CACHE: join(dir, 'blocker', 'cache') });
+    assert.equal(bad.status, 0, bad.stderr);
+    assert.equal(bad.stdout, '2');
+  } finally {
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});

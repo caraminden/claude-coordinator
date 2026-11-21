@@ -100,6 +100,22 @@ test('--into --full: refuses a build the branch lacks (merge, not rebase), then 
   assert.deepEqual(b.ranFiles(), ['f1.txt', 'full'], 'the full check ran, not the files');
 });
 
+// KT5 (#1519): a commit made in the worktree while the check runs was never checked, so the build moves to the commit
+// that was (Citadel's own land.sh reads its tip before the check too).
+test('--into and --full move the build to the commit the check ran on, not one made during it', () => {
+  const during = 'git -c user.name=t -c user.email=t@t commit -q --allow-empty -m during';
+  const b = buildSetup({ CHECK_FILE_CMD: `echo {file} >>"$RAN"; ${during}`, CHECK: `echo full >>"$RAN"; ${during}` });
+  const res = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(b.wts[0], 'log', '-1', '--format=%s'), 'during', 'the check made a commit');
+  assert.equal(b.at('build/1'), b.at('ticket/1-x^'), 'the build is at the checked commit, under the one made during the check');
+  git(b.wts[2], 'merge', '-q', '--no-edit', 'build/1');
+  const merged = git(b.wts[2], 'rev-parse', 'HEAD');
+  const full = b.run(3, '--into', 'build/1', '--full');
+  assert.equal(full.status, 0, full.stderr);
+  assert.equal(b.at('build/1'), merged, "--full: the build is at the build minion's checked merge");
+});
+
 test('--into --full: a red full check, or red CI, leaves the build untouched', () => {
   const red = buildSetup();
   git(red.wts[2], 'merge', '-q', '--no-edit', 'build/1');

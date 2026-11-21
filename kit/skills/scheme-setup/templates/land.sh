@@ -1652,6 +1652,9 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
     printf 'land: %s\n' "$branch removes what these merged, without naming them:" "$clashes" >&2
     refuse "$build is untouched. If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
+  # The commit the check runs on is the one the build moves to: one made in the worktree while the check runs was
+  # never checked (KT5, #1519; Citadel's own land.sh reads its tip here too).
+  tip=$(git rev-parse HEAD)
   if [ "$mode" = into ]; then
     # A feeder runs only what it touched: its test files through CHECK_FILE_CMD, else the light check, else CHECK.
     chk=${CHECK_LIGHT:-$CHECK}
@@ -1679,7 +1682,6 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
          refuse "the full check or CI is red on $branch (above), so $build is untouched. Fix it, commit, then run this again" ;;
     esac
   fi
-  tip=$(git rev-parse HEAD)
   git update-ref -m "land.sh --into $branch" "refs/heads/$build" "$tip" "$bbase" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
   say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); $BRANCH is untouched"
   exit 0

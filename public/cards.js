@@ -511,8 +511,8 @@ export function questionCard(ticketId, card, opts = {}) {
       },
       send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) } }),
       undo: () => {
-        unanswer();
         if (confirmed) return;
+        unanswer();
         lock(false);
         status.textContent = '';
         refresh();

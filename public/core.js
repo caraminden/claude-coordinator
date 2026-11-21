@@ -15,7 +15,7 @@ import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './b
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshInbox, refreshSchemeCounts } from './inbox.js';
+import { forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
@@ -863,6 +863,7 @@ export async function catchUpEvents() {
 export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
+  holdAnswered(ticket); // #1409
   // Each person has their own Taskmaster (#919): the others' updates only refresh their entry in view.taskmasters.
   if (ticket.kind === 'coordinator' && view.coordinator && ticket.id !== view.coordinator.id) {
     // Another person's Taskmaster or the Overlord: its cards still count in Needs you.

@@ -135,8 +135,8 @@ export function itemTicket(view, id) {
  */
 export const stripItems = (view, items, answered = new Set()) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed' && !answered.has(i.key));
 
-/** The items a person just answered: that minion's card with that id (an item's `card.id` is the question, plan or approval id). #1409 drops them from every count at the click. */
-export const answeredItems = (items, ticketId, cardId) => items.filter((i) => i.ticketId === ticketId && i.card?.id === cardId);
+/** The items a person just answered on a minion: its card with that id (an item's `card.id` is the question, plan or approval id), or the ones `which` (a function of the item) picks. #1409 drops them from every count at the click. */
+export const answeredItems = (items, ticketId, which) => items.filter((i) => i.ticketId === ticketId && (typeof which === 'function' ? which(i) : i.card?.id === which));
 
 /** A row's open_cards less the answered items' cards (a card link names its chat event, `?e=<eventId>`, as the item does). */
 export const withoutCards = (cards, answered) => cards.filter((c) => !answered.some((i) => c.href?.endsWith(`?e=${i.eventId}`)));

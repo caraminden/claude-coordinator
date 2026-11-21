@@ -1,6 +1,7 @@
 // One-tap replies (#105): the short go-aheads a minion offers at the end of a turn (set_thread_status
 // replies), as buttons that send their text as your message. They go once anyone writes or a turn starts.
 import { h } from './base.js';
+import { answerNow } from './inbox.js';
 
 /**
  * The minion's replies as a row of buttons, or '' when it offers none (or is running or dismissed).
@@ -18,7 +19,8 @@ export function replyChips(t, send) {
       tapped.classList.toggle('sent', on);
     };
     mark(true);
-    send(text).catch(() => mark(false));
+    const unanswer = answerNow(t.id, (i) => i.kind === 'replies'); // #1409: the strip and pill drop it at the tap
+    send(text).catch(() => { mark(false); unanswer(); });
   } }, text)));
   return box;
 }

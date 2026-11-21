@@ -4,6 +4,8 @@
 // It never sends by itself. A page can also open one of its own pictures to draw on (#946), and send the
 // marked copies with its text.
 
+import { answerNow } from './inbox.js';
+
 export const TAG = 'citadel-bridge-1';
 const MAX_TEXT = 10_000;
 const MAX_ENTRIES = 100;
@@ -126,7 +128,9 @@ async function onMessage(e) {
       // this window; a tab's doesn't, so a tab only gets a gap between sends.
       if (frame.iframe && navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
-      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items } });
+      // #1409: the choices card this page answers drops from the counts at the click; a refused send brings it back.
+      const unanswer = frame.open?.ticket ? answerNow(frame.open.ticket, (i) => !!i.card?.doc && (i.card.doc.path === frame.open.path || i.card.doc.path?.endsWith(`/${frame.open.path}`))) : () => {};
+      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items } }).catch((e) => { unanswer(); throw e; });
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       reply({ ok: true, result: { sent: true, to: r.to.label } });
       // Sent: the viewer goes away and the chat shows the message, unless the page keeps it open (send's keepOpen).

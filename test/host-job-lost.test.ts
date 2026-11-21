@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './wait.ts';
 import { HostJobs, jobLost, oomKilled } from '../src/host-job.ts';
 
 // #1325: a ship's unit killed from outside (systemd-oomd, on Nov 20) left no record but the journal; now the server hears it once.
@@ -54,7 +55,7 @@ test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; on
   const run = async (name: string, env: Record<string, string>) => {
     const dir = join(root, name);
     jobs.start({ dir, cwd: root, argv: ['sh', '-c', 'echo "$TMPDIR $TMP $TEMP"'], env: { PATH: process.env.PATH!, ...env }, unit: `t-${name}`, description: name, ticketId: 0 });
-    for (let i = 0; i < 100 && !existsSync(join(dir, 'code')); i++) await new Promise((r) => setTimeout(r, 50));
+    await until('the job writes its exit code', () => existsSync(join(dir, 'code')));
     return readFileSync(join(dir, 'output.log'), 'utf8').trim();
   };
   assert.equal(await run('tmpfs', { TMPDIR: '/tmp' }), `${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')}`);

@@ -116,3 +116,25 @@ test('a land_after that fails or exits is only warned about: the landing still e
     assert.ok(landLockFree(r));
   }
 });
+
+test("a landing whose push failed has its land_after made up by the next landing that pushes (KT4, #1519)", () => {
+  const r = hooked(recorder);
+  const url = git(r.main, 'remote', 'get-url', 'origin');
+  git(r.main, 'remote', 'set-url', 'origin', join(r.dir, 'missing.git'));
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const failed = r.run();
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /land_after didn't run, since main isn't on origin: the next landing that pushes it runs it/);
+  const first = git(r.wt, 'rev-parse', 'HEAD');
+  assert.deepEqual(r.after(), []);
+  git(r.main, 'remote', 'set-url', 'origin', url);
+  r.commit(r.wt, 'c.txt', 'more\n');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  const second = git(r.wt, 'rev-parse', 'HEAD');
+  assert.deepEqual(r.after(), [`${first} ticket/1-x free 0`, `${second} ticket/1-x free 0`]);
+  // Made up once: a third landing doesn't run it again.
+  r.commit(r.wt, 'd.txt', 'again\n');
+  assert.equal(r.run().status, 0);
+  assert.equal(r.after().length, 3);
+});

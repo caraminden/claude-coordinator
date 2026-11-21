@@ -153,7 +153,7 @@ test('fast mode in a batched line: the fast landing is a batch of its own, and t
       clearInterval(greenAll);
     }
     assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
-    assert.doesNotMatch(one.stderr(), /landed in a batch/, "the fast one isn't in landing 1's batch");
+    assert.doesNotMatch(one.stderr(), /landed [0-9a-f]+ "[^"]*" in a batch/, "the fast one isn't in landing 1's batch");
     assert.doesNotMatch(two.stderr(), /^land: (waiting for CI|running |lane )/m);
     const fastSha = git(q.main, 'rev-parse', 'main~1').slice(0, 12);
     assert.ok(!ci.asked().includes(fastSha), 'CI was never asked about the fast commit');

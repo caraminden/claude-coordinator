@@ -644,9 +644,12 @@ test('batches: three share one run on the top commit; main moves once, straight 
     assert.equal([a, b, d].filter((l) => /pushed main to origin/.test(l.stderr())).length, 1, 'and was pushed once');
     assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), td);
     assert.deepEqual([c.sent(a), c.sent(b)], [[], []], 'the members below the top sent nothing to CI');
-    assert.match(a.stderr(), /landed in a batch with ticket\/2-x, ticket\/3-x, on ticket\/3-x's CI run/);
-    assert.match(b.stderr(), /landed in a batch with ticket\/1-x, ticket\/3-x, on ticket\/3-x's CI run \(main is now [0-9a-f]{12}\)/);
-    assert.match(d.stderr(), /landed in a batch with ticket\/1-x, ticket\/2-x, on its own CI run/);
+    // Each names its own commit, which is what the server's ship note reads (KT3, #1519), and a member says the
+    // head's push reached origin before it leaves.
+    assert.match(a.stderr(), new RegExp(`landed ${ta.slice(0, 7)}[0-9a-f]* "[^"]*" in a batch with ticket/2-x, ticket/3-x, on ticket/3-x's CI run`));
+    assert.match(b.stderr(), new RegExp(`landed ${tb.slice(0, 7)}[0-9a-f]* "[^"]*" in a batch with ticket/1-x, ticket/3-x, on ticket/3-x's CI run \\(main is now [0-9a-f]{12}\\)`));
+    assert.match(d.stderr(), new RegExp(`landed ${td.slice(0, 7)}[0-9a-f]* "[^"]*" in a batch with ticket/1-x, ticket/2-x, on its own CI run`));
+    for (const l of [b, d]) assert.match(l.stderr(), /main is on origin \(the batch head pushed it\)/);
     // The ship line (#1320): each its own commit and place; the timing lines, with no shared folder, in .git/land-log.
     assert.deepEqual([a, b, d].map((l) => l.stderr().trimEnd().split('\n').pop()), [ta, tb, td].map((t, i) => `ship: landed ${t} batch ${i + 1} of 3 deploy none`));
     const timed = timingLines(join(c.state, 'land-log')).sort((x, y) => x.split(' · ')[2].localeCompare(y.split(' · ')[2]));
@@ -683,7 +686,7 @@ test('batches: the line follows land-queue/.order (#1007), so the batches form i
     }
     for (const l of all) assert.equal(await l.exit, 0, l.stderr());
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3']);
-    assert.match(a.stderr(), /landed in a batch with ticket\/4-x/);
+    assert.match(a.stderr(), /landed [0-9a-f]+ "[^"]*" in a batch with ticket\/4-x/);
   } finally {
     c.stop();
   }
@@ -713,7 +716,7 @@ test('batches: a red top bisects; the bottom lands, the bad middle is refused on
     assert.equal(c.parent(again), ta, 'the top builds again on main');
     c.verdict(again, GREEN);
     assert.equal(await d.exit, 0, d.stderr());
-    assert.doesNotMatch(d.stderr(), /landed in a batch/);
+    assert.doesNotMatch(d.stderr(), /landed [0-9a-f]+ "[^"]*" in a batch/);
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3']);
     assert.equal(c.mainAt(), again);
     assert.deepEqual(c.scratch(), []);
@@ -735,7 +738,7 @@ test('batches: a member in conflict where it sits is skipped and the batch close
     c.verdict(td, GREEN);
     assert.equal(await a.exit, 0, a.stderr());
     assert.equal(await d.exit, 0, d.stderr());
-    assert.match(d.stderr(), /landed in a batch with ticket\/1-x, on its own CI run/);
+    assert.match(d.stderr(), /landed [0-9a-f]+ "[^"]*" in a batch with ticket\/1-x, on its own CI run/);
     assert.equal(await b.exit, 1, b.stderr());
     assert.match(b.stderr(), /the rebase onto main failed/);
     assert.deepEqual(c.sent(b), [], 'nothing of the 2nd went to CI');
@@ -872,7 +875,26 @@ test("batches: a member whose commit the head lands while it is looking at the l
     writeFileSync(join(hold, 'go'), '');
     assert.equal(await b2.exit, 0, b2.stderr());
     assert.doesNotMatch(b2.stderr(), /won't rebase onto/);
-    assert.match(b2.stderr(), /landed in a batch with/);
+    assert.match(b2.stderr(), /landed [0-9a-f]+ "[^"]*" in a batch with/);
+  } finally {
+    c.stop();
+  }
+});
+
+test("batches: when the head's push of main fails, each member says so in the unpushed line, not that it landed and left (KT3, #1519)", async () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
+  try {
+    writeFileSync(join(c.origin, 'hooks', 'pre-receive'), '#!/bin/sh\nwhile read o n r; do [ "$r" != refs/heads/main ] || { echo "main is protected here"; exit 1; }; done\n', { mode: 0o755 });
+    const [a, b, d] = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(d);
+    c.verdict(td, GREEN);
+    for (const l of [a, b, d]) {
+      assert.equal(await l.exit, 1, l.stderr());
+      assert.match(l.stderr(), /land: main moved, but the push to origin failed: .*main is protected here/s);
+    }
+    assert.equal(c.mainAt(), td, 'main moved locally');
+    assert.ok(landLockFree(c));
   } finally {
     c.stop();
   }

@@ -306,6 +306,9 @@ fi
 # its new top; the old top's run goes on. A ticket with no sixth line is from a land.sh older than batches: it is
 # a batch of its own, never landed by another.
 QUEUE_POLL=${LAND_QUEUE_POLL:-1}
+# How long a batch member waits for the head's push of main before saying it is still to come (KT3).
+BATCH_PUSH_WAIT=${LAND_BATCH_PUSH_WAIT:-90}
+[[ $BATCH_PUSH_WAIT =~ ^[0-9]+$ ]] || refuse "LAND_BATCH_PUSH_WAIT is in whole seconds, not \"$BATCH_PUSH_WAIT\""
 CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 [[ $CHECK_LIMIT =~ ^[0-9]+$ ]] || refuse "LAND_CHECK_TIMEOUT is in whole seconds, not \"$CHECK_LIMIT\""
 [[ ${LAND_QUEUE_SLACK:-300} =~ ^[0-9]+$ ]] || refuse "LAND_QUEUE_SLACK is in whole seconds, not \"$LAND_QUEUE_SLACK\""
@@ -933,6 +936,7 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
 green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
 main_pushed='' # step 7 runs land_after only once this is set
+made_up=() # land_after owed by earlier landings whose push failed, made up after this one's push (KT4)
 lane=full lane_why='' ci_lane=full # this commit's lane (LANES), why, and the lane of the CI run it waits for
 verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or red
 B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
@@ -1397,8 +1401,37 @@ batch_landed() {
   SHIP_N=$B_I
   ride
   keep=$tip landed=ok
-  say "landed in a batch with ${with#, }, on $on CI run (${BRANCH} is now $(git rev-parse --short=12 "refs/heads/$BRANCH"))"
+  # Its own commit, which the server's ship note reads (KT3, #1519): main's tip is the deepest green commit of the batch.
+  say "landed $(git log -1 --format='%h "%s"' "$tip") in a batch with ${with#, }, on $on CI run (${BRANCH} is now $(git rev-parse --short=12 "refs/heads/$BRANCH"))"
+  batch_pushed
   exit 0
+}
+
+# The head pushes main after its merge, so a member waits a while for origin to hold its commit, and says how that
+# ended: pushed, the head's push failed (the unpushed line the server reads, so the minion hands off again or tells a
+# person), or still to come. Never waits with PUSH_MAIN=0 or no origin, where nothing is pushed.
+batch_pushed() {
+  local t=0
+  [ "$PUSH_MAIN" != 0 ] && git -C "$MAIN" remote get-url origin >/dev/null 2>&1 || return 0
+  while ! git -C "$MAIN" merge-base --is-ancestor "$tip" "refs/remotes/origin/$BRANCH" 2>/dev/null; do
+    if grep -qs "^$tip " "$state/land-after-pending"; then
+      say "$BRANCH moved, but the push to origin failed: $(cat "$state/land-push-error" 2>/dev/null)"
+      exit 1
+    fi
+    if [ "$t" -ge "$BATCH_PUSH_WAIT" ]; then
+      say "the batch head's push of $BRANCH to origin is still to come (not there after ${BATCH_PUSH_WAIT}s); it landed here all the same"
+      return 0
+    fi
+    sleep 2; t=$((t + 2))
+  done
+  say "$BRANCH is on origin (the batch head pushed it)"
+}
+
+# "<commit>:<branch>" for each branch this landing put on main: its own and, as the head of a batch, each member's.
+landed_here() {
+  local i
+  echo "$tip:$branch"
+  [ -z "$BATCH" ] || for ((i = 2; i <= ${GI:-0}; i++)); do echo "${B_SHA[i]}:${B_LABEL[i]}"; done
 }
 
 # On the way out, however it ends: the worktree goes back on the branch, the place in line and the lock
@@ -1431,8 +1464,8 @@ leave() {
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
   fi
   if [ -n "$main_pushed" ] && declare -F land_after >/dev/null; then
-    local i after=("$tip $branch")
-    [ -z "$BATCH" ] || for ((i = 2; i <= ${GI:-0}; i++)); do after+=("${B_SHA[i]} ${B_LABEL[i]}"); done
+    local i after=("${made_up[@]}") seen=" ${made_up[*]%% *} "
+    while IFS= read -r i; do [[ $seen == *" ${i%%:*} "* ]] || after+=("${i%%:*} ${i#*:}"); done < <(landed_here)
     for i in "${after[@]}"; do
       (land_after "${i%% *}" "${i#* }") >&2 || say "land.local.sh's land_after failed for ${i#* } (exit $?), which landed all the same"
     done
@@ -1780,7 +1813,7 @@ keep=$tip landed=ok # it landed, so its time counts toward the estimate, whateve
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$to")"
 if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then
   with=$(printf ', %s' "${B_LABEL[@]:2:GI-1}")
-  say "landed in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"
+  say "landed $(git log -1 --format='%h "%s"' "$tip") in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"
 fi
 if [ "$mode" = build ]; then
   if git update-ref -d "refs/heads/$build" "$bbase"; then
@@ -1804,11 +1837,24 @@ queue_phase "pushing $BRANCH to origin"
 if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$MAIN" push -q --no-verify origin "$BRANCH" 2>&1); then
   say "pushed $BRANCH to origin"
   main_pushed=1
+  # land_after owed by earlier landings whose push failed (KT4, #1519): made up now that origin holds them, claimed
+  # under the lock so two landings never both run one.
+  if [ -s "$state/land-after-pending" ]; then
+    while read -r i; do
+      git merge-base --is-ancestor "${i%% *}" "refs/remotes/origin/$BRANCH" 2>/dev/null && made_up+=("$i")
+    done <"$state/land-after-pending"
+    rm -f "$state/land-after-pending" "$state/land-push-error"
+  fi
   if [ "$mode" = build ] && git show-ref -q --verify "refs/remotes/origin/$build"; then
     hub git push -q --no-verify origin ":refs/heads/$build" 2>/dev/null || say "couldn't delete $build on origin: delete it there by hand"
   fi
 else
   say "$BRANCH moved, but the push to origin failed: $out"
+  # What land_after owes is written down for the next landing that pushes (KT4, #1519), and a waiting batch member
+  # reads it to report the failure.
+  printf '%s\n' "$out" >"$state/land-push-error"
+  while IFS= read -r i; do printf '%s %s\n' "${i%%:*}" "${i#*:}"; done < <(landed_here) >>"$state/land-after-pending"
+  ! declare -F land_after >/dev/null || say "land.local.sh's land_after didn't run, since $BRANCH isn't on origin: the next landing that pushes it runs it"
   say "the next landing retries it; if origin's $BRANCH moved on its own (rejected as non-fast-forward), a person merges it into $MAIN first"
   exit 1
 fi

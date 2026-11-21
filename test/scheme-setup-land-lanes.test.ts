@@ -220,7 +220,7 @@ test("lanes: with batches the top's run takes the lane of the batch's whole rang
     assert.deepEqual(l.landed().slice(1), ['docs/a.md: 1', 'b.md: 2', 'docs/c.md: 3']);
     assert.deepEqual(all.map(l.sent), [[], [], []]);
     assert.equal(l.asked(), '', 'CI was never asked');
-    assert.match(all[0].stderr(), /landed in a batch with ticket\/2-x, ticket\/3-x/);
+    assert.match(all[0].stderr(), /landed [0-9a-f]+ "[^"]*" in a batch with ticket\/2-x, ticket\/3-x/);
   } finally {
     l.stop();
   }

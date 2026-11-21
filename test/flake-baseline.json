@@ -269,6 +269,12 @@
    "ok": 0
   }
  },
+ "chain-outbox.test.ts": {
+  "rmTemp": {
+   "n": 1,
+   "ok": 0
+  }
+ },
  "chained-minions.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -1189,7 +1195,7 @@
  },
  "loop-lag.test.ts": {
   "sleep": {
-   "n": 4,
+   "n": 3,
    "ok": 0
   },
   "rmTemp": {
@@ -1883,7 +1889,7 @@
    "ok": 0
   },
   "sleep": {
-   "n": 10,
+   "n": 11,
    "ok": 0
   },
   "shortUntil": {
@@ -2384,6 +2390,12 @@
   }
  },
  "turn-setup.test.ts": {
+  "rmTemp": {
+   "n": 1,
+   "ok": 0
+  }
+ },
+ "turn-supervisor.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0

@@ -177,6 +177,30 @@ test('the digest: up to ten lines other Taskmasters logged since this one last r
   assert.equal(ten.at(-1), 'line 13', 'the newest ten, oldest first');
 });
 
+test('the digest never marks a line read that it did not return (2D1)', () => {
+  const { store, Cara, Josh } = people('digest-race.db');
+  const p = store.createProject('Shared', null, Cara.id);
+  const cara = coordinator(store, p.id);
+  const josh = store.splitScheme(p.id, Josh.id);
+  store.noteDigest(p.id, josh.id, 'first');
+  // A line committed right after the first digest statement ran, as the writer can between two reads.
+  const real = store.db.prepare.bind(store.db);
+  let injected = false;
+  (store.db as { prepare: unknown }).prepare = (sql: string) => {
+    const st = real(sql);
+    if (!sql.includes('FROM taskmaster_digest') || sql.startsWith('DELETE')) return st;
+    const wrap = (m: 'get' | 'all') => (...a: unknown[]) => {
+      const out = (st[m] as (...x: unknown[]) => unknown)(...a);
+      if (!injected) { injected = true; real('INSERT INTO taskmaster_digest (project_id, by_ticket, at, text) VALUES (?, ?, ?, ?)').run(p.id, josh.id, Date.now(), 'between'); }
+      return out;
+    };
+    return { get: wrap('get'), all: wrap('all') } as unknown as typeof st;
+  };
+  store.digestFor(cara.id);
+  (store.db as { prepare: unknown }).prepare = real;
+  assert.deepEqual(store.digestFor(cara.id), ['between']);
+});
+
 test("a personal Taskmaster's turns run for its person; a card answer from someone else runs on theirs (R5)", () => {
   const { store, Cara, Josh } = people('turn-person.db');
   const p = store.createProject('Shared', null, Cara.id);

@@ -249,7 +249,7 @@ const STAYS_ON_THREAD: Record<string, string> = {
   'props.insertValue': 'inside props.registerValues and props.review',
   'props.putStage': 'inside props.statusChanged',
   'props.statusChanged': 'inside updateTicket',
-  'props.startStage': 'no callers',
+  'props.startStage': 'called by newMinion (src/new-minion.ts), which runs it with the ticket\'s other writes',
   // Not moved yet: rare, or they write only now and then and would wait for the queue on every call as a VALUE_WRITE.
   ...Object.fromEntries(['putSecret', 'deleteSecret', 'splitScheme', 'putClaudeState', 'forgetJobKind', 'props.backfill', 'schedules.setBrief',
     'schedules.categorize', 'reviews.ensureAgents', 'reviews.recordRun', 'reviews.recordVerdict', 'reviews.removeVerdict', 'reviews.recordRefutes',

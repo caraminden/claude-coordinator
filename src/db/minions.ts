@@ -191,10 +191,12 @@ export const minionQueries = {
     if (!t) return [];
     const key = `digest_read:${coordinatorId}`;
     const since = this.getSetting<number>(key) ?? 0;
-    const rows = this.db.prepare('SELECT id, text FROM taskmaster_digest WHERE project_id = ? AND id > ? AND by_ticket != ? ORDER BY id DESC LIMIT 10')
-      .all(t.project_id, since, coordinatorId) as { id: number; text: string }[];
+    // The bound first, so the mark can't pass a line the query below didn't see (one committed between the two reads).
     const last = (this.db.prepare('SELECT max(id) AS id FROM taskmaster_digest WHERE project_id = ?').get(t.project_id) as { id: number | null }).id;
-    if (last != null && last > since) this.setSetting(key, last);
+    if (last == null || last <= since) return [];
+    const rows = this.db.prepare('SELECT id, text FROM taskmaster_digest WHERE project_id = ? AND id > ? AND id <= ? AND by_ticket != ? ORDER BY id DESC LIMIT 10')
+      .all(t.project_id, since, last, coordinatorId) as { id: number; text: string }[];
+    this.setSetting(key, last);
     return rows.reverse().map((r) => r.text);
   },
 

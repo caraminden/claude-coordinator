@@ -1908,7 +1908,7 @@ export class Store {
    */
   private attachState() {
     this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath ?? ':memory:');
-    // auto_vacuum only takes before the file's first table, so a new state.db gets it; the prune frees space with incremental_vacuum.
+    // auto_vacuum only takes before the file's first table, so a new state.db gets it, so the file can shrink when a vacuum is run on it.
     this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL; PRAGMA state.synchronous = NORMAL;');
     // A WAL file keeps its biggest size unless capped: the move alone grew state.db's to its whole size.
     this.db.exec('PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');

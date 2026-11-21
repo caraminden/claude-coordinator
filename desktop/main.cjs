@@ -8,6 +8,7 @@ const { app, BrowserWindow, Menu, Tray, nativeTheme, screen, shell, ipcMain } = 
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
+const { reloadKey } = require('./keys.cjs');
 
 const START = new URL(process.env.CITADEL_URL || 'https://cara.apps.webplatformisbestplatform.net/c/');
 /** Citadel's other addresses: a link to one of these opens here, on START's host, rather than in a browser. */
@@ -83,6 +84,13 @@ function open(url = START.href) {
     e.preventDefault();
     if (r.kind === 'here') wc.loadURL(r.url);
     else if (r.kind === 'browser') shell.openExternal(r.url);
+  });
+  // No menu means no Ctrl+R / F5 accelerators (#1526): handle the browser's reload keys here, in every window.
+  wc.on('before-input-event', (e, input) => {
+    const k = reloadKey(input);
+    if (!k) return;
+    e.preventDefault();
+    if (k === 'reload-hard') wc.reloadIgnoringCache(); else wc.reload();
   });
   wc.on('context-menu', (_e, p) => contextMenu(wc, p));
   win.on('close', (e) => { remember(); if (!quitting) { e.preventDefault(); win.hide(); } });

@@ -31,7 +31,7 @@ npm exec --yes --package=resedit-cli@3.1.1 -- resedit --in "$work/Citadel/electr
 rm "$work/Citadel/electron.exe"
 rm -f "$work/Citadel/resources/default_app.asar"
 mkdir "$work/Citadel/resources/app"
-cp "$here"/{main.cjs,route.cjs,preload.cjs,package.json,icon.ico} "$work/Citadel/resources/app/"
+cp "$here"/{main.cjs,route.cjs,keys.cjs,preload.cjs,package.json,icon.ico} "$work/Citadel/resources/app/"
 rm -f "$out"
 # Deflated, sorted, with directory entries and no extra fields, like zip -r -X made it.
 python3 -I - "$work" "$out" <<'PY'

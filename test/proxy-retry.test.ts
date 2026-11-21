@@ -148,6 +148,7 @@ test('a plain script is gzipped for a browser that accepts it, with an ETag and 
     assert.ok(r.body.length < big.length / 4);
     const again = await files(app, { 'accept-encoding': 'gzip', 'if-none-match': String(r.headers['etag']) });
     assert.equal(again.status, 304);
+    assert.equal((await files(app, { 'accept-encoding': 'gzip', 'if-none-match': `"x", W/${r.headers['etag']}` })).status, 304);
     const plain = await files(app, {});
     assert.equal(plain.headers['content-encoding'], undefined);
     assert.equal(plain.body.toString(), big);

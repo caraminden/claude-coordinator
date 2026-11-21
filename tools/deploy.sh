@@ -247,7 +247,7 @@ interruptible() {
 turn_units() {
   local tag
   tag=$(printf %s "$(dirname "$DB")/run/turns" | sha256sum | cut -c1-8)
-  echo "citadel-turn-$tag-*.service"
+  echo "citadel-turn-$tag-*"  # a wrapper's .service or, since #1343, a supervisor turn's .scope
 }
 
 # Drop the contraption turn audit (#844) from database copy $1: it holds players' words for 14 days only, so

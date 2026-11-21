@@ -41,6 +41,7 @@ import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-fac
 import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial, trialLine } from './seam-trial.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
+import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -621,6 +622,12 @@ export class Runner {
   units = false;
   /** Turns get their Citadel tools from their place's shared tool server (#1259, src/mcp-pool.ts) rather than helpers of their own; set by server.ts. */
   pool = false;
+  /**
+   * Host turns with units start in the shared turn supervisor (#1343, src/turn-supervisor.mjs), each in a scope of its
+   * own, rather than each with a node wrapper of its own; a turn it doesn't take at once gets its wrapper unit. Set by server.ts.
+   */
+  supervisor = false;
+  private supSpec: SupervisorSpec | null = null;
   /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
   turnsDir: string;
   /** The data dir this runner's turns use (beside the database), so a test's or dev copy's stay apart. */
@@ -1621,6 +1628,26 @@ export class Runner {
     return true;
   }
 
+  /** The shared turn supervisor for this server's pinned code (#1343). */
+  private supervisorSpec(): SupervisorSpec {
+    return (this.supSpec ??= supervisorSpec(this.turnsDir, this.unitTag, turnPins()));
+  }
+
+  /**
+   * A turn whose supervisor is gone (stopped, or a crash its unit didn't restart) runs on in its scope, but its shared
+   * tool server forgets it within 30 s unless a supervisor adopts it: start one, which adopts it at start.
+   */
+  private keepSupervisor(live: LiveTurn) {
+    if (!this.supervisor || !live.unit) return;
+    let sup: unknown;
+    try {
+      sup = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).supervisor;
+    } catch {
+      return;
+    }
+    if (sup !== undefined && !supervisorAlive(sup)) ensureSupervisor(this.supervisorSpec());
+  }
+
   /** Whether a followed turn's process may still be running: started, or still starting. */
   private running(live: LiveTurn): boolean {
     return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < START_GRACE_MS;
@@ -2447,7 +2474,9 @@ export class Runner {
       }
     }
     // A unit's other processes (claude not started yet, or something it left behind) go with the unit.
-    if (live.unit && (!pid || sig === 'SIGKILL')) execFile('systemctl', ['--user', 'stop', live.unit], () => {});
+    // By pattern: the turn's wrapper unit (name.service) or its scope from the supervisor (name.scope, #1343); a pattern
+    // that matches nothing is no error, where a missing unit named outright would stop the whole call.
+    if (live.unit && (!pid || sig === 'SIGKILL')) execFile('systemctl', ['--user', 'stop', `${live.unit}.*`], () => {});
   }
 
   /**
@@ -3097,13 +3126,17 @@ export class Runner {
       this.spawnWrapper(wrapper, dir);
       return live.ended;
     }
-    execFile('systemd-run', plan.spawn.systemdRun, (err, _out, stderr) => {
+    const { systemdRun, scope } = plan.spawn;
+    const inUnit = () => execFile('systemd-run', systemdRun, (err, _out, stderr) => {
       if (!err) return fallbacks.started();
       fallbacks.record(ticket.id, 'A turn', String(stderr).trim() || err.message);
       live.unit = null;
       this.saveTurn(ticket.id, { unit: null });
       this.spawnWrapper(wrapper, dir);
     });
+    // The scope keeps the unit's name, so stopping it by name (signal) reaches it either way.
+    if (this.supervisor) void handTurn(this.supervisorSpec(), dir, scope).then((taken) => taken || inUnit());
+    else inUnit();
     return live.ended;
   }
 
@@ -3337,9 +3370,11 @@ export class Runner {
       }
       if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
       // Gone without a word: killed with its unit (out of memory, say).
-      if (++live.ticks % 20 === 0 && this.gone(live)) {
-        this.readStream(ticketId, live, true);
-        this.finish(ticketId, live, null);
+      if (++live.ticks % 20 === 0) {
+        if (this.gone(live)) {
+          this.readStream(ticketId, live, true);
+          this.finish(ticketId, live, null);
+        } else this.keepSupervisor(live);
       }
     } catch (err: any) {
       console.error(`Ticket ${ticketId}: following its turn failed:`, err);

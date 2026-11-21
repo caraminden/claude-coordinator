@@ -1,38 +1,23 @@
 // Runs one turn's `claude -p` for the runner (src/runner.ts) in a process of its own, normally a
-// transient systemd user unit, so the turn outlives a restart of the server. Plain JS, not TypeScript: a .ts file
-// makes node load its type stripper, about 18 MB more in every turn's wrapper (#1343).
-// Everything it reads and writes is in the turn's folder, given as its one argument:
-//   spec.json     in: the command, args, cwd and env (deleted once read, as the env holds the turn's token)
-//   prompt.jsonl  in: the turn's first message, written to claude's stdin
-//   steer.jsonl   in: messages that steer the running turn, one stream-json line each, appended by the runner
-//   steer.sent    out: bytes of steer.jsonl passed to claude; the runner queues the rest for the next turn
-//   pid.json      out: { wrapper, claude } pids; the runner stops a turn by signalling claude's process group
-//   stream.jsonl  out: claude's stdout, the stream-json the runner tails
-//   stderr.log    out: claude's stderr
-//   exit.json     out: { code, signal, error? } once claude has exited
-//   beat          out: touched every 5 s while this runs
-//   mcp-stdio.json in: the turn's own-helpers tool config, used instead of mcp.json when spec.pool won't start (#1259)
-//                 or mcp.json names a variable the env lacks (#1272)
+// transient systemd user unit, so the turn outlives a restart of the server. Since #1343 a host turn normally starts
+// in the shared supervisor (src/turn-supervisor.mjs) instead; this runs container turns, test and dev turns, and any
+// turn the supervisor couldn't take. Plain JS, not TypeScript: a .ts file makes node load its type stripper, about
+// 18 MB more in every turn's wrapper (#1343). The turn's folder, its one argument, is described in src/turn-run.mjs.
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { keepTurn } from './pool-client.mjs';
+import { claimSpec, feeder, keepPooled, prepare, put } from './turn-run.mjs';
 
 const dir = process.argv[2];
 /** @param {string} name */
 const file = (name) => join(dir, name);
-/** Write a file the runner may read at any moment: renamed into place, so it never sees it half-written. */
-/** @param {string} name @param {string} data */
-function put(name, data) {
-  writeFileSync(file(`${name}.tmp`), data);
-  renameSync(file(`${name}.tmp`), file(name));
-}
-const spec = JSON.parse(readFileSync(file('spec.json'), 'utf8'));
-rmSync(file('spec.json'));
+const spec = claimSpec(dir);
+// The supervisor took it first (the runner starts this when the supervisor is slow to answer): it runs the turn.
+if (!spec) process.exit(0);
 
 /** @param {{ code: number | null, signal: string | null, error?: string }} exit */
 function done(exit) {
-  put('exit.json', JSON.stringify(exit));
+  put(dir, 'exit.json', JSON.stringify(exit));
   process.exit(0);
 }
 
@@ -42,118 +27,40 @@ function failed(err) {
   done({ code: null, signal: null, error: err.message });
 }
 
-// The shared tool server (#1259, src/mcp-pool.ts): the turn's tools come from its place's pool, which this keeps up
-// and keeps the turn registered with. If it won't start, the turn runs its own helpers, as before the pool.
-if (spec.pool) {
-  /** @type {import('./pool-client.mjs').PoolSpec} */
-  const pool = spec.pool;
-  /** @type {string} */
-  const token = spec.env.COORDINATOR_TOKEN ?? '';
-  const reg = { env: spec.env, cwd: spec.cwd };
-  try {
-    const p = await keepTurn(pool, token, reg);
-    spec.env = { ...spec.env, CITADEL_POOL_PORT: String(p.port) };
-    let busy = false;
-    setInterval(() => {
-      if (busy) return;
-      busy = true;
-      keepTurn(pool, token, reg).catch(() => {}).finally(() => (busy = false));
-    }, 2_000).unref();
-  } catch (err) {
-    appendFileSync(file('stderr.log'), `The shared tool server didn't start (${err.message}); this turn runs its own helpers.\n`);
-    spec.args = spec.args.map((/** @type {string} */ a) => (a === file('mcp.json') ? file('mcp-stdio.json') : a));
-  }
-}
-
-// Claude Code leaves an unset ${VAR} in an http server's url as written, refuses the server and runs the turn with no
-// Citadel tools (#1272). A config naming one this env lacks gives way to the turn's own helpers, when it has them.
-if (spec.args.includes(file('mcp.json')) && existsSync(file('mcp-stdio.json'))) {
-  let why = '';
-  try {
-    const unset = new Set([...readFileSync(file('mcp.json'), 'utf8').matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/g)].filter((m) => !m[2] && spec.env[m[1]] === undefined).map((m) => m[1]));
-    if (unset.size) why = `names ${[...unset].join(', ')}, which its env lacks`;
-  } catch (err) {
-    why = `can't be read (${err.message})`;
-  }
-  if (why) {
-    appendFileSync(file('stderr.log'), `This turn's tool config ${why}; it runs its own helpers.\n`);
-    spec.args = spec.args.map((/** @type {string} */ a) => (a === file('mcp.json') ? file('mcp-stdio.json') : a));
-  }
+const pooled = await prepare(dir, spec);
+if (pooled) {
+  let busy = false;
+  setInterval(() => {
+    if (busy) return;
+    busy = true;
+    keepPooled(pooled).finally(() => (busy = false));
+  }, 2_000).unref();
 }
 
 // The env is exactly the runner's allowlist (turnEnv), not this unit's: the user manager adds its own.
-/** @type {import('node:child_process').ChildProcess} */
+/** @type {import('node:child_process').ChildProcessWithoutNullStreams} */
 let child;
 try {
-  child = spawn(spec.command, spec.args, {
+  child = /** @type {any} */ (spawn(spec.command, spec.args, {
     cwd: spec.cwd,
     env: spec.env,
     // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
     detached: true,
     stdio: ['pipe', openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
-  });
+  }));
 } catch (err) {
   // Some failures (E2BIG: arguments too long) throw here rather than emit 'error'; without exit.json
   // the runner would wait out its start-up grace and report the turn as killed.
   failed(/** @type {Error} */ (err));
 }
 child.on('error', failed);
-if (child.pid) put('pid.json', JSON.stringify({ wrapper: process.pid, claude: child.pid }));
+if (child.pid) put(dir, 'pid.json', JSON.stringify({ wrapper: process.pid, claude: child.pid }));
 child.on('exit', (code, signal) => done({ code, signal }));
 // In a container the runner can't see these pids, so it goes by this heartbeat (runner.ts wrapperAlive).
 setInterval(() => writeFileSync(file('beat'), ''), 5_000).unref();
 
-// Claude reads stdin line by line, mid-turn too, and waits for more until it closes. So steers go in
-// until the turn's reply (its result) is out; anything written before the close is still handled.
-child.stdin.on('error', () => {}); // claude exited without reading it all
-child.stdin.write(readFileSync(file('prompt.jsonl')));
-let sent = 0;
-let scanned = 0;
-const tick = setInterval(() => {
-  if (replied()) {
-    clearInterval(tick);
-    child.stdin.end();
-    return;
-  }
-  let steers;
-  try {
-    steers = readFileSync(file('steer.jsonl'));
-  } catch {
-    return; // none yet
-  }
-  const end = steers.lastIndexOf(10) + 1; // whole lines only: the runner may be mid-append
-  if (end <= sent) return;
-  child.stdin.write(steers.subarray(sent, end));
-  sent = end;
-  put('steer.sent', String(sent));
-}, 250);
-
-/**
- * Claude's stream has a result line past what was scanned before.
- * @returns {boolean}
- */
-function replied() {
-  const fd = openSync(file('stream.jsonl'), 'r');
-  try {
-    const size = fstatSync(fd).size;
-    if (size <= scanned) return false;
-    const buf = Buffer.alloc(size - scanned);
-    readSync(fd, buf, 0, buf.length, scanned);
-    const end = buf.lastIndexOf(10) + 1;
-    scanned += end;
-    for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
-      if (!line.includes('"result"')) continue;
-      try {
-        if (JSON.parse(line).type === 'result') return true;
-      } catch {
-        // Not JSON: claude printed something else.
-      }
-    }
-    return false;
-  } finally {
-    closeSync(fd);
-  }
-}
+const tick = feeder(dir, child.stdin);
+const feeding = setInterval(() => tick() || clearInterval(feeding), 250);
 // `systemctl stop` signals the whole unit at once; outlive claude so its exit is still recorded.
 process.on('SIGTERM', () => {});
 process.on('SIGINT', () => {});

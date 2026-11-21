@@ -312,7 +312,7 @@ test('/api/health gives the ids of the turns a restart would cut off, and deploy
 test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {
   const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
   const tag = (new Runner(store, () => {}, () => ({})) as any).unitTag;
-  assert.equal(units, `citadel-turn-${tag}-*.service`);
+  assert.equal(units, `citadel-turn-${tag}-*`);
 });
 
 test('deploy.sh pushes the live commit to main, never forced, and a failed push only reports', () => {

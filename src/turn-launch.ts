@@ -51,6 +51,9 @@ export interface TurnPins {
   /** Runs every PreToolUse check above in one node process (#1296, src/hook-run.ts). */
   HOOK_RUN: string;
   TURN_WRAPPER: string;
+  /** The shared turn supervisor (#1343, src/turn-supervisor.mjs), and a hash of its code: one runs per turns folder and version. */
+  SUPERVISOR: string;
+  SUPERVISOR_VERSION: string;
   /**
    * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
    * deploy only reaches turns that start after the restart, and a branch's kit never reaches other schemes.
@@ -110,10 +113,16 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     for (const [, dep] of readFileSync(join(MCP_DIR, file), 'utf8').matchAll(/from '\.\/([^']+)'/g)) closure(dep, seen);
     return seen;
   };
-  const hash = createHash('sha256');
-  for (const f of [...closure('mcp-pool.ts')].sort()) hash.update(`${f}\0`).update(readFileSync(join(MCP_DIR, f)));
-  hash.update(`slice\0${TASKMASTER_SLICE}`); // the slice it runs in too, so moving it starts a fresh pool there
-  const POOL_VERSION = hash.digest('hex').slice(0, 16);
+  /** A hash of `file`'s closure and the slice it runs in, so moving it starts a fresh one there. */
+  const version = (file: string): string => {
+    const hash = createHash('sha256');
+    for (const f of [...closure(file)].sort()) hash.update(`${f}\0`).update(readFileSync(join(MCP_DIR, f)));
+    hash.update(`slice\0${TASKMASTER_SLICE}`);
+    return hash.digest('hex').slice(0, 16);
+  };
+  const POOL_VERSION = version('mcp-pool.ts');
+  const SUPERVISOR = pinnedCopy('turn-supervisor.mjs');
+  const SUPERVISOR_VERSION = version('turn-supervisor.mjs');
   const KIT = join(MCP_DIR, 'kit');
   const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
   if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
@@ -163,7 +172,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   mkdirSync(SPARES_DIR, { recursive: true });
   for (const name of readdirSync(SPARES_DIR)) if (Number(name) !== process.pid && !alive(Number(name))) rmSync(join(SPARES_DIR, name), { recursive: true, force: true });
   pinSparesAt(join(SPARES_DIR, String(process.pid)), MCP_DIR);
-  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
+  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, SUPERVISOR, SUPERVISOR_VERSION, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
 }
 
 /**
@@ -597,7 +606,12 @@ export interface LaunchPlan {
   configDir: string;
   /** Files for the turn's folder, in the order to write them. */
   files: { name: string; text: string; mode?: number }[];
-  spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
+  /**
+   * `unit`: a host turn with a unit of its own. The runner hands it to the shared turn supervisor (#1343,
+   * src/turn-supervisor.mjs), which runs it in a scope from `scope` (systemd-run's arguments: the same name, slice and
+   * memory marks), and starts the wrapper in a unit from `systemdRun` when the supervisor doesn't take it.
+   */
+  spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; scope: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
   /** The shared tool server the wrapper keeps up for this turn (src/pool-client.mjs); with it, `mcp.json` reaches the pool and `mcp-stdio.json` is the fallback. */
   pool?: PoolSpec;
 }
@@ -792,10 +806,12 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     args.unshift(pinned(pins.CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(codex.thread ? ['--codex-thread', codex.thread] : []));
   }
   const wrapper = [node, pinned(pins.TURN_WRAPPER), dir];
+  // The turn's own memory group, a unit for the wrapper or a scope from the supervisor: its slice and oomd's mark on it.
   // systemd-oomd (#1338): a minion turn is `avoid`, the last pick once heavy commands, ships and test scopes are gone;
-  // a Taskmaster turn is `omit`, never picked. A turn unit is a leaf cgroup, which is where oomd reads the mark.
+  // a Taskmaster turn is `omit`, never picked. A turn unit or scope is a leaf cgroup, which is where oomd reads the mark.
+  const group = [`--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15'];
   const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
-    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
+    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
     : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):

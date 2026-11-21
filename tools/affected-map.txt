@@ -17,6 +17,11 @@ src/host-check.ts: test/host-check.test.ts
 src/prompts.ts: test/prompt-done-when.test.ts test/prompt-hashes.test.ts test/model-table.test.ts
 src/mcp.ts: test/mcp-always-load.test.ts
 src/turn-launch.ts: test/pinned-mcp.test.ts
+# How a turn's claude starts: the shared supervisor (#1343), the per-turn wrapper, and what both run.
+src/turn-supervisor.mjs: test/turn-supervisor.test.ts
+src/supervisor-client.ts: test/turn-supervisor.test.ts
+src/turn-run.mjs: test/turn-supervisor.test.ts test/steer.test.ts test/turn-survives.test.ts
+src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-container.test.ts
 src/runner.ts: test/pinned-mcp.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).

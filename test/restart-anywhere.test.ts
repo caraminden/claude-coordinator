@@ -31,6 +31,7 @@ import { createHook } from 'node:async_hooks';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { gzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -50,7 +51,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
-const { fake, prompts, setRelease, turnsRun } = releaseFake(root);
+const { fake, prompts, setRelease, setReply, turnsRun } = releaseFake(root);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Two hours from now, in Claude's words.
@@ -59,7 +60,10 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
 type Ctx = {
-  runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void;
+  runner: Runner; store: Store; id: number; say: (author: string, text: string) => void;
+  /** A message another minion relays (send's `from`), as a minion's ask to its Taskmaster. */
+  relay: (text: string) => void;
+  mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void;
   /** Chain the minion on another's work (create_ticket's start_after), its brief held in a `chain` row; meetChain is the check finding that work in. */
   chain: (brief: string) => void; meetChain: () => void;
   quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner;
@@ -277,6 +281,65 @@ const FLOWS: Flow[] = [
       } },
     ],
   },
+  // Seam review R3, R4, R6 (#1283, #1452): what a turn sets at its start or mid-turn and reads later survives a cut.
+  {
+    name: 'a Taskmaster turn a minion\'s relay started, cut off and resumed',
+    steps: [
+      { name: 'a minion relays an ask', run: async (c) => {
+        setRelease(null);
+        c.relay('please start part two');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+      } },
+      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
+        await crash(c.runner, c.id);
+        setRelease('ok');
+        const before = turnsRun();
+        const next = c.restart();
+        next.recover();
+        await c.quiet('the resume', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
+    name: 'a minion held on start_after answers a message, cut off and resumed',
+    setup: () => (r) => {
+      r.heldFor = () => '#9 ships';
+    },
+    steps: [
+      { name: 'Cara asks the held minion something', run: async (c) => {
+        c.store.updateTicket(c.id, { state: 'parked', note: 'waits on #9' });
+        setRelease(null);
+        c.say('Cara', 'a question while you wait');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+      } },
+      { name: 'the turn sets its own state', run: async (c) => {
+        c.store.updateTicket(c.id, { state: 'ready', note: 'answered' });
+        await sleep(30);
+      } },
+      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
+        await crash(c.runner, c.id);
+        setRelease('ok');
+        const before = turnsRun();
+        const next = c.restart();
+        next.recover();
+        await c.quiet('the resume', () => turnsRun() === before + 1);
+        const t = c.store.getTicket(c.id)!;
+        assert.deepEqual([t.state, t.note], ['parked', 'waits on #9'], 'still parked once the resumed turn ends');
+      } },
+    ],
+  },
+  {
+    name: 'a reply with a status trailer',
+    steps: [
+      { name: 'the turn replies with a trailer and ends', run: async (c) => {
+        setReply('done <!-- status: {"state":"ready","note":"read me","replies":["Ship it"]} -->');
+        setRelease('ok');
+        const before = turnsRun();
+        c.say('Cara', 'go');
+        await c.quiet('the turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
 ];
 
 /** The server dies mid-turn and its turn goes with it, as in auto-resume.test.ts. */
@@ -308,7 +371,9 @@ function makeRunner(store: Store, hooks?: (r: Runner) => void) {
 }
 
 /** A point a restart could land on: the store's copy there, and what the uncut run had done by then. */
-type Cut = { n: number; dir: string; step: number; what: string };
+type Cut = { n: number; dir: string; step: number; what: string; mem: Mem };
+/** What the uncut runner held in memory for the minion's turn at a cut (R3, R4, R6). */
+type Mem = { from?: number; parkedAs?: { state: string | null; note: string | null }; status?: object };
 type Logged = { kind: 'sent' | 'start' | 'dropped'; texts: string[]; at: number; step: number };
 
 /**
@@ -320,6 +385,8 @@ class Recorder {
   log: Logged[] = [];
   step = 0;
   error: unknown = null;
+  /** The uncut runner's per-turn memory, taken with each cut. */
+  probe: () => Mem = () => ({});
   private changes: () => number;
   private last: number;
   private settings = new Map<string, string>();
@@ -374,7 +441,7 @@ class Recorder {
       const dir = join(this.dir, `cut-${this.cuts.length}`);
       mkdirSync(dir);
       this.store.db.exec(`VACUUM main INTO '${join(dir, 'test.db')}'; VACUUM state INTO '${join(dir, 'state.db')}'`);
-      this.cuts.push({ n: this.cuts.length, dir, step: this.step, what: this.describe() });
+      this.cuts.push({ n: this.cuts.length, dir, step: this.step, what: this.describe(), mem: structuredClone(this.probe()) });
     } catch (err) {
       // An async hook that throws ends the process: kept, and the flow fails on it.
       this.error ??= err;
@@ -420,6 +487,7 @@ class Recorder {
 async function record(flow: Flow) {
   const dir = join(root, flow.name.replace(/\W+/g, '-'));
   mkdirSync(dir);
+  setReply(null);
   const store = new Store(join(dir, 'test.db'));
   const project = store.createProject('Test', null);
   const hooks = flow.setup?.(store, project.id);
@@ -458,6 +526,10 @@ async function record(flow: Flow) {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
       ctx.runner.send(t.id, author, text);
     },
+    relay: (text) => {
+      rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
+      ctx.runner.send(t.id, 'Minion', text, [], { from: leader.id });
+    },
     wake: (note, inMs) => {
       rec.log.push({ kind: 'sent', texts: [note], at: rec.cuts.length, step: rec.step });
       wakes!.add(t.id, Date.now() + inMs, note, 'Minion');
@@ -492,6 +564,10 @@ async function record(flow: Flow) {
       runners.push(ctx.runner);
       return ctx.runner;
     },
+  };
+  rec.probe = () => {
+    const r = ctx.runner as any;
+    return { from: r.turnFrom.get(t.id), parkedAs: r.parkedAs.get(t.id), status: r.statuses.get(t.id) };
   };
   rec.start();
   try {
@@ -531,6 +607,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     kinds(store, r, outbox);
   }
   const problems: string[] = [];
+  const saved = store.getSetting<{ keepalive?: true }>(`turn:${id}`);
   try {
     r.recover();
     void outbox?.boot();
@@ -545,6 +622,12 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
       }
     }
     const t = store.getTicket(id)!;
+    // Per-turn values the old server held (#1452): a cut-off turn's resume still has them, and a held minion stays parked.
+    const { from, parkedAs, status } = cut.mem;
+    if (saved && !saved.keepalive && from !== undefined && r.relayedBy(id) !== from) problems.push(`its turn answered #${from}'s relay, but now answers ${r.relayedBy(id) ?? 'no one'}'s`);
+    if (saved && !saved.keepalive && status && started.length && !isDeepStrictEqual((r as any).statuses.get(id), status)) problems.push(`its reply's status trailer ${JSON.stringify(status)} is lost`);
+    const parkedNow = (r as any).parkedAs.get(id) ?? { state: t.state, note: t.note };
+    if (parkedAs && !isDeepStrictEqual(parkedNow, parkedAs)) problems.push(`it was parked as ${JSON.stringify(parkedAs)}, but is now ${JSON.stringify(parkedNow)} with nothing to put that back`);
     const limit = r.limitWait(id);
     const net = r.netWait(id);
     const q = r.queue.get(id);

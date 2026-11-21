@@ -172,6 +172,12 @@ interface TurnState {
   result?: { error: boolean; text: string | null };
   /** Its minion's deploy went live mid-turn (see deployLive). */
   deployed?: true;
+  /** The minion whose relay started it (Runner.turnFrom): a restart mid-turn keeps whose minion a Taskmaster's create_ticket makes (R3, #1452). */
+  from?: number;
+  /** A held minion's state and note at its start (Runner.parkedAs, #261), put back at its end (R4, #1452). */
+  parkedAs?: { state: string | null; note: string | null };
+  /** Its reply's last status trailer (Runner.statuses), applied with its result (R6, #1452). */
+  status?: StatusFields;
   limitTries?: number;
   netTries?: number;
   killTries?: number;
@@ -1575,6 +1581,9 @@ export class Runner {
         if (owed) later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
         if (cut) {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
+          // What the turn set and reads later (#1452): kept for a re-attached turn's end, or the resume that carries it on.
+          if (turn?.from) this.turnFrom.set(t.id, turn.from);
+          if (turn?.parkedAs) this.parkedAs.set(t.id, turn.parkedAs);
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
           this.approvals.restore(t.id, this.store.eventsOfKinds(t.id, ['approval', 'approval_result']), turn?.startedAt);
           try {
@@ -1584,6 +1593,9 @@ export class Runner {
           }
           // Its turn is gone, so nobody's click can count for them now.
           this.approvals.endTurn(t.id, 'The server restarted while this waited.');
+          // Its trailer, as last saved (a vanished turn's result, read by reattach, applied it): only its resume's end applies it.
+          const status = this.store.getSetting<TurnState>(turnKey(t.id))?.status;
+          this.statuses.delete(t.id);
           // Steers it never passed on go back to the queue.
           this.queue.endSteers(t.id, turn?.dir ? unsentSteers({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
           // A line read, or output it never read, says claude had its prompt (#1364): that turn resumes with its batch.
@@ -1622,6 +1634,7 @@ export class Runner {
           } else {
             // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
             this.queue.owe(t.id, owedOf(resumed.via, resumed.retries));
+            if (status) this.statuses.set(t.id, status);
             later.push(() => this.resume(t.id, resumed.via, resumed.retries));
           }
         }
@@ -1688,6 +1701,8 @@ export class Runner {
     // server, so a fresh beat says nothing. With no wrapper run (no pid.json) and nothing left to start one, it was interrupted.
     // The process scan goes first: a wrapper that ends during it has written its files by the time they are checked.
     if (turn.container && turn.dir && !wrapperInProc(turn.dir, true) && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f)))) return false;
+    // Before following: what it wrote while no server read it may hold its result, which applies the trailer.
+    if (turn.status) this.statuses.set(ticketId, turn.status);
     const live = this.follow(ticketId, turn);
     if (this.gone(live)) {
       // What it wrote while no server read it reaches the chat before recovery deletes its folder, as poll's does (C8, #1406).
@@ -2183,7 +2198,7 @@ export class Runner {
       this.heard(ticketId, ticket, msg);
       this.saveTurn(ticketId, { typedBy });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
-      if (person && !extra.from) this.turnFrom.delete(ticketId);
+      if (person && !extra.from && this.turnFrom.delete(ticketId)) this.saveTurn(ticketId, { from: undefined });
       return { event: row };
     }
     const limited = !!(ticket && this.limitWait(ticketId));
@@ -3132,7 +3147,9 @@ export class Runner {
         const name = person && this.store.getUser(person)?.name;
         if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: claudePlace.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
       }
-      const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
+      // A resume carries on the cut-off turn, so it answers that turn's relay, unless a person's message rides along (#1452).
+      const first = batch.find((m) => m.from || this.personOf?.(m.author));
+      const from = first ? first.from : resumed ? this.turnFrom.get(ticket.id) : undefined;
       if (from) this.turnFrom.set(ticket.id, from);
       else this.turnFrom.delete(ticket.id);
       // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
@@ -3140,7 +3157,10 @@ export class Runner {
       // sets another state or a person wrote to it (personWrote).
       // A limited minion's note is the server's, about the wait this turn ends; a complete one's says nothing is left (#547).
       // A minion parked on start_after stays parked through a turn that answers a message (#261).
-      if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
+      // One recover() put back is a cut-off turn's, from before that turn could change the state (#1452).
+      const parkedAs = this.parkedAs.get(ticket.id);
+      this.parkedAs.delete(ticket.id);
+      if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
       else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.cancelLimitWait(ticket.id);
@@ -3213,7 +3233,8 @@ export class Runner {
     writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
     const turn: TurnState = { ...(Object.keys(retries).length ? { retries } : {}), dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
-      ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
+      ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}),
+      ...(!keepalive && this.turnFrom.has(ticket.id) ? { from: this.turnFrom.get(ticket.id) } : {}), ...(!keepalive && this.parkedAs.has(ticket.id) ? { parkedAs: this.parkedAs.get(ticket.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;
@@ -3927,6 +3948,7 @@ export class Runner {
       const status = this.statuses.get(ticketId);
       this.statuses.delete(ticketId);
       if (status && !ev.is_error) this.onStatusTrailer(ticketId, status);
+      if (status) this.saveTurn(ticketId, { status: undefined });
     }
     // Likewise the model: remembered from turns that ran without one chosen.
     const t = ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string' ? this.store.getTicket(ticketId) : null;
@@ -4089,10 +4111,13 @@ export class Runner {
       const { text, status, bad } = takeStatus(b.text);
       if (text === b.text) return [b];
       changed = true;
-      if (status) this.statuses.set(ticketId, status);
+      if (status) {
+        this.statuses.set(ticketId, status);
+        this.saveTurn(ticketId, { status });
+      }
       if (bad) {
         // A later reply's bad line (a sent-back reply's rewrite) doesn't let an earlier reply's line stand.
-        this.statuses.delete(ticketId);
+        if (this.statuses.delete(ticketId)) this.saveTurn(ticketId, { status: undefined });
         console.log(`[status] minion ${ticketId}: ignored a status trailer, ${bad}`);
         this.emit(ticketId, 'note', { text: `The reply's status line was ignored (${bad}), so the state stays as it was.` });
       }

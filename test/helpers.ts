@@ -108,7 +108,8 @@ const wait = setInterval(() => {
   appendFileSync(${JSON.stringify(prompts)}, input);
   const result = process.env.FAKE_RESULT ?? readFileSync(${JSON.stringify(release)}, 'utf8');
   console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'm-main' }));
-  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
+  const reply = existsSync(${JSON.stringify(release + '.reply')}) ? [{ type: 'text', text: readFileSync(${JSON.stringify(release + '.reply')}, 'utf8') }] : [];
+  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: reply, usage: { input_tokens: 5, cache_read_input_tokens: 120000, cache_creation_input_tokens: 2000 } } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result, modelUsage: { 'm-grunt': { contextWindow: 200000 }, 'm-main': { contextWindow: 1000000 } } }));
   process.exit(0);
 }, 20);
@@ -121,7 +122,9 @@ const wait = setInterval(() => {
     writeFileSync(`${release}.tmp`, words);
     renameSync(`${release}.tmp`, release);
   };
-  return { fake, prompts, setRelease, turnsRun: () => lines(prompts).length };
+  /** The words of the turn's one reply (a status trailer, say), or null for none. */
+  const setReply = (words: string | null) => (words === null ? rmSync(`${release}.reply`, { force: true }) : writeFileSync(`${release}.reply`, words));
+  return { fake, prompts, setRelease, setReply, turnsRun: () => lines(prompts).length };
 }
 
 export const jsonLines = (path: string): any[] => lines(path).map((l) => JSON.parse(l));

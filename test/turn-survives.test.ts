@@ -31,7 +31,7 @@ const { appendFileSync, existsSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: process.argv.slice(2), env: Object.keys(process.env), input }) + '\\n');
   const say = (text) => console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
-  say(input.includes('big line') ? 'x'.repeat(1.5e6) : 'working on it');
+  say(input.includes('big line') ? 'x'.repeat(1.5e6) : input.includes('with a trailer') ? 'working on it <!-- status: {"state":"ready","note":"read me","replies":["Ship it"]} -->' : 'working on it');
   const wait = setInterval(() => {
     if (!existsSync(${JSON.stringify(release)})) return;
     clearInterval(wait);
@@ -256,4 +256,58 @@ test('a running ticket says when its turn started, before any claude event, and 
   writeFileSync(release, '');
   await until('!next.isRunning(id)', () => !next.isRunning(id));
   assert.equal(next.view(store.getTicket(id)!).turnStartedAt, null);
+});
+
+// Seam review R3, R4, R6 (#1283, #1452): values a turn sets at its start or mid-turn and reads at its end live in its
+// saved TurnState, so a deploy that restarts the server mid-turn keeps them.
+test("a Taskmaster turn a minion's relay started still answers that minion after a restart (R3)", async () => {
+  const id = newTicket();
+  const asker = newTicket();
+  rmSync(release, { force: true });
+  const before = server();
+  before.send(id, 'Minion', 'please start part two', [], { from: asker });
+  await until('texts(id).length > 0', () => texts(id).length > 0);
+  assert.equal(before.relayedBy(id), asker);
+  before.detachAll();
+
+  const next = server();
+  next.recover();
+  assert.ok(next.isRunning(id));
+  assert.equal(next.relayedBy(id), asker, "create_ticket's fallback still finds the asking minion");
+  writeFileSync(release, '');
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
+});
+
+test('a minion held on start_after stays parked when its message turn ends after a restart (R4)', async () => {
+  const id = newTicket();
+  store.updateTicket(id, { state: 'parked', note: 'waits on #9' });
+  rmSync(release, { force: true });
+  const before = server();
+  before.heldFor = () => '#9 ships';
+  before.send(id, 'Cara', 'a question while you wait');
+  await until('texts(id).length > 0', () => texts(id).length > 0);
+  store.updateTicket(id, { state: 'ready', note: 'answered' }); // the turn's own set_thread_status
+  before.detachAll();
+
+  const next = server();
+  next.heldFor = () => '#9 ships';
+  next.recover();
+  writeFileSync(release, '');
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
+  const t = store.getTicket(id)!;
+  assert.deepEqual([t.state, t.note], ['parked', 'waits on #9']);
+});
+
+test("a reply's status trailer read before a restart is applied when the re-attached turn ends (R6)", async () => {
+  const id = newTicket();
+  const before = await started(id, 'answer with a trailer');
+  before.detachAll();
+
+  const next = server();
+  const got: unknown[] = [];
+  next.onStatusTrailer = (tid, fields) => tid === id && got.push(fields);
+  next.recover();
+  writeFileSync(release, '');
+  await until('!next.isRunning(id)', () => !next.isRunning(id));
+  assert.deepEqual(got, [{ state: 'ready', note: 'read me', replies: ['Ship it'] }]);
 });

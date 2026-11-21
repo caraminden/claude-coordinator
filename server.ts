@@ -976,7 +976,7 @@ const desktopFromCi = services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR ? undef
     return f ? ciStore.plain(f).catch(() => null) : null;
   },
 });
-const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) }, desktop: desktopFromCi });
+const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) }, desktop: desktopFromCi, feeds: desktop.feeds });
 ciStore.keep = () => ciPackageReader.keeps();
 const apkReader = new ApkReader({
   store, finder: targetFinder, actions, mirror: ciMirror,

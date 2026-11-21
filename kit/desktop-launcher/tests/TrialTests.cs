@@ -176,6 +176,34 @@ static class TrialTests
             Is(s.Failed.Contains(7), false, "7's old failure was wiped when it passed");
         });
 
+        // A copy already running (#1522): a "file" build's start would hand off to it, so it isn't tried then.
+        Test("a file build waiting isn't tried while a copy of the app runs, and isn't struck for it", () =>
+        {
+            var s = Waiting();
+            Is(Trial.TryNow(s, () => true), false, "tried with a copy running");
+            Is(s.Pending.Id, 7, "still waiting");
+            Is(s.Struck == null || s.Struck.Count == 0, true, "no strike");
+            Is(Trial.TryNow(s, () => false), true, "tried once nothing runs");
+        });
+        Test("with nothing running, a file build that exits 0 without saying it started still fails its start", () =>
+        {
+            var s = Waiting();
+            Is(Trial.TryNow(s, () => false), true, "tried");
+            var r = Trial.StartFailed(s);
+            Is(r.Refused, false, "first failure");
+            Is(s.Struck.Contains(7), true, "struck");
+            Is(Trial.StartFailed(s).Refused, true, "second failure refuses it");
+        });
+        Test("an alive build, a first build, or nothing waiting: the running copy isn't asked", () =>
+        {
+            Func<bool> ask = () => { throw new Exception("asked"); };
+            var alive = Waiting();
+            alive.Pending.Started = "alive";
+            Is(Trial.TryNow(alive, ask), true, "alive build");
+            Is(Trial.TryNow(new State { Pending = B(1) }, ask), true, "first build");
+            Is(Trial.TryNow(new State { Current = B(6) }, ask), false, "nothing waiting");
+        });
+
         // Saved data: a state.json written by launcher 1 reads as it is.
         Test("launcher 1's state.json: its current build is good and its refused builds stay refused", () =>
         {

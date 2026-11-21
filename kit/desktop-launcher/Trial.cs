@@ -66,6 +66,20 @@ namespace Citadel.Desktop
             return exitCode == 0 ? Verdict.Passed : Verdict.Crashed;
         }
 
+        /// <summary>
+        /// Whether to try the pending build on this start. A "file" build isn't tried while a copy of the app is already
+        /// running (#1522): a single-instance app hands the new start off to that copy and exits 0 without writing the file,
+        /// which proves nothing about the new build and mustn't count against it. The current build starts instead, and the
+        /// new one waits for a start with nothing running. An "alive" build is tried anyway: a clean exit already passes its
+        /// start and leaves it on probation (Judge). `copyRuns` is asked only when it decides.
+        /// </summary>
+        public static bool TryNow(State s, Func<bool> copyRuns)
+        {
+            if (s.Pending == null) return false;
+            if (s.Current == null || s.Pending.Started == "alive") return true;
+            return !copyRuns();
+        }
+
         /// <summary>The pending build said it started: it is current, on probation, and the last good build stays to go back to.</summary>
         public static void Started(State s)
         {

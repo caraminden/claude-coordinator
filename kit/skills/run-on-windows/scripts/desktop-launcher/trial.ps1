@@ -176,7 +176,7 @@ Stop-Install $d
 # 6. A waiting "file" build isn't tried while a copy of the app runs (a new start would hand off to it, #1522): no strike,
 # and it is tried on the first start with nothing running.
 $d = New-Install 'copy' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' }
-$copy = Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (Join-Path $d 'versions\6') -PassThru
+Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (Join-Path $d 'versions\6')
 Start-Sleep -Seconds 2
 $l = Start-Launcher $d
 Test-That 'copy: build 11 waits while a copy runs' (Wait-Log $d 'build 11 waits: a copy of Trial app is already running' 30)

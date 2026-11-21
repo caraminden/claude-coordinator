@@ -6,7 +6,8 @@
 # citadel-heavy.slice (deploy/citadel-heavy.slice: its own MemoryHigh and MemoryMax, low CPU weight), so the kernel
 # acts on it alone, and the turn sees a failed command it can retry. It keeps the caller's process,
 # terminal, fds and process group (a scope moves the process, nothing more), so it reads and writes as before and a
-# Ctrl-C or a timeout still reaches it.
+# Ctrl-C or a timeout still reaches it. A TERM or HUP sent to heavy-unit itself (a script's `kill $!` after
+# `npm run dev &`) is passed on to the command, which would otherwise outlive it.
 # The scope is bound to the caller's unit when that is a turn, land or Taskmaster unit (BindsTo): when the turn
 # ends, its heavy commands stop with it, as they did inside its cgroup, and a dev copy left running dies with it.
 # Wherever it runs, the command gets oom_score_adj 1000, so a wider OOM (citadel.slice's, a container's cap) picks
@@ -72,8 +73,19 @@ fi
 marker=$(mktemp "${TMPDIR:-/tmp}/heavy-unit.XXXXXX") && rm -f "$marker" || marker=
 # No --collect: a scope that failed stays loaded until reset-failed below, so its Result (oom-kill or signal) can be
 # read. One that succeeded is gone at once either way.
-"${run[@]}" "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- /bin/sh -c '[ -z "$0" ] || : >"$0"; exec "$@"' "$marker" "$@"
-status=$?
+# In the background only so a signal to this script can be passed on: <&0 keeps stdin (bash gives a background
+# command /dev/null otherwise), and without job control it stays in the caller's process group.
+"${run[@]}" "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- /bin/sh -c '[ -z "$0" ] || : >"$0"; exec "$@"' "$marker" "$@" <&0 &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' TERM
+trap 'kill -HUP "$child" 2>/dev/null' HUP
+# A trapped signal ends `wait` early; wait again until the command itself has ended.
+while :; do
+  wait "$child"
+  status=$?
+  kill -0 "$child" 2>/dev/null || break
+done
+trap - TERM HUP
 started=1
 [ -z "$marker" ] || { [ -e "$marker" ] || started=; rm -f "$marker"; }
 if [ -z "$started" ]; then

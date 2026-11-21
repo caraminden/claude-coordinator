@@ -11,7 +11,8 @@ name=${0##*/}
 real=
 IFS=: read -ra dirs <<<"$PATH"
 for d in "${dirs[@]}"; do
-  [ -n "$d" ] && [ -f "$d/$name" ] && [ -x "$d/$name" ] || continue
+  d=${d:-.} # an empty entry is the current folder, as the shell reads it
+  [ -f "$d/$name" ] && [ -x "$d/$name" ] || continue
   [ "$d/$name" -ef "$0" ] && continue
   real=$d/$name
   break
@@ -22,7 +23,8 @@ case $(</proc/self/cgroup) in */"${CITADEL_HEAVY_SLICE:-citadel-heavy.slice}"/*)
 mode=()
 case $name in
   # node is everywhere (hooks, scripts): only its test runner is heavy.
-  node) case " $* " in *" --test "*|*" --test="*) ;; *) direct "$@" ;; esac ;;
+  # node's own options come before the script; a --test after it is the script's.
+  node) t=; for a; do case $a in --test|--test=*) t=1; break ;; -*) ;; *) break ;; esac; done; [ -n "$t" ] || direct "$@" ;;
   # mise's other subcommands are quick lookups.
   mise) case ${1:-} in exec|x|run|r|watch|w|install|i) ;; *) direct "$@" ;; esac ;;
   # A browser is stopped by the pid its caller started, so heavy-unit becomes it.

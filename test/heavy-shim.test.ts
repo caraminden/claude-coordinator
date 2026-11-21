@@ -54,6 +54,7 @@ test('node and mise pass through unless they run tests or tools', () => {
   const mine = readFileSync('/proc/self/oom_score_adj', 'utf8').trim();
   assert.deepEqual(lines(run('node hook.js', env).stdout)[0].slice(0, 2), ['node', mine]);
   assert.deepEqual(lines(run('node --test a.test.ts', env).stdout)[0].slice(0, 2), ['node', '1000']);
+  assert.deepEqual(lines(run('node hook.js --test', env).stdout)[0].slice(0, 2), ['node', mine], "the script's own --test");
   assert.equal(run('mise which cargo', env).stdout, 'mise which cargo\n');
 });
 
@@ -65,7 +66,7 @@ test('a command not past the shims says so, as the shell would', () => {
 });
 
 const inContainer = existsSync('/run/.containerenv') || existsSync('/.dockerenv');
-const userSystemd = !inContainer && spawnSync('systemd-run', ['--user', '--scope', '--quiet', 'true']).status === 0;
+const userSystemd = !inContainer && spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--expand-environment=no', 'true']).status === 0;
 const heavySlice = `citadel-heavy-hs${process.pid}.slice`;
 after(() => {
   if (userSystemd) spawnSync('systemctl', ['--user', 'stop', heavySlice]);

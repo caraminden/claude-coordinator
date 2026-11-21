@@ -124,6 +124,19 @@ test('--exec becomes the command, so the caller can stop it by the pid it starte
   assert.equal(await new Promise((r) => child.on('close', (_c, sig) => r(sig))), 'SIGTERM');
 });
 
+test("a TERM to heavy-unit stops its command too, so a script's `kill $!` doesn't leave a dev server running", { skip: !userSystemd && 'no user systemd with a memory controller here', timeout: 30_000 }, async () => {
+  const child = spawn(unitTool, ['sh', '-c', 'echo $$; cat /proc/self/cgroup; exec sleep 300'], { env: scriptEnv({ CITADEL_HEAVY_SLICE: heavySlice }) });
+  let out = '';
+  child.stdout!.on('data', (b) => (out += b));
+  const closed = new Promise((r) => child.on('close', (code) => r(code)));
+  await until('the command to start', () => out.includes('.scope'));
+  const pid = Number(out.split('\n')[0]);
+  assert.notEqual(pid, child.pid, 'a command of its own, not heavy-unit');
+  child.kill('SIGTERM');
+  assert.equal(await closed, 143);
+  await until('the command to stop', () => !existsSync(`/proc/${pid}`));
+});
+
 test('a heavy command stops when its turn ends', { skip: !userSystemd && 'no user systemd with a memory controller here', timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(root, 'bind-'));
   // Its $$ also checks that systemd-run hands the command each $ as it is.

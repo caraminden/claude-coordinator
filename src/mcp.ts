@@ -811,21 +811,6 @@ const TOOLS = () => ([
     },
   },
   {
-    name: 'review_property',
-    description:
-      "Settle a value: approve a minion's proposed value, reject it, archive a value no longer used (what has it keeps it), restore one, or merge a value into another (it becomes an alias and everything carrying it moves over). Keys, and approving your own unreviewed values, need a person.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        key: { type: 'string' },
-        value: { type: 'string' },
-        action: { type: 'string', enum: ['approve', 'reject', 'archive', 'restore', 'merge'] },
-        into: { type: 'string', description: 'For merge: the value it becomes an alias of' },
-      },
-      required: ['key', 'value', 'action'],
-    },
-  },
-  {
     name: 'get_project_instructions',
     description: "Read the scheme instructions: the standing rules people set for this scheme, which every minion and you receive in the system prompt.",
     inputSchema: { type: 'object', properties: {} },
@@ -1880,10 +1865,6 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'register_property_key': {
       const r = await call('POST', `/api/projects/${C().PROJECT}/properties/keys`, args);
       return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Orders → Properties. Tell people in your reply.`);
-    }
-    case 'review_property': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/review`, args);
-      return `Done: ${r.action} ${r.key}${r.value ? `: ${r.value}` : ''}.`;
     }
     case 'get_project_instructions': {
       const { project } = await call('GET', `/api/projects/${C().PROJECT}`);

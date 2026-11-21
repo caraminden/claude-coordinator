@@ -37,6 +37,12 @@
    "ok": 0
   }
  },
+ "approvals.test.ts": {
+  "rmTemp": {
+   "n": 1,
+   "ok": 0
+  }
+ },
  "auto-resume.test.ts": {
   "shortUntil": {
    "n": 1,

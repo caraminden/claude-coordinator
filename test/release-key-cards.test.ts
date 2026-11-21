@@ -1,23 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, tempRoot, until, ok, type Booted } from './helpers.ts';
 
 // An app's release key (#837; Cara, 2026-11-17, "Both"): make_release_key posts a card any member of the app's scheme
 // approves, and the Releases page's button does the same at once. Either makes the key on the server, where a stand-in
 // keytool (in the test HOME's JDK) writes the keystore; the password never comes back.
-const root = mkdtempSync(join(tmpdir(), 'release-key-cards-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('release-key-cards-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 const home = join(root, 'home');
 const keyDir = join(home, '.config/citadel-android');
@@ -66,7 +60,7 @@ before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: home } });
   base = srv.base;
   cookies.Cara = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
   project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'P' } });
   other = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Q' } });
   const made = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Dana' } });
@@ -177,7 +171,7 @@ test('approving and rejecting one key card at the same moment gives the minion o
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, whose scheme's apps are twi and later. */
 async function mcp(method: string, params: object) {
-  const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: live(), COORDINATOR_PROJECT: String(ticket.project_id),
       COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'thread', COORDINATOR_HOME_CONTRAPTIONS: 'later,twi',

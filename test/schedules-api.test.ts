@@ -1,19 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, stopProcs, stopTurns, type Booted } from './helpers.ts';
+import { agentToken, bootServer, tempRoot, type Booted } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'schedules-api-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const scratch = tempRoot('schedules-api-');
+const root = scratch.dir;
+after(() => scratch.teardown()); // ends the server and its detached turns before the folder goes (#271)
 
 let base = '';
 let cookie = '';
@@ -27,7 +20,7 @@ before(async () => {
   srv = await bootServer({ root, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
-  procs.push(srv.proc);
+  scratch.track(srv.proc);
 });
 
 test('people and the Taskmaster manage schedules; minions and other schemes cannot', async () => {
@@ -93,14 +86,13 @@ test("the Taskmaster's schedule tools", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   for (const s of (await call(`/api/projects/${p.id}/schedules`)).data.schedules) await call(`/api/schedules/${s.id}`, { method: 'DELETE' });
-  const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
+  const mcp = scratch.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),
       COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id),
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
-  procs.push(mcp);
   const { createInterface } = await import('node:readline');
   const replies = new Map<number, (r: any) => void>();
   createInterface({ input: mcp.stdout! }).on('line', (l) => {

@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { type ChildProcess } from 'node:child_process';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { folderOf, guardedCgroup, guardedPids, ownerOf, Reaper, REAPED, scanProcs, shownCommand, startOf, WRAPPER_MARKS, type Proc } from '../src/reaper.ts';
 import { SHIM } from '../src/turn-run.mjs';
-import { bootServer, until } from './helpers.ts';
+import { bootServer, tempRoot, until } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'reaper-'));
+const tmp = tempRoot('reaper-');
+const root = tmp.dir;
 const pids: number[] = [];
-after(() => {
+after(async () => {
   for (const pid of pids) try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const P = '/data/projects';
@@ -91,7 +91,7 @@ test('a command line shown to people has its secrets masked', () => {
  * background and exits, so it is re-parented away from this test. Its pid. */
 async function detached(cwd: string, tag: string): Promise<number> {
   const pidFile = join(root, `${tag}.pid`);
-  const sh: ChildProcess = spawn('sh', ['-c', `"$0" -e 'setInterval(() => {}, 1000)' ${tag} & echo $! > "$1"`, process.execPath, pidFile], { cwd, detached: true, stdio: 'ignore' });
+  const sh: ChildProcess = tmp.spawn('sh', ['-c', `"$0" -e 'setInterval(() => {}, 1000)' ${tag} & echo $! > "$1"`, process.execPath, pidFile], { cwd, detached: true, stdio: 'ignore' });
   await new Promise((r) => sh.on('exit', r));
   for (let i = 0; i < 50; i++) {
     try {
@@ -129,7 +129,7 @@ test('closing reaps only the closed minion\'s processes; open minions, Taskmaste
   const notThis = await detached(folder(other.id), 'other');
   // A person's shell in the closed minion's worktree: `script` holds its terminal and has none itself.
   // Started through `sh -c '… &'` so it is re-parented away from the test, which the reaper treats as the server.
-  const sh = spawn('sh', ['-c', `script -qfc "exec \\"$0\\" -e 'setInterval(() => {}, 1000)' shell" /dev/null &`, process.execPath], { cwd: folder(closed.id), detached: true, stdio: 'ignore' });
+  const sh = tmp.spawn('sh', ['-c', `script -qfc "exec \\"$0\\" -e 'setInterval(() => {}, 1000)' shell" /dev/null &`, process.execPath], { cwd: folder(closed.id), detached: true, stdio: 'ignore' });
   await new Promise((r) => sh.on('exit', r));
   const [termPid, shell] = await until('the shell under script', async () => {
     const procs = await scanProcs();

@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { scriptEnv } from './script-env.ts';
 import { git } from './git.ts';
+import { tempRoot } from './helpers.ts';
 
 // tools/run-tests.sh on throwaway fixture suites. A red full run reruns each failed file alone, once, only to label
 // it: "passed alone" is a likely flake with a retro-log line, and the run still fails (Cara, 2026-11-10, "Keep
 // failing, log it"). A hang is never rerun.
 const tools = join(import.meta.dirname, '..', 'tools');
-const root = mkdtempSync(join(tmpdir(), 'run-tests-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const scratch = tempRoot('run-tests-');
+const root = scratch.dir;
+after(() => scratch.teardown());
 // NODE_TEST_CONTEXT would make the inner `node --test` report to this runner; COORDINATOR_SHARED_DIR would write
 // into the real scheme's retro log; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope (run-tests-scope.test.ts).
 const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined, DEPLOY_RERUN_DEADLINE: undefined, CITADEL_TEST_TIMEOUT: undefined };
@@ -100,7 +102,7 @@ async function again(dir: string, extra: Record<string, string> = {}, logName = 
     const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: shared, ...extra } }, (err, _out, se) =>
       resolve({ code: err ? ((err as any).code ?? null) : 0, stderr: se }),
     );
-    p.stdin?.end();
+    scratch.track(p).stdin?.end();
   });
   const day = new Date().toISOString().slice(0, 10);
   const retroFile = join(shared, 'retro-log', day, 'land.md');

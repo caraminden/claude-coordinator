@@ -1,22 +1,20 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { APPROVAL_TIMEOUT_MS } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { tempRoot, testPins } from './helpers.ts';
 
 // The server pins its MCP servers under its data dir when it starts (pinTurnFiles), sweeping copies of dead servers.
-const root = mkdtempSync(join(tmpdir(), 'turn-setup-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('turn-setup-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the turns first (they are detached, #271), then deletes the folders
 process.env.DATA_DIR = join(root, 'data');
 const stale = join(root, 'data', 'run', 'mcp-999999999');
 mkdirSync(stale, { recursive: true });
@@ -398,9 +396,9 @@ test('create_ticket lists properties but still starts a minion when a stale sess
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 40, number: 12, title: 'X', status: 'new', created_by: 'Taskmaster' }));
     });
   });
-  await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-  const mcp = spawn(process.execPath, [MCP_SERVER], {
-    env: { PATH: process.env.PATH, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`, COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
+  const apiPort = await tmp.serve(api);
+  const mcp = tmp.spawn(process.execPath, [MCP_SERVER], {
+    env: { PATH: process.env.PATH, COORDINATOR_API: `http://127.0.0.1:${apiPort}`, COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const replies = new Map<number, (r: any) => void>();

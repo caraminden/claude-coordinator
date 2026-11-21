@@ -657,18 +657,12 @@
    "ok": 0
   }
  },
- "read-ticket.test.ts": {
-  "rmTemp": {
+ "reaper.test.ts": {
+  "sleep": {
    "n": 1,
    "ok": 0
-  }
- },
- "reaper.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
   },
-  "sleep": {
+  "rmTemp": {
    "n": 1,
    "ok": 0
   },
@@ -680,18 +674,6 @@
  "reconnect-browser.test.ts": {
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "relay-when-live.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "release-key-cards.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -761,12 +743,6 @@
    "ok": 2
   }
  },
- "review-set-api.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "run-tests.test.ts": {
   "sleep": {
    "n": 3,
@@ -780,12 +756,6 @@
   },
   "rmTemp": {
    "n": 4,
-   "ok": 0
-  }
- },
- "schedules-api.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -877,7 +847,7 @@
  },
  "shared-pins.test.ts": {
   "rmTemp": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },

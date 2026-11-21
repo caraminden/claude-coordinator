@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
-import { lines, stopTurns, testPins } from './helpers.ts';
+import { lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -14,11 +12,9 @@ testPins();
 // (src/turn-wrapper.mjs) passes them to claude's stdin until the turn's result is out. The fake reads
 // stdin line by line like claude, replies once `release` appears in its folder, and exits at the end
 // of its input (or, with `hold` there, only once that is gone).
-const root = mkdtempSync(join(tmpdir(), 'steer-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('steer-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the turns first (they are detached, #271), then deletes the folders
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(
@@ -230,7 +226,7 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   await started(r, t);
   const sentFile = join(turnDir(r, t.id), 'steer.sent');
   // A process of its own reading as fast as it can, as the runner would on a restart mid-write.
-  const reader = spawn(process.execPath, ['-e', `
+  const reader = tmp.spawn(process.execPath, ['-e', `
     const { readFileSync } = require('node:fs');
     const bad = new Set();
     let reads = 0;

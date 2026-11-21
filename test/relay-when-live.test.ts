@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -9,18 +7,19 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { LiveWaiters, type Relay } from '../src/wake.ts';
 import { git as gitIn, makeRepo } from './git.ts';
-import { bootServer, PASSWORD, REPO, SECRET, stopProcs, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, stopProcs, tempRoot, type Booted } from './helpers.ts';
 
 // relay_when_live: a note queued for a Taskmaster or minion, sent as held mail once its commit is live. The
 // Taskmaster of the sender sees the text at once. LiveWaiters is tested in process (a stand-in live checkout);
 // the tool and its routes through the real MCP server, in a scheme whose repo this server doesn't run, where live means merged.
-const root = mkdtempSync(join(tmpdir(), 'relay-when-live-'));
+const tmp = tempRoot('relay-when-live-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 let srv: Booted | undefined;
 after(async () => {
   if (srv) await stopProcs([srv.proc]);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const repo = join(root, 'scheme-repo');
@@ -113,7 +112,7 @@ before(async () => {
 });
 
 async function tool(from: number, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: { ...process.env, COORDINATOR_API: srv!.base, COORDINATOR_TOKEN: tokens.agentToken(from), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(from), COORDINATOR_ROLE: 'thread' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

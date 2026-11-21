@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
 
 // Files in a scheme's shared folder can be pinned: by people in the Shared viewer.
 // A pin is keyed by path, so a rewrite keeps it and a deleted file shows as missing.
-const root = mkdtempSync(join(tmpdir(), 'shared-pins-'));
+const scratch = tempRoot('shared-pins-');
+const root = scratch.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -29,6 +28,7 @@ function thread(projectId: number, kind: 'ticket' | 'coordinator', title: string
 const TA = thread(A.id, 'coordinator', 'Coordinator');
 const M1 = thread(A.id, 'ticket', 'One');
 const TB = thread(B.id, 'coordinator', 'Coordinator');
+store.db.close(); // the server below is the only writer to this file
 const dirA = projectSharedDir(data, A.id);
 const dirB = projectSharedDir(data, B.id);
 mkdirSync(join(dirA, 'specs'), { recursive: true });
@@ -47,11 +47,11 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await scratch.teardown();
 });
 
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = scratch.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id),

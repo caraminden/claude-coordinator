@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { loadVapidKeys } from '../src/push.ts';
+import { tempRoot } from './helpers.ts';
 import { answer, check, recipients, step, targets, type Target, type WatchState } from '../src/watchdog.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'watchdog-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('watchdog-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const MIN = 60_000;
 const T = 10 * MIN;
 const round = (state: WatchState, now: number, ...found: [string, string | null][]) => {
@@ -175,9 +176,9 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   writeFileSync(join(dir, 'backups', 'coordinator-2026-11-19.db'), 'x'); // a fresh night, so only Citadel is down
   const stateFile = join(dir, 'state.json');
   writeFileSync(stateFile, JSON.stringify({ citadel: { title: 'Citadel', since: Date.now() - 11 * MIN, why: 'failed', alerted: false } }));
-  const run = (env: object = {}) => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
+  const run = (env: object = {}) => new Promise<string>((ok, fail) => tmp.track(execFile(process.execPath, ['tools/watchdog.ts'], {
     env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, ...env },
-  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
+  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))))));
   const out = await run();
   assert.match(out, /2 watched, down: Citadel: failed/);
   assert.match(out, /Pushing to Cara: Citadel down: Down: Citadel 11 min \(failed\)\./);
@@ -226,9 +227,9 @@ test('tools/watchdog.ts pushes once when the newest backup is a day old, and nam
   const stateFile = join(dir, 'state.json');
   // It has been missing for 11 minutes already: the push is due now.
   writeFileSync(stateFile, JSON.stringify({ backup: { title: 'Nightly backup', since: Date.now() - 11 * MIN, why: 'x', alerted: false } }));
-  const run = () => new Promise<string>((ok, fail) => execFile(process.execPath, ['tools/watchdog.ts'], {
+  const run = () => new Promise<string>((ok, fail) => tmp.track(execFile(process.execPath, ['tools/watchdog.ts'], {
     env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, WATCHDOG_CITADEL_PORT: String(healthPort) },
-  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
+  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))))));
   const out = await run();
   assert.match(out, /Nightly backup: the database backup is 30 h old/);
   assert.match(out, /Pushing to Cara: Nightly backup down/);

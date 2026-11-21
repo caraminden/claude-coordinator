@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
 import { landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
-import { spawn } from 'node:child_process';
+import { tempRoot } from './helpers.ts';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
-const root = mkdtempSync(join(tmpdir(), 'waits-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('waits-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const store = new Store(join(root, 'test.db'));
 const citadel = store.createProject('Citadel', null);
 
@@ -164,7 +164,7 @@ test('a heavy slot reads as held only while someone holds its lock', async () =>
   const slot = join(root, 'slot-0');
   writeFileSync(slot, '');
   assert.equal(slotHeld(slot), false);
-  const holder = spawn('flock', [slot, 'sh', '-c', 'echo held; sleep 30'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+  const holder = tmp.spawn('flock', [slot, 'sh', '-c', 'echo held; sleep 30'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
   try {
     await new Promise((r) => holder.stdout!.once('data', r));
     assert.equal(slotHeld(slot), true);

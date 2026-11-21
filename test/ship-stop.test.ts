@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { cantStop, descendants, shipLines, shipRows, signalTree, StopRefused, stopInLine, stopMinionShip, stopShip } from '../src/ship-stop.ts';
 import { CITADEL_TARGET } from '../src/releases.ts';
 import { readQueue, type LandTicket } from '../src/waits.ts';
-import { until } from './helpers.ts';
+import { tempRoot, until } from './helpers.ts';
 
 // #1168: the Status page's ship line and its "Stop this ship".
-const root = mkdtempSync(join(tmpdir(), 'ship-stop-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const scratch = tempRoot('ship-stop-');
+const root = scratch.dir;
+after(() => scratch.teardown());
 
 const ticket = (o: Partial<LandTicket>): LandTicket => ({ seq: 1, proc: '1 1', got: 0, label: 'ticket/9-x', phase: 'waiting', mtime: 0, ...o });
 
@@ -81,7 +81,7 @@ test('a ship hung on the real line lets go of the lock and leaves the line when 
   mkdirSync(state, { recursive: true });
   const script = join(root, 'hung-land.sh');
   writeFileSync(script, `set -u\nsource ${JSON.stringify(resolve('tools/deploy-queue.sh'))}\nqueue_lock ${JSON.stringify(state)} ticket/9-hung || exit 1\ntrap 'queue_done; exec 9>&-' EXIT\nqueue_phase "waiting for CI since 12:00"\nsleep 300\n`);
-  const land = spawn('bash', [script], { stdio: 'ignore' });
+  const land = scratch.spawn('bash', [script], { stdio: 'ignore' });
   const q = join(state, 'queue');
   let line: LandTicket[] = [];
   await until('the hung ship holds the line', () => (line = readQueue(q, 4)).some((t) => t.got > 0 && /waiting for CI/.test(t.phase)));
@@ -93,7 +93,7 @@ test('a ship hung on the real line lets go of the lock and leaves the line when 
   assert.deepEqual(readdirSync(q).filter((n) => /^\d+$/.test(n)), [], 'its EXIT trap ran: its ticket is gone');
   await until('its sleep is gone too', () => !existsSync(`/proc/${sleeper[0]}`) || /\) Z /.test(readFileSync(`/proc/${sleeper[0]}/stat`, 'utf8')));
   // The lock is free: the next one in line takes it at once.
-  const next = spawn('bash', ['-c', `exec 9>${JSON.stringify(join(state, 'lock'))}; flock -n 9`], { stdio: 'ignore' });
+  const next = scratch.spawn('bash', ['-c', `exec 9>${JSON.stringify(join(state, 'lock'))}; flock -n 9`], { stdio: 'ignore' });
   assert.equal(await new Promise((r) => next.on('exit', r)), 0, 'the lock is free');
 });
 

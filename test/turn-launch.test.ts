@@ -6,21 +6,22 @@
 // that kind: `UPDATE_SNAPSHOT=1 node --test test/turn-launch.test.ts` rewrites the snapshot, and the
 // diff is what to review.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
 // The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
 process.umask(0o022);
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'turn-launch-')));
+const { jsonLines, lines, stopTurns, tempRoot, testPins } = await import('./helpers.ts');
+const tmp = tempRoot('turn-launch-');
+const root = realpathSync(tmp.dir);
 // The delete hit ENOTEMPTY under CI load (#758): a turn's session save was still running, and its worker thread
 // made state.db in root mid-delete. launch() waits for each save; this ends whatever else a failed test leaves.
 after(async () => {
   await stopTurns(root);
   for (const live of (runner as any).turns.values()) clearInterval(live.timer);
   store.db.close();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 // A fixed environment, set before anything reads it: a turn inherits HOME, PATH, the locale and every
 // CLAUDE_* and ANTHROPIC_* variable of the server, and a snapshot can't depend on whose shell runs it.
@@ -40,7 +41,6 @@ const { Runner } = await import('../src/runner.ts');
 const { codexSwitchKey, codexThreadKey } = await import('../src/codex.ts');
 const { transcriptPath } = await import('../src/sessions.ts');
 const { GLOBAL_OWNER } = await import('../src/properties.ts');
-const { jsonLines, lines, stopTurns, testPins } = await import('./helpers.ts');
 testPins(root);
 
 const store = new Store(join(root, 'coordinator.db'));
@@ -283,11 +283,10 @@ test("a turn gets its scheme's review set as files, named in its turn message, w
 // parse, and list each server's tools over HTTP with its headers. The turn runs through the runner's own wrapper and pool.
 test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Claude Code can reach it from mcp.json', async () => {
   const { createServer } = await import('node:http');
-  const { spawn } = await import('node:child_process');
   const { readPool } = await import('../src/pool-client.mjs');
   // The pool's calls back to the app go here, never to the live server the runner's env names.
   const app = createServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'));
-  await new Promise<void>((r) => app.listen(0, '127.0.0.1', r));
+  const appPort = await tmp.serve(app);
   const standIn = join(root, 'stand-in-claude.mjs');
   const out = join(root, 'stand-in-claude.json');
   writeFileSync(standIn, `
@@ -326,7 +325,7 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         const spec = JSON.parse(readFileSync(join(dir, 'spec.json'), 'utf8'));
         spec.command = process.execPath;
         spec.args = [standIn, ...spec.args];
-        spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${(app.address() as any).port}` };
+        spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${appPort}` };
         writeFileSync(join(dir, 'spec.json'), JSON.stringify(spec), { mode: 0o600 });
         // The runner follows this turn too, and ends it (deleting its folder) on the poll that sees exit.json. Racing
         // that poll for the file failed under CI load (#1293): it is held off until the test has read the folder.
@@ -334,7 +333,7 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         clearInterval(live.timer);
         try {
           const [node, ...wrapper] = spawned[0].wrapper;
-          const w = spawn(node, wrapper, { stdio: 'ignore' });
+          const w = tmp.spawn(node, wrapper, { stdio: 'ignore' });
           for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
           w.kill();
           exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;

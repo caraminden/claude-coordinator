@@ -2,14 +2,15 @@
 // chat with the old and new prompt, writes blind X/Y outcomes with the key outside the critic's folder, deletes the
 // transcripts it made, and refuses more than TURN_CAP turns unless told.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { answer, run, type Kept } from '../src/replay.ts';
+import { tempRoot } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'replay-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('replay-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 const turn = (n: number, calls: Kept['calls'], prompt = `turn ${n}`): Kept => ({ n, prompt, images: 0, system: 'x', model: null, servers: ['app'], agents: false, webSearch: false, compactWindow: 40_000, calls, text: `reply ${n}` });
 

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
+import { tempRoot } from './helpers.ts';
 import { router, type Route } from '../src/http.ts';
 import { appRoutes } from '../src/routes/app.ts';
 import { fileRoutes } from '../src/routes/files.ts';
@@ -62,13 +62,14 @@ const api = createServer((req, res) => {
     res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
   });
 });
-await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-after(() => api.close());
+const tmp = tempRoot('thread-identity-');
+after(() => tmp.teardown()); // stops the MCP server and the stand-in API
+const apiPort = await tmp.serve(api);
 
-const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
+const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
   env: {
     ...process.env, MACHINES_URL: undefined,
-    COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+    COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
     COORDINATOR_TOKEN: `${ID}.sig`,
     COORDINATOR_PROJECT: '2',
     COORDINATOR_ROLE: 'thread',
@@ -76,7 +77,6 @@ const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')]
   },
   stdio: ['pipe', 'pipe', 'inherit'],
 });
-after(() => mcp.kill());
 const replies = new Map<number, (r: any) => void>();
 createInterface({ input: mcp.stdout! }).on('line', (l) => {
   const r = JSON.parse(l);

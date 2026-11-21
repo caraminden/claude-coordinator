@@ -1,21 +1,16 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, REPO, stopProcs, stopTurns, type Booted } from './helpers.ts';
+import { agentToken, bootServer, REPO, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'review-set-api-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('review-set-api-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 let base = '';
 let cookie = '';
@@ -41,7 +36,7 @@ fi
   srv = await bootServer({ root, stdout: true, env: { CLAUDE_BIN: claude } });
   base = srv.base;
   cookie = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
 });
 
 test("a scheme's review set: new on trial, switches, a minion's learning, History, and other schemes kept out", async () => {
@@ -96,7 +91,7 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
 
   // The minion's tool: list, read one, save what it learned.
   const tool = async (args: Record<string, unknown>, name = 'review_set', as: { id: number } = minion) => {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -286,7 +281,7 @@ test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, e
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Draw a crab', properties: { type: 'art' } } });
   const url = `/api/projects/${p.id}/reviews`;
   const tool = async (as: number, args: Record<string, unknown>) => {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as), COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -368,7 +363,7 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   // The review_set tool names it as the file's, and reads out the file's text with the scheme's additions.
   const tm = (await call(`/api/projects/${p.id}`)).data.coordinator.id;
   const tool = async (args: Record<string, unknown>) => {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(tm), COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

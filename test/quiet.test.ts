@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { tempRoot, testPins } from './helpers.ts';
 import { checkProcess, descendants, GRACE_MS, longestTool, noteEvent, QUIET_MS, quietAt, toolLimit } from '../src/quiet.ts';
 import { until } from './wait.ts';
 
@@ -44,23 +42,21 @@ test('descendants walks the process tree from a pid', () => {
 test('checkProcess: unknown with no pid, gone for a dead one, busy for a process burning CPU', async () => {
   assert.equal((await checkProcess(null)).verdict, 'unknown');
   assert.equal((await checkProcess(2 ** 22 + 12345)).verdict, 'gone');
-  const busy = spawn(process.execPath, ['-e', 'const t = Date.now(); while (Date.now() - t < 3000);'], { stdio: 'ignore' });
+  const own = tempRoot('quiet-');
+  const busy = own.spawn(process.execPath, ['-e', 'const t = Date.now(); while (Date.now() - t < 3000);'], { stdio: 'ignore' });
   try {
     const c = await checkProcess(busy.pid!, 300);
     assert.equal(c.verdict, 'busy', c.text);
   } finally {
-    busy.kill();
-    await new Promise((r) => busy.once('exit', r));
+    await own.teardown();
   }
 });
 
 // The runner end: a real turn (a stand-in claude that says one line when told, and ends when released).
 testPins();
-const root = mkdtempSync(join(tmpdir(), 'quiet-'));
-after(async () => {
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('quiet-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}

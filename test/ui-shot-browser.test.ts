@@ -2,16 +2,14 @@
 // text and eval against a small static page, run as the one command a minion would type; a wrong selector names
 // its step and shoots the page; and open() for a script. Skipped without headless Chromium.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 // @ts-ignore: plain JS from the kit
 import { findChrome } from '../kit/skills/critique/scripts/ui-measure.mjs';
 import { open } from '../tools/ui-shot.ts';
+import { tempRoot } from './helpers.ts';
 
 const skip = !(process.env.CHROME || findChrome()) && 'no headless Chromium';
 const tool = resolve(import.meta.dirname, '..', 'tools', 'ui-shot.ts');
@@ -27,24 +25,19 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   $('name').onkeydown = (e) => { if (e.key === 'Enter') document.title = 'entered ' + e.target.value; };
 </script>`;
 
-let server: Server;
+const tmp = tempRoot('ui-shot-test-');
+const out = tmp.dir;
 let url = '';
-let out = '';
 before(async () => {
-  out = mkdtempSync(join(tmpdir(), 'ui-shot-test-'));
-  server = createServer((_, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE));
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  const port = await tmp.serve(createServer((_, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE)));
+  url = `http://127.0.0.1:${port}/`;
 });
-after(() => {
-  server?.close();
-  if (out) rmSync(out, { recursive: true, force: true });
-});
+after(() => tmp.teardown());
 
 /** The command a minion types, against the static page; a child we await, so this process keeps serving it. */
 function uiShot(...args: string[]) {
   return new Promise<{ code: number | null; text: string }>((ok) => {
-    const p = spawn(process.execPath, [tool, '--url', url, '--anon', '--out', out, ...args], { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } });
+    const p = tmp.spawn(process.execPath, [tool, '--url', url, '--anon', '--out', out, ...args], { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } });
     let text = '';
     p.stdout.on('data', (d) => (text += d));
     p.stderr.on('data', (d) => (text += d));

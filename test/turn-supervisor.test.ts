@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -10,7 +8,7 @@ import { Runner } from '../src/runner.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { claimSpec } from '../src/turn-run.mjs';
 import { readSupervisor } from '../src/supervisor-client.ts';
-import { lines, stopProcs, stopTurns, testPins } from './helpers.ts';
+import { lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins(); // the turn files the runner and its supervisor run from
 
@@ -19,15 +17,9 @@ testPins(); // the turn files the runner and its supervisor run from
 // --scope runs its command in place, as the real one does, and a unit runs its command in the background. The fake
 // claude is steer.test.ts's: it reads stdin line by line, replies once `release` is in its folder, and exits at the
 // end of its input once it has replied.
-const root = mkdtempSync(join(tmpdir(), 'supervisor-'));
-const procs: ChildProcess[] = [];
-const servers: Server[] = [];
-after(async () => {
-  await stopProcs(procs);
-  for (const s of servers) s.close();
-  await stopTurns(root); // the supervisor's and turns' processes name folders under root
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('supervisor-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the supervisor's and turns' processes, which name folders under root, then deletes them
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 process.env.CITADEL_SUPERVISOR_RETRY_MS = '100';
 process.env.CITADEL_SUPERVISOR_ADOPT_MS = '200';
@@ -197,8 +189,7 @@ const unitAt = () => Number(readFileSync(join(bin, 'unit-at'), 'utf8').trim().sp
 async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
   const s = spec(r);
   mkdirSync(s.dir, { recursive: true });
-  const stray = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', 'turn-supervisor'], { stdio: 'ignore' });
-  procs.push(stray);
+  const stray = tmp.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', 'turn-supervisor'], { stdio: 'ignore' });
   const saved = existsSync(join(s.dir, 'supervisor.json')) ? readFileSync(join(s.dir, 'supervisor.json'), 'utf8') : null;
   writeFileSync(join(s.dir, 'supervisor.json'), JSON.stringify({ pid: stray.pid, port, key: 'k', version: s.version }));
   try {
@@ -211,13 +202,8 @@ async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
 
 test('a turn the supervisor can\'t take starts in its wrapper at once', async () => {
   const r = server();
-  // Nothing listens on the port.
-  const port = await new Promise<number>((res) => {
-    const probe = createServer().listen(0, '127.0.0.1', () => {
-      const p = (probe.address() as { port: number }).port;
-      probe.close(() => res(p));
-    });
-  });
+  // Nothing answers on the port: it resets every connection.
+  const port = await tmp.down();
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
@@ -231,8 +217,7 @@ test('a turn the supervisor can\'t take starts in its wrapper at once', async ()
 test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, and the spec\'s claim lets only one run the turn', async () => {
   const r = server();
   const hung = createServer(() => {}); // takes the request and never answers
-  servers.push(hung);
-  const port = await new Promise<number>((res) => hung.listen(0, '127.0.0.1', () => res((hung.address() as { port: number }).port)));
+  const port = await tmp.serve(hung);
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();

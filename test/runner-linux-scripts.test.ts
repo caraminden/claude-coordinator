@@ -2,18 +2,20 @@
 // tried before it lands. Here they run for real against a fake Citadel, a fake runner tarball (its config.sh logs what
 // it's asked) and stubbed root-only commands (id, useradd, userdel, runuser, chown, systemctl) in a temporary folder.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { tempRoot } from './helpers.ts';
 
 const scripts = join(import.meta.dirname, '..', 'tools', 'ci-runner');
 const TOKEN = `ccm_7_${'x'.repeat(43)}`;
 const REG = 'AREGISTRATIONTOKEN0123456789AB';
-let tmp: string, root: string, units: string, log: string, base: string, sha: string;
+const scratch = tempRoot('linux-runner-');
+const tmp = scratch.dir;
+let root: string, units: string, log: string, base: string, sha: string;
 const USER = `ci-theory-of-crafting-${createHash('sha256').update('caraminden/theory-of-crafting').digest('hex').slice(0, 6)}`;
 const asked: any[] = [];
 const server = createServer((req, res) => {
@@ -34,7 +36,6 @@ function stub(dir: string, name: string, body: string) {
 }
 
 before(async () => {
-  tmp = mkdtempSync(join(tmpdir(), 'linux-runner-'));
   root = join(tmp, 'opt');
   units = join(tmp, 'units');
   mkdirSync(root, { mode: 0o700 });
@@ -59,17 +60,13 @@ before(async () => {
   execFileSync('tar', ['-czf', join(tmp, 'runner.tar.gz'), '-C', pkg, '.']);
   sha = createHash('sha256').update(readFileSync(join(tmp, 'runner.tar.gz'))).digest('hex');
   process.env.PATH_FOR_SCRIPTS = `${bin}:${process.env.PATH}`;
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${await scratch.serve(server)}`;
 });
-after(() => {
-  server.close();
-  rmSync(tmp, { recursive: true, force: true });
-});
+after(() => scratch.teardown());
 
 function run(script: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
-    const child = spawn('bash', [join(scripts, script), ...args], {
+    const child = scratch.spawn('bash', [join(scripts, script), ...args], {
       env: { PATH: process.env.PATH_FOR_SCRIPTS!, HOME: tmp, CC_MACHINE_TOKEN: TOKEN, CITADEL_RUNNER_ROOT: root, CITADEL_RUNNER_UNITS: units, USERS: join(tmp, 'users'), RUNNER_SHA256: sha, RUNNER_NAME: 'DESK', CITADEL_RUNNER_SETTLE: '0', FAKE_TARBALL: join(tmp, 'runner.tar.gz'), LOG: log, ...env },
     });
     let out = '';

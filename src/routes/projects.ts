@@ -1655,8 +1655,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // Release: the claim passes to the first in its queue, who hears so (#1334), or is free.
-    method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
+    // Release: the claim passes to the first in its queue, who hears so (#1334), or is free. Taskmasters only (the `release` tool): the page
+    // has no Release button, since a person can't tell whom it would pass to (#1435).
+    method: 'DELETE', path: '/api/projects/:project/claims/:name', who: ['taskmaster'], refuse: 'Only Taskmasters pass a claim on; ask yours',
     handler({ res, app, session, caller, project, params, url }) {
       const name = claimName(decodeURIComponent(params.name));
       // ?holder=<number>: the holder the caller saw, so a second Release click can't pass it on twice.

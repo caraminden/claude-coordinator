@@ -184,10 +184,10 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   const { data: tmEvents } = await call(`/api/tickets/${tm}/events?after=0`);
   assert.ok(JSON.stringify(tmEvents).includes('pipeline-lane is free'), 'the Taskmaster is told the lane is free');
 
-  // A person releases one on the page; the Taskmaster's own claim holds it itself.
+  // A Taskmaster's release tool frees one (people have no button); the Taskmaster's own claim holds it itself.
   await call(url, { method: 'POST', body: { name: 'release-train' }, as: tm });
   assert.equal((await call(url)).data.claims[0].holder, tm);
-  const freed = await call(`${url}/release-train`, { method: 'DELETE' });
+  const freed = await call(`${url}/release-train`, { method: 'DELETE', as: tm });
   assert.equal(freed.status, 200);
   assert.equal(freed.data.released.name, 'release-train');
 
@@ -237,13 +237,15 @@ test('a queued claim passes to the next minion with one chat line when its holde
   assert.ok(JSON.stringify((await call(`/api/tickets/${tm}/events?after=0`)).data).includes(`pipeline-lane passed to #${c.number}`));
 
   // A release passes it on too; a second click from a page that saw the old holder is refused, not a second pass.
-  const rel = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE' });
+  // People can't release (the page has no button); the Taskmaster's tool can.
+  assert.equal((await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE' })).status, 403);
+  const rel = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE', as: tm });
   assert.equal(rel.data.claim.holder_number, b.number);
-  const again = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE' });
+  const again = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE', as: tm });
   assert.equal(again.status, 409, JSON.stringify(again.data));
   assert.equal((await call(url)).data.claims[0].holder_number, b.number);
   assert.equal(await said(b.id), 1);
-  assert.equal((await call(`${url}/pipeline-lane`, { method: 'DELETE' })).data.claim, undefined);
+  assert.equal((await call(`${url}/pipeline-lane`, { method: 'DELETE', as: tm })).data.claim, undefined);
   assert.deepEqual((await call(url)).data.claims, []);
 });
 

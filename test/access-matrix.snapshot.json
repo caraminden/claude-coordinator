@@ -1595,9 +1595,9 @@
  },
  "DELETE /api/projects/:p/claims/nope": {
   "anon": "401 Not logged in",
-  "person": "200",
-  "member": "200",
-  "outsider": "404 No such scheme",
+  "person": "403 Only Taskmasters pass a claim on; ask yours",
+  "member": "403 Only Taskmasters pass a claim on; ask yours",
+  "outsider": "403 Only Taskmasters pass a claim on; ask yours",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",

@@ -1,5 +1,5 @@
 // Two read-outs on the Releases page (#1060): the claims a scheme holds (the pipeline lane and other single-holder
-// duties, src/claims.ts) with their queues (#1334) and a Release button, and Citadel's post-deploy watch (src/deploy-watch.ts): each deploy's
+// duties, src/claims.ts) with their queues (#1334), and Citadel's post-deploy watch (src/deploy-watch.ts): each deploy's
 // checks at +20 min, +1 h and +24 h, before against after. The server decides every verdict; nothing here knows a threshold.
 import { ago, api, h } from './base.js';
 import { optimistic } from './ui/optimistic.js';
@@ -34,10 +34,10 @@ const QUEUED = { done: ['ok', '✓ Done'], working: ['info', 'Working'], waiting
 // A past holder's chip by how its time ended (src/claims.ts SpanEnd).
 const ENDED = { live: ['ok', '✓ Shipped'], released: ['neutral', 'Released'], dismissed: ['neutral', 'Dismissed'] };
 
-/** A holder's minion changed (its plan, state or ship): redraw its claim's stage and time, at most every 5 s per scheme. */
+/** A holder's or a queued minion changed (its plan, state or ship): redraw its claim's stage, time and chips, at most every 5 s per scheme. */
 const holderLoads = new Map();
 export function onHolderTicket(t, redraw) {
-  if (!(claims.get(t.project_id) ?? []).some((c) => c.holder === t.id) || holderLoads.has(t.project_id)) return;
+  if (!(claims.get(t.project_id) ?? []).some((c) => c.holder === t.id || (c.queue ?? []).some((q) => q.number === t.number)) || holderLoads.has(t.project_id)) return;
   holderLoads.set(t.project_id, setTimeout(() => { holderLoads.delete(t.project_id); loadClaims(t.project_id, redraw); }, 5000));
 }
 
@@ -120,15 +120,6 @@ function claimBody(c, edit) {
   return [box, h('div', {}, h('div', { class: 'claim-sub' }, c.estimate ? 'Queue · expected start' : 'Queue'), h('ol', { class: 'claim-qlist' }, ...rows))];
 }
 
-/** What Release shows at once: the first waiting holds it from now (the server's view replaces this), or the claim is gone. */
-function passedOn(c) {
-  const done = (c.queue ?? []).filter((q) => q.state === 'done');
-  const [next, ...rest] = (c.queue ?? []).filter((q) => q.state !== 'done');
-  if (!next) return [];
-  return [{ ...c, holder: null, holder_number: next.number, holder_name: `#${next.number} ${next.title}`, since_text: 'since now', note: '', stage: 'working', progress: 0, step: null,
-    done: c.done + 1, queue: [...done, { number: c.holder_number, title: c.holder_title, state: 'done', how: 'released' }, ...rest] }];
-}
-
 export function claimsBlock(projectId, redraw) {
   const list = claims.get(projectId) ?? [];
   if (!list.length) return '';
@@ -145,14 +136,7 @@ export function claimsBlock(projectId, redraw) {
       undo: () => { claims.set(projectId, list); redraw(); },
       label,
     })) : []),
-    hueRow({ hue: 'held', meta: h('button', { type: 'button', class: 'btn-small', title: queued ? `Pass ${c.name} to the first in its queue, who is told` : `Free ${c.name}; its holder is told nothing`, onclick: () => optimistic({
-      key: `claim:${projectId}/${c.name}`,
-      apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).flatMap((x) => (x.name !== c.name ? [x] : passedOn(x)))); redraw(); },
-      // The holder it saw: a second click after it passed on is refused, not a second pass.
-      send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}${c.holder_number != null ? `?holder=${c.holder_number}` : ''}`, { method: 'DELETE' }),
-      undo: () => { claims.set(projectId, list); redraw(); },
-      label: `release ${c.name}`,
-    }) }, 'Release') }, queued ? h('span', { class: 'muted' }, 'Release passes it to the first in line.') : [h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)]));
+    hueRow({ hue: 'held' }, queued ? h('span', { class: 'muted' }, 'A Taskmaster passes it on; it also passes on when its holder is dismissed.') : [h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)]));
     if (queued) row.querySelector('.settings-row-text').append(claimProgress(c));
     return row;
   });

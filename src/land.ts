@@ -731,8 +731,9 @@ export class LandHandoffs {
     const deploys = apps.length ? await once('deployed', () => deployApps(id, apps, r.commit, this.d.deployOps!)) : [];
     const failed = deploys.filter((d) => !d.ok);
     const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
+    const through = /^land: shipped through main's red on (.+)$/m.exec(run.output)?.[1]; // #1478: red only on a test main's tip fails too
     const flakeKept = (run.output.match(/^land: refused on flakes only .*not your change: keeping its place in line/gm) ?? []).length; // #1419 part 2
-    await once('noted', () => runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` }));
+    await once('noted', () => runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` }));
     await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)
     await once('woke', () => this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`));
     const t = store.getTicket(id);

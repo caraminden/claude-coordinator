@@ -95,7 +95,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
 // after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, due: one file left unrerun at CI's deadline, or swap: the first red as mixed, later reds a new real failure with test/real.test.ts not rerun); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
-// file not rerun because a real failure already made the run red).
+// file not rerun because a real failure already made the run red; two-real: mixed, and test/other.test.ts a second real failure, #1478).
 // FAKE_RED_NAMES: a line the red's output adds, naming the file behind a guard's failure (a train's suspects, #1451);
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_RED_TEXT: the same for
 // a commit with that text in any file (#1403); FAKE_FLAKY_PATH:
@@ -205,7 +205,7 @@ case "$*" in
     case $lg in
       many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
       *)
-        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$(case $lg in after-real | killed-rerun | swapped) echo 3 ;; *) echo 2 ;; esac)"
+        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$(case $lg in after-real | killed-rerun | swapped | two-real) echo 3 ;; *) echo 2 ;; esac)"
         printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
           printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
@@ -216,6 +216,7 @@ case "$*" in
           printf '%b test/real.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
         else
           printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
+          [ "\${FAKE_LOG:-mixed}" != two-real ] || printf '%b test/other.test.ts: failed again alone: a real failure\\n' "$p"
           [ "\${FAKE_LOG:-mixed}" != after-real ] || printf '%b test/busy.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
           [ "\${FAKE_LOG:-mixed}" != killed-rerun ] || printf '%b test/busy.test.ts: killed (exit 137) when rerun alone after 2s, before its 120s limit: stopped from outside, so it has no label (an unlabelled file keeps the run red)\\n' "$p"
         fi ;;

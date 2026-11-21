@@ -73,6 +73,13 @@ test('a ship let through on known flakes says so in its shipped line (#1419)', a
   assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Shipped past known flakes test/x.test.ts (seen on 4 other branches in 14 days, fix #12). Live now.']);
 });
 
+test("a ship let through main's red names main's red test in its shipped line (#1478)", async () => {
+  const s = setup('live');
+  await s.land(LIVE.replace('\n', "\nland: shipped through main's red on test/x.test.ts\n"));
+  await s.handoffs.poll();
+  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Shipped through main\'s red on test/x.test.ts: main still needs a fix for it. Live now.']);
+});
+
 test('a clean land that is live now posts the shipped line and dismisses the minion, with no message to it', async () => {
   const s = setup('live');
   await s.land(LIVE);

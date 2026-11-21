@@ -628,33 +628,113 @@ test('a retried ship whose train goes red is bisected like any rider, and refuse
   l.done();
 });
 
-// Red on main too (#1430): main's own tip fails test/real.test.ts run alone (tonight's clock test, Nov 21 00:00 PST), so
-// every train is red on it. No ship is to blame: none is refused by suspects or a bisect, the riders go back in line, and
-// each front takes its one retry in place, then is refused saying main is red, not its change. Ship 1 lands green
-// (its CI isn't told the red file) before the red test reaches main.
-test('a train red only on a test that fails on main too refuses none of its riders, and runs no suspects or bisect (#1430)', async () => {
+// Red on main too (#1430): main's own tip fails test/real.test.ts run alone (Nov 21 00:00 PST's clock test), so every
+// train is red on it. Ship through (#1478, Cara, 2026-11-21, on #1430's card: "Ship through"): when that is the run's only
+// real failure (its other reds passed alone: flakes) and no ship on it touched the test, the train is no worse than main,
+// so it ships, saying so, and main's fix ships separately. It used to go back in line, its front refused. Ship 1 lands
+// green (its CI isn't told the red file).
+test("a train red only on a test that fails on main too ships through main's red, and says so (#1478)", async () => {
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, {}, {}],
     (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
     (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
   );
   const done = await l.go();
-  assert.equal(done[0].status, 0, done[0].stderr);
-  for (const i of [2, 3, 4]) {
-    const e = done[i - 1].stderr;
-    assert.equal(done[i - 1].status, 1, `ship ${i}: ${e}`);
-    assert.doesNotMatch(e, /suspects:|bisect|likely the cause/, `ship ${i}: no ship is blamed`);
-    assert.match(e, /red on main too: not this (train|ship)'s/, `ship ${i} hears main is red`);
-    assert.match(e, /land: tests failed in CI \(https:\/\/ci\/\d+\) in test\/real\.test\.ts, which fails on main's own tip too \(run alone here\): main is red, not this change, so main is untouched/, `ship ${i}'s refusal says so`);
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  const front = done[1].stderr;
+  assert.doesNotMatch(front, /suspects:|bisect|likely the cause|keeping its place|go back in line/, 'no ship is blamed or sent back');
+  assert.match(front, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here too, and it is the only real failure of this train's CI run \(https:\/\/ci\/\d+\)/);
+  assert.match(front, /Main still needs a fix for test\/real\.test\.ts/);
+  assert.match(front, /^land: shipped through main's red on test\/real\.test\.ts$/m, "the front's shipped line names main's red");
+  for (const i of [3, 4]) {
+    shipped(l, done[i - 1], i, 2, 3);
+    assert.match(done[i - 1].stderr, /^land: shipped through main's red on test\/real\.test\.ts$/m, `ship ${i}'s shipped line names main's red`);
   }
-  for (const i of [2, 3]) assert.match(done[i - 1].stderr, /not your change: keeping its place in line and riding the next train, once/, `ship ${i}: its one retry in place`);
-  assert.match(done[3].stderr, /red on main too: not this ship's: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here, so ticket\/4-x isn't to blame/, 'last, alone');
-  assert.doesNotMatch(done[3].stderr, /retry in place|keeping its place/, 'alone, a retry would only run CI on it again');
-  assert.match(done[1].stderr, /red on main too: not this train's: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here, so no ship on the train is to blame and none is refused: the 2 riders go back in line/);
-  assert.deepEqual(l.subjects(), ['base', "test/real.test.ts: throw new Error('red on main');", 'f1.txt: 1'], 'nothing landed on a red main');
+  assert.deepEqual(l.subjects(), ['base', "test/real.test.ts: throw new Error('red on main');", 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4'], 'the train shipped on a red main');
   const log = join(l.r.dir, 'shared', 'retro-log');
   const lines = readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8');
-  assert.match(lines, / · red on main too: not this train's · ticket\/2-x · test\/real\.test\.ts · https:\/\/ci\/\d+/);
+  assert.match(lines, / · shipped through main's red · ticket\/2-x · test\/real\.test\.ts · https:\/\/ci\/\d+/);
+  assert.doesNotMatch(lines, /red on main too: not/);
+  l.done();
+});
+
+test("a ship alone red only on main's red test ships through it too (#1478)", async () => {
+  const l = await line(
+    [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}],
+    (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
+    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+  );
+  const [first, one] = await l.go();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(one.status, 0, one.stderr);
+  assert.match(one.stderr, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here too, and it is the only real failure of this ship's CI run/);
+  assert.match(one.stderr, /^land: shipped through main's red on test\/real\.test\.ts$/m);
+  assert.deepEqual(l.subjects(), ['base', "test/real.test.ts: throw new Error('red on main');", 'f1.txt: 1', 'f2.txt: 2']);
+  l.done();
+});
+
+// A second real failure that passes on main may be the train's own: no ship through. #1430's path stands: nobody is blamed
+// by a bisect that can't judge, the riders go back in line, and each front takes its one retry in place, then is refused
+// naming the other failure as maybe its own (#1478).
+test("a train also red on a test that passes on main doesn't ship through: #1430's path (#1478)", async () => {
+  const l = await line(
+    [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, {}],
+    (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'two-real', ...shared(d) }),
+    (r) => {
+      r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+      r.commit(r.source, 'test/other.test.ts', "import test from 'node:test'; test('green on main', () => {});\n");
+    },
+  );
+  const done = await l.go();
+  assert.equal(done[0].status, 0, done[0].stderr);
+  for (const i of [2, 3]) {
+    const e = done[i - 1].stderr;
+    assert.equal(done[i - 1].status, 1, `ship ${i}: ${e}`);
+    assert.doesNotMatch(e, /SHIPPING THROUGH|shipped through/, `ship ${i} doesn't ship through`);
+    assert.doesNotMatch(e, /suspects:|bisect|likely the cause/, `ship ${i}: no ship is blamed`);
+    assert.match(e, /land: tests failed in CI \(https:\/\/ci\/\d+\) in test\/real\.test\.ts, which fails on main's own tip too \(run alone here\): main is red, not this change, so main is untouched\. The run was also red on test\/other\.test\.ts, which may be yours/, `ship ${i}'s refusal says so`);
+  }
+  assert.match(done[1].stderr, /red on main too: not this train's: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here, so no ship on the train is to blame and none is refused: the 1 riders go back in line \(its other failures, test\/other\.test\.ts, cannot be pinned on a ship/);
+  assert.match(done[1].stderr, /not your change: keeping its place in line and riding the next train, once/, 'the front: its one retry in place');
+  assert.deepEqual(l.subjects().slice(-1), ['f1.txt: 1'], 'nothing more landed');
+  l.done();
+});
+
+// A rider that changed main's red test and left it red may have broken it again: the train doesn't ship through. It goes
+// back in line and, alone, is refused (its change doesn't make the test pass); the front, after its retry in place,
+// ships through on its own (#1478).
+test("a train with a rider that changed main's red test doesn't ship through it; the front then ships alone (#1478)", async () => {
+  const l = await line(
+    [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, { change: ['test/real.test.ts', "throw new Error('still red');\n"] }],
+    (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
+    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+  );
+  const done = await l.go();
+  assert.equal(done[0].status, 0, done[0].stderr);
+  assert.match(done[1].stderr, /the 1 riders go back in line \(ticket\/3-x changed test\/real\.test\.ts or what it imports, so the train doesn't ship through main's red\)/);
+  assert.match(done[1].stderr, /not your change: keeping its place in line and riding the next train, once/, 'the front: its one retry in place');
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.doesNotMatch(done[2].stderr, /SHIPPING THROUGH|shipped through/, "the rider doesn't ship through");
+  assert.match(done[2].stderr, /ticket\/3-x changed test\/real\.test\.ts or what it imports, yet it still fails: main is red and this change doesn't make it pass/, 'alone, the rider hears its change is no fix');
+  assert.equal(done[1].status, 0, done[1].stderr);
+  assert.match(done[1].stderr, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts .* of this ship's CI run/, 'the front, alone, ships through');
+  assert.deepEqual(l.subjects().slice(-2), ['f1.txt: 1', 'f2.txt: 2'], "only the front's change landed");
+  l.done();
+});
+
+// A failed file that was never rerun alone (CI stopped at its first real failure) may be load or the train's own: it is
+// no flake, so no ship through (#1478).
+test("a train whose other red file was never rerun doesn't ship through main's red (#1478)", async () => {
+  const l = await line(
+    [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}],
+    (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'after-real', ...shared(d) }),
+    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+  );
+  const [first, one] = await l.go();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(one.status, 1, one.stderr);
+  assert.doesNotMatch(one.stderr, /SHIPPING THROUGH|shipped through/);
+  assert.match(one.stderr, /main is red, not this change, so main is untouched\. The run was also red on test\/busy\.test\.ts, which may be yours/);
   l.done();
 });
 

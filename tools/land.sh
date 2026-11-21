@@ -31,7 +31,7 @@
 # The ship train (#1166, docs/adr/0020-ship-train.md): at step 2 the landing at the front of the line stacks up to
 # LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
 # main and deploy once for them all. A red train whose really failing test fails on main's tip too refuses nobody
-# (train_main_red, #1430). Otherwise it first refuses the ship that turns its really failing tests red run
+# (train_main_red, #1430), and ships through main's red when that is its only real failure (#1478). Otherwise it first refuses the ship that turns its really failing tests red run
 # alone here, or holds off those whose change touched them (train_suspects, #1346, #1403) and runs again with the next ships in line in their places; failing that, it is bisected by
 # its prefixes: the green part ships, the first ship that turned it red is refused with its own failure, and the ships
 # after it stay in line. Each rider waits in line
@@ -464,7 +464,8 @@ fi
 #   moving <train commit> <front> <tip it took> <front's pid and start>   main holds the train and its deploy runs: the
 #                                                branch moves to its train commit now, so the release row lists it
 #   back <train commit> <tip it took> <front>    the train went without it, or didn't ship: back to waiting, as it was
-#   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped
+#   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped; its next lines, if any, are said
+#                                                as they are (known flakes, #1419; main's red it shipped through, #1478)
 #   refused <front> <the red CI run> [likely <tests> [pinned]]   the bisect found it the first ship that turned the train red, or
 #                                                with likely: the real failures in <tests> (comma-separated) map to its change (#1346), and
 #                                                with pinned: they failed alone here with it and passed without it (#1403); the
@@ -513,13 +514,13 @@ train_verdict() {
       [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
       return 0 ;;
     landed)
-      x=$(sed -n 2p "$f" 2>/dev/null) || x=''
+      mapfile -t lines < <(sed -n '2,$p' "$f" 2>/dev/null) || true
       rm -f "$f"
       [ "$at" = "$a" ] || { [ "$at" = "$d" ] && git reset -q --keep "$a"; } ||
         say "$branch moved after the train took it, so it stays as it is; what shipped of it is $(git rev-parse --short "$a")"
       say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
       say "main is now at $(git log -1 --format='%h "%s"' "$a"), in $c's ship train"
-      [ -z "$x" ] || say "$x"
+      for x in "${lines[@]}"; do [ -z "$x" ] || say "$x"; done
       land_mark lock
       land_mark landed
       if [ "$b" = live ]; then
@@ -1219,9 +1220,15 @@ cut_off() {
 # hasn't got, or a run stopped at LAND_PIN_LIMIT s or by a test's own timeout (load on perigee, not proof), is no main red:
 # today's path. A red file this ship changed, or what it imports (the suspects' map), is still main's red, but the ship
 # hears that its change doesn't make it pass, with no retry (main_red_mine). Fails when no real failure is red on main.
+# Ship through (#1478, Cara, 2026-11-21, on #1430's card: "Ship through"): when every real failure is main's red, no ship
+# on it changed one of them or what it imports, and every other failed file passed alone (a flake: one never rerun, or
+# whose rerun was killed, may be the train's own), the train is no worse than main, so the gate counts as green (rc=0)
+# and it ships, riders and all, saying so loudly; main's fix ships separately. Its shipped line names main's red
+# (through_by). The cost: a second break in the same test stays hidden until main's fix ships.
 main_red='' main_red_other='' main_red_mine='' main_red_riders=0
+declare -A through_by=() # #1478: <commit> -> main's red tests its green was let through on
 train_main_red() {
-  local f wt r n=0 real=() reds=() other=() chg=() hits=() mine=()
+  local f i wt r n=0 real=() reds=() other=() chg=() hits=() mine=() touched=()
   [ -z "$burn_red" ] || return 1 # a burn-in red is the ship's own new or changed test (#1443)
   mapfile -t real < <(train_real) || true
   for f in "${real[@]}"; do git cat-file -e "$old:$f" 2>/dev/null && n=1; done
@@ -1241,20 +1248,34 @@ train_main_red() {
   done
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   [ ${#reds[@]} -gt 0 ] || return 1
+  # Failed files with no verdict (not rerun, or the rerun killed) may be the train's own: they count as its other reds.
+  mapfile -t -O "${#other[@]}" other < <(train_labels | sed -n 's/^\(not rerun\|killed (exit [0-9]*) when rerun alone\) //p') || true
   train_chg
   for f in "${reds[@]}"; do
     mapfile -t hits < <(train_suspects_of "$f")
     [[ " ${hits[*]} " != *' 0 '* ]] || mine+=("$f")
+    for i in "${hits[@]}"; do [ "$i" = 0 ] || [[ " ${touched[*]} " == *" ${train_br[$((i - 1))]} "* ]] || touched+=("${train_br[$((i - 1))]}"); done
   done
   main_red=$(sed 's/ /, /g' <<<"${reds[*]}") main_red_other=$(sed 's/ /, /g' <<<"${other[*]}") main_red_mine=$(sed 's/ /, /g' <<<"${mine[*]}") main_red_riders=${#train_n[@]}
-  local who="this train's" more="no ship on the train is to blame and none is refused: the ${#train_n[@]} riders go back in line"
-  [ ${#train_n[@]} -gt 0 ] || who="this ship's" more="$branch isn't to blame"
+  local who="this train's" more
+  [ ${#train_n[@]} -gt 0 ] || who="this ship's"
+  if [ -z "$main_red_other" ] && [ -z "$main_red_mine" ] && [ ${#touched[@]} = 0 ]; then
+    through_by[$tip]=$main_red rc=0
+    say "=========================================================================="
+    say "SHIPPING THROUGH MAIN'S RED: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is the only real failure of $who CI run ($ci_url): no ship on it changed $main_red or what it imports, and its other failed files passed alone. So it is no worse than main and ships as green$([ ${#train_n[@]} = 0 ] || echo ", all $((${#train_n[@]} + 1)) ships"). Main still needs a fix for $main_red, which ships separately; until then a new break in $main_red goes unseen"
+    say "=========================================================================="
+    retro_log "shipped through main's red · $label · $main_red · $ci_url"
+    return 0
+  fi
+  more="no ship on the train is to blame and none is refused: the ${#train_n[@]} riders go back in line"
+  [ ${#train_n[@]} -gt 0 ] || more="$branch isn't to blame"
   if [ -n "$main_red_mine" ] && [ ${#train_n[@]} = 0 ]; then
     more="$branch changed $main_red_mine or what it imports and it still fails, so its change doesn't make it pass"
   elif [ -n "$main_red_mine" ]; then
     more+=", though the front, $branch, changed $main_red_mine or what it imports and it still fails, so it is refused"
   fi
-  say "red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here, so $more${main_red_other:+ (its other real failures, $main_red_other, cannot be pinned on a ship while every run is red on the main ones)}. Main needs a fix for $main_red"
+  [ ${#touched[@]} = 0 ] || more+=" (${touched[*]} changed $main_red or what it imports, so the train doesn't ship through main's red)"
+  say "red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here, so $more${main_red_other:+ (its other failures, $main_red_other, cannot be pinned on a ship while every run is red on the main ones, so it does not ship through)}. Main needs a fix for $main_red"
   retro_log "red on main too: not $who · $label · $main_red · $ci_url${main_red_other:+ · also red: $main_red_other}"
   train_drop
   return 0
@@ -1300,9 +1321,10 @@ train_drop() {
   train_tip=("${train_tip[@]:0:${1:-0}}") train_br=("${train_br[@]:0:${1:-0}}") train_n=("${train_n[@]:0:${1:-0}}") train_was=("${train_was[@]:0:${1:-0}}")
 }
 train_landed() { # <rider index>
-  local kind=restart
+  local kind=restart through=''
   ! grep -q '^live ' "$times" 2>/dev/null || kind=live
-  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))" "${known_by[$tip]:+shipped past known flakes ${known_by[$tip]}}"
+  [ -z "${through_by[$tip]:-}" ] || through="shipped through main's red on ${through_by[$tip]}" # (an apostrophe in a :+ word opens a quote)
+  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))" "${known_by[$tip]:+shipped past known flakes ${known_by[$tip]}}" "$through"
 }
 # "<commit> <branch>" of each ship in the train but the top one, which is "$tip $train_owner": what came off main with
 # it when main goes back (taken-back), so each branch on its train commit leaves the others' commits behind.
@@ -1555,15 +1577,22 @@ held_n=() held_br=() held_was=() held_files=() held_run=() held_log=()
 # CI's deadline. A file not rerun, or whose rerun was killed from outside (#1393), may be load or real, so it names no suspect: if it is real, the refilled train is red
 # on it, and the next round sees it. Fails when there are none, or the log doesn't label every failed file.
 train_real() {
-  local at n out
+  local out
   [ -z "$burn_red" ] || { burn_lines | sed 's/: failed in .*//' | grep .; return; } # each burn-in red file is a real failure (#1443)
+  out=$(train_labels) || return 1
+  out=$(sed -n 's/^\(failed again alone\|hung when rerun alone\|rerun alone stopped\) //p' <<<"$out")
+  [ -n "$out" ] && echo "$out"
+}
+# Each failed file in $failed with run-tests.sh's label for its rerun alone, "<label> <file>" a line. Fails when the log
+# doesn't label every failed file.
+train_labels() {
+  local at n out
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
   n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
   out=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\|killed (exit [0-9]*) when rerun alone\).*/\2 \1/p' | sort -u -k2)
   [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] || return 1
-  out=$(sed -n 's/^\(failed again alone\|hung when rerun alone\|rerun alone stopped\) //p' <<<"$out")
-  [ -n "$out" ] && echo "$out"
+  echo "$out"
 }
 # <file>: the repo paths it imports by a relative path, as the train's top has it.
 train_imports() {
@@ -1960,6 +1989,7 @@ fi
 if [ "$mode" = full ]; then
   [ -z "$fellback" ] || say "merged on perigee's own test run, not CI: $fellback"
   [ -z "${known_by[$tip]:-}" ] || say "shipped past known flakes ${known_by[$tip]}"
+  [ -z "${through_by[$tip]:-}" ] || say "shipped through main's red on ${through_by[$tip]}"
   merge_into
 fi
 
@@ -2026,6 +2056,7 @@ moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 [ -z "${known_by[$tip]:-}" ] || say "shipped past known flakes ${known_by[$tip]}"
+[ -z "${through_by[$tip]:-}" ] || say "shipped through main's red on ${through_by[$tip]}"
 if [ ${#train_n[@]} -gt 0 ]; then
   # Each rider moves its own branch (its worktree is its own) within a poll of the line, before the deploy writes the
   # release row, which finds each ship by its branch's tip (src/releases.ts landedIn).

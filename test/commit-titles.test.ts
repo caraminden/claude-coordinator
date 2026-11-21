@@ -7,6 +7,9 @@ import { after, test } from 'node:test';
 import { keepTitles } from '../src/workspace.ts';
 
 // #1489: a "#N: title" survives a conflicted rebase continued with GIT_EDITOR=true, and the ship check names a commit that lost it.
+// The runner's own git config (a comment char, a template, a default branch) must not decide these.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
 const root = mkdtempSync(join(tmpdir(), 'titles-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' } }).trim();

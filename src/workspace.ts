@@ -257,11 +257,11 @@ export async function createTicketDir(
  * Every worktree of the scheme checkout shares its config, so setting it when a minion is made covers the open minions'
  * worktrees too (#1489). A `#N: ...` commit title starts with git's default comment character, so a rebase stopped on a conflict
  * and continued with GIT_EDITOR=true read it as a comment and lost it. `;` rather than `auto`, which git 3 removes.
- * Left alone where the checkout already sets one. Best effort: a failure must not stop a minion starting.
+ * Left alone where the checkout's own config already sets one (a global setting doesn't count: it may be the default #). Best effort: a failure must not stop a minion starting.
  */
 export async function keepTitles(repoDir: string): Promise<void> {
   try {
-    await git(['config', '--get', 'core.commentChar'], repoDir).catch(() => git(['config', 'core.commentChar', ';'], repoDir));
+    await git(['config', '--local', '--get', 'core.commentChar'], repoDir).catch(() => git(['config', '--local', 'core.commentChar', ';'], repoDir));
   } catch {}
 }
 

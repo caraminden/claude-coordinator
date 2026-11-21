@@ -163,6 +163,8 @@ test('the minion withdraws its held edit with settle_question, by the id it was 
   const r = await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. A held line to withdraw by its id.' }], ['CLAUDE.md says it']);
   assert.equal(typeof r.id, 'string');
   assert.equal(r.id, lastCard().id, 'the held reply names the card by its id');
+  assert.deepEqual(await settle(undefined as any), { status: 200, body: { settled: [] } }, 'without an id a plan waiting on a person stays');
+  assert.equal(lastCard().status, 'pending');
   assert.deepEqual(await settle(r.id), { status: 200, body: { settled: [r.id] } });
   assert.equal(lastCard().status, 'withdrawn');
   assert.equal(store.openCardsOf(ticket.id).length, 0, 'no longer holds the minion open (close_self)');

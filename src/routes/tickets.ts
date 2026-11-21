@@ -769,11 +769,13 @@ export const ticketRoutes: Route[] = [
       // By the id its tool returned, its event id, or its link (`?e=<event id>`): the held edit's tool gave only a link.
       const want = only == null ? null : String(only).trim();
       const event = want === null ? null : /^\d+$/.test(want) ? Number(want) : Number(/[?&]e=(\d+)/.exec(want)?.[1] ?? NaN);
-      const picked = want === null ? open : open.filter((e) => e.id === event || JSON.parse(e.data).id === want);
-      const list = () => open.map((e) => `${JSON.parse(e.data).id} (${e.kind === 'plan' ? 'plan' : 'question'} card "${cardLabel(e.kind, JSON.parse(e.data))}")`).join('; ');
+      // Without an id only question cards count: a plan waiting on a person is withdrawn only by its id.
+      const pool = want === null ? open.filter((e) => e.kind !== 'plan') : open;
+      const picked = want === null ? pool : open.filter((e) => e.id === event || JSON.parse(e.data).id === want);
+      const list = (cards = open) => cards.map((e) => `${JSON.parse(e.data).id} (${e.kind === 'plan' ? 'plan' : 'question'} card "${cardLabel(e.kind, JSON.parse(e.data))}")`).join('; ');
       if (want !== null && !picked.length) throw new HttpError(404, `No open card with that id.${open.length ? ` Open: ${list()}` : ' None of yours is open.'}`);
       // Without an id it settles only a lone open card (#1488): settling every one at once took cards still waiting.
-      if (want === null && picked.length > 1) throw new HttpError(409, `${picked.length} cards are open, so say which: pass question_id. Open: ${list()}`);
+      if (want === null && picked.length > 1) throw new HttpError(409, `${picked.length} cards are open, so say which: pass question_id. Open: ${list(pool)}`);
       const busy = picked.find((e) => e.kind === 'plan' && deciding.has(e.id));
       if (busy) throw new HttpError(409, 'A person is answering that card right now');
       const at = Date.now();

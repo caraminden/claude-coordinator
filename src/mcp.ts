@@ -302,10 +302,10 @@ const ASK_QUESTION = () => ({
 const SETTLE_QUESTION = {
   name: 'settle_question',
   description:
-    'Settle a card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced, or withdraw one no longer wanted. Use your judgement: settle a question only if their message really answers it. A settled question card greys out as answered and a plan-type card (propose_plan, edit_instructions\' held edit) as withdrawn; either leaves the needs-you list, can no longer be answered, and no longer holds the minion open. Without question_id it settles your one open card, and refuses when more than one is open, listing them.',
+    'Settle a card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced, or withdraw one no longer wanted. Use your judgement: settle a question only if their message really answers it. A settled question card greys out as answered and a plan-type card (propose_plan, edit_instructions\' held edit) as withdrawn; either leaves the needs-you list, can no longer be answered, and no longer holds the minion open. Without question_id it settles your one open question card, and refuses when more than one is open, listing them; a plan-type card is withdrawn only by its id.',
   inputSchema: {
     type: 'object',
-    properties: { question_id: { type: 'string', description: "The card's id (from ask_question, propose_plan or edit_instructions), or its link; leave out only when one card is open" } },
+    properties: { question_id: { type: 'string', description: "The card's id (from ask_question, propose_plan or edit_instructions), or its link; needed for a plan-type card; leave out only when one question card is open" } },
   },
 };
 

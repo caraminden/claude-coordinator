@@ -46,3 +46,11 @@ test('only an advisor-trial model gets the consult lines (#954)', () => {
   assert.ok(!turn('claude-sonnet-5-5').includes('advisor'));
   assert.ok(!turn(null).includes('advisor'));
 });
+
+test('every scheme\'s Taskmaster, whatever its role, is told once to start everything and limit heavy work (#1488)', () => {
+  for (const role of [null, 'person', 'overlord'] as const) {
+    const p = systemPrompt({ ...project, id: 9, name: 'Delve' }, tm, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, true, null, null, false, role);
+    assert.equal(p.split('limit heavy work (citadel-heavy), not starts').length, 2, `${role}: the line once`);
+    assert.match(p, /start_after is for code a minion needs, never for spacing/);
+  }
+});

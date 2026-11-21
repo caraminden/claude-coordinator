@@ -200,7 +200,6 @@ const nowWords = (p, eta, full = false) => {
   return p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' left', since: p.since, full }) : p.text);
 };
 
-/** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
 /** A row's "now" words with its ship train: the front says how many ride, a rider whose train it is in, a waiter which train it will be in. */
 function trainNow(next, c, waits) {
   const t = c.train;
@@ -211,6 +210,7 @@ function trainNow(next, c, waits) {
   return [h('b', { class: 'waits' }, t.label)];
 }
 
+/** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
 function changeNow(next, c) {
   return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
 }

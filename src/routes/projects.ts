@@ -1391,10 +1391,10 @@ export const projectRoutes: Route[] = [
   // scheme's pages and handoffs in the background once it is a few minutes old; ?status= and ?q= filter.
   {
     method: 'GET', path: '/api/projects/:project/ideas', who: ['person', 'taskmaster', 'minion'],
-    handler({ res, url, app, project }) {
+    async handler({ res, url, app, project }) {
       const status = url.searchParams.get('status');
       if (status && !(IDEA_STATUSES as readonly string[]).includes(status)) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}`);
-      json(res, 200, ideasView(app, project, status, (url.searchParams.get('q') ?? '').slice(0, 200)));
+      json(res, 200, await ideasView(app, project, status, (url.searchParams.get('q') ?? '').slice(0, 200)));
     },
   },
   {
@@ -1766,13 +1766,14 @@ const IDEAS_FRESH_MS = 5 * 60_000;
 const ideasSynced = new Map<number, number>();
 
 /** The ledger for the page and the ideas tool: rows (filtered), counts by status, and the Later rows waiting over two weeks. */
-export function ideasView(app: App, project: Project, status: string | null, q: string) {
+export async function ideasView(app: App, project: Project, status: string | null, q: string) {
   const shared = projectSharedDir(app.dataDir, project.id);
   const first = !ideasSynced.has(project.id);
   if (first || Date.now() - ideasSynced.get(project.id)! > IDEAS_FRESH_MS) {
     ideasSynced.set(project.id, Date.now());
-    // The first look in a server's life reads everything now, so the page opens full; later ones refresh behind it.
-    if (first) app.store.ideas.sync(project.id, shared);
+    // The first look in a server's life reads everything first, so the page opens full; later ones refresh behind it.
+    // Paced either way: the read yields to other requests between its steps (#1414).
+    if (first) await app.store.ideas.now(project.id, shared);
     else app.store.ideas.soon(project.id, shared, 0);
   } else app.store.ideas.restatus(project.id);
   const all = app.store.ideas.list(project.id);

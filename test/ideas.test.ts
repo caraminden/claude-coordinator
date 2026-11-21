@@ -66,7 +66,7 @@ test('derive: a link beats the pick, a ship makes it built', () => {
   assert.equal(derive({ pick: 'go', ticket_id: 4 }, true), 'built');
 });
 
-test('a page, its handoff, a start and a ship fill one row, in a scheme that is not Citadel; hand edits stick', () => {
+test('a page, its handoff, a start and a ship fill one row, in a scheme that is not Citadel; hand edits stick', async () => {
   const store = newStore();
   const p = store.createProject('Peek Auras', null);
   const other = store.createProject('Mandate', null);
@@ -85,7 +85,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   writeFileSync(join(shared, 'handoffs', 'loose.md'), '# Handoff: something with no page\n\nFrom #40.\n');
 
   store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- G3 One ledger: Build it. "one view of everything"\n- F7 Pick bars: Later');
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   let rows = store.ideas.list(p.id);
   assert.equal(rows.length, 3, 'two picks with Later options and one loose handoff; the takes bar makes none');
   const g3 = rows.find((r) => r.card === 'G3')!;
@@ -101,7 +101,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   // A minion starts from the handoff: its row is started, then built when it ships.
   const t = store.createTicket({ project_id: p.id, title: 'ledger', permission_mode: 'default', created_by: 'Josh' });
   store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${shared}/handoffs/handoff-ledger.md\`.` });
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   assert.equal(store.ideas.get(g3.id)!.status, 'started');
   assert.equal(store.ideas.get(g3.id)!.ticket_id, t.id);
   store.addEvent(t.id, 'note', { text: 'Shipped abc "x": y. Risk low: z. Live now.' });
@@ -116,7 +116,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   assert.equal(store.ideas.laterNote(p.id), null, 'once a week');
   store.ideas.edit(f7.id, 'Josh', { status: 'declined' });
   store.ideas.edit(g3.id, 'Josh', { ticket: null });
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   rows = store.ideas.list(p.id);
   assert.equal(rows.find((r) => r.id === f7.id)!.status, 'declined');
   assert.equal(rows.find((r) => r.id === g3.id)!.ticket_id, null);
@@ -126,7 +126,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   assert.equal(store.ideas.get(g3.id)!.status, 'built');
 });
 
-test("a minion merged into a build is built once the build's own minion ships", () => {
+test("a minion merged into a build is built once the build's own minion ships", async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'mandate-shared');
@@ -140,12 +140,13 @@ test("a minion merged into a build is built once the build's own minion ships", 
   store.addEvent(feeder.id, 'note', { text: 'Merged into build/3 …' });
   store.ideas.restatus(p.id);
   assert.equal(store.ideas.byHandoff(p.id, 'handoffs/feeder.md')!.status, 'started');
+  await store.ideas.now(p.id, shared); // the server's first ship scan, paced (#1414); restatus scans by itself after it
   store.addEvent(owner.id, 'note', { text: 'Shipped def "Build 3": done.' });
   store.ideas.restatus(p.id);
   assert.equal(store.ideas.byHandoff(p.id, 'handoffs/feeder.md')!.status, 'built');
 });
 
-test('a handoff deleted after its minion started still joins its card, from the copy the minion read', () => {
+test('a handoff deleted after its minion started still joins its card, from the copy the minion read', async () => {
   const store = newStore();
   const p = store.createProject('Peek Auras', null);
   const shared = join(root, 'gone-shared');
@@ -160,7 +161,7 @@ test('a handoff deleted after its minion started still joins its card, from the 
   store.addEvent(t.id, 'claude', { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `     1\t# Handoff: third-fix flag (B4)\n     2\t\n     3\tFrom #12's ideas page, card B4: \`${page}\`.` }] } });
   const lone = store.createTicket({ project_id: p.id, title: 'A lost handoff', permission_mode: 'default', created_by: 'Josh' });
   store.addEvent(lone.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${join(shared, 'handoffs', 'lost.md')}\`.` });
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   const b4 = store.ideas.find(p.id, page, 'B4')!;
   assert.equal(b4.handoff, 'handoffs/handoff-third-fix-flag.md');
   assert.equal(b4.ticket_id, t.id);
@@ -200,7 +201,7 @@ test('starting a minion through the API from a handoff marks its idea started at
   }
 });
 
-test("a handoff naming its card and source minion, but not the page's path, joins that page's card; one climbing out is refused", () => {
+test("a handoff naming its card and source minion, but not the page's path, joins that page's card; one climbing out is refused", async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'src-shared');
@@ -209,7 +210,7 @@ test("a handoff naming its card and source minion, but not the page's path, join
   store.ideas.readPage(p.id, page, 1093, [], 'Picks on "Platform":\n- A1 Nightly backups: Build it');
   store.ideas.upsert(p.id, page, 'A1', { pick: 'go', decided_by: 'Josh', decided_at: 1, source_number: 1093 });
   writeFileSync(join(shared, 'handoffs', 'apps-nightly-backups.md'), "# Apps write nightly backups\n\nFrom #1093's platform ideas, idea A1. Josh picked Build it.\n");
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   assert.equal(store.ideas.find(p.id, page, 'A1')!.handoff, 'handoffs/apps-nightly-backups.md');
   const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
   assert.equal(store.ideas.linkHandoff(p.id, shared, '../outside/handoff.md', t), null);
@@ -231,7 +232,7 @@ const counting = (store: Store) => {
   return seen;
 };
 
-test('a sync reads the scheme\'s Send messages once, however many untitled pages it has', () => {
+test('a sync reads the scheme\'s Send messages once, however many untitled pages it has', async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'once-shared');
@@ -242,11 +243,11 @@ test('a sync reads the scheme\'s Send messages once, however many untitled pages
     store.writeArtifactData(p.id, join(shared, 'mockups', page), [{ key: 'db/ideas', value: '{}' }], 'Josh');
   }
   const seen = counting(store);
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   assert.ok(seen.filter((s) => s.includes('Picks on')).length <= 1, 'one scan of the messages, not one per page');
 });
 
-test('restatus rescans a minion\'s events only when it has new ones, and never once it shipped', () => {
+test('restatus rescans a minion\'s events only when it has new ones, and never once it shipped', async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'ship-shared');
@@ -254,7 +255,7 @@ test('restatus rescans a minion\'s events only when it has new ones, and never o
   writeFileSync(join(shared, 'handoffs', 'handoff-x.md'), '# Handoff: x\n');
   const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
   store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${shared}/handoffs/handoff-x.md\`.` });
-  store.ideas.sync(p.id, shared);
+  await store.ideas.sync(p.id, shared);
   const seen = counting(store);
   store.ideas.shippedTickets(p.id);
   const first = seen.filter((s) => s.includes('LIKE')).length;
@@ -265,4 +266,60 @@ test('restatus rescans a minion\'s events only when it has new ones, and never o
   const after = seen.filter((s) => s.includes('LIKE')).length;
   store.ideas.shippedTickets(p.id);
   assert.equal(seen.filter((s) => s.includes('LIKE')).length, after, 'a shipped minion is never scanned again');
+});
+
+// #1415's stalls (#1414): on today's 2 GB database, one read of every Send held the loop 4-18 s on a cold page cache, and
+// the first restatus after a restart read every linked minion's events at once (30.3 s at 01:34 PST, Nov 20).
+test('the first Send read goes in ranges of event ids, then only past the last one read', async () => {
+  const store = newStore();
+  const p = store.createProject('Mandate', null);
+  const shared = join(root, 'range-shared');
+  mkdirSync(shared, { recursive: true });
+  const t = store.createTicket({ project_id: p.id, title: 'ideas', permission_mode: 'default', created_by: 'Josh' });
+  mkdirSync(join(shared, 'mockups'), { recursive: true });
+  const page = join(shared, 'mockups', 'a.html');
+  writeFileSync(page, "<script>mock.picks({ collection: 'ideas', options: ['go', 'later'] });</script>");
+  store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A1 One: Go', comment: { path: page, about: 'X' } });
+  // A database with 65k events already, without writing them all.
+  const db = (store.ideas as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } }).db;
+  db.prepare("INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (65000, ?, 'note', '{}', ?)").run(t.id, Date.now());
+  store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A2 Two: Go', comment: { path: page, about: 'X' } });
+  store.writeArtifactData(p.id, page, ['A1', 'A2', 'A3'].map((c) => ({ key: `db/ideas/${c}`, value: JSON.stringify({ v: 'go', by: 'Josh', at: '2026-11-20T20:00:00Z' }) })), 'Josh');
+  const ranges: unknown[][] = [];
+  const real = (db.prepare as Function).bind(db);
+  db.prepare = (sql: string) => {
+    const st = real(sql);
+    if (!sql.includes('Picks on')) return st;
+    const all = st.all.bind(st);
+    st.all = (...a: unknown[]) => { ranges.push(a); return all(...a); };
+    return st;
+  };
+  await store.ideas.sync(p.id, shared);
+  assert.ok(ranges.length >= 4, `read in ranges, not in one statement: ${JSON.stringify(ranges)}`);
+  for (const [lo, hi] of ranges) assert.ok(Number(hi) - Number(lo) <= 20_000, `a range of at most 20k ids: ${lo}..${hi}`);
+  assert.deepEqual(store.ideas.list(p.id).map((r) => r.title).sort(), ['A1 One', 'A2 Two', 'A3'], 'both Sends read; A3 had none yet');
+  ranges.length = 0;
+  store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A3 Three: Go', comment: { path: page, about: 'X' } });
+  assert.match(store.ideas.sendsOf(p.id, page).text, /Three[\s\S]*Two[\s\S]*One/, 'newest first, the new one included');
+  assert.equal(ranges.length, 1, 'only the events past the last read');
+});
+
+test('after a restart, restatus leaves the ship scan to a paced pass instead of reading every linked minion at once', async () => {
+  const file = join(root, `db-${++n}.sqlite`);
+  const store = new Store(file);
+  const p = store.createProject('Mandate', null);
+  const shared = join(root, 'restart-shared');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  writeFileSync(join(shared, 'handoffs', 'handoff-x.md'), '# Handoff: x\n');
+  const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
+  store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: `Start from the handoff \`${shared}/handoffs/handoff-x.md\`.` });
+  await store.ideas.sync(p.id, shared);
+  store.addEvent(t.id, 'note', { text: 'Shipped abc "x": y.' });
+  const next = new Store(file);
+  const seen = counting(next);
+  next.ideas.restatus(p.id);
+  assert.equal(seen.filter((s) => s.includes('Shipped')).length, 0, 'no ship scan on the request\'s own turn');
+  assert.notEqual(next.ideas.list(p.id)[0].status, 'built', 'not yet');
+  await next.ideas.now(p.id, shared);
+  assert.equal(next.ideas.list(p.id)[0].status, 'built', 'the paced pass marks it built');
 });

@@ -9,6 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pacificDay } from './pacific.ts';
+import { drain, pace } from './breathe.ts';
 
 export const STATUSES = ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'] as const;
 export type IdeaStatus = (typeof STATUSES)[number];
@@ -17,6 +18,8 @@ export const LATER_STALE_MS = 14 * 24 * 60 * 60_000;
 export const LATER_NOTE_EVERY_MS = 7 * 24 * 60 * 60_000;
 /** How much of a handoff's head names its page, card and source. */
 const HEAD_LINES = 40;
+/** Event ids per step of the Send read: about 2 ms warm, a few hundred cold (#1414). */
+const SEND_IDS = 20_000;
 
 export interface Idea {
   id: number;
@@ -177,8 +180,13 @@ export class Ideas {
   /** Minions seen shipped, and the last event id scanned for a ship line in each one that hasn't (#1215). */
   private shipped = new Set<number>();
   private shipScanned = new Map<number, number>();
-  /** The Send messages of a scheme, read once per sync pass and filtered per page (#1215). */
-  private sends: { projectId: number; rows: { data: string; number: number | null; kind: string }[] } | null = null;
+  /** Schemes whose linked minions were all scanned for ship lines this server life: restatus is cheap only after that (#1414). */
+  private warm = new Set<number>();
+  /**
+   * The Send messages of each scheme, and the last event id read for them: a pass reads only events past it. One read of
+   * every Send per pass still held the loop 4-18 s on a cold page cache (#1414), so the first read goes in id ranges.
+   */
+  private sends = new Map<number, { mark: number; rows: { data: string; number: number | null; kind: string }[] }>();
   private pages = new Map<string, { mtime: number; colls: string[] }>();
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
   private running = new Map<number, Promise<void>>();
@@ -351,14 +359,34 @@ export class Ideas {
     }
   }
 
-  /** Every row's derived status, kept in the status column for the page's filters; a hand status wins. */
+  /**
+   * Every row's derived status, kept in the status column for the page's filters; a hand status wins. Until the scheme's
+   * first paced ship scan has run, a ship isn't looked for here: scanning every linked minion's events at once, on a cold
+   * cache after a restart, held the loop for seconds (#1414). That scan is queued instead, and sets the statuses after.
+   */
   restatus(projectId: number): void {
-    const rows = this.list(projectId);
-    const shipped = this.shippedTickets(projectId);
-    for (const r of rows) {
-      const s = r.status_manual ?? derive(r, !!r.ticket_id && shipped.has(r.ticket_id));
+    const warm = this.warm.has(projectId);
+    if (!warm) void this.warmUp(projectId);
+    this.restatusWith(projectId, warm ? this.shippedTickets(projectId) : null);
+  }
+
+  /** With no scan yet (null), only minions already known to have shipped count, and a built row stays built. */
+  private restatusWith(projectId: number, shipped: Set<number> | null): void {
+    for (const r of this.list(projectId)) {
+      if (!shipped && r.status === 'built' && r.status_manual == null) continue;
+      const s = r.status_manual ?? derive(r, !!r.ticket_id && (shipped ?? this.shipped).has(r.ticket_id));
       if (s !== r.status) this.db.prepare('UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?').run(s, Date.now(), r.id);
     }
+  }
+
+  /** The scheme's ship scan, paced, then its statuses: queued behind any sync of the scheme. */
+  private warmUp(projectId: number): Promise<void> {
+    return this.queue(projectId, async () => {
+      if (this.warm.has(projectId)) return;
+      const shipped = await pace(this.shipSteps(projectId));
+      this.warm.add(projectId);
+      this.restatusWith(projectId, shipped);
+    });
   }
 
   /**
@@ -366,6 +394,11 @@ export class Ideas {
    * ship. A minion merged into a build counts once its build's own minion has shipped.
    */
   shippedTickets(projectId: number): Set<number> {
+    return drain(this.shipSteps(projectId));
+  }
+
+  /** shippedTickets as steps, one linked minion each, so a paced caller yields between them (#1414). */
+  private *shipSteps(projectId: number): Generator<void, Set<number>> {
     const linked = (this.db.prepare('SELECT DISTINCT ticket_id FROM ideas WHERE project_id = ? AND ticket_id IS NOT NULL').all(projectId) as { ticket_id: number }[]).map((r) => r.ticket_id);
     const out = new Set<number>();
     // A ship line never goes away, so a shipped minion is remembered, and an unshipped one's events are only
@@ -388,6 +421,7 @@ export class Ideas {
       return true;
     };
     for (const id of linked) {
+      yield;
       if (did(id)) { out.add(id); continue; }
       const t = this.db.prepare('SELECT build FROM tickets WHERE id = ?').get(id) as { build: number | null } | undefined;
       if (!t?.build) continue;
@@ -419,11 +453,18 @@ export class Ideas {
     if (tickets.length) this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(tickets.at(-1)!.id));
   }
 
-  /** The whole scan for one scheme: its pages, its handoffs, its minions' starts, then every row's status. */
-  sync(projectId: number, sharedDir: string): void {
-    this.sends = null;
+  /**
+   * The whole scan for one scheme: its pages, its handoffs, its minions' starts, then every row's status. Paced: it
+   * yields to the event loop between pages, files, Send chunks and minions (#1414), so call it through now() or soon().
+   */
+  async sync(projectId: number, sharedDir: string): Promise<void> {
+    await pace(this.syncSteps(projectId, sharedDir));
+  }
+
+  private *syncSteps(projectId: number, sharedDir: string): Generator<void, void> {
     const files = (this.db.prepare("SELECT DISTINCT file FROM artifact_data WHERE project_id = ? AND key LIKE 'db/%'").all(projectId) as { file: string }[]).map((r) => r.file);
     for (const file of files) {
+      yield;
       const src = this.db.prepare(`SELECT t.number FROM artifacts a JOIN tickets t ON t.id = a.ticket_id WHERE a.project_id = ? AND a.path = ? AND t.kind = 'ticket' ORDER BY a.created_at LIMIT 1`).get(projectId, file) as { number: number | null } | undefined;
       // Titles the page's Sends named: read from the chats it was sent to, once per page while a row lacks one.
       const untitled = this.db.prepare("SELECT 1 FROM ideas WHERE project_id = ? AND page = ? AND title = '' LIMIT 1").get(projectId, file);
@@ -431,26 +472,45 @@ export class Ideas {
       const key = `${projectId}\0${file}`;
       if ((!untitled && !fresh) || this.searched.has(key)) { this.readPage(projectId, file, src?.number ?? null); continue; }
       this.searched.add(key);
+      yield* this.sendSteps(projectId);
       const sends = this.sendsOf(projectId, file);
       this.readPage(projectId, file, src?.number ?? sends.source, [], sends.text);
       // A row no Send named keeps its card id as its title, so this chat search runs once per page, not every pass.
       this.db.prepare("UPDATE ideas SET title = card WHERE project_id = ? AND page = ? AND title = ''").run(projectId, file);
     }
-    for (const rel of handoffFiles(sharedDir)) this.fromHandoff(projectId, sharedDir, rel);
+    for (const rel of handoffFiles(sharedDir)) {
+      yield;
+      this.fromHandoff(projectId, sharedDir, rel);
+    }
     this.linkStarts(projectId, sharedDir);
-    this.restatus(projectId);
-    this.sends = null;
+    const shipped = yield* this.shipSteps(projectId);
+    this.warm.add(projectId);
+    this.restatusWith(projectId, shipped);
+  }
+
+  /** Reads the scheme's Sends past the last event read, a range of event ids per step. */
+  private *sendSteps(projectId: number): Generator<void, void> {
+    // On the primary key, one row: MIN and MAX in one query scan the table (eventIdAt).
+    const top = (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0;
+    let held = this.sends.get(projectId);
+    // Past the newest event: the newest were deleted and their ids may come back, so read afresh.
+    if (!held || held.mark > top) this.sends.set(projectId, held = { mark: 0, rows: [] });
+    // CROSS JOIN keeps events first, on events_asks: from tickets, it read every event of the scheme's minions to check its kind.
+    const range = this.db.prepare(`SELECT e.data, t.number, t.kind FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.kind = 'user_message' AND e.id > ? AND e.id <= ? AND t.project_id = ? AND e.data LIKE '%Picks on %' ORDER BY e.id`);
+    while (held.mark < top) {
+      const to = Math.min(held.mark + SEND_IDS, top);
+      held.rows.push(...(range.all(held.mark, to, projectId) as { data: string; number: number | null; kind: string }[]));
+      held.mark = to;
+      if (held.mark < top) yield;
+    }
   }
 
   /** The Send texts posted from a page, newest first, from any chat in the scheme, and the minion they first went to. */
   sendsOf(projectId: number, file: string): { text: string; source: number | null } {
-    // The Send's comment carries the page's path; the (ticket_id, kind) index keeps this to the scheme's user messages.
-    // One read of every Send in the scheme serves all the pages of a pass: a scan per page froze the loop for 30 s (#1215).
-    if (this.sends?.projectId !== projectId) {
-      this.sends = { projectId, rows: this.db.prepare(`SELECT e.data, t.number, t.kind FROM tickets t JOIN events e ON e.ticket_id = t.id AND e.kind = 'user_message'
-        WHERE t.project_id = ? AND e.data LIKE '%Picks on %' ORDER BY e.id`).all(projectId) as { data: string; number: number | null; kind: string }[] };
-    }
-    const rows = this.sends.rows.filter((r) => r.data.includes(file));
+    // The Send's comment carries the page's path. Read on the spot when sync didn't read them first (a direct caller).
+    drain(this.sendSteps(projectId));
+    const rows = this.sends.get(projectId)!.rows.filter((r) => r.data.includes(file));
     const texts: string[] = [];
     for (const r of rows) {
       try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }
@@ -468,8 +528,13 @@ export class Ideas {
   }
 
   now(projectId: number, sharedDir: string): Promise<void> {
+    return this.queue(projectId, () => this.sync(projectId, sharedDir));
+  }
+
+  /** Runs `job` after the scheme's queued ones, so two paced scans of a scheme never interleave; errors are logged. */
+  private queue(projectId: number, job: () => Promise<void>): Promise<void> {
     const prev = this.running.get(projectId) ?? Promise.resolve();
-    const next = prev.then(() => this.sync(projectId, sharedDir)).catch((e) => console.error(`ideas sync ${projectId}: ${(e as Error).message}`));
+    const next = prev.then(job).catch((e) => console.error(`ideas sync ${projectId}: ${(e as Error).message}`));
     this.running.set(projectId, next);
     return next;
   }

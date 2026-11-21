@@ -15,6 +15,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS minion_index USING fts5(title, type, brief, s
 CREATE VIRTUAL TABLE IF NOT EXISTS handoff_index USING fts5(name, body, project_id UNINDEXED, mtime UNINDEXED, tokenize = 'porter unicode61');
 `;
 
+/** A folder listed within this long of its last change is listed again next pass: see syncHandoffs. */
+const RACY_MS = 2_000;
 const BRIEF_MAX = 3000;
 const SAID_MAX = 4000;
 /** Minions indexed between yields: each reads its events (0.2 to 1.6 MB on Citadel's), so a few keep the server's loop free. */
@@ -140,8 +142,10 @@ export class MinionIndex {
         keep(); // a listing that failed (EMFILE, EIO) drops no rows, and the next pass lists it again
         continue;
       }
-      // Noted only once listed: a folder whose listing failed is listed again next pass.
-      dirs.set(sub, at);
+      // Noted only once listed: a folder whose listing failed is listed again next pass. A folder changed moments before
+      // its listing may change again within the same mtime tick (a coarse clock, a 1 s filesystem), which would leave
+      // its mtime where it was, so it is noted as unseen and listed again next pass (git's "racy" entries; #1483).
+      dirs.set(sub, Date.now() - at < RACY_MS ? -1 : at);
       // A few stats at a time: the thread pool is shared with every other file call the server makes.
       for (let i = 0; i < names.length; i += 8) {
         const batch = names.slice(i, i + 8);

@@ -261,6 +261,11 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
     streams any size. `<a download>` is
     only for a `blob:` URL your page made. [references/api.md](references/api.md#downloads).
 
+26. **Live updates: a plain `EventSource`.** #1376, 2026-11-20. Citadel's proxy keeps it alive
+    across your app's restarts and Citadel's (it never answers a stream with a 502), so write no
+    reconnect code; catch up on what was missed in `onopen`.
+    [references/api.md](references/api.md#requests-from-browsers-the-appsname-proxy).
+
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").
 

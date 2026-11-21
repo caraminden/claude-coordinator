@@ -128,7 +128,19 @@ On every request, open path or not:
   events arrive event by event (tested), and a stream you drop ends the browser's too, so its
   `EventSource` reconnects (tested). Websocket upgrades are tunnelled on open and gated paths
   (tested).
-- If your server doesn't answer: 502, `<title> is not answering`.
+- If your server doesn't answer (a deploy, a crash, a stop), past the restart hold and retry above
+  (#1376, tested, with a real `EventSource` across a restart):
+  - **An `EventSource` never gets a 502**, which would close it for good. Its request waits up to
+    25 s for you, then gets an empty `200 text/event-stream` with `retry: 3000` that ends at once, so it
+    asks again, for as long as the page is open. A Citadel restart keeps its socket, so streams come
+    back across those too. A plain `new EventSource(url)` is all you need: no kit helper, no
+    reconnect code. What you sent while it was away is missed: catch up in `onopen` (it fires on each
+    reconnect; a catch-up fetch can fail if `open` came from a "come back" answer after a long outage,
+    so let the next `open` retry it) or from the `Last-Event-ID` header the browser sends if your
+    events carry `id:`.
+  - **A page load** (a browser's GET asking for HTML) gets a 503 "Can't reach <title>" page in the
+    kit's look, with Retry, Back to Citadel, and a check that reloads it once you answer.
+  - **Anything else** (a `fetch`, a POST): 502, `<title> is not answering`.
 
 **Open paths** (the registry's `open_paths`) skip the login and carry **no** identity header. A
 path matches when it equals an open path or sits under it; a path containing `%2e`, `%2f`, `%5c` or
@@ -1053,6 +1065,9 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-20:** An app restart no longer leaves pages stale: an open `EventSource` waits for your
+  server and then reconnects by itself instead of getting a 502, and a page load while you're down gets
+  a kit-styled "Can't reach" page with Retry that reloads once you're back ("Requests from browsers").
 - **2026-11-19:** Push to a person's phone: `POST /api/contraptions/push` sends a notification and/or
   silent data to their Android app, through the shared shell ("Push to a person's phone"). The fake
   Citadel answers it as well, giving each enabled person one phone, and records the sends in `fake.pushes`.

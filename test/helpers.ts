@@ -1,5 +1,7 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { Server } from 'node:http';
+import { createServer as createNetServer, type AddressInfo, type Server as NetServer } from 'node:net';
 import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +29,71 @@ export function testPins(dataDir?: string): TurnPins {
  */
 export async function stopProcs(procs: ChildProcess[]) {
   await Promise.all(procs.map((p) => (p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); }))));
+}
+
+export type TempRoot = {
+  /** The scratch folder. */
+  dir: string;
+  /** A path inside it. */
+  path: (...parts: string[]) => string;
+  /** child_process.spawn, with the child tracked: teardown waits for it to exit (killing it if it hasn't) before the delete. */
+  spawn: (cmd: string, args: string[], opts?: SpawnOptions) => ChildProcess;
+  /** A child started some other way (execFile, a ChildProcess a helper returned) that teardown must wait for too. */
+  track: <T extends ChildProcess>(proc: T) => T;
+  /** Listen with `server` on 127.0.0.1, port 0, and return the port the kernel gave it. Teardown closes it (and its connections). */
+  serve: (server: Server | NetServer) => Promise<number>;
+  /**
+   * A port that refuses connections for as long as the test runs, for "the app is down": a socket on port 0 that is
+   * closed straight away is a port the kernel may hand to the next listen(0), so this keeps the port held by a listener
+   * that resets every connection it gets instead (the caller sees a reset, never someone else's server).
+   */
+  down: () => Promise<number>;
+  /** Stop every tracked child (waiting for it to exit), close every server, kill what still names the folder, then delete it. */
+  teardown: () => Promise<void>;
+};
+
+/**
+ * A scratch folder with the teardown in the right order (#1445): its children exit first, then its servers close, then
+ * the folder goes, so nothing is still writing into it when it is deleted ("directory not empty"), and a test never
+ * picks a port and binds it later ("address in use"). Call `await tmp.teardown()` in `after`/`finally`. A test that
+ * boots a server uses bootServer, whose stop() does the same plus the settled drain.
+ */
+export function tempRoot(prefix = 'test-'): TempRoot {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const procs: ChildProcess[] = [];
+  const servers: (Server | NetServer)[] = [];
+  const track = <T extends ChildProcess>(proc: T): T => {
+    procs.push(proc);
+    return proc;
+  };
+  const serve = async (server: Server | NetServer) => {
+    servers.push(server);
+    await new Promise<void>((ok, fail) => {
+      server.once('error', fail);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', fail);
+        ok();
+      });
+    });
+    return (server.address() as AddressInfo).port;
+  };
+  return {
+    dir,
+    path: (...parts) => join(dir, ...parts),
+    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts ?? {})),
+    track,
+    serve,
+    down: () => serve(createNetServer((sock) => sock.destroy())),
+    teardown: async () => {
+      await stopProcs(procs);
+      for (const s of servers) {
+        (s as Server).closeAllConnections?.();
+        await new Promise((r) => (s.listening ? s.close(r) : r(undefined)));
+      }
+      await stopTurns(dir);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 /**

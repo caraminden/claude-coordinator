@@ -64,6 +64,9 @@ function workspace(c: Case, out: string): string {
   g('branch', '-q', 'main', base);
   writeFileSync(join(dir, '.git', 'replay-how'), how);
   g('reflog', 'expire', '--expire=now', '--all');
+  // Copy in what the two refs reach and drop the link to the repo's objects, so the fix can't be found by hash.
+  g('repack', '-a', '-d', '-q');
+  execFileSync('rm', ['-f', join(dir, '.git', 'objects', 'info', 'alternates')]);
   writeFileSync(join(dir, '.ready'), '');
   // Keep the marker out of the reviewer's `git status`.
   writeFileSync(join(dir, '.git', 'info', 'exclude'), '.ready\n', { flag: 'a' });

@@ -178,13 +178,16 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
   },
   'welcome-done': { about: "you with every welcome step done: it says You're set once, then is gone (#1151)", seed: (c) => firstDay(c, 5) },
   'outbox-waits': {
-    about: 'minions with waits in the outbox (#1387): a timed wake, a wait on another minion, a wait on an event, a dropped wait, and one with none',
+    about: 'minions with waits in the outbox (#1387): a timed wake with a note from another minion and a long Taskmaster wake beside it (#1512), a wait on another minion, a wait on an event, a dropped wait, and one with none',
     seed(c) {
       const now = Date.now(), at = (h: number) => now + h * 3_600_000;
       const lead = minion(c, 'Ship line fix');
       const row = (t: Ticket, d: Partial<Parameters<Store['addDelivery']>[0]>) => c.store.addDelivery({ project_id: c.project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: `minion:${t.id}`, ...d });
       const timed = minion(c, 'Check the nightly run', { state: 'parked', note: 'waking at 06:00' });
       row(timed, { when_arg: at(9), due: at(9), payload: { note: 'check the nightly run' } });
+      // #1512: a note from another minion once its change is live (Peek's #830, 2026-11-21), and a long wake the Taskmaster set.
+      row(timed, { kind: 'relay', when_kind: 'live', when_arg: 'fa4fb3f6d0c1e2b3a4f5e6d7c8b9a0f1e2d3c4b5', set_by: `minion:${lead.id}`, payload: { ticket: lead.id, to: { minion: timed.id, number: timed.number }, text: `#${lead.number} here: main's windows-check is green again. crates/app/src/run/tests.rs now uses #808's CaptureError::Unsupported (the windows.yml red 44946655531 on 905663b). Rebase onto main and hand off again.` } });
+      row(timed, { when_arg: at(1.5), due: at(1.5), set_by: 'Taskmaster', payload: { setBy: 'Taskmaster', note: "Check whether main's windows-check is fixed: git fetch, then git grep UnsupportedWindows origin/main -- crates/app must come back empty. If it's fixed, rebase on origin/main and hand_off_land the registry edit again. If it isn't, set another wake_at 40 minutes out." } });
       const chained = minion(c, 'Follow-up docs', { state: 'parked' });
       row(chained, { kind: 'chain', when_kind: 'live', when_arg: { after: lead.id, base: null }, set_by: 'Taskmaster', dedupe_key: String(chained.id), payload: { message: 'Write the follow-up docs', from: 'Taskmaster', reason: `#${lead.number} Ship line fix's work is live` } });
       const ev = minion(c, 'Land when runners return', { state: 'parked' });

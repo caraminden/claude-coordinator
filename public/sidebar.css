@@ -158,7 +158,7 @@
 .thread-row .wait-chip.empty { visibility: hidden; }
 .thread-row .wait-chip.gone, .wait-line.gone { opacity: 0.5; }
 /* The waits popover (#1512): a headline per wait that wraps, the waiter's first sentence under it, and a click opens the summary in place. */
-.wait-lines { display: grid; gap: 0.15rem; max-width: 26rem; margin: -0.2rem -0.35rem; }
+.wait-lines { display: grid; gap: 0.15rem; margin: -0.2rem -0.35rem; }
 .wait-lines .wait-line { margin: 0; border-radius: 8px; transition: background-color 0.15s; }
 .wait-line.open { background: color-mix(in srgb, var(--waiting, #7c5cd6) 7%, transparent); }
 .wait-line-hd { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: baseline; padding: 0.35rem 0.35rem; border-radius: 8px; cursor: pointer; }
@@ -170,6 +170,7 @@
 .wait-line-hd:hover .wait-line-chev { color: var(--ink); }
 .wait-line.open .wait-line-chev { transform: rotate(90deg); }
 .wait-line-meta { grid-column: 2 / span 2; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-line.open .wait-line-meta { display: none; } /* the summary starts with the same sentence */
 .wait-sum { display: grid; grid-template-rows: 1fr; }
 .wait-line.opening .wait-sum { animation: wait-sum-open 0.2s ease-out; }
 @keyframes wait-sum-open { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
@@ -183,7 +184,7 @@
 @media (prefers-reduced-motion: reduce) { .wait-line.opening .wait-sum { animation: none; } .wait-line-chev, .wait-line { transition: none; } }
 /* The chip's popover (public/ui/tip.js): what, since when, the usual, and a link to what it waits on. */
 .why-tip { max-width: min(20rem, calc(100vw - 16px)); }
-.why-tip:has(.wait-lines) { max-width: min(26rem, calc(100vw - 16px)); }
+.why-tip:has(.wait-lines) { width: min(26rem, calc(100vw - 16px)); max-width: none; box-sizing: border-box; } /* a fixed width, so opening a line never widens it */
 .why { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.88rem; line-height: 1.4; }
 .why p { margin: 0; overflow-wrap: anywhere; }
 .why-title { color: var(--c, var(--ink)); }

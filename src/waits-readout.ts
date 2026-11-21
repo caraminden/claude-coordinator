@@ -58,7 +58,7 @@ function chipOf(r: Delivery, other: Ticket | null, now: number): string {
   if (r.when_kind === 'at' || (r.due != null && r.when_kind === 'now')) return `⏱ ${hhmm(r.due ?? Number(r.when_arg), now)}`;
   if (other) return `⇢ #${other.number}`;
   if (r.when_kind === 'live' || r.when_kind === 'merged') return r.when_kind === 'merged' ? '⇢ main' : '⇢ live';
-  if (r.when_kind === 'ci') return '⇢ CI';
+  if (r.when_kind === 'ci' || r.kind === 'runners_back') return '⇢ CI';
   return '⇢ event';
 }
 

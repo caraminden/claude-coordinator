@@ -92,6 +92,19 @@ export const deliveryQueries = {
     return !!this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? AND json_extract(data, '$.subtype') = 'init' LIMIT 1").get(ticketId, eventId);
   },
 
+  /** Run `fn` in one transaction on this connection, so the settings it writes commit with its rows or not at all (alert wakes' `told`, #1392). */
+  deliveryTransaction<T>(this: Store, fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const out = fn();
+      this.db.exec('COMMIT');
+      return out;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  },
+
   /**
    * Move an old settings key's rows into the table and empty the key, in one transaction: all of them or none (ADR 0021,
    * "Steps"). A row keeps its old id when the table never used it, so an id a minion remembers still names its wake; an

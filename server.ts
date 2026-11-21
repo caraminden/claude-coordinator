@@ -1282,7 +1282,8 @@ if (!BOOT_CHECK) github.start();
 // Alarm items wake the Taskmaster they're about (#869, src/alert-wakes.ts): its scheme's, or for Citadel-wide senders
 // (id 0: CI health, timers with no home scheme) the live checkout's scheme's. Its item links that chat, where it explains.
 const alertScheme = (from: number) => from || store.listProjects().find((p) => liveSlug && repoSlug(p.repo_url) === liveSlug)?.id || 0;
-const alertWakes = new AlertWakes(store, {
+// Each scheme's batch is an `alert` row in the outbox (ADR 0021 step 6, #1392), sent by its timer.
+const alertWakes = new AlertWakes(store, outbox, {
   wake: (from, text) => {
     const scheme = alertScheme(from);
     if (!scheme || !store.getOverlord(scheme)) return false;
@@ -1290,7 +1291,6 @@ const alertWakes = new AlertWakes(store, {
     return true;
   },
 });
-if (!BOOT_CHECK && !PREVIEW) every('alert wakes', 20_000, async () => alertWakes.tick());
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log; `parts`, an alert's problems for its Taskmaster's wake. */
 async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false, parts?: AlertPart[]): Promise<boolean> {
   const c = store.getContraption('mandate');

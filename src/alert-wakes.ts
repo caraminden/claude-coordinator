@@ -5,14 +5,22 @@
 // until 9. A wake reloads a Taskmaster's whole context, so it's one per alert (not per person who got it), and a burst
 // is one wake per scheme. Scheme 0 is Citadel-wide (CI health, timers with no home scheme): the server sends it to the
 // scheme whose repo the live checkout is.
+// Since #1392 (ADR 0021 step 6) a scheme's batch is an `alert` row in the outbox that new alerts merge into; the outbox's
+// one timer sends it, so the 20 s tick is gone.
 import type { Store } from './db.ts';
+import type { Delivery } from './db/deliveries.ts';
+import type { Outbox } from './outbox.ts';
 import { ZONE } from './pacific.ts';
 
 /** How long a scheme's batch waits for more alerts after its newest one. */
 export const BATCH_MS = 60_000;
 /** The longest a batch waits while alerts keep coming. */
 export const MAX_WAIT_MS = 5 * 60_000;
-const KEY = 'alert-wakes';
+/** The old key, `{ told, batches }`: moved into the table and `TOLD` on first boot, and read again every pass (the dual read). */
+const OLD_KEY = 'alert-wakes';
+/** Alert (`<from id>:<key>`) → the problem ids in it the Taskmaster has heard of, or will in the row waiting. */
+const TOLD = 'alert-told';
+const KIND = 'alert';
 
 /** A problem inside an alert: CI health's one alert holds several. `facts`: what the Taskmaster needs that the title lacks. */
 export interface AlertPart { id: string; title: string; facts?: string }
@@ -28,13 +36,9 @@ export interface Raised {
   parts?: AlertPart[];
 }
 interface Queued { sender: string; title: string; link: string; to: string[]; parts: AlertPart[] | null }
-interface Batch { first: number; last: number; alerts: Record<string, Queued> }
-interface State {
-  /** Alert (`<from id>:<key>`) → the problem ids in it the Taskmaster has heard of, or will in the batch waiting. */
-  told: Record<string, string[]>;
-  /** Scheme id → its alerts waiting to go out. */
-  batches: Record<string, Batch>;
-}
+/** An `alert` row's payload. `note`: the line the waits readout shows. */
+interface Batch { first: number; last: number; alerts: Record<string, Queued>; note?: string }
+type Told = Record<string, string[]>;
 
 export interface AlertWakeDeps {
   /** Wake the scheme's Taskmaster (0: the Citadel scheme's); false when there's none to wake. */
@@ -50,77 +54,106 @@ export function quietUntil(t: number): number | null {
 }
 
 const names = (to: string[]) => (to.length > 1 ? `${to.slice(0, -1).join(', ')} and ${to.at(-1)}` : to[0]);
+/** The earlier of 60 s after the last alert and 5 min after the first, pushed past 2-9 AM Pacific. */
+const settled = (b: Batch) => Math.min(b.last + BATCH_MS, b.first + MAX_WAIT_MS);
+const dueOf = (b: Batch) => quietUntil(settled(b)) ?? settled(b);
+const noted = (b: Batch): Batch => {
+  const titles = Object.values(b.alerts).map((q) => q.title);
+  return { ...b, note: `Explain ${titles.length === 1 ? 'a Mandate alert' : `${titles.length} Mandate alerts`}: ${titles.join('; ')}` };
+};
+/** Two batches for one scheme as one: the newer copy of an alert wins. */
+const fold = (a: Batch, b: Batch): Batch => noted({ first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), alerts: { ...a.alerts, ...b.alerts } });
 
 export class AlertWakes {
   private store: Store;
-  private deps: AlertWakeDeps;
-  constructor(store: Store, deps: AlertWakeDeps) {
+  private outbox: Outbox;
+  constructor(store: Store, outbox: Outbox, deps: AlertWakeDeps) {
     this.store = store;
-    this.deps = deps;
+    this.outbox = outbox;
+    outbox.register({
+      kind: KIND,
+      migrate: () => this.migrate(),
+      merge: (row, incoming) => fold(row.payload, incoming.payload as Batch),
+      due: dueOf,
+      describe: (r) => String(r.payload.note ?? 'alert wake'),
+      deliver: (rows) =>
+        rows.map((r) => {
+          const b = r.payload as Batch;
+          const held = quietUntil(b.first) !== null || quietUntil(settled(b)) !== null;
+          if (deps.wake(r.to_id, wakeText(b, held))) return { state: 'accepted' as const };
+          console.log(`Alert wakes: scheme ${r.to_id} has no Taskmaster; ${Object.keys(b.alerts).length} alert(s) not explained`);
+          return { state: 'drop' as const, reason: 'no Taskmaster to wake' };
+        }),
+    });
   }
 
-  private load(): State {
-    return this.store.getSetting<State>(KEY) ?? { told: {}, batches: {} };
+  /** The dual read: the old key's told, until the move empties it. */
+  private told(): Told {
+    return this.store.getSetting<Told>(TOLD) ?? this.store.getSetting<{ told?: Told }>(OLD_KEY)?.told ?? {};
+  }
+
+  private waiting(scheme: number): Delivery | undefined {
+    return this.store.listDeliveries({ kind: KIND, dedupe: String(scheme), states: ['waiting'] })[0];
+  }
+
+  private add(scheme: number, b: Batch) {
+    this.outbox.add({ project_id: scheme, kind: KIND, to_kind: 'taskmaster', to_id: scheme, when_kind: 'at', set_by: 'citadel', dedupe_key: String(scheme), payload: noted(b) });
+  }
+
+  /** Take an alert out of its scheme's waiting row, and drop the row once it holds none. */
+  private trim(scheme: number, id: string) {
+    const row = this.waiting(scheme);
+    if (!row?.payload.alerts[id]) return;
+    const alerts = { ...row.payload.alerts };
+    delete alerts[id];
+    if (!Object.keys(alerts).length) this.outbox.cancel(row.id, 'its alerts cleared');
+    else this.store.updateDelivery(row.id, { payload: noted({ ...row.payload, alerts }) }, ['waiting'], this.outbox.clock());
+  }
+
+  /** Move the old key's batches into the table and its told into `TOLD`, emptying the key, all in one transaction. */
+  private migrate() {
+    const old = this.store.getSetting<{ told?: Told; batches?: Record<string, Batch> }>(OLD_KEY);
+    if (!old) return;
+    this.store.deliveryTransaction(() => {
+      this.store.setSetting(TOLD, { ...old.told, ...this.store.getSetting<Told>(TOLD) });
+      for (const [scheme, b] of Object.entries(old.batches ?? {})) if (Object.keys(b.alerts ?? {}).length) this.add(Number(scheme), b);
+      this.store.deleteSetting(OLD_KEY);
+    });
   }
 
   /** An alarm item Mandate took for one person: queues the news in it, if any, for its scheme's next wake. */
-  raise(a: Raised, now = Date.now()) {
-    const s = this.load();
-    const id = `${a.from.id}:${a.key}`;
-    const parts = a.parts ?? [{ id: a.key, title: a.title }];
-    const told = new Set(s.told[id] ?? []);
-    const fresh = parts.filter((p) => !told.has(p.id));
-    // What it holds now: a problem that left (or returns later, as news again) stops counting as heard.
-    s.told[id] = parts.map((p) => p.id);
-    const batch = s.batches[a.from.id];
-    const queued = batch?.alerts[id];
-    if (queued?.parts) queued.parts = queued.parts.filter((p) => parts.some((x) => x.id === p.id));
-    if (fresh.length || queued) {
-      const b = (s.batches[a.from.id] ??= { first: now, last: now, alerts: {} });
-      const q = (b.alerts[id] ??= { sender: a.from.name, title: a.title, link: a.link, to: [], parts: a.parts ? [] : null });
+  raise(a: Raised, now = this.outbox.clock()) {
+    this.store.deliveryTransaction(() => {
+      const told = this.told();
+      const id = `${a.from.id}:${a.key}`;
+      const parts = a.parts ?? [{ id: a.key, title: a.title }];
+      const heard = new Set(told[id] ?? []);
+      const fresh = parts.filter((p) => !heard.has(p.id));
+      // What it holds now: a problem that left (or returns later, as news again) stops counting as heard.
+      told[id] = parts.map((p) => p.id);
+      this.store.setSetting(TOLD, told);
+      const queued = this.waiting(a.from.id)?.payload.alerts[id] as Queued | undefined;
+      if (!fresh.length && !queued) return;
+      const q: Queued = queued ? structuredClone(queued) : { sender: a.from.name, title: a.title, link: a.link, to: [], parts: a.parts ? [] : null };
       Object.assign(q, { title: a.title, link: a.link });
       if (!q.to.includes(a.person)) q.to.push(a.person);
-      if (q.parts) q.parts.push(...fresh.filter((p) => !q.parts!.some((x) => x.id === p.id)));
-      if (fresh.length) b.last = now;
-      if (q.parts && !q.parts.length) this.drop(s, a.from.id, id);
-    }
-    this.store.setSetting(KEY, s);
+      if (q.parts) q.parts = [...q.parts.filter((p) => parts.some((x) => x.id === p.id)), ...fresh.filter((p) => !q.parts!.some((x) => x.id === p.id))];
+      if (q.parts && !q.parts.length) return this.trim(a.from.id, id);
+      // Only news moves the wait on (a merge keeps the row's first and the later last).
+      this.add(a.from.id, { first: now, last: fresh.length ? now : 0, alerts: { [id]: q } });
+    });
   }
 
   /** The alert's item was cleared: nothing to wake anyone for, and the next time it opens is news. */
   clear(from: { id: number }, key: string) {
-    const s = this.load();
     const id = `${from.id}:${key}`;
-    if (!s.told[id] && !s.batches[from.id]?.alerts[id]) return;
-    delete s.told[id];
-    this.drop(s, from.id, id);
-    this.store.setSetting(KEY, s);
-  }
-
-  private drop(s: State, scheme: number, id: string) {
-    const b = s.batches[scheme];
-    if (!b) return;
-    delete b.alerts[id];
-    if (!Object.keys(b.alerts).length) delete s.batches[scheme];
-  }
-
-  /** Sends each batch whose burst is over, unless it's 2-9 AM Pacific. */
-  tick(now = Date.now()) {
-    if (quietUntil(now) !== null) return;
-    const s = this.load();
-    const due = Object.entries(s.batches).filter(([, b]) => now - b.last >= BATCH_MS || now - b.first >= MAX_WAIT_MS);
-    if (!due.length) return;
-    // Saved first, so a send that throws can't wake anyone twice.
-    for (const [scheme] of due) delete s.batches[scheme];
-    this.store.setSetting(KEY, s);
-    for (const [scheme, b] of due) {
-      const held = quietUntil(b.first) !== null || quietUntil(Math.min(b.last + BATCH_MS, b.first + MAX_WAIT_MS)) !== null;
-      try {
-        if (!this.deps.wake(Number(scheme), wakeText(b, held))) console.log(`Alert wakes: scheme ${scheme} has no Taskmaster; ${Object.keys(b.alerts).length} alert(s) not explained`);
-      } catch (err) {
-        console.error(`Alert wakes: waking scheme ${scheme}'s Taskmaster failed:`, err);
-      }
-    }
+    const told = this.told();
+    if (!told[id] && !this.waiting(from.id)?.payload.alerts[id]) return;
+    this.store.deliveryTransaction(() => {
+      delete told[id];
+      this.store.setSetting(TOLD, told);
+      this.trim(from.id, id);
+    });
   }
 }
 

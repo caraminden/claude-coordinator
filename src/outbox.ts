@@ -49,6 +49,8 @@ export type Kind = {
   deliver(rows: Delivery[], ctx: DeliverCtx): Outcome[] | Promise<Outcome[]>;
   /** A re-add with the same dedupe_key: the payload to keep. Without it the new payload replaces the old. */
   merge?(row: Delivery, incoming: NewDelivery): unknown;
+  /** When a row with this payload is due, on add and on every merge (alert batches: their wait moves with each alert). */
+  due?(payload: any): number | null;
   /** `deliver`: still sent to a dismissed minion (relays, as held mail). Default `hold`: the 3-day rule. */
   onDismiss?: 'hold' | 'deliver';
   /** The dual read (ADR 0021, "Steps"): move anything found in the kind's old settings key into the table. Runs every pass. */
@@ -125,9 +127,10 @@ export class Outbox {
     const [old] = d.dedupe_key == null ? [] : this.store.listDeliveries({ kind: d.kind, dedupe: d.dedupe_key, states: ['waiting', 'held'] });
     let row: Delivery;
     if (old) {
-      this.store.updateDelivery(old.id, { payload: kind.merge ? kind.merge(old, d) : d.payload, when_arg: d.when_arg ?? old.when_arg, due: d.due ?? old.due }, undefined, now);
+      const payload = kind.merge ? kind.merge(old, d) : d.payload;
+      this.store.updateDelivery(old.id, { payload, when_arg: d.when_arg ?? old.when_arg, due: kind.due ? kind.due(payload) : (d.due ?? old.due) }, undefined, now);
       row = this.store.getDelivery(old.id)!;
-    } else row = this.store.addDelivery(d, now);
+    } else row = this.store.addDelivery(kind.due ? { ...d, due: kind.due(d.payload) } : d, now);
     void this.poke({ type: 'added', ticket: d.to_kind === 'minion' ? d.to_id : undefined });
     return row;
   }
@@ -386,7 +389,8 @@ export class Outbox {
     this.store.updateDelivery(r.id, { state: 'failed', attempts, last_error: reason, reason: `failed ${attempts} times` }, undefined, now);
     // A lost wake strands a minion, so the setter's Taskmaster is woken, not given held mail (ADR 0021).
     const setter = /^minion:(\d+)$/.exec(r.set_by);
-    const of = this.store.getTicket(setter ? Number(setter[1]) : r.to_id);
+    // A Taskmaster target's to_id is its scheme, not a minion.
+    const of = setter ? this.store.getTicket(Number(setter[1])) : r.to_kind === 'minion' ? this.store.getTicket(r.to_id) : undefined;
     const tm = of && this.store.ownerCoordinator(of);
     if (!tm) return this.opts.log?.(`outbox: delivery #${r.id} failed, and no Taskmaster to tell`);
     const what = this.kinds.get(r.kind)?.describe?.(r) ?? r.kind;

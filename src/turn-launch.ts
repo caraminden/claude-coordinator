@@ -442,7 +442,7 @@ const READ_ONLY_EXCEPTIONS = [
   // uniq's second operand is a file it writes.
   .concat('Bash(uniq * *)');
 /** Box-health files a Taskmaster may Read beside its read folders. */
-const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**'];
+const HEALTH_FILES = ['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/pressure/**']; // host-signal-ok: paths a turn's sandbox may read, not a read here
 
 /**
  * What the Citadel scheme's Taskmaster may read beyond its own scheme (#656, Josh: "the Citadel taskmaster should

@@ -59,7 +59,7 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
+      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude-config'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -125,7 +125,7 @@ test('a preview exits once the server that started it is gone', async () => {
 
 test('a dev copy exits by itself once nobody has asked it anything for IDLE_EXIT_MS', async () => {
   const dir = mkdtempSync(join(root, 'idle-'));
-  const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
+  const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
   tmp.track(p);
   const port = await listeningPort(p);
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).ok, true);

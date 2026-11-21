@@ -16,6 +16,7 @@ import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts'
 import type { ContraptionRow } from './db.ts';
 import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
 import { gradleVersion } from './release-readers.ts';
+import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
 
 /** The whole build, the wait for a heavy slot included: past it the build is stopped and told. */
 const BUILD_MS = 90 * 60_000;
@@ -95,8 +96,8 @@ export interface ApkBuildDeps {
 /** OOM kills in this process's cgroup (cgroup v2's memory.events, which counts its children's): 0 when it can't be read. */
 async function cgroupOomKills(): Promise<number> {
   try {
-    const path = (await readFile('/proc/self/cgroup', 'utf8')).match(/^0::(.*)$/m)?.[1];
-    const events = path ? await readFile(join('/sys/fs/cgroup', path, 'memory.events'), 'utf8') : '';
+    const path = (await hostText(SELF_CGROUP)).match(/^0::(.*)$/m)?.[1];
+    const events = path ? await hostText(join(CGROUP_ROOT, path, 'memory.events')) : '';
     return Number(/^oom_kill (\d+)$/m.exec(events)?.[1] ?? 0);
   } catch {
     return 0;

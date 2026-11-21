@@ -2,6 +2,7 @@
 // holds them, the line behind them, the CPU-pressure gate, and a week of waits per scheme from its history file.
 // Read-only: the slot count stays a file (X2 was left unpicked: raising it put the load near 100 on Nov 10).
 import { readFileSync } from 'node:fs';
+import { hostTextSync, PSI_FILES } from './host-signals.ts';
 import { join } from 'node:path';
 import { median, readHeavy, type HeavyJob } from './waits.ts';
 import { MAX_CPU_PRESSURE } from './pressure.ts';
@@ -82,8 +83,8 @@ const slotCount = (dir: string): number => {
 };
 
 /** The gate's reading: /proc/pressure/cpu "some avg60" as a whole percent, or null without PSI. */
-export function readPressure(file = '/proc/pressure/cpu'): number | null {
-  try { return Math.floor(Number(readFileSync(file, 'utf8').match(/^some .*avg60=([\d.]+)/m)?.[1])) } catch { return null; }
+export function readPressure(file: string = PSI_FILES.cpu): number | null {
+  try { return Math.floor(Number(hostTextSync(file).match(/^some .*avg60=([\d.]+)/m)?.[1])) } catch { return null; }
 }
 
 export interface HostLoad {

@@ -1,4 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import './src/host-signals.ts'; // first: a test server's fixed zone (TZ) is set before any module reads the clock (#1485)
 import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

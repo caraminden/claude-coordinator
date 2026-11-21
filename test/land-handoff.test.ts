@@ -340,6 +340,7 @@ test('the ship note finds the commit on any default branch, not only main (KT2)'
   assert.deepEqual(landResult('land: trunk is now at abc1234 "#2: x"\n', 0), { kind: 'landed', commit: 'abc1234', subject: '#2: x' });
   assert.deepEqual(landResult(LIVE, 0), { kind: 'live', commit: 'abc1234', subject: '#9: usage bar' });
   assert.deepEqual(landResult('land: main is now at abc1234 "#9: x", in ticket/3-y\'s ship train\n', 0), { kind: 'landed', commit: 'abc1234', subject: '#9: x' }, "Citadel's train line");
+  assert.deepEqual(landResult('land: landed d1a5c2f "#15: seed" in a batch with ticket/3-y, on ticket/3-y\'s CI run (master is now 0123456789ab)\n', 0), { kind: 'landed', commit: 'd1a5c2f', subject: '#15: seed' }, "a batch member's own commit (KT3)");
   // A merge into a build names the build, not the default branch: no commit for the shipped line (it says "into build/3").
   assert.deepEqual(landResult('land: build/3 is now at abc1234 "#9: x"; master is untouched\n', 0), { kind: 'landed' });
 });

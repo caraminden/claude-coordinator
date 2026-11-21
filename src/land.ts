@@ -359,7 +359,8 @@ export function landResult(output: string, code: number): LandResult {
   if (code !== 0) return /^land: smoke: .*, before the line \(\d+ s\), so nothing landed/m.test(output) ? { kind: 'failed', smoke: true } : { kind: 'failed' };
   // "<default branch> is now at": main, or master and the like in a scheme on the kit's land.sh (KT2, #1519). A merge
   // into a build says "build/<n> is now at", which isn't the commit main moved to.
-  const at = [...output.matchAll(/^land: (?!build\/)\S+ is now at ([0-9a-f]{7,40}) "(.*)"/gm)].pop();
+  // A batch member's own line names its commit, which sits under main's tip (KT3): "land: landed <sha> "<subject>" in a batch".
+  const at = [...output.matchAll(/^land: (?:(?!build\/)\S+ is now at|landed) ([0-9a-f]{7,40}) "(.*)"/gm)].pop();
   const commit = at ? { commit: at[1], subject: at[2] } : {};
   // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
   // already runs" (live already), "restart queued" / "a restart is already queued" / "not live yet" (waiting on it).

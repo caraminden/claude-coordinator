@@ -110,7 +110,8 @@ const openFix = (x) => x.fixTicket && x.fixTicket.status !== 'closed';
 function fixPart(s, x) {
   const k = `${s.id}:${x.key}`;
   const mine = pressed.get(k);
-  if (mine && openFix(x) && (mine.number == null || x.fixTicket.number === mine.number)) pressed.delete(k);
+  // Shown by the server (open, or already closed), or five minutes stale (a red that cleared and came back): the read wins.
+  if (mine && ((openFix(x) && (mine.number == null || x.fixTicket.number === mine.number)) || (mine.number != null && x.fixTicket?.number === mine.number) || Date.now() - mine.at > 5 * 60_000)) pressed.delete(k);
   const p = pressed.get(k);
   const shown = p ? { ...x, fixTicket: { project_id: s.id, number: p.number ?? '…', title: p.title, status: 'running', created_at: p.at, last_activity: p.number ? 'Starting its first turn' : 'Starting a fix minion' } } : x;
   const box = shown.fixTicket || shown.noFix ? fixBox(shown) : '';

@@ -192,3 +192,30 @@ test('from a subfolder it runs there on CI, with every edit in the repo and no u
   assert.equal(git(r.bare, 'show', `${sent['inputs[sha]']}:sub dir/b.txt`), 'b');
   assert.equal(git(r.bare, 'ls-tree', '-r', '--name-only', sent['inputs[sha]']).split('\n').filter((f) => /\.env|\.pem/.test(f)).length, 0, 'no .env or key file pushed');
 });
+
+// Long jobs (#1363): --long only queues; the server's pump (src/long-jobs.ts, test/long-jobs.test.ts) starts and watches them.
+test('--long pushes the snapshot, writes the job for the server and returns at once without dispatching', () => {
+  const r = repo();
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_WHO: 'Peek #9 (cara)', COORDINATOR_TICKET: '42' };
+  const res = spawnSync(heavy, ['--long', 'sh', '-c', 'echo ran here; exit 5'], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env });
+  assert.equal(res.status, 0, res.stderr);
+  const id = res.stdout.trim();
+  assert.match(id, /^[a-z0-9]+-\d+-[a-z0-9]+$/);
+  assert.match(res.stderr, /end your turn/);
+  assert.ok(!existsSync(join(r.gh, 'dispatch.json')), 'nothing is dispatched yet');
+  const job = JSON.parse(readFileSync(join(r.gh, 'locks', 'long', `${id}.json`), 'utf8'));
+  assert.deepEqual([job.ticket, job.slug, job.state, job.who, job.command], [42, 'o/r', 'queued', 'Peek #9 (cara)', `sh -c 'echo ran here; exit 5'`]);
+  assert.equal(git(r.bare, 'show', `refs/citadel-heavy/${id}:a.txt`), 'edited, not committed', 'the snapshot stays on GitHub for the run');
+  assert.equal(git(r.bare, 'rev-parse', `refs/citadel-heavy/${id}`), job.sha);
+  assert.doesNotMatch(res.stdout, /ran here/);
+
+  const noTicket = spawnSync(heavy, ['--long', 'true'], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env: { ...env, COORDINATOR_TICKET: undefined } });
+  assert.equal(noTicket.status, 2, 'only a minion can queue one: nobody else could be woken');
+  const here = spawnSync(heavy, ['--here', '--long', 'true'], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env });
+  assert.equal(here.status, 2);
+  const none = spawnSync(heavy, ['--long', 'true'], { cwd: repo(false).d, encoding: 'utf8', timeout: 30_000, env });
+  assert.equal(none.status, 2, 'a repo without the workflow cannot take long jobs');
+  const huge = spawnSync(heavy, ['--long', 'echo', 'x'.repeat(20_001)], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env });
+  assert.equal(huge.status, 2, 'a command the server would drop is refused, not queued to wait forever');
+  assert.match(huge.stderr, /at most 20000/);
+});

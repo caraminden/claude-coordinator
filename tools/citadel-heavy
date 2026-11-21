@@ -49,6 +49,10 @@
 # Perigee's small slot (#1160, Josh: "One small slot here"): plain jobs here use at most CITADEL_HEAVY_PLAIN_SLOTS (1)
 # of the slots, at nice 19 and idle disk priority, so minions never feel them; the other slots are for priority jobs
 # (deploy and APK builds), which take them from the top down.
+#
+# Long jobs (#1363): `citadel-heavy --long <command...>` doesn't wait. It snapshots the working copy for the scheme's CI,
+# queues the job and prints its id at once (tools/heavy-ci.ts --long). The server starts it at night, from 2am until the
+# job hours of the PC that runs the repo's runners end, and wakes the minion when it ends.
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
@@ -58,7 +62,12 @@ say() { echo "citadel-heavy: $*" >&2; }
 us() { local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}; echo "${t:-${SECONDS}000000}"; }
 here=${CITADEL_HEAVY_HERE:-}
 [ "${1:-}" != --here ] || { here=1; shift; }
-[ $# -gt 0 ] || { say "usage: citadel-heavy [--here] <command> [args...]"; exit 2; }
+if [ "${1:-}" = --long ]; then
+  [ -z "$here" ] || { say "a long job runs on the scheme's CI only, so --long and --here (or CITADEL_HEAVY_HERE) don't go together"; exit 2; }
+  shift
+  exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
+fi
+[ $# -gt 0 ] || { say "usage: citadel-heavy [--here | --long] <command> [args...]"; exit 2; }
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || exec "$@"
 
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}

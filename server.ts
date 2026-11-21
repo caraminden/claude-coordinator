@@ -37,7 +37,8 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { ShipWatch } from './src/ci-ships.ts';
-import { MachineJobs } from './src/machine-jobs.ts';
+import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
+import { LongJobs } from './src/long-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
@@ -555,6 +556,36 @@ claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurn
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
+// Long heavy jobs (#1363): `citadel-heavy --long` queues them in the heavy folder; this starts each on its scheme's CI in
+// the night: from 2am until the job hours (of the PC whose runners serve that repo, from their load samples) end.
+const longJobPc = new Map<string, number>();
+const longJobs = new LongJobs({
+  dir: join(DATA_DIR, 'projects', '.heavy'),
+  scheme: (id) => {
+    const t = store.getTicket(id);
+    const p = t && store.getProject(t.project_id);
+    return p ? { projectId: p.id, slug: repoSlug(p.repo_url) } : null;
+  },
+  hours: (slug) => {
+    const lower = slug.toLowerCase();
+    const sample = store.runnerLoadSince(Date.now() - 10 * 60_000).reverse().find((r) => {
+      try { return (JSON.parse(r.data).runners ?? []).some((x: { repo?: string }) => x.repo?.toLowerCase() === lower); } catch { return false; }
+    });
+    // Remembered, so a PC that went quiet or off overnight keeps its own hours rather than the defaults.
+    if (sample) longJobPc.set(lower, sample.machine_id);
+    const m = longJobPc.has(lower) ? store.getMachine(longJobPc.get(lower)!) : null;
+    return m ? storedSettings(m) : DEFAULT_SETTINGS;
+  },
+  gh: (projectId, args) => {
+    const p = store.getProject(projectId);
+    const env = { ...process.env, ...(p?.repo_dir ? githubOf(p.repo_dir) : {}) };
+    return new Promise((done, fail) => execFile('gh', ['api', ...args], { env, timeout: 120_000, maxBuffer: 256 << 20 }, (err, out, errOut) =>
+      err ? fail(new Error(String(errOut || err.message).trim().split('\n').pop())) : done(String(out))));
+  },
+  wake: (id, text, light) => runner.send(id, APP_NAME, text, [], light ? { light } : {}),
+  note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
+});
+if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pump(), 30_000);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
 // Kit files sync themselves (#1100): a change to the scheme-setup templates schemes copy is merged into each scheme

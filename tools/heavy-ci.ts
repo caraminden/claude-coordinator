@@ -12,9 +12,10 @@
 // CITADEL_HEAVY_CI_QUEUE s, default 600, while nothing else on the repo's CI ran either: the desktop is off) it says why, writes the reason to the file
 // CITADEL_HEAVY_FALLBACK_FILE names and exits FALLBACK, and citadel-heavy runs it in perigee's small slot instead.
 // Once a run has started it never falls back: a stop or a lost run is reported, not run twice.
+//   node heavy-ci.ts --long <command> [args...]   queues a long job and exits at once (#1363, below)
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const FALLBACK = 120;
@@ -124,13 +125,57 @@ async function waitForShips(slug: string, poll: number) {
   }
 }
 
+/** The command line the workflow runs: in the same folder of the repo as here. */
+function remoteCommand(argv: string[]): string {
+  const prefix = git('rev-parse', '--show-prefix');
+  return prefix ? `cd ${commandLine([prefix])} && ${commandLine(argv)}` : commandLine(argv);
+}
+const newId = () => `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
+
+/** Where long jobs wait, beside citadel-heavy's slots: <CITADEL_HEAVY_DIR>/long/<id>.json (and <id>.log once it ends). */
+export const longDir = (env: NodeJS.ProcessEnv = process.env) => join(env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'), 'long');
+
+/**
+ * A long job (#1363; Cara, 2026-11-20: "maybe we need a lane for LONG jobs like this to run while I am sleeping?"):
+ * snapshot and push the working copy now, write the job's file and exit; the server (src/long-jobs.ts) starts it on CI
+ * at night, from 2am until the job hours of the PC with the repo's runners end, and wakes this minion
+ * with its status and output when it ends. Prints the job's id.
+ */
+function queueLong(argv: string[]): number {
+  const ticket = Number(process.env.COORDINATOR_TICKET);
+  if (!Number.isInteger(ticket) || ticket <= 0) { say('--long is for a minion\'s turn (it needs COORDINATOR_TICKET): the minion that queues it is woken when it ends'); return 2; }
+  const command = remoteCommand(argv);
+  // The server drops a job file it can't trust (src/long-jobs.ts cleanJob), so a job it would drop is refused here instead.
+  if (command.length > 20_000) { say(`the command is ${command.length} characters; a long job takes at most 20000: put it in a script`); return 2; }
+  let slug: string;
+  try { slug = repo(); } catch (e) { say(`a long job runs only on the scheme's CI, and ${(e as Error).message}; run it without --long`); return 2; }
+  const id = newId();
+  let sha: string;
+  try {
+    sha = snapshot();
+    git('push', '-q', '--no-verify', 'origin', `${sha}:refs/citadel-heavy/${id}`);
+  } catch (e: any) {
+    say(`pushing the snapshot to GitHub failed (${String(e.stderr || e.message).trim().split('\n').pop()}), so nothing is queued`);
+    return 1;
+  }
+  const what = (process.env.CITADEL_HEAVY_WHAT || argv.join(' ')).slice(0, 100);
+  const job = { id, ticket, slug, sha, command, what, who: (process.env.CITADEL_HEAVY_WHO || 'someone').slice(0, 200), queued_at: Date.now(), state: 'queued' };
+  const dir = longDir();
+  // Open to every account: turns in people's containers write here, and the server rewrites the files as jobs move.
+  if (!existsSync(dir)) { mkdirSync(dir, { recursive: true }); try { chmodSync(dir, 0o777); } catch { /* not ours */ } }
+  writeFileSync(join(dir, `.${id}.tmp`), JSON.stringify(job) + '\n', { mode: 0o666 });
+  renameSync(join(dir, `.${id}.tmp`), join(dir, `${id}.json`));
+  process.stdout.write(`${id}\n`);
+  say(`queued long job ${id} (${what}) for ${slug}'s CI. It starts at night (from 2am, in the CI PC's job hours), so end your turn now: you are woken with its exit status and output (${join(dir, `${id}.log`)}) when it ends`);
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const poll = Number(process.env.CITADEL_HEAVY_CI_POLL) || 10;
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
   const slug = repo();
-  const prefix = git('rev-parse', '--show-prefix');
-  const command = prefix ? `cd ${commandLine([prefix])} && ${commandLine(argv)}` : commandLine(argv);
-  const id = `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
+  const command = remoteCommand(argv);
+  const id = newId();
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
   try {
@@ -235,7 +280,9 @@ if (import.meta.main) {
     if (process.env.CITADEL_HEAVY_FALLBACK_FILE) writeFileSync(process.env.CITADEL_HEAVY_FALLBACK_FILE, `${why}\n`);
     process.exitCode = FALLBACK;
   };
-  if (argv[0] === '--repo') {
+  if (argv[0] === '--long') {
+    process.exitCode = argv.length > 1 ? queueLong(argv.slice(1)) : (say('usage: citadel-heavy --long <command> [args...]'), 2);
+  } else if (argv[0] === '--repo') {
     try { process.stdout.write(repo() + '\n'); } catch (e) { say(`not on CI: ${(e as Error).message}`); fallback((e as Error).message); }
   } else if (!argv.length) {
     say('usage: heavy-ci.ts --repo | <command> [args...]');

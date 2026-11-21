@@ -3,7 +3,9 @@
 # With this on the default branch, `citadel-heavy <command>` in a minion's turn runs here, on the scheme's runners,
 # instead of on perigee: Citadel's tools/heavy-ci.ts pushes the minion's working copy as a snapshot commit
 # (refs/citadel-heavy/<id>, which no push trigger sees), starts this workflow on it, waits, prints what the command
-# printed between the two markers below and exits with its status. A repo without this file runs its heavy jobs in
+# printed between the two markers below and exits with its status. `citadel-heavy --long <command>` only queues the job:
+# Citadel starts it here at night (from 2am, in the CI PC's job hours) with a longer `minutes`,
+# and wakes the minion with the result (#1363). A repo without this file runs its heavy jobs in
 # perigee's one small, low-priority slot: slow, on purpose (Josh, 2026-11-20: "perigee is fine and nothing breaks,
 # we just ship less").
 #
@@ -32,6 +34,10 @@ on:
       id:
         description: names the run
         required: true
+      minutes:
+        description: the time limit; Citadel sends a longer one for long jobs (citadel-heavy --long, #1363)
+        required: false
+        default: '60'
 
 permissions:
   contents: read
@@ -39,7 +45,7 @@ permissions:
 jobs:
   heavy:
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<runner-label>"]') }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(inputs.minutes || '60') }}
     steps:
       - uses: actions/checkout@v4
         with:

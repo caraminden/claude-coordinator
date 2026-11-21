@@ -47,7 +47,7 @@ export function hostLoadBlock(l) {
       : emptyCard('No heavy jobs this week', 'Builds and test runs that take a slot show here with how long they waited.', { mark: '·', hue: 'muted' }));
 
   return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'),
-    h('div', { class: 'settings-rows' }, slots, line, week, minionsRow(l)));
+    h('div', { class: 'settings-rows' }, slots, line, longRow(l), week, minionsRow(l)));
 }
 
 const minionLink = (m) => h('a', { href: threadNumberHref(m.schemeId ?? m.scheme, m.number) }, `#${m.number}`);
@@ -71,6 +71,23 @@ function minionsRow(l) {
         schemeTag(r.schemeName), ' ', minionLink({ ...r, schemeId: r.scheme }), ' ', h('code', {}, r.command)))) })
       : emptyCard('None this week', 'A closed minion\'s leftover processes are stopped at its close or within the hour, and each shows here.'),
     h('p', { class: 'look-prose' }, 'Closing a minion stops what runs from its worktree and temp folder (TERM, then KILL), by pid, never by name. An open minion\'s processes, a person\'s own shell, ships and deploys are never touched.'));
+  return row;
+}
+
+// Long jobs (#1363): `citadel-heavy --long` queues them for the scheme's CI at night, from 2am (src/long-jobs.ts).
+const LONG = { queued: 'waits for 2am', dispatched: 'sent to CI, waiting for a runner', running: 'running on CI', done: 'passed' };
+const LONG_HUE = { queued: 'waiting', dispatched: 'running', running: 'running', done: 'done', failed: 'danger', lost: 'danger' };
+function longRow(l) {
+  const jobs = l.long ?? [];
+  const running = jobs.filter((j) => j.state === 'running' || j.state === 'dispatched').length, queued = jobs.filter((j) => j.state === 'queued').length;
+  const summary = running || queued ? [running && toneChip('info', `${running} running`), queued && toneChip('warn', `${queued} queued`)].filter(Boolean)
+    : [toneChip('ok', 'None queued'), jobs.length ? `${jobs.length} ended today` : 'run at night, from 2am'];
+  const [row] = settingsRow({ key: 'host-long', icon: 'rows', hue: running ? 'running' : queued ? 'waiting' : 'done', title: 'Long jobs', summary },
+    jobs.length ? h('div', { class: 'hue-rows' }, ...jobs.map((j) => hueRow({ hue: LONG_HUE[j.state], meta: held(j, l.now) },
+      schemeTag(j.scheme, j.who), `${j.what} · `,
+      h('span', { class: 'muted' }, LONG[j.state] ?? (j.state === 'failed' ? `failed, exit ${j.code}` : `lost: ${j.why ?? 'no result'}`)),
+      j.url ? [' · ', h('a', { href: j.url, target: '_blank', rel: 'noopener' }, 'CI run')] : '')))
+      : emptyCard('No long jobs', 'A minion queues a test run of an hour or more with citadel-heavy --long; it starts at 2am, in the CI machine\'s job hours, and the minion is woken with the result.'));
   return row;
 }
 

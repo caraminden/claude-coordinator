@@ -16,6 +16,10 @@ on:
       id:
         description: names the run
         required: true
+      minutes:
+        description: the time limit; Citadel sends a longer one for long jobs (citadel-heavy --long, #1363)
+        required: false
+        default: '60'
 
 permissions:
   contents: read
@@ -26,7 +30,7 @@ jobs:
     # four ships in a row to the suite on perigee on 2026-11-20. The first runner stays the ships' (tests.yml, #1240);
     # a heavy job waits behind a proof instead, and heavy-ci.ts waits too while CI is busy.
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]') }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(inputs.minutes || '60') }}
     steps:
       - uses: actions/checkout@v4
         with:

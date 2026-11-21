@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { median, readHeavy, type HeavyJob } from './waits.ts';
 import { MAX_CPU_PRESSURE } from './pressure.ts';
+import { longView, readLongJobs } from './long-jobs.ts';
 
 /** citadel-heavy's defaults (its header): pressure at or above 50% holds a free slot, for at most 5 minutes. */
 export const MAX_PRESSURE = MAX_CPU_PRESSURE;
@@ -93,6 +94,8 @@ export interface HostLoad {
   maxPressure: number;
   loadWaitS: number;
   week: SchemeWaits[];
+  /** Long jobs (#1363): queued, running, and ended in the last day. */
+  long: (ReturnType<typeof longView>[number] & { scheme: string })[];
   now: number;
 }
 
@@ -101,5 +104,6 @@ export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, o
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';
   try { history = readFileSync(join(dir, 'history'), 'utf8'); } catch { /* none yet */ }
-  return { slots: slotCount(dir), holders: holders.map(tag), waiters: waiters.map(tag), pressure: readPressure(pressureFile), maxPressure: MAX_PRESSURE, loadWaitS: LOAD_WAIT_S, week: parseHistory(history, now - WEEK_MS, owners), now };
+  return { slots: slotCount(dir), holders: holders.map(tag), waiters: waiters.map(tag), pressure: readPressure(pressureFile), maxPressure: MAX_PRESSURE, loadWaitS: LOAD_WAIT_S, week: parseHistory(history, now - WEEK_MS, owners),
+    long: longView(readLongJobs(dir), now).map((j) => ({ ...j, scheme: schemeOfWho(j.who, owners) })), now };
 }

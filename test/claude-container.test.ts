@@ -76,7 +76,7 @@ const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   // What Codex's managed hook and citadel-codex-review find while the turn runs (#330); the turn's folder goes once it ends.
   const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
-  const pinBin = process.env.PATH.split(':')[0];
+  const pinBin = process.env.PATH.split(':').find((d) => d.endsWith('/pin/bin'));
   const codexPinned = existsSync(pinBin + '/citadel-codex-review') && existsSync(pinBin + '/../codex-review.ts') && !!codex && existsSync(codex.script);
   appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ env: process.env, codex, codexPinned }) + '\\n');
   if (input.includes('expired')) {
@@ -142,8 +142,8 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   // The host's Android SDK and JDK (#379), where it has them (on perigee it does), at the same paths as on the host.
   assert.equal(env.ANDROID_HOME, androidEnv(homedir()).ANDROID_HOME);
   assert.equal(env.JAVA_HOME, androidEnv(homedir()).JAVA_HOME);
-  // citadel-heavy (#325): pinned in the turn's folder, ahead of the image's tools, and its slots in the mounted projects folder.
-  assert.match(env.PATH, /^[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
+  // citadel-heavy (#325): pinned in the turn's folder, ahead of the image's tools, behind only the heavy-command shims (#1298), and its slots in the mounted projects folder.
+  assert.match(env.PATH, /^[^:]*\/pin\/bin\/heavy:[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
   assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
   assert.match(env.CITADEL_HEAVY_WHO, / #\d+ \(josh\)$/);
   // Codex reviews (#330): the managed hook reads the turn's tripwire from a file, which never asks (no card in Codex); the reviewer is pinned beside citadel-heavy.

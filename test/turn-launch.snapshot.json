@@ -45,7 +45,7 @@
    ],
    "cwd": "<ROOT>/ticket-1",
    "env": {
-    "PATH": "<ROOT>/run/turns/1-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/1-<TIME>/pin/bin/heavy:<ROOT>/run/turns/1-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -245,7 +245,7 @@
    ],
    "cwd": "<ROOT>/ticket-2",
    "env": {
-    "PATH": "<ROOT>/run/turns/2-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/2-<TIME>/pin/bin/heavy:<ROOT>/run/turns/2-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -493,7 +493,7 @@
    ],
    "cwd": "<ROOT>/ticket-3",
    "env": {
-    "PATH": "<ROOT>/run/turns/3-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/3-<TIME>/pin/bin/heavy:<ROOT>/run/turns/3-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -893,7 +893,7 @@
    ],
    "cwd": "<ROOT>/ticket-4",
    "env": {
-    "PATH": "<ROOT>/run/turns/4-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/4-<TIME>/pin/bin/heavy:<ROOT>/run/turns/4-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -1258,7 +1258,7 @@
    ],
    "cwd": "<ROOT>/ticket-5",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-2/5-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/josh-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/4/tmp/5",
@@ -1456,7 +1456,7 @@
    ],
    "cwd": "<ROOT>/ticket-6",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-2/6-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/josh-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/5/tmp/6",
@@ -1661,7 +1661,7 @@
    ],
    "cwd": "<ROOT>/ticket-7",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-2/7-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/josh-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/6/tmp/7",
@@ -1879,7 +1879,7 @@
    ],
    "cwd": "<ROOT>/ticket-8",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-2/8-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/josh-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/7/tmp/8",
@@ -2101,7 +2101,7 @@
    ],
    "cwd": "<ROOT>/ticket-9",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-2/9-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/josh-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/8/tmp/9",
@@ -2306,7 +2306,7 @@
    ],
    "cwd": "<ROOT>/ticket-10",
    "env": {
-    "PATH": "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin/heavy:<ROOT>/run/turns/person-1/10-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/cara-volume",
     "CLAUDE_CONFIG_DIR": "<ROOT>/cara-volume/.claude",
     "XDG_RUNTIME_DIR": "<ROOT>/projects/9/tmp/10",
@@ -2513,7 +2513,7 @@
    ],
    "cwd": "<ROOT>/ticket-11",
    "env": {
-    "PATH": "<ROOT>/run/turns/11-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/11-<TIME>/pin/bin/heavy:<ROOT>/run/turns/11-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -2721,7 +2721,7 @@
    ],
    "cwd": "<ROOT>/ticket-12",
    "env": {
-    "PATH": "<ROOT>/run/turns/12-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/12-<TIME>/pin/bin/heavy:<ROOT>/run/turns/12-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",
@@ -2920,7 +2920,7 @@
    ],
    "cwd": "<ROOT>/ticket-13",
    "env": {
-    "PATH": "<ROOT>/run/turns/13-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
+    "PATH": "<ROOT>/run/turns/13-<TIME>/pin/bin/heavy:<ROOT>/run/turns/13-<TIME>/pin/bin:<ROOT>/bin:<PATH>:<ROOT>/home/.local/share/mise/shims",
     "HOME": "<ROOT>/home",
     "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
     "XDG_RUNTIME_DIR": "/run/user/1000",

@@ -186,7 +186,7 @@ export class Ideas {
    * The Send messages of each scheme, and the last event id read for them: a pass reads only events past it. One read of
    * every Send per pass still held the loop 4-18 s on a cold page cache (#1414), so the first read goes in id ranges.
    */
-  private sends = new Map<number, { mark: number; rows: { data: string; number: number | null; kind: string }[] }>();
+  private sends = new Map<number, { mark: number; rows: { ticket: number; data: string; number: number | null; kind: string }[] }>();
   private pages = new Map<string, { mtime: number; colls: string[] }>();
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
   private running = new Map<number, Promise<void>>();
@@ -496,11 +496,11 @@ export class Ideas {
     // Past the newest event: the newest were deleted and their ids may come back, so read afresh.
     if (!held || held.mark > top) this.sends.set(projectId, held = { mark: 0, rows: [] });
     // CROSS JOIN keeps events first, on events_asks: from tickets, it read every event of the scheme's minions to check its kind.
-    const range = this.db.prepare(`SELECT e.data, t.number, t.kind FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
+    const range = this.db.prepare(`SELECT t.id AS ticket, e.data, t.number, t.kind FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
       WHERE e.kind = 'user_message' AND e.id > ? AND e.id <= ? AND t.project_id = ? AND e.data LIKE '%Picks on %' ORDER BY e.id`);
     while (held.mark < top) {
       const to = Math.min(held.mark + SEND_IDS, top);
-      held.rows.push(...(range.all(held.mark, to, projectId) as { data: string; number: number | null; kind: string }[]));
+      held.rows.push(...(range.all(held.mark, to, projectId) as { ticket: number; data: string; number: number | null; kind: string }[]));
       held.mark = to;
       if (held.mark < top) yield;
     }
@@ -510,7 +510,9 @@ export class Ideas {
   sendsOf(projectId: number, file: string): { text: string; source: number | null } {
     // The Send's comment carries the page's path. Read on the spot when sync didn't read them first (a direct caller).
     drain(this.sendSteps(projectId));
-    const rows = this.sends.get(projectId)!.rows.filter((r) => r.data.includes(file));
+    // The rows outlive passes, so a minion deleted or moved to another scheme since they were read is dropped here.
+    const here = this.db.prepare('SELECT 1 FROM tickets WHERE id = ? AND project_id = ?');
+    const rows = this.sends.get(projectId)!.rows.filter((r) => r.data.includes(file) && here.get(r.ticket, projectId));
     const texts: string[] = [];
     for (const r of rows) {
       try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }

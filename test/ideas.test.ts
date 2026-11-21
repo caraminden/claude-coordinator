@@ -302,6 +302,9 @@ test('the first Send read goes in ranges of event ids, then only past the last o
   store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A3 Three: Go', comment: { path: page, about: 'X' } });
   assert.match(store.ideas.sendsOf(p.id, page).text, /Three[\s\S]*Two[\s\S]*One/, 'newest first, the new one included');
   assert.equal(ranges.length, 1, 'only the events past the last read');
+  const moved = store.createProject('Elsewhere', null);
+  store.db.prepare('UPDATE tickets SET project_id = ? WHERE id = ?').run(moved.id, t.id);
+  assert.equal(store.ideas.sendsOf(p.id, page).text, '', 'a minion moved to another scheme takes its Sends along');
 });
 
 test('after a restart, restatus leaves the ship scan to a paced pass instead of reading every linked minion at once', async () => {

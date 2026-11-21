@@ -499,3 +499,22 @@ test('a lease whose holder died frees itself at its time; a bad length is refuse
   assert.equal(runIn(locks, 'B', 'down').status, 0);
   assert.match(runIn(locks, 'B', 'status').stderr, /not leased/);
 });
+
+test('an interrupted mic step ends its lease renewer and its play, and lets go of the screen (#1522)', async () => {
+  const locks = join(root, 'mic-1');
+  const wav = join(root, 'mic-1.wav');
+  assert.equal(runIn(locks, 'M', 'tone', '440', '1', wav).status, 0);
+  // Nothing on the stub opens the mic, so play waits for a recording until it is stopped.
+  const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_RENEW: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const done = new Promise<number | null>((r) => m.on('exit', r));
+  const left = () => spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' }).stdout.split('\n').filter((l) => l.includes(wav) && !l.includes(' ps '));
+  await until('the play and its renewer to run', async () => left().length >= 3, 10_000);
+  m.kill('SIGTERM');
+  await done;
+  await until('the renewer and the play to end', async () => left().length === 0, 5000).catch(() => { throw new Error(`still running:\n${left().join('\n')}`); });
+  assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '', 'the screen is free at once');
+  // Nothing renews it after: another caller's step goes straight through.
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '');
+  assert.equal(runIn(locks, 'N', 'shot', join(root, 'mic-1.png')).status, 0);
+});

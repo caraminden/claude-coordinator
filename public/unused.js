@@ -2,13 +2,14 @@
 // Grunt type with its last use, nothing in 30 days first. Counts since the ledger began; items it never saw say "never".
 import { api, h, icon, view } from './base.js';
 import { settingsTabs, settingsTitle } from './settings.js';
+import { loadingLine } from './ui/state.js';
 
 const KIND = { page: 'Page', route: 'Route group', tool: 'MCP tool', schedule: 'Schedule', setting: 'Setting changed', skill: 'Skill', grunt: 'Grunt type' };
 
 const nw = (t) => t.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); // no break inside a date or a kind: the table's cells wrap whatever their style says
 
 export function unusedPage() {
-  const slot = h('div', { class: 'where-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
+  const slot = h('div', { class: 'where-slot loading' }, loadingLine('Loading…'));
   api('api/admin/usage').then(({ since, items }) => {
     slot.classList.remove('loading');
     const idle = items.filter((i) => i.idle).length;

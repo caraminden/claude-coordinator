@@ -1,6 +1,6 @@
 # The runner's seams: one queue, then one outcome policy
 
-Status: accepted, 2026-11-20. Seam 1 (one queue) built by #1378; seam 2 (one turn-outcome policy) not built yet.
+Status: accepted, 2026-11-20. Seam 1 (one queue) built by #1378; seam 2 (one turn-outcome policy) built by #1379.
 Proposed by #1310. Evidence: the shared folder's `reports/runner-map-2026-11.md`.
 
 `src/runner.ts` runs every turn of every minion. ADR 0001 cut turn launch out into `src/turn-launch.ts` and
@@ -87,3 +87,23 @@ Decision: Cara, 2026-11-20, on #1310's card, picked "One queue per minion; One t
   in is left for later.
 - Known edge: if a resume's launch fails twice in a row, the second try can resend the cut-off turn's batch along with
   its own. Duplicate, not lost.
+
+## Seam 2 as built (#1379)
+
+- `src/turn-outcome.ts` holds `outcome(end)`: pure, from a `TurnEnd` (the saved turn, its exit, stderr, close_self,
+  where it ran, a restart's cut, the account pick's answer) to its kind, follow-ups, reason, and the resume it earns
+  (`retry`) or would have earned with its cap spent (`spent`). `test/turn-outcome.test.ts` has a row for every kind.
+- The runner's `wrapUp` calls it once at a turn's end; its old nine "ended well" guards are gone, and each follow-up
+  (`cleared`, `close`, `fresh`, `seam`, `keepalive`, `deploy-note`, `rerun`) is read off the outcome. `recover` calls
+  the same function on a turn a restart cut off (`cut`), so a killed turn is judged by the same rows either way.
+  `endFailed` carries out a failed outcome: the account pick, the switch, the kill wait, or `turnFailed`'s words.
+- No `save` follow-up: every turn's end is saved, whatever its kind, so it stays a step of `wrapUp`, not a row.
+- The four counters (`resumes`, `limitTries`, `netTries`, `killTries`) are one `retries` record on the turn, and
+  `RETRIES` holds each kind's cap and the counts its resume keeps: restart 2 (keeps kill), kill 1 (keeps restart;
+  Cara's "I dont want to get in restart loops"), limit 3, net 3, switch 3 (keeps limit). The stored waits
+  (`limit-resumes`, `net-resumes`, `kill-resumes`) keep their shape; a turn saved before this reads its old counters
+  through `retriesOf`, so there is no migration.
+- The one visible change: switching onto another of a person's Claude accounts had no cap, so two accounts that kept
+  hitting the limit could hand a turn back and forth forever. It now stops after 3 switches in a row, says so in the
+  chat, and waits out the limit as if no account were ready.
+- Left as they were: the queue's interface, the turn-folder protocol, spawning, and every other cap and message.

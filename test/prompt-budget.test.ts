@@ -107,9 +107,10 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
 
 // The tool definitions loaded up front (src/mcp.ts ALWAYS_LOAD) sit in the same prefix: characters of name, description and
 // input schema, in a plain scheme, Citadel's (deploys), one with apps, and both. 12,900 at most before #1275, whose plan and
-// ship tools are held to 3,700 characters (1k tokens at reports/quality-push-2026-11/tokens.md's 3.7 a token, the handoff's bar).
+// ship tools are held to 3,700 characters (1k tokens at reports/quality-push-2026-11/tokens.md's 3.7 a token, the handoff's bar),
+// plus 150 for hand_off_land's fix_proof (#1398: the proof field Cara's "Fixes ship; data still asks" needs, at its tersest).
 const TOOLS_BUDGET = 16_700;
-const ADDED_BUDGET = 3_700;
+const ADDED_BUDGET = 3_850;
 
 test("a minion's always-loaded tool definitions stay within their budget", () => {
   for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }, { COORDINATOR_DEPLOYS: '1', COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {

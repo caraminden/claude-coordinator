@@ -11,6 +11,7 @@ import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
 import type { FailureDetail, FailureNext, LastTry } from './ship-failures.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
+import { fixKey } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
 import { behindOld, landPhase, ordinal, ridingOf, TRACK, type LandTicket, type Wait } from './waits.ts';
@@ -38,7 +39,8 @@ export interface Release {
   link: string | null;
   /** Its name from its target's own numbering ("Build 997", Target.numbering); absent: "Release <number>". */
   name?: string;
-  changes: { ticketId: number; number: number | null; title: string }[];
+  /** fix (#1398): the line of a change that shipped as a fix without a go, put on at read time. */
+  changes: { ticketId: number; number: number | null; title: string; fix?: string }[];
   /** When its first change started on its way (ms), and when it went live; null when not known. */
   started: number | null;
   live: number | null;
@@ -81,6 +83,8 @@ export interface Change extends Progress {
   idle?: boolean;
   /** Back in line after a failed ship try: that try (#1375). */
   lastTry?: LastTry;
+  /** It shipped as a fix without a go (#1398): the line its shipped line had. */
+  fix?: string;
 }
 
 export interface Next extends Progress {
@@ -269,6 +273,15 @@ export class Releases {
         const mine = tv.testCopies.filter((c) => c.ticketId != null && ids.has(c.ticketId));
         const copy = mine.find((c) => c.running) ?? mine[0];
         if (copy) tv.next.link = `/${copy.path}`;
+      }
+    }
+    // A fix that shipped without a go says so on its row (#1398), where members already look.
+    for (const s of byScheme.values()) {
+      for (const tv of s.targets) {
+        for (const c of [...(tv.next?.changes ?? []), ...[tv.current, ...tv.recent].flatMap((r) => r?.changes ?? [])]) {
+          const fix = this.d.store.getSetting<string>(fixKey(c.ticketId));
+          if (fix) c.fix = fix;
+        }
       }
     }
     return [...byScheme.values()].sort((a, b) => a.projectId - b.projectId);

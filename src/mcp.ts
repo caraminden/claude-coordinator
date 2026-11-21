@@ -1635,6 +1635,7 @@ const THREAD_TOOLS = () => ([
         risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out only when no review gives one (your Kit reviewers line); it then ships as high and needs go" },
         risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus anything you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
+        fix_proof: { type: 'object', description: 'A proven bug fix\'s proof, instead of go: {test, red_on, red_output, review} (self-review)' },
         stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, and you stay open in state ready' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing on her phone"); woken once live, do them and set your state' },
         ...LAND_PROPS,
@@ -2302,7 +2303,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
       return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (C().HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${C().HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state (the server shows you as landing until it ends): the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';

@@ -27,6 +27,9 @@ let page = null;
 /** Where × goes back to: the hash the page was opened from. */
 let returnTo = null;
 
+/** A change that shipped as a fix without a go (#1398): its one line, beside its title. */
+const fixTag = (c) => (c.fix ? h('span', { class: 'rel-fix muted' }, ` · ${c.fix}`) : '');
+
 /** Fetch every scheme's releases (on the stream's hello, so after a reconnect too) and redraw what shows them. */
 export async function loadReleases() {
   const got = await Promise.all([api('api/releases'), api('api/releases?scope=member')]).catch(() => null);
@@ -359,7 +362,7 @@ function previousList(projectId, tv) {
         failed ? h('span', { class: 'rel-failed' }, r.failure ? failText(r.failure) : r.outcome) : '',
         h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
         r.changes.length > 1 ? h('span', { class: 'rel-together muted' }, `${r.changes.length} ships went out together`) : '',
-        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title)) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '',
+        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c))) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)])) : '',
         r.failure ? failureLines(projectId, r) : '');
     })));
 }
@@ -593,7 +596,7 @@ function changeList(projectId, tv) {
     const seq = wait ? { 'data-seq': wait.seq } : {};
     if (c) {
       return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
-        h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
+        h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)),
         h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)),
         lastTryLine(c), landNext(wait), stuck(why), placedNote(placed), tryIt(projectId, tv, c)));
     }
@@ -739,7 +742,7 @@ function allView(ids) {
   // The newest live release: its number (linked to the release itself), its age and the minions it carried.
   const lastCard = (id, r) => h('div', { class: 'rel-card-sm live' },
     h('span', { class: 'what' }, versionLink(r), r.live ? h('span', { class: 'where' }, ` · live ${ago(r.live)}`) : ''),
-    r.changes.length ? h('ul', { class: 'rel-carried' }, r.changes.map((c) => h('li', {}, h('a', { class: 'num', href: minionHref(id, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title))) : '');
+    r.changes.length ? h('ul', { class: 'rel-carried' }, r.changes.map((c) => h('li', {}, h('a', { class: 'num', href: minionHref(id, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)))) : '');
   const grid = h('div', { class: 'rel-grid', role: 'table', 'aria-label': 'Releases of every scheme' },
     h('div', { class: 'rel-grid-row head', role: 'row' }, ['Target', ...COLUMNS].map((c) => h('span', { role: 'columnheader' }, c))),
     rows.map(({ id, tv }) => {

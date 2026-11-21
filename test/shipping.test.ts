@@ -38,6 +38,7 @@ test('shippingLine: the path, the go threshold and try-first, with defaults for 
   assert.match(citadel, /hand it off with `hand_off_land`/);
   assert.match(citadel, /A high-risk change waits for a member's go: .*kind ship.*hand_off_land's `go` names who and when/);
   assert.doesNotMatch(citadel, /try first/);
+  assert.match(citadel, /A bug fix proving itself .* needs no go: pass `fix_proof`; not for data or auth/, 'the fix exception (#1398)');
   const auto = shippingLine({ ship_path: 'pr-auto', go_from: 'medium', try_first: 'ui' }, false);
   assert.match(auto, /gh pr merge --auto --squash/);
   assert.match(auto, /A medium or high-risk change waits/);
@@ -47,6 +48,10 @@ test('shippingLine: the path, the go threshold and try-first, with defaults for 
   assert.match(person, /Every change waits.*Every feature \(type feature\) waits for a try first: start a preview/);
   assert.match(person, /the merge's own Approve is that go: .*no card first/, 'the merge approval is the go, so no second ask on a card');
   assert.doesNotMatch(person, /kind ship/);
+  assert.doesNotMatch(person, /bug fix/, 'where a person merges every change, a fix waits too');
+  assert.match(auto, /A bug fix proving itself .* needs no go; not for data or auth/);
+  assert.doesNotMatch(auto, /fix_proof/);
+  assert.doesNotMatch(shippingLine({ ship_path: 'citadel', go_from: 'all', try_first: 'never' }, true), /bug fix/);
   assert.match(shippingLine({ ship_path: 'citadel', go_from: 'never', try_first: 'never' }, true), /No change waits for a person's go/);
   assert.equal(shippingLine({} as any, true), shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never' }, true));
 });

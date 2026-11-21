@@ -9,6 +9,7 @@
 // run/landings/<minion>/, so the next server reports them to the tool still polling. Without units
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would
 // cut off: only those count toward the runner's interruptible().
+import { fixKey, fixLine } from './fix-proof.ts';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -37,6 +38,8 @@ export interface Handoff {
   reason: string;
   /** With risk high: who gave the go, and when. */
   go?: string;
+  /** In place of go (#1398): a bug fix that proved itself, so the shipped line and the Releases row say it shipped without a go. */
+  fix?: { test: string; redOn: string; review: string };
   /** False: the scheme's apps aren't deployed after the land (#712), for a change with nothing to serve. */
   deploy?: false;
   /** True (#909): the brief has more pieces for this minion, so a clean land leaves it open (ready) instead of dismissing it. */
@@ -416,7 +419,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 
 export interface HandoffDeps {
   landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log'>;
-  store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
+  store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown; setSetting?(key: string, value: unknown): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
     send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean }): void;
@@ -553,6 +556,7 @@ export class LandHandoffs {
     }
     const into = h.args[0] === '--into' ? h.args[1] : null;
     if (!into && r.commit) this.d.landed?.(id, r.commit);
+    if (!into && h.fix) store.setSetting?.(fixKey(id), fixLine(h.fix));
     const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
     const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
@@ -564,7 +568,7 @@ export class LandHandoffs {
     }
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
     const failed = deploys.filter((d) => !d.ok);
-    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
+    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${h.fix ? ` ${fixLine(h.fix)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

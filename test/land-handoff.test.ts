@@ -564,6 +564,76 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
   }
 });
 
+// #1398 (Cara, 2026-11-20, "Fixes ship; data still asks"): a high bug fix with its proof ships with no go and says so;
+// no proof, not a bug, a red_on off main, or a diff that rewrites data is refused. Peek-like scheme (every-scheme skill).
+test('a high bug fix with fix_proof ships without a go and its line says so; without proof, as a non-fix or touching data it is refused', async () => {
+  const srv = await bootServer();
+  try {
+    const store = new Store(join(srv.data, 'coordinator.db'));
+    const project = store.createProject('Peek', null);
+    const minion = store.createTicket({ project_id: project.id, title: 'Fix the guard', permission_mode: 'default', created_by: 'Cara' });
+    const cwd = join(srv.root, 'wt');
+    mkdirSync(join(cwd, 'tools'), { recursive: true });
+    mkdirSync(join(cwd, 'src'));
+    mkdirSync(join(cwd, 'test'));
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+    writeFileSync(join(cwd, 'src', 'guard.ts'), 'export const ok = false;\n');
+    git(cwd, 'init', '-q', '-b', 'main');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'init');
+    const main = git(cwd, 'rev-parse', 'HEAD');
+    git(cwd, 'checkout', '-q', '-b', 'ticket/1-fix');
+    writeFileSync(join(cwd, 'src', 'guard.ts'), 'export const ok = true;\n');
+    writeFileSync(join(cwd, 'test', 'guard.test.ts'), "// a fixture's SQL is not a migration: UPDATE tickets SET x = 1\n");
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'fix');
+    store.setTicketDir(minion.id, cwd, null);
+    const token = agentToken(srv.data, minion.id);
+    const handOff = async (body: object) => {
+      const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, error: res.status === 202 ? '' : String((await res.json()).error) };
+    };
+    const proof = { test: 'test/guard.test.ts', red_on: main, red_output: 'not ok 1 - the guard lets a fix through', review: 'clean: 0 findings' };
+    const body = { summary: 'Guard fix', risk: 'high', risk_reason: 'guard file', fix_proof: proof };
+
+    const notBug = await handOff(body);
+    assert.equal(notBug.status, 400);
+    assert.match(notBug.error, /type is unset, not bug/, 'a high non-fix is refused');
+    store.props.set('minion', minion.id, project.id, { type: 'bug' }, 'Cara');
+    const noProof = await handOff({ ...body, fix_proof: undefined });
+    assert.equal(noProof.status, 400, 'a high fix with no proof still needs a go');
+    assert.match(noProof.error, /ships only on a person's go.*fix_proof instead/);
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, red_on: git(cwd, 'rev-parse', 'HEAD') } })).error, /isn't on main/, 'red_on is a commit on main');
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, test: 'test/none.test.ts' } })).error, /isn't in your worktree/);
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, review: '2 findings left' } })).error, /starts with "clean"/);
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, red_output: undefined } })).error, /red_output is required/);
+    store.setProjectSettings(project.id, { go_from: 'all' });
+    assert.match((await handOff(body)).error, /every change ships only on a person's go: name who gave it and when in go, or ask with a ship card \(kind ship\) first$/, 'where every change waits, a fix waits too');
+    store.setProjectSettings(project.id, { go_from: 'high' });
+
+    writeFileSync(join(cwd, 'src', 'store.ts'), "db.exec('DELETE FROM tickets WHERE closed');\n");
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'prune');
+    const data = await handOff(body);
+    assert.equal(data.status, 400, 'a fix that touches data is refused');
+    assert.match(data.error, /src\/store\.ts adds `db\.exec\('DELETE FROM tickets.*data and auth changes always wait/);
+    git(cwd, 'reset', '-q', '--hard', 'HEAD~1');
+    writeFileSync(join(cwd, 'src', 'auth.ts'), 'export const x = 1;\n');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'auth');
+    assert.match((await handOff(body)).error, /src\/auth\.ts, an auth file/, 'an auth change is refused');
+    git(cwd, 'reset', '-q', '--hard', 'HEAD~1');
+
+    assert.equal((await handOff(body)).status, 202, 'a high bug fix with its proof ships with no go');
+    await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
+    const line = `Shipped as a fix without a go: test/guard.test.ts (red on ${main.slice(0, 7)})`;
+    assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes(line)), 'the shipped line says it shipped without a go');
+    assert.equal(store.getSetting(`nogo_fix:${minion.id}`), line, "the Releases row's line is kept");
+  } finally {
+    await srv.stop();
+  }
+});
+
 // Fast mode (#1017): in a fast scheme a low or medium land gets LAND_FAST=1 and a high one doesn't; both get the
 // scheme's known reds. Peek-like scheme, not Citadel (the every-scheme skill).
 test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger to every land', async () => {

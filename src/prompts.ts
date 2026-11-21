@@ -354,6 +354,9 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
   };
 }
 
+/** The fix exception (#1398; Cara, 2026-11-20, "Fixes ship; data still asks"), wherever a go applies but every change's. */
+export const fixClause = (land: boolean) => `A bug fix proving itself (self-review, "The go threshold") needs no go${land ? ': pass `fix_proof`' : ''}; not for data or auth.`;
+
 /**
  * A scheme's Shipping settings (#1043, public/shipping.js) as one line for its minions and Taskmaster. They win over the
  * scheme instructions (Josh, 2026-11-19, "The settings win"), so a scheme needs no "Shipping fixes" paragraph of its own.
@@ -369,7 +372,7 @@ export function shippingLine(p: Pick<Project, 'ship_path' | 'go_from' | 'try_fir
     : p.go_from === 'all' && p.ship_path !== 'citadel' && p.ship_path
       // The gate ticks the merge approval here, so the merge's own Approve is the go: a card first would ask twice.
       ? 'Every change waits for a member\'s go, and the merge\'s own Approve is that go: open the pull request and run the merge, with no card first.'
-      : `${{ high: 'A high-risk change waits', medium: 'A medium or high-risk change waits', all: 'Every change waits' }[p.go_from] ?? 'A high-risk change waits'} for a member's go: stop before shipping, ask with an \`ask_question\` card (kind ship), and ship only on their go${(p.ship_path ?? 'citadel') === 'citadel' ? " (hand_off_land's `go` names who and when)" : ''}.`;
+      : `${{ high: 'A high-risk change waits', medium: 'A medium or high-risk change waits', all: 'Every change waits' }[p.go_from] ?? 'A high-risk change waits'} for a member's go: stop before shipping, ask with an \`ask_question\` card (kind ship), and ship only on their go${(p.ship_path ?? 'citadel') === 'citadel' ? " (hand_off_land's `go` names who and when)" : ''}.${p.go_from === 'all' ? '' : ` ${fixClause((p.ship_path ?? 'citadel') === 'citadel')}`}`;
   const wait = deploys
     ? 'start a preview (`start_preview`), post its link, set state try, and ship only on a member\'s go.'
     : 'post screenshots (and a build or link if the scheme has one), set state try, and ship only on a member\'s go.';

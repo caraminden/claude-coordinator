@@ -55,7 +55,7 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
   (Josh, 2026-11-19):** "Go on A1"`, plus the original ask it came from.
 - Under about 60 lines; link the long material rather than copy it.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
-  asks which to start.
+  asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
 
 ## Example
 

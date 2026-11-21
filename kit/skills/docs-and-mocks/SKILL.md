@@ -30,7 +30,8 @@ Make a page when one of these is true:
   cases: an economy, an automation rule, a flow with awkward orders. (Prototype: a logic toy.)
 
 A choice a click settles is a question card. A choice that is visual or has several parts (takes to
-compare side by side, a handful of separate picks) is a choices page, a review page with pick bars:
+compare side by side, a handful of separate picks, more than four options or questions in all, as
+the Citadel-wide card rule (Asking and picking) sets) is a choices page, a review page with pick bars:
 make those often, people decide fast from them (Cara 2026-11-16, "we should DEFINITELY do a lot of
 when appropriate"). A bug, a status, a one-off list of numbers or anything five lines can say is a reply.
 

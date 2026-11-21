@@ -296,11 +296,11 @@ test("a guard that names the file behind its failure: the ship that changed that
 // #1538 (from #1488, bounced twice on Nov 21): test/judges.test.ts goes red when a judge's pinned code changed without a
 // re-recorded replay, and says which files are pinned. The ship that changed one of those is the suspect, not the one that
 // only edited judges.test.ts (or its replay record).
-test("a judge-replay red names the pinned code: the ship that changed it is the suspect, not the one that edited the judge test (#1538)", async () => {
-  const l = await line([{}, {}, { change: ['test/judges.test.ts', '// edit\n'] }, { change: ['src/pinned-judge.ts', 'export const X = 2;\n'] }, {}], { FAKE_RED_PATH: 'src/pinned-judge.ts', FAKE_RED_NAMES: "Flake counter's code changed since its last replay (pinned code: src/pinned-judge.ts)" }, (r) => {
-    mkdirSync(join(r.source, 'src'), { recursive: true });
-    writeFileSync(join(r.source, 'src', 'pinned-judge.ts'), 'export const X = 1;\n');
-    r.commit(r.source, 'test/real.test.ts', "import { X } from '../src/pinned-judge.ts';\nif (X === 2) throw new Error('stale');\n");
+test("a judge-replay red names the pinned code: the ship that changed it is the suspect, not the one that re-recorded the replay file the test reads (#1538)", async () => {
+  const l = await line([{}, {}, { change: ['test/judge-replays.json', '{"a":2}\n'] }, { change: ['test/pinned-judge.ts', 'export const X = 2;\n'] }, {}], { FAKE_RED_PATH: 'test/pinned-judge.ts', FAKE_RED_NAMES: 'the flake counter code changed since its last replay (pinned code: test/pinned-judge.ts)' }, (r) => {
+    mkdirSync(join(r.source, 'test'), { recursive: true });
+    writeFileSync(join(r.source, 'test', 'judge-replays.json'), '{"a":1}\n');
+    r.commit(r.source, 'test/real.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/judge-replays.json');\n");
   });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);

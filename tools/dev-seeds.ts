@@ -176,6 +176,24 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
     },
   },
   'welcome-done': { about: "you with every welcome step done: it says You're set once, then is gone (#1151)", seed: (c) => firstDay(c, 5) },
+  'outbox-waits': {
+    about: 'minions with waits in the outbox (#1387): a timed wake, a wait on another minion, a wait on an event, a dropped wait, and one with none',
+    seed(c) {
+      const now = Date.now(), at = (h: number) => now + h * 3_600_000;
+      const lead = minion(c, 'Ship line fix');
+      const row = (t: Ticket, d: Partial<Parameters<Store['addDelivery']>[0]>) => c.store.addDelivery({ project_id: c.project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: `minion:${t.id}`, ...d });
+      const timed = minion(c, 'Check the nightly run', { state: 'parked', note: 'waking at 06:00' });
+      row(timed, { when_arg: at(9), due: at(9), payload: { note: 'check the nightly run' } });
+      const chained = minion(c, 'Follow-up docs', { state: 'parked' });
+      row(chained, { kind: 'chain', when_kind: 'live', when_arg: { ticket: lead.id }, payload: { text: `after #${lead.number}` } });
+      const ev = minion(c, 'Land when runners return', { state: 'parked' });
+      row(ev, { kind: 'runners_back', when_kind: 'runners', when_arg: 'seeded', payload: { reason: 'CI gave no verdict' } });
+      const dropped = minion(c, 'A cancelled wait');
+      row(dropped, { state: 'dropped', reason: 'cancelled', when_arg: at(2), due: at(2), payload: { note: 'was a wake' } });
+      minion(c, 'Nothing to wait for');
+      return `#/p/${c.project.id}`;
+    },
+  },
   'question-card': {
     about: 'a minion waiting on two open question cards: one pick with a recommended option, one multi-select',
     seed(c) {

@@ -452,6 +452,33 @@ test('a hang run-tests.sh stopped prints the same interrupt but is a real red: r
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
+// #1393: a run killed from outside (exit 137, the desktop's out-of-memory killer) before any test failed is a lost run,
+// as #1377's cut-off one: run-tests.sh's killed line, or only GitHub's exit 137 line when the whole step was killed.
+test('a CI run killed from outside before any test failed is no verdict: one fresh run decides', () => {
+  for (const kind of ['killed', 'bare']) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const shared = join(r.dir, 'shared');
+    const res = c.run({ FAKE_CUT: '0 1', FAKE_CUT_KIND: kind, COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
+    assert.match(res.stderr, /the CI run on \w+ was cut off before any test failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s, kind);
+    assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed|a test hung/, kind);
+    assert.match(landLog(shared), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · green$/m, kind);
+  }
+});
+
+test('a CI run killed from outside after a test had failed is a real red: refused, not run again', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'killed-red' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /land: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/);
+  assert.doesNotMatch(res.stderr, /cut off|once more|CI FALLBACK/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+});
+
 test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {
   const cases: [string, Record<string, string>, RegExp][] = [
     ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],
@@ -785,6 +812,23 @@ test("a ship whose suite couldn't start because the heavy slot was taken goes ag
     assert.equal(c.localRuns(), 1);
     assert.match(retries(shared)[0], /· retry in place · ticket\/1-x · perigee's heavy slot was taken · landed$/);
   } finally { clearInterval(fresh); }
+});
+
+// #1393: the suite here killed from outside before any test failed is the pipeline's, not the change's: it keeps its
+// place and goes again once, as a red of flakes only does.
+const killer = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.KILL_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.KILL_ON ?? '').split(',').includes(String(n))) { process.kill(process.ppid, 'SIGKILL'); await new Promise(() => {}); }\n}\n";
+
+test('a perigee run killed from outside before any test failed goes again once, and lands on a green run (#1393)', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'test/killer.test.mjs', killer);
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ LAND_CI: '0', LAND_SMOKE: '0', KILL_COUNT: join(r.dir, 'count'), KILL_ON: '1', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /run-tests: the tests were killed \(exit 137\)/);
+  assert.match(res.stderr, /refused by the pipeline \(the suite on perigee was killed from outside before any test failed\), not your change/);
+  assert.doesNotMatch(res.stderr, /a test hung|tests failed on the rebased branch/);
+  assert.match(retries(shared)[0], /· retry in place · ticket\/1-x · the suite on perigee was killed from outside before any test failed · landed$/);
 });
 
 test('a perigee red of flakes only goes again once: green lands, red again refuses for good (#1360)', () => {

@@ -246,6 +246,18 @@ test('a bisect run cut off twice before any test failed refuses nobody: the trai
   l.done();
 });
 
+// #1393: the same for runs killed from outside (exit 137) before any test failed: no answer, so nobody is refused for it.
+test('a bisect run killed from outside twice before any test failed refuses nobody: only a real red refuses', async () => {
+  const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt', FAKE_CUT: '2 3', FAKE_CUT_KIND: 'killed' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /finding the first ship that turned it red.*cut off before any test failed.*the ship train goes back in line, since CI gave no answer \(CI was cut off twice before any test failed/s);
+  assert.doesNotMatch(done[1].stderr, /the bisect found|a test hung/);
+  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /the first ship that turned it red/);
+  l.done();
+});
+
 test('a train whose front is red: the front is refused as alone, and the ships behind it ship as the next train', async () => {
   const l = await line([{}, { change: ['red.txt', 'red\n'] }, {}, {}, {}], { FAKE_RED_PATH: 'red.txt' });
   const done = await l.go();

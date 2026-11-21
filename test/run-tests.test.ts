@@ -64,6 +64,17 @@ test('slow', async () => {
 FIXTURES['slow-pass.test.mjs'] = slowOnce('pass');
 FIXTURES['slow-hang.test.mjs'] = slowOnce('hang');
 for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
+// Killed from outside (#1393: the desktop's out-of-memory killer): the file SIGKILLs the node --test runner that started it,
+// before any test fails. kill-once does it only when rerun alone, after failing in the full run.
+FIXTURES['killed.test.mjs'] = "import test from 'node:test';\ntest('killed', () => { process.kill(process.ppid, 'SIGKILL'); return new Promise(() => {}); });\n";
+FIXTURES['fail-then-killed.test.mjs'] = `import test from 'node:test';
+import { existsSync, writeFileSync } from 'node:fs';
+test('fails, then is killed', () => {
+  if (existsSync('ran-killed')) { process.kill(process.ppid, 'SIGKILL'); return new Promise(() => {}); }
+  writeFileSync('ran-killed', '');
+  throw new Error('first run fails');
+});
+`;
 
 // Four files that each log "+" when they start and "-" when done, 700 ms apart: the log shows how many ran at once.
 const OVERLAP = "import { appendFileSync } from 'node:fs';\nimport test from 'node:test';\ntest('t', async () => { appendFileSync(process.env.OVERLAP_LOG, '+'); await new Promise((r) => setTimeout(r, 700)); appendFileSync(process.env.OVERLAP_LOG, '-'); });\n";
@@ -152,6 +163,25 @@ test('a hang is never rerun: the time limit fails the run with its line, and not
   assert.doesNotMatch(r.log, /passed alone|failed again alone/);
   assert.equal(existsSync(join(r.dir, 'land-test-rerun.log')), false, 'nothing was rerun');
   assert.equal(r.retro, '');
+});
+
+// #1393: timeout's exit 137 is both its KILL at the limit (a hang) and its child killed from outside. Only the time tells
+// them apart, as deploy.sh's boot check does: an outside kill well before the limit is a lost run, not a hang.
+test('a run killed from outside before any test failed reads as killed (exit 137), not as a hang, and nothing is rerun', async () => {
+  const r = await run(['ok.test.mjs', 'killed.test.mjs'], { DEPLOY_TEST_TIMEOUT: '60' });
+  assert.equal(r.code, 137, r.log);
+  assert.match(r.stderr, /run-tests: the tests were killed \(exit 137\) after \d+s, before the 60s limit: stopped from outside \(the out-of-memory killer\?\), not a hang/);
+  assert.doesNotMatch(r.log, /a test hung|ran past/);
+  assert.equal(existsSync(join(r.dir, 'land-test-rerun.log')), false, 'nothing was rerun');
+  assert.equal(r.retro, '');
+});
+
+test('a file killed from outside when rerun alone is a lost rerun with no label, not a hang', async () => {
+  const r = await run(['fail-then-killed.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '60' });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/fail-then-killed\.test\.mjs: killed \(exit 137\) when rerun alone after \d+s, before its 60s limit: stopped from outside, so it has no label/);
+  assert.doesNotMatch(r.log, /hung|passed alone|failed again alone/);
+  assert.deepEqual(flakeLines(r.retro), []);
 });
 
 // #999: one test that hangs (a client waiting on a tool server that died) held the land line for the whole 10 minutes

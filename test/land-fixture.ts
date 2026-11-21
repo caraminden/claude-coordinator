@@ -103,7 +103,9 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
-// hang run-tests.sh stopped (the same interrupt, but a verdict);
+// hang run-tests.sh stopped (the same interrupt, but a verdict); FAKE_CUT_KIND: how those runs were cut off, interrupt
+// (default), killed (#1393: run-tests.sh's line for an outside SIGKILL, exit 137) or bare (the whole step killed, only
+// GitHub's exit 137 line); FAKE_LOG=killed-red: killed from outside, but after a test had failed (a verdict);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
 // JSON, which the --jq filter is run on.
 // FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
@@ -167,7 +169,15 @@ case "$*" in
     k=$(grep -nxF "$sha $3" "${calls}.seen" 2>/dev/null | cut -d: -f1)
     read -r cs cn <<<"\${FAKE_CUT:-0 0}"
     if [ -n "$k" ] && [ "$k" -gt "$cs" ] && [ "$k" -le "$((cs + cn))" ]; then
-      printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b ##[error]Process completed with exit code 1.\\n' "$p" "$p" "$p"
+      case \${FAKE_CUT_KIND:-interrupt} in
+        killed) printf '%b ✔ fine (1.2ms)\\n%b run-tests: the tests were killed (exit 137) after 55s, before the 600s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change\\n%b ##[error]Process completed with exit code 137.\\n' "$p" "$p" "$p" ;;
+        bare) printf '%b ✔ fine (1.2ms)\\n%b ##[error]Process completed with exit code 137.\\n' "$p" "$p" ;;
+        *) printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b ##[error]Process completed with exit code 1.\\n' "$p" "$p" "$p" ;;
+      esac
+      exit 0
+    fi
+    if [ "\${FAKE_LOG:-}" = killed-red ]; then # killed from outside after a test had failed: that failure is a verdict
+      printf '%b ✖ broken (3.1ms)\\n%b run-tests: the tests were killed (exit 137) after 55s, before the 600s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change\\n%b ##[error]Process completed with exit code 137.\\n' "$p" "$p" "$p"
       exit 0
     fi
     if [ "\${FAKE_LOG:-}" = hung ]; then # run-tests.sh's timeout stopped a hung test: Node prints the same interrupt

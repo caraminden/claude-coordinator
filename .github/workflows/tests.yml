@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! "$HOME/.dotnet/dotnet" --list-sdks 2>/dev/null | grep -q '^8\.'; then
-            curl -fsSL -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
+            curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
             bash "$RUNNER_TEMP/dotnet-install.sh" --channel 8.0 --install-dir "$HOME/.dotnet" --no-path
           fi
           "$HOME/.dotnet/dotnet" --list-sdks

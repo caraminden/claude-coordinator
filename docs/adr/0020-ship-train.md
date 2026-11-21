@@ -106,3 +106,28 @@ changes (red, a rider dropped), the record goes unused and the ship rebases as i
   conflict is replayed too, for any ship: a fix one minion recorded against a rider is replayed for that rider if it
   drops out and later rebases onto main holding the first ship. Its minion isn't told; the land says "a fix recorded
   ahead of time" and writes a `train prep replayed` retro-log line. CI still tests the result. Upgrade (scope the record per ship) if one is ever replayed wrongly.
+
+## Early next train (#1366)
+
+Cara, 2026-11-20, picked "Also test next train early" on the same card: the train next in line starts its CI before
+the one ahead has shipped.
+
+Once a train passed its gate, just before its deploy, the front (`early_next`) finds the ship next in line: the first
+waiter by queue order that isn't on its train. It stacks that ship onto the train's top in a scratch worktree, then
+builds the train that ship would take with `train_build` in a dry subshell (no verdicts said, nothing logged). It pushes
+the top to that ship's `land/<branch>` and writes `<state>/early`. Each stack goes to `<state>/stacked`, keyed by the commit it was
+stacked onto and the commit stacked. That ship's own rebase and its `train_build` take the stored stack instead of
+rebasing again: a fresh rebase would be a new commit (committer dates), and CI's run is found by commit. A train
+that comes out the same is the same commit, so `ci_gate` takes the early run as its own. `early_gate`, at the next
+gate any landing reaches, counts it (`early train · counted · Ns head start` in the retro log, `ci early Ns` in the
+timing line) or cancels it and deletes its scratch branch (`early train · discarded · <why>`): another ship came
+first, the train came out different, or the early run went red (it runs again, as for a landing started again).
+
+- Not while the front's own run goes, though the brief allowed it on a second free runner: two suites at once on Cara's
+  desktop flaked (2026-11-11, `tests.yml`), and the lands' runs share one concurrency group, so a second would only wait.
+- It needs a free (online, not busy) `citadel-ci-linux` runner; with none, the next ship waits for its turn as before.
+- Not for a train that changes the pipeline (the next ship runs that train's land.sh), a next ship that isn't a plain
+  land, one that would leave a taken-back commit behind, or one whose lane runs no CI.
+- A conflict in the early stack isn't reported there: that ship's own rebase reports it once the train has shipped. A
+  fix recorded with conflict prep is replayed in the early stack too.
+- Off: `LAND_EARLY=0`, or `<state>/early-off`.

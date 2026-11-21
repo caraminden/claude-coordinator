@@ -104,7 +104,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
 // hang run-tests.sh stopped (the same interrupt, but a verdict);
-// FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
+// FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
+// JSON, which the --jq filter is run on.
 // FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
 // Nth commit it is asked about and any after it, until the file FAKE_CI_UP exists. The wait's own runner checks (runners?per_page=,
 // #1361) start no run, and answer FAKE_RUNNERS_WAIT when it is set, else as the check before a push.
@@ -154,7 +155,7 @@ case "$*" in
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
   *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
-  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;

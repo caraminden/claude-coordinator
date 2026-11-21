@@ -472,11 +472,11 @@ test('a retried ship whose train goes red is bisected like any rider, and refuse
 // train is tested, land.sh tells it so; its minion records the fix with git rerere in a scratch worktree (prepMessage's
 // steps), off its branch; once the train ships, ship 4's real rebase replays the fix and it ships.
 // keep: the fix keeps the train's side whole, so ship 4's a.txt commit drops out and only its second commit ships.
-async function prepped(red: boolean, keep = false) {
+async function prepped(red: boolean, keep = false, early = false) {
   let gate = '';
   const l = await line(
     [{}, {}, { change: ['a.txt', 'three\n'], ...(red ? { also: ['red.txt', 'red\n'] as [string, string] } : {}) }, { change: ['a.txt', 'four\n'], ...(keep ? { also: ['g.txt', 'g\n'] as [string, string] } : {}) }],
-    (dir) => ({ ...shared(dir), FAKE_CI_GATE: (gate = join(dir, 'ci-gate')), ...(red ? { FAKE_RED_PATH: 'red.txt' } : {}) }),
+    (dir) => ({ ...shared(dir), ...(early ? {} : { LAND_EARLY: '0' }), FAKE_CI_GATE: (gate = join(dir, 'ci-gate')), ...(red ? { FAKE_RED_PATH: 'red.txt' } : {}) }),
     (r) => writeFileSync(join(r.dir, 'ci-gate'), ''), // ship 1's run goes through; the train's waits
   );
   rmSync(gate);
@@ -536,6 +536,15 @@ test("conflict prep: a fix that keeps the train's side whole drops that commit, 
   l.done();
 });
 
+test('conflict prep with the early next train: the early stack replays the recorded fix, and its run counts (#1366)', async () => {
+  const { l, done } = await prepped(false, false, true);
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[3].stderr, /that run is its CI/);
+  assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'three\nfour');
+  assert.deepEqual(retro(l.r.dir, ' · train prep replayed · '), ["train prep replayed · ticket/4-x onto ticket/2-x's train sha, early"]);
+  l.done();
+});
+
 test('conflict prep off: <state>/prep-off, and no prep line is said (#1366)', async () => {
   const l = await line([{}, {}, { change: ['a.txt', 'three\n'] }, { change: ['a.txt', 'four\n'] }], {}, (r) => {
     const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
@@ -547,4 +556,71 @@ test('conflict prep off: <state>/prep-off, and no prep line is said (#1366)', as
   assert.doesNotMatch(done[3].stderr, /land: prep:/);
   assert.throws(() => git(l.r.source, 'config', '--get', 'rerere.enabled'), 'land.sh leaves the repo\'s rerere setting alone');
   l.done();
+});
+
+// Early next train (#1366): once a train's CI is green, the ship next in line and the train it would take are stacked
+// on its top and pushed to CI while it deploys. LAND_TRAIN_MAX=1: ship 2 takes ship 3, and ship 4 is next, with ship 5.
+const retro = (dir: string, what: string) => {
+  const log = join(dir, 'shared', 'retro-log');
+  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(what)).map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)|[0-9a-f]{7,}$/g, 'sha'));
+};
+
+test("early next train: the next ship's train is stacked and its CI started while the train ahead deploys, and its run counts (#1366)", async () => {
+  const l = await line([{}, {}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }));
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /land: early next train: ticket\/4-x \(with ticket\/5-x riding\) is stacked on this train's top and its CI starts now, while this one deploys \(([0-9a-f]{7,})\)/);
+  const top = /while this one deploys \(([0-9a-f]{7,})\)/.exec(done[1].stderr)![1];
+  assert.match(done[3].stderr, /land: early next train: CI started on this train at \d\d:\d\d while ticket\/2-x's deployed, and it came out the same, so that run is its CI \(\d+ s head start\)/);
+  assert.equal(git(l.r.source, 'rev-parse', '--short=7', 'main').slice(0, 7), top.slice(0, 7), 'the train that shipped is the one stacked early');
+  shipped(l, done[4], 5, 4, 2);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4', 'f5.txt: 5']);
+  assert.deepEqual(retro(l.r.dir, ' · early train · '), ["early train · ticket/4-x + 1 riders onto ticket/2-x's train sha · pushed sha", 'early train · ticket/4-x · counted · 0s head start'.replace('0s', retro(l.r.dir, ' · counted · ')[0]?.match(/(\d+)s head/)?.[1] + 's')]);
+  assert.match(retro(l.r.dir, 'timing · ticket/4-x').join('\n'), / · ci early \d+s · landed/);
+  assert.ok(!existsSync(join(l.state, 'early')), 'the record is used up');
+  l.done();
+});
+
+test('early next train: an early run that went red is dropped and runs again on its turn, and the train is bisected as usual (#1366)', async () => {
+  const l = await line([{}, {}, {}, {}, { change: ['red.txt', 'red\n'] }], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', FAKE_RED_PATH: 'red.txt' }));
+  const done = await l.go();
+  assert.match(done[1].stderr, /land: early next train: ticket\/4-x \(with ticket\/5-x riding\) is stacked/);
+  assert.match(done[3].stderr, /land: early next train: dropped the early CI run on ticket\/4-x's train \(the early run failed, so it runs again\)/);
+  assert.equal(done[4].status, 1, 'ship 5 turned it red');
+  for (const i of [1, 2, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4']);
+  assert.deepEqual(retro(l.r.dir, ' · discarded · '), ['early train · ticket/4-x · discarded · the early run failed, so it runs again']);
+  l.done();
+});
+
+test("early next train: a record for a ship that wasn't next is dropped by the next landing to reach its gate (#1366)", async () => {
+  const l = await line([{}], shared, (r) => {
+    const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'early'), `${git(r.source, 'rev-parse', 'main')} ticket/9-x ${Math.floor(Date.now() / 1000)} ticket/8-x\n`);
+  });
+  const [d] = await l.go();
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stderr, /land: early next train: dropped the early CI run on ticket\/9-x's train \(ticket\/9-x wasn't next in line after all\)/);
+  assert.ok(!existsSync(join(l.state, 'early')));
+});
+
+test('early next train: with no free runner nothing is pushed early, and with LAND_EARLY=0 or <state>/early-off nothing is tried (#1366)', async () => {
+  // The one runner is online, so each ship's CI waits for its run, but busy (a heavy job holds it), so never free.
+  const runners = JSON.stringify({ runners: [{ status: 'online', busy: true, labels: [{ name: 'citadel-ci-linux' }] }] });
+  const l = await line([{}, {}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', FAKE_RUNNERS_FILE: join(d, 'runners') }), (r) => writeFileSync(join(r.dir, 'runners'), runners));
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /land: early next train: no free citadel-ci-linux runner, so ticket\/4-x's CI waits for its turn/);
+  assert.doesNotMatch(done[3].stderr, /early next train/);
+  assert.deepEqual(retro(l.r.dir, ' · early train · '), []);
+  l.done();
+  for (const how of ['env', 'file'] as const) {
+    const off = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', ...(how === 'env' ? { LAND_EARLY: '0' } : {}) }));
+    if (how === 'file') { mkdirSync(off.state, { recursive: true }); writeFileSync(join(off.state, 'early-off'), ''); }
+    const offDone = await off.go();
+    offDone.forEach((d, i) => assert.equal(d.status, 0, `${how}: ship ${i + 1}: ${d.stderr}`));
+    assert.doesNotMatch(offDone.map((d) => d.stderr).join('\n'), /early next train/, how);
+    off.done();
+  }
 });

@@ -107,7 +107,7 @@ land_timing() (
   if [ "$mode" = into ]; then # only its own test files: no CI, no deploy
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
   else
-    retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live · $out"
+    retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live${early_ahead:+ · ci early ${early_ahead}s} · $out"
   fi
   rm -f "$times"
 ) >/dev/null 2>&1
@@ -326,6 +326,11 @@ rerere_on() {
     GIT_EDITOR=true "$@" -C "$d" "${rr[@]}" rebase "$step" >/dev/null 2>&1 && return 0
   done
   return 1
+}
+# <onto> <commit>: the stack the early next train (early_next, below) made of that commit on that one, if it is still there.
+stacked_of() {
+  local c
+  c=$(awk -v k="$1 $2" '$1 " " $2 == k { print $3; exit }' "$state/stacked" 2>/dev/null) && [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"
 }
 # <onto>: whether the rebase onto <onto>, which trial() says stops, goes through with the fixes recorded with git rerere.
 # Replayed in a scratch worktree, so no ref or worktree of the minion's moves. shortcut: a checkout each time (about 1 s
@@ -640,7 +645,10 @@ case $mode in
     [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
     [ -n "$quiet" ] || queue_phase "rebasing onto main"
     [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-    if numbers_git ours "${rr[@]}" rebase -q ${under:+--onto} main ${under:+"$under"}; then :
+    # The same rebase, made by the early next train (early_next), so CI may have run it already. --keep refuses to
+    # overwrite an edit or an untracked file, as the rebase would: then the rebase runs and says why.
+    if [ -z "$under" ] && c=$(stacked_of "$(git rev-parse main)" "$(git rev-parse HEAD)") && git reset -q --keep "$c" 2>/dev/null; then :
+    elif numbers_git ours "${rr[@]}" rebase -q ${under:+--onto} main ${under:+"$under"}; then :
     elif rerere_on . numbers_git ours; then say "the fix recorded ahead of time (git rerere, conflict prep) resolved the rebase's conflicts"; retro_log "train prep replayed · $label onto main ($(git rev-parse --short main))"
     else conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed"; fi ;;
   into | full)
@@ -1253,6 +1261,92 @@ top_say() {
   { echo "$tip $branch $$"; echo "$own $branch"; for ((i = 0; i < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done; } >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
 }
 top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p" = $$ ] && rm -f "$state/train-top"; return 0; }
+# Early next train (#1366; Cara, 2026-11-20, picked "Also test next train early"). Once this train passed its gate, just
+# before its deploy, early_next stacks the ship next in line, and the train it would take, on this train's top in a
+# scratch worktree and pushes that to CI, so its run goes while this one deploys. Only then: two suites at once on Cara's
+# desktop flaked (tests.yml), and the lands' runs go one at a time anyway. Each stack goes to <state>/stacked
+# ("<onto> <commit> <result>"), which that ship's own rebase and train_build take instead of rebasing again (a re-run
+# rebase is a new commit), so a train that comes out the same is the same commit, and ci_gate takes the early run as its
+# own. <state>/early: "<top> <its branch> <when pushed> <this branch>"; the next landing to reach its gate counts it, or
+# cancels it (early_gate). Off: LAND_EARLY=0, or for every landing, touch <state>/early-off.
+early_ahead=''
+early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
+early_next() {
+  local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n
+  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
+  ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
+  local -A QUEUE_RANK=()
+  local QUEUE_OLD=() QUEUE_ORDER_BY=''
+  queue_order "$q"
+  while read -r x t; do # the first in line that isn't on this train
+    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
+    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = riding || $x = moving ]] && continue
+    [ "${l[5]:-}" = train ] && [[ $(queue_state "${l[0]%% *}") != [Tt] ]] && nt=${t##*/} nb=${l[2]:-}
+    break
+  done < <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
+  [ -n "$nb" ] && [ "$nb" != "$branch" ] && [[ $nb != build/* ]] && r=$(git rev-parse -q --verify "refs/heads/$nb^{commit}") || return 0
+  while read -r x c; do # it would leave a commit that came off main behind: not the plain rebase stacked here
+    [ "$c" != "$nb" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null && return 0
+  done < <(cat "$state/taken-back" 2>/dev/null || true)
+  slug=$(early_slug) || return 0
+  free=$(hub gh api "repos/$slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || free=''
+  [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-early.XXXXXX") || return 0
+  if git worktree add -q --detach "$wt" "$r" >/dev/null 2>&1 && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q "$tip" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $nb onto $label's train ($(git rev-parse --short "$tip")), early"; }; }; then
+    own_e=$(git -C "$wt" rev-parse HEAD)
+  else
+    git -C "$wt" "${rr[@]}" rebase --abort >/dev/null 2>&1 || true
+    own_e=''
+  fi
+  git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  rmdir "$wt" 2>/dev/null || true
+  [ -n "$own_e" ] && [ "$own_e" != "$tip" ] || return 0 # a conflict is its own rebase's to report, after this ships
+  read -r lane_e _ < <(git diff --no-renames --name-only "$tip" "$own_e" | "$tools/lane.sh" "$tip") || lane_e=full
+  [ "$lane_e" != light ] || return 0 # it runs no CI
+  echo "$tip $r $own_e" >"$state/stacked.tmp$$"
+  # The train it would take, as train_build will build it once it has the line, with no verdicts said and nothing logged.
+  out=$(
+    early_memo=$state/stacked.tmp$$ branch=$nb own=$own_e old=$tip lane=$lane_e tip=$own_e DEPLOY_QUEUE_TICKET=$nt
+    train_n=() train_br=() train_tip=() train_was=()
+    say() { :; }
+    retro_log() { :; }
+    train_say() { :; }
+    train_build >/dev/null 2>&1 || true
+    echo "$tip ${#train_n[@]} ${train_br[*]}"
+  ) || out=''
+  read -r top n x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
+  mv -f "$state/stacked.tmp$$" "$state/stacked"
+  hub git push -q "$REMOTE" "+$top:refs/heads/land/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
+  echo "$top $nb $(date +%s) $branch" >"$state/early"
+  say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while this one deploys ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
+  retro_log "early train · $nb${x:+ + $n riders} onto $label's train ($(git rev-parse --short "$tip")) · pushed $(git rev-parse --short "$top")"
+}
+# At this landing's gate, with its train built: an early run on it counts (early_ahead: how long ago it started), and
+# any other early run is cancelled, so it doesn't hold up this one's in the lands' one-at-a-time CI group.
+early_gate() {
+  local top b at fb slug run id st w
+  read -r top b at fb 2>/dev/null <"$state/early" || return 0
+  rm -f "$state/early"
+  [[ $at =~ ^[0-9]+$ ]] && slug=$(early_slug) || return 0
+  run=$(hub gh api "repos/$slug/actions/runs?head_sha=$top&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\"] | @tsv" 2>/dev/null) || run=''
+  read -r id st w _ <<<"$run" || true
+  if [ "$b" = "$branch" ] && [ "$top" = "$tip" ] && [[ $id =~ ^[0-9]+$ ]] && { [ "$st" != completed ] || [ "$w" = success ]; }; then
+    early_ahead=$(($(date +%s) - at))
+    say "early next train: CI started on this train at $(date -d "@$at" +%H:%M) while $fb's deployed, and it came out the same, so that run is its CI ($early_ahead s head start)"
+    retro_log "early train · $label · counted · ${early_ahead}s head start"
+    return 0
+  fi
+  if [ "$b" != "$branch" ]; then w="$b wasn't next in line after all"
+  elif [ "$top" != "$tip" ]; then w="its train came out different from the one stacked early"
+  elif [[ $id =~ ^[0-9]+$ ]]; then w="the early run failed, so it runs again" # as for a run on the same commit from a landing started again
+  else w="GitHub has no run of it"; fi
+  [[ ! $id =~ ^[0-9]+$ ]] || [ "$st" = completed ] || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
+  # Its scratch branch goes too, so a push of the same commit later starts a fresh run.
+  hub git push -q "$REMOTE" ":refs/heads/land/$b" >/dev/null 2>&1 || true
+  say "early next train: dropped the early CI run on $b's train ($w)"
+  retro_log "early train · $label · discarded · $w"
+}
 # <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
 train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
 # [<ticket>...]: those first, in that order, then the rest of the line in its order (a refill after suspects, #1346).
@@ -1276,6 +1370,7 @@ train_build() {
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
     tried[${t##*/}]=1
     read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
+    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
     [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
     [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
@@ -1296,7 +1391,9 @@ train_build() {
       if [ -z "$wt" ]; then
         wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
       fi
-      if git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { git -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" git && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; then
+      # Stacked already by the early next train (early_next), else rebased here.
+      if { c=$(stacked_of "$cur" "$r") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null; } ||
+        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { git -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" git && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
         c=$(git -C "$wt" rev-parse HEAD)
         if [ "$c" = "$cur" ]; then skip="main already has all of it"
         elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"
@@ -1308,6 +1405,7 @@ train_build() {
       fi
     fi
     if [ -n "$skip" ]; then say "ship train: $b stays in line ($skip)"; continue; fi
+    [ -z "${early_memo:-}" ] || echo "$cur $r $c" >>"$early_memo"
     train_n+=("${t##*/}") train_br+=("$b") train_tip+=("$c") train_was+=("$r")
     train_say $((${#train_n[@]} - 1)) "riding $branch"
     cur=$c
@@ -1324,6 +1422,7 @@ train_build() {
 gate() {
   local rc=0
   ci_done
+  [ -z "$early_ahead" ] || ci_pushed=1 # the early run's scratch branch is this landing's to delete, however it ends
   tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
   ci_gate || rc=$?
   # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
@@ -1565,6 +1664,7 @@ reran=''
 land_mark ci ci
 if [ "$lane" = light ]; then
   rc=light
+  early_gate
 else
   # No answer from CI: the suite runs here only on a quiet perigee (#1254). Until then CI is asked again at every look,
   # since a runner may come back (Cara's desktop logs on); busy_wait refuses once perigee has been busy QUIET_LIMIT s.
@@ -1580,6 +1680,7 @@ else
   }
   train_build
   top_say
+  early_gate
   gate "$tip" || rc=$?
   # A train keeps its riders while it waits (#1361): they go back only once the gate gives up for good, to run here.
   busy_gate
@@ -1733,6 +1834,8 @@ if [ ${#train_n[@]} -gt 0 ]; then
   done
   [ -z "$late" ] || say "ship train:$late didn't move to its train commit within 10 s, so the release row may leave it out"
 fi
+# In the background, so set -e still holds inside it, but a slip there can't stop this deploy with main moved.
+early_next </dev/null & wait $! || say "early next train: it stopped part way (exit $?), so the next ship's CI waits for its turn"
 queue_phase "deploying"
 land_mark deploy deploy
 

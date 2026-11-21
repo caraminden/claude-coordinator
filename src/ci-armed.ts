@@ -15,8 +15,10 @@ import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
 export interface Card { questions: unknown[]; kind?: 'merge'; /** Set on a feeder's go card: the build it merges into (Merge, not Ship It). */ into?: number; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** A kit sync's ship card (#1100): the kit commit; the server answers it, with no turn. */ kitSync?: string; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; /** A plain ask_question card: later questions of the same turn join it (mergeCard). */ mergeable?: true; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number }
-export interface Armed { sha: string; at: number; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
+export interface Armed { sha: string; at: number; /** Set once the card is posted, so a retry of the message doesn't post it again. */ cardPosted?: true; note?: string; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
 
+/** The one line the waits readout shows for an armed row. */
+const armNote = (p: Pick<Armed, 'sha' | 'card' | 'coordinator'>) => `armed ${[p.card && 'card', p.coordinator && 'Taskmaster message'].filter(Boolean).join(' and ')} for CI on ${short(p.sha)}`;
 export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
 const short = (sha: string) => sha.slice(0, 7);
 
@@ -112,7 +114,9 @@ export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card
   // Passed wins over failed: a re-run that went green after a red one.
   if (seen.some((k) => k.endsWith(`:ci:${sha}:passed`))) return null;
   if (seen.some((k) => k.endsWith(`:ci:${sha}:failed`))) throw new HttpError(409, `when_ci_passes: CI already failed on ${short(sha)}. Fix it and push, then arm again`);
-  app.outbox!.add({ project_id: ticket.project_id, kind: 'ci_armed', to_kind: 'minion', to_id: ticket.id, when_kind: 'ci', when_arg: sha, payload: { sha, at: Date.now(), ...part }, set_by: `minion:${ticket.id}`, dedupe_key: String(ticket.id) });
+  // A row already met is on its way for an earlier commit (a retry): a new arm is a new wait, not a change to that one.
+  for (const r of store.listDeliveries({ kind: 'ci_armed', dedupe: String(ticket.id), states: ['waiting'] })) if (r.met_at != null) app.outbox!.cancel(r.id, 're-armed');
+  app.outbox!.add({ project_id: ticket.project_id, kind: 'ci_armed', to_kind: 'minion', to_id: ticket.id, when_kind: 'ci', when_arg: sha, payload: { sha, at: Date.now(), ...part, note: armNote({ sha, ...part }) }, set_by: `minion:${ticket.id}`, dedupe_key: String(ticket.id) });
   const pushed = await git(ticket.cwd, ['rev-parse', `origin/${ticket.branch}`]);
   const what = part.card ? 'the card' : 'the message';
   const push = pushed === sha ? '' : ` origin/${ticket.branch} isn't at ${short(sha)} yet: push it, or CI never runs on it and ${what} never goes out.`;
@@ -127,7 +131,7 @@ export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card
 export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox): void {
   const newRow = (ticketId: number, a: Armed, origin: string): NewDelivery => {
     const { sha, ...payload } = a;
-    return { project_id: store.getTicket(ticketId)?.project_id ?? 0, kind: 'ci_armed', to_kind: 'minion', to_id: ticketId, when_kind: 'ci', when_arg: sha, payload: { sha, ...payload }, set_by: `minion:${ticketId}`, dedupe_key: String(ticketId), origin };
+    return { project_id: store.getTicket(ticketId)?.project_id ?? 0, kind: 'ci_armed', to_kind: 'minion', to_id: ticketId, when_kind: 'ci', when_arg: sha, payload: { sha, ...payload, note: armNote(a) }, set_by: `minion:${ticketId}`, dedupe_key: String(ticketId), origin };
   };
   outbox.register({
     kind: 'ci_armed',
@@ -137,7 +141,11 @@ export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox)
       for (const { key, value } of store.settingsWithPrefix<Armed>('ci-armed:')) {
         const id = Number(key.slice('ci-armed:'.length));
         if (!Number.isInteger(id) || !value?.sha) { store.deleteSetting(key); continue; }
-        store.importDeliveries(key, [newRow(id, value, `${key}:${createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)}`)], outbox.clock());
+        try {
+          store.importDeliveries(key, [newRow(id, value, `${key}:${createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)}`)], outbox.clock());
+        } catch (err) {
+          console.error(`ci-armed: moving ${key} failed, tried again next pass: ${(err as Error)?.message}`); // one bad key must not hold the rest
+        }
       }
       for (const r of store.listDeliveries({ kind: 'ci_armed', states: ['waiting'] })) {
         const seen = store.githubSeen(r.to_id, 'pr');
@@ -147,8 +155,11 @@ export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox)
     // At boot only (ciFinished meets a row itself, with its checks): CI already passed on the sha while the server was down.
     ready: (r, event) => event.type === 'boot' && store.githubSeen(r.to_id, 'pr').some((k) => k.endsWith(`:ci:${r.when_arg}:passed`)),
     // A second arm on the same commit adds to it; on a new commit it replaces.
-    merge: (row, incoming) => (row.when_arg === incoming.when_arg ? { ...row.payload, ...(incoming.payload as object) } : incoming.payload),
-    describe: (r) => `armed ${[r.payload.card && 'card', r.payload.coordinator && 'Taskmaster message'].filter(Boolean).join(' and ')} for CI on ${short(String(r.when_arg))}`,
+    merge: (row, incoming) => {
+      const p = row.when_arg === incoming.when_arg ? { ...row.payload, ...(incoming.payload as object) } : (incoming.payload as Armed);
+      return { ...p, note: armNote(p) };
+    },
+    describe: (r) => r.payload.note,
     deliver: async (rows) => {
       const out: Outcome[] = [];
       for (const r of rows) out.push(await sendArmed(r).catch((err): Outcome => ({ state: 'retry', reason: String(err?.message ?? err) })));
@@ -160,13 +171,14 @@ export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox)
     const ticket = app.store.getTicket(r.to_id);
     if (!ticket) return { state: 'drop', reason: 'minion deleted' };
     const armed = r.payload as Armed;
-    if (armed.card) {
+    if (armed.card && !armed.cardPosted) {
       postCard(app, ticket, armed.card);
-      if (armed.coordinator) store.updateDelivery(r.id, { payload: { ...r.payload, card: undefined } }, ['sending']); // a retry of the message must not post the card again
+      if (armed.coordinator) store.updateDelivery(r.id, { payload: { ...r.payload, cardPosted: true } }, ['sending']); // a retry of the message must not post the card again
     }
+    // A message the loop guard holds is saved by it, and a person's Continue sends it: accepted, not retried (each retry would queue a copy).
     if (armed.coordinator) {
       const { text, urgent, wake, need } = armed.coordinator;
-      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false, need)) === true) return { state: 'retry', reason: 'the Taskmaster message is held by the 6-in-10-minutes guard' };
+      await tellTaskmaster(app, ticket, text, urgent, wake !== false, need);
     }
     // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
     const state: TicketState | null = armed.card ? null : 'ready';

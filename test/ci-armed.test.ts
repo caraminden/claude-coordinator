@@ -166,23 +166,45 @@ test('an armed held-mail message stays held mail when it goes out', async () => 
   assert.deepEqual(log.wakes, [false]);
 });
 
-test("a message the loop guard holds is retried, and the card isn't posted twice", async () => {
+test("a message the loop guard holds counts as sent (the guard keeps it): no retry, no second card", async () => {
   const s = setup('heldmsg');
   const { sha, store, ticket, app, log } = s;
   log.held = true;
   await armForCi(app, ticket, { card, coordinator: { text: 'PR #12 is green', urgent: false } });
   await finish(s, pr(sha), 'passed');
+  assert.equal(store.listDeliveries({ kind: 'ci_armed' })[0].state, 'sent');
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'the card went out once');
+  assert.equal(store.getTicket(ticket.id)!.state, null, "a card is people's turn");
+});
+
+test("a message that throws is retried without posting the card again, and the minion isn't marked ready", async () => {
+  const s = setup('throwmsg');
+  const { sha, store, ticket, app, log } = s;
+  let fail = true;
+  const relay = app.runner.relay;
+  app.runner.relay = (...a: any[]) => { if (fail) throw new Error('boom'); return relay(...a); };
+  await armForCi(app, ticket, { card, coordinator: { text: 'm', urgent: false } });
+  await finish(s, pr(sha), 'passed');
   const [row] = store.listDeliveries({ kind: 'ci_armed' });
   assert.equal(row.state, 'waiting');
-  assert.match(row.last_error!, /6-in-10-minutes/);
-  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'the card went out once');
-  assert.equal(store.getTicket(ticket.id)!.note, null, 'no fired note yet');
-  log.held = false;
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1);
+  fail = false;
   store.updateDelivery(row.id, { due: Date.now() - 1 }, ['waiting']);
   await s.outbox.poke({ type: 'tick' });
   assert.equal(store.getDelivery(row.id)!.state, 'sent');
-  assert.deepEqual(log.relays, ['PR #12 is green']);
   assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'still once');
+  assert.equal(store.getTicket(ticket.id)!.state, null, 'a card is out: not ready');
+});
+
+test('a re-arm on a new commit while a send is being retried is a new wait', async () => {
+  const s = setup('rearmmet');
+  await armForCi(s.app, s.ticket, { card });
+  const [row] = s.store.listDeliveries({ kind: 'ci_armed' });
+  s.store.updateDelivery(row.id, { met_at: Date.now(), due: Date.now() + 60000 }, ['waiting']);
+  git(s.dir, 'commit', '-q', '--allow-empty', '-m', 'two');
+  await armForCi(s.app, s.ticket, { card });
+  assert.equal(s.store.getDelivery(row.id)!.state, 'dropped');
+  assert.equal(s.armedRow().met_at, null);
 });
 
 test('a second arm on a new commit replaces the first', async () => {
@@ -221,11 +243,12 @@ test('boot reconciles: CI that passed while the server was down posts the card; 
   assert.equal(red.store.listDeliveries({ kind: 'ci_armed' })[0].state, 'dropped');
 });
 
-test("a dismissed minion's armed row is held, then dropped after 3 days", async () => {
+test("a dismissed minion's armed row is held for 3 days", async () => {
   const s = setup('dismissed');
   await armForCi(s.app, s.ticket, { card });
   await boot(s);
   s.store.updateTicket(s.ticket.id, { status: 'closed' });
   await s.outbox.poke({ type: 'closed' });
   assert.equal(s.store.listDeliveries({ kind: 'ci_armed' })[0].state, 'held');
+  assert.match(s.store.listDeliveries({ kind: 'ci_armed' })[0].payload.note, /armed card for CI/);
 });

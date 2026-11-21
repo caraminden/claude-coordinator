@@ -643,8 +643,7 @@ export class Runner {
   /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
-  /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
-  /** `soon`: a turn ended or a reply linked a file, so look within seconds; otherwise a tool result, looked at throttled (#1542). */
+  /** Files on disk may have changed. `soon`: a turn ended or a reply linked a file, so look within seconds; false: a tool result, looked at throttled (#1542). */
   onFilesMayChange: (ticketId: number, soon: boolean) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
   ship: (ticketId: number) => Ship | null = () => null;

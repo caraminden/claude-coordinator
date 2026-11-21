@@ -76,7 +76,7 @@ export class ShipStatus {
     if (!first || now !== 'null') this.d.runner.broadcastTicket(ticketId);
   }
 
-  /** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
+  /** After a tool call (a commit, `gh pr create`) look again, at most every TOOL_GAP_MS; `soon`, at a turn's end, within seconds. */
   scheduleCheck(ticketId: number, soon = false) {
     this.timers.schedule(ticketId, soon);
   }

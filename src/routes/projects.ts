@@ -492,7 +492,6 @@ export const projectRoutes: Route[] = [
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
-    // minimized: this person minimized it (#1243): listed after the others; the counts stay real, and the front end draws it quiet.
     // member: they own it or were added to it (#674); false for one only admin reach opens, listed apart from theirs.
     // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
     // shipping: how many minions have no turn but the server works for them: ship in line, landing, deploying (#727, #1294); 0 when hidden.
@@ -502,14 +501,11 @@ export const projectRoutes: Route[] = [
     // violet badge. A scheme they've never had open since #539 takes today's items as seen, so nothing is marked on day one.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
-      const minimized = store.minimizedProjects(session.uid ?? -1);
       const member = store.memberSchemes(session.uid);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
-      // Minimized ones (#1243) go after the rest, keeping their own order among themselves.
-      const ordered = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
-      const schemes = [...ordered.filter((p) => !minimized.has(p.id)), ...ordered.filter((p) => minimized.has(p.id))];
+      const schemes = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
       json(res, 200, await Promise.all(schemes.map(async (p) => {
         const tickets = store.listTickets(p.id);
         const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
@@ -519,7 +515,6 @@ export const projectRoutes: Route[] = [
         return {
           ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
           hidden: hidden.has(p.id),
-          minimized: minimized.has(p.id),
           member: member.has(p.id),
           inbox,
           fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
@@ -557,18 +552,6 @@ export const projectRoutes: Route[] = [
       // Every stream of the scheme's people gets it; each tab refreshes only for its own person, like views.
       app.broadcast({ type: 'hidden', name: session.name, projectId: project.id });
       return json(res, 200, { hidden: body.hidden });
-    },
-  },
-  {
-    // Minimize a scheme for yourself, or bring it back (#1243): last in your list, no count, off Home. Only ever your own.
-    method: 'PUT', path: '/api/projects/:project/minimized', who: ['person'],
-    async handler({ req, res, app, session, project }) {
-      const body = await readJson(req);
-      if (typeof body.minimized !== 'boolean') throw new HttpError(400, 'minimized must be true or false');
-      if (session.uid === undefined) throw new HttpError(400, 'Sign in again first');
-      app.store.setProjectMinimized(session.uid, project.id, body.minimized);
-      app.broadcast({ type: 'hidden', name: session.name, projectId: project.id });
-      return json(res, 200, { minimized: body.minimized });
     },
   },
   {

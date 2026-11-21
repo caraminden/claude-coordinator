@@ -1883,16 +1883,6 @@
   "m1": "409 A's chats aren't indexed for search by meaning yet",
   "m2": "409 A's chats aren't indexed for search by meaning yet"
  },
- "PUT /api/projects/:p/minimized": {
-  "anon": "401 Not logged in",
-  "person": "400 minimized must be true or false",
-  "member": "400 minimized must be true or false",
-  "outsider": "404 No such scheme",
-  "tmA": "403 Not available to the Taskmaster",
-  "tmB": "403 Not available to the Taskmaster",
-  "m1": "403 A minion may only update itself",
-  "m2": "403 A minion may only update itself"
- },
  "GET /api/projects/:p/my-instructions": {
   "anon": "401 Not logged in",
   "person": "200",

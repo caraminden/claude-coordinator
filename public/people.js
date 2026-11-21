@@ -3,7 +3,7 @@ import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { gloss } from './help-words.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
-import { hideButton, minimizeButton } from './hidden.js';
+import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { loadingLine } from './ui/state.js';
@@ -98,10 +98,7 @@ export function membersPage() {
     h('h3', { class: 'settings-section' }, 'Just for you'),
     h('div', { class: 'settings-rows' }, settingsRow({ part: 'hide-scheme', icon: 'eye', hue: 'muted', title: 'Hide this scheme', summary: 'Out of your lists, badges and notifications' },
       settingsHelp('Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications.', 'You stay in it, and its link still opens it.'),
-      hideButton(p))[0],
-      settingsRow({ part: 'minimize-scheme', icon: 'eye', hue: 'muted', title: 'Minimize this scheme', summary: 'Last in your list, no count, off Home' },
-        settingsHelp('Minimizing keeps the scheme in your list, at the bottom, with no Needs-you count, off Home and off your app badge.', 'Cards addressed to you by name still notify you. Restore puts it back.'),
-        minimizeButton(p))[0]),
+      hideButton(p))[0]),
     account?.admin && settingsHelp('To add someone new to Citadel, invite them under People first.'));
 }
 

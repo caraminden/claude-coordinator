@@ -55,7 +55,7 @@ export function schemePill(p) {
  * `projects` as api/projects sends them; the open scheme's `fresh` is this page's own (`seen`, as inbox.js holds it).
  */
 export const wantsBadge = (projects, openId, seen) =>
-  (projects || []).some((p) => !p.hidden && !p.minimized && schemePill(openPill(p, openId, seen)).fresh);
+  (projects || []).some((p) => !p.hidden && schemePill(openPill(p, openId, seen)).fresh);
 
 /**
  * The scheme you're in, as this page saw it (`seen`: inbox.js's seenHere): its strip's count and spinner (`seen.pill`) and

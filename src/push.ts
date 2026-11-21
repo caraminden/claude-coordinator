@@ -221,13 +221,13 @@ export class Pusher {
     const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to
       : !owner || s.name.toLowerCase() === owner || s.name.toLowerCase() === also || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);
     const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && forThem(s) && !JSON.parse(s.muted).includes(ticket.project_id)
-      && this.inScheme(s.name, ticket.project_id) && this.hears(s.name, ticket.project_id, to) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name) || s.name.toLowerCase() === also));
+      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name) || s.name.toLowerCase() === also));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
   /** Tell every device of the scheme's members (no mute or pin filters: this is about the server, not a minion). */
   async broadcast(projectId: number, msg: PushMessage): Promise<void> {
-    const subs = this.store.listPushSubscriptions().filter((s) => this.inScheme(s.name, projectId) && this.hears(s.name, projectId, null));
+    const subs = this.store.listPushSubscriptions().filter((s) => this.inScheme(s.name, projectId));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
@@ -246,12 +246,6 @@ export class Pusher {
     const user = this.store.findUser('name', name);
     return !!user && !user.disabled_at && this.store.memberSchemes(user.id).has(projectId)
       && !this.store.hiddenProjects(user.id).has(projectId);
-  }
-
-  /** A scheme this person minimized (#1243) is quiet for them except for a card or mention addressed to them by name (`to`). */
-  private hears(name: string, projectId: number, to: string | null): boolean {
-    const user = this.store.findUser('name', name);
-    return !user || to === name.toLowerCase() || !this.store.minimizedProjects(user.id).has(projectId);
   }
 
   /** Send one message (a desktop app's through its page); a subscription the push service says is gone (404, 410) is deleted. */

@@ -134,12 +134,6 @@ test('app badge: calls the API only on a change, and nothing without it (#980)',
   assert.equal(syncBadge(true, { on: null }, {} as any), false);
 });
 
-test('a minimized scheme never lights the icon badge (#1243)', () => {
-  const p = { id: 1, inbox: 1, fresh: true };
-  assert.equal(wantsBadge([p], null, null), true);
-  assert.equal(wantsBadge([{ ...p, minimized: true }], null, null), false);
-});
-
 // #1400: Peek Auras' rail said 2 away from it and 1 inside it. It's split (#919): the page lists Cara's own Taskmaster
 // and the minions, while the Overlord's Taskmaster (everyone's, so the server counts its card) is only in `taskmasters`.
 test("the open scheme's strip shows every item the badge counts, a card on a Taskmaster the page doesn't list included (#1400)", () => {

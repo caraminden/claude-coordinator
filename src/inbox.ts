@@ -195,8 +195,7 @@ export function homeDays(now: number): string[] {
  */
 export function homeView(store: Store, approvals: Approvals, who: { name: string; uid?: number }, busy: (t: Ticket) => boolean, since: number, now = Date.now(), cache?: HomeBucketCache): HomeView {
   const hidden = store.hiddenProjects(who.uid ?? -1);
-  const minimized = store.minimizedProjects(who.uid ?? -1); // off Home (#1243)
-  const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id) && !minimized.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
+  const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
   const schemes = ids.map((id) => store.getProject(id)).filter((p): p is Project => !!p);
   const days = homeDays(now);
   const buckets = cache ? cache.get(store, now) : bucketShips(store, now);

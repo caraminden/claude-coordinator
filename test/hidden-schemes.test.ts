@@ -175,23 +175,3 @@ test("a card another scheme addressed to you isn't in this scheme's Needs you li
   assert.deepEqual(await ids(here.id), [], 'another scheme does not');
   store.db.close();
 });
-
-test('a minimize is the minimizer\'s own: it sinks the scheme to the end of their list and flags it, counts stay real, and un-minimize restores it (#1243)', async () => {
-  const { data: first } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'MinFirst' } });
-  const { data: second } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'MinSecond' } });
-  assert.equal((await call('Cara', `/api/projects/${first.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
-  const order = async (who: string) => (await call(who, '/api/projects')).data.map((p: any) => p.id);
-  const before = await order('Cara');
-  assert.ok(before.indexOf(first.id) < before.indexOf(second.id));
-  assert.deepEqual(await call('Cara', `/api/projects/${first.id}/minimized`, { method: 'PUT', body: { minimized: true } }), { status: 200, data: { minimized: true } });
-  const after = await order('Cara');
-  assert.equal(after.at(-1), first.id, 'minimized goes last');
-  assert.equal((await listed('Cara', first.id)).minimized, true);
-  assert.equal((await listed('Cara', first.id)).hidden, false, 'a minimize is not a hide');
-  assert.equal((await listed('Josh', first.id)).minimized, false, 'nobody else\'s list changes');
-  assert.equal((await call('Cara', `/api/projects/${first.id}/minimized`, { method: 'PUT', body: { minimized: false } })).status, 200);
-  assert.deepEqual(await order('Cara'), before);
-  assert.equal((await call('Cara', `/api/projects/${first.id}/minimized`, { method: 'PUT', body: { minimized: 'yes' } })).status, 400);
-  const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'MinPrivate' } });
-  assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/minimized`, { method: 'PUT', body: { minimized: true } })).status, 404);
-});

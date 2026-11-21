@@ -24,7 +24,7 @@ import { toast } from './ui/status.js';
 
 export const LAST_SCHEME = 'cc-scheme'; // the scheme this browser last had open
 
-/** Your schemes the shelf lists (#674): not hidden, and yours; a minimized one (#1243) is still one of them for the front door and Home. Home (#1140) shows for two or more. */
+/** Your schemes the shelf lists: not hidden, and yours (#674). Home (#1140) shows for two or more. */
 export const shelfSchemes = (projects) => (projects ?? []).filter((p) => !p.hidden && p.member !== false);
 
 /** The app's front door: Home when you're in two or more schemes (#1140; Josh, 2026-11-19: "Always opens to Home"), else the last scheme (or Citadel, or the first); with none, offer to make one. */

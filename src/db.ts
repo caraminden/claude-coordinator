@@ -1077,7 +1077,7 @@ CREATE TABLE IF NOT EXISTS project_hides (
   hidden_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, project_id)
 );
--- Schemes a person minimized for themselves (#1243): still on their list, at the bottom, with no count, off Home. Never changes who is in the scheme.
+-- Retired (#1405): the settings Minimize that wrote this is gone and nothing reads or writes it. The table stays, empty, on purpose: no migration.
 CREATE TABLE IF NOT EXISTS project_minimizes (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -2555,17 +2555,6 @@ export class Store {
   hiddenProjects(uid: number): Set<number> {
     const rows = this.db.prepare('SELECT project_id FROM project_hides WHERE user_id = ?').all(uid) as { project_id: number }[];
     return new Set(rows.map((r) => r.project_id));
-  }
-
-  /** The schemes this person minimized for themselves (#1243). */
-  minimizedProjects(uid: number): Set<number> {
-    const rows = this.db.prepare('SELECT project_id FROM project_minimizes WHERE user_id = ?').all(uid) as { project_id: number }[];
-    return new Set(rows.map((r) => r.project_id));
-  }
-
-  setProjectMinimized(uid: number, projectId: number, minimized: boolean) {
-    if (minimized) this.db.prepare('INSERT INTO project_minimizes (user_id, project_id, minimized_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid, projectId, Date.now());
-    else this.db.prepare('DELETE FROM project_minimizes WHERE user_id = ? AND project_id = ?').run(uid, projectId);
   }
 
   setProjectHidden(uid: number, projectId: number, hidden: boolean) {

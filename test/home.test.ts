@@ -129,18 +129,3 @@ test('a visit to Home counts what shipped since the last one ended, and keeps th
   assert.equal(homeSince(store, 'josh', back), t0 + 60_000, 'a new visit starts where the last one ended');
   assert.equal(homeSince(store, 'cara', back), back - HOME_FIRST_LOOK, 'kept per person');
 });
-
-test('Home leaves out a scheme the person minimized, and only theirs (#1243)', () => {
-  const { store, josh, scheme, minion, approvals } = setup('minimized.sqlite');
-  const peek = scheme('Peek Auras'), quiet = scheme('Quiet one');
-  store.addEvent(minion(peek, 'a').id, 'question', { id: 'q-a', questions: [] });
-  store.addEvent(minion(quiet, 'b').id, 'question', { id: 'q-b', questions: [] });
-  const ids = () => homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, 0).items.map((i) => (i.card as { id: string }).id).sort();
-  assert.deepEqual(ids(), ['q-a', 'q-b']);
-  store.setProjectMinimized(josh.id, quiet, true);
-  assert.deepEqual(ids(), ['q-a']);
-  assert.deepEqual([...store.minimizedProjects(josh.id)], [quiet]);
-  store.setProjectMinimized(josh.id, quiet, false);
-  assert.deepEqual(ids(), ['q-a', 'q-b']);
-  assert.equal(store.minimizedProjects(josh.id).size, 0);
-});

@@ -28,7 +28,7 @@ const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError add
   healthEventsSince heldBelow hiddenProjects hostSamples inScheme insertEvent instructionHistory isAdmin isTicketPinned
   lastApkPublish lastEventOf lastHealthEvent lastTurnEnd latestArtifact latestPlan listArtifacts listClaudeState
   listContraptionDeploys listContraptions listCredentials listEvents listMembers listOrder listProjects listReleases
-  listRepoCollaborators listSecrets listTurns listUsers liveReleasesSince markSeen memberSchemes minimizedProjects
+  listRepoCollaborators listSecrets listTurns listUsers liveReleasesSince markSeen memberSchemes
   minionCosts minionTurnsSince noteLooks onboardingOpenedAt openCardAt openCardEventId openCards openCardsOf
   openCardsWhere openrouterSpent personalInstructionHistory personalInstructions personalLayer personNotes pickedCards
   pinnedArtifactPaths pinnedTickets planEvents promptHashes pruneArtifacts publishCiFile putCiFile putClaudeState
@@ -36,7 +36,7 @@ const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError add
   recordApkPublish recordGrunts recordTurn releasesSince removeMember renameProject replyTexts rewriteClaudeEvents
   saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner setAppInstructions setArtifactPinned
   setContraptionUser setEventData setListOrder setOpenrouterCallPath setPersonalInstructions setPersonNote
-  setProjectHidden setProjectInstructions setProjectMinimized setProjectRepoDir setProjectSettings setProjectUpstream
+  setProjectHidden setProjectInstructions setProjectRepoDir setProjectSettings setProjectUpstream
   setSeenItems setSharedPin setTicketPinned settleBrief setTurnVerdict sharedPins shipNotesSince shippedNotes
   shippedSince spendByPayer spendRows startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts
   ticketCost turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix updateUser visibleProjects

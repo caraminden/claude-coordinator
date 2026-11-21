@@ -347,7 +347,7 @@ test('after-call runner: on a recorded session it says and logs exactly what the
     return { tmp: join(dir, 'tmp'), shared: join(dir, 'shared') };
   };
   const old = side('old'), now = side('new');
-  const env = (s: { tmp: string; shared: string }) => ({ ...process.env, TMPDIR: s.tmp, COORDINATOR_SHARED_DIR: s.shared, COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '42' });
+  const env = (s: { tmp: string; shared: string }) => ({ ...process.env, TMPDIR: s.tmp, COORDINATOR_SHARED_DIR: s.shared, COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '42', COORDINATOR_NUMBER: '42' });
   for (const s of [old, now]) mkdirSync(s.tmp, { recursive: true });
   const script = (file: string, input: string, s: { tmp: string; shared: string }) => spawnSync(process.execPath, [join(HOOKS, file)], { input, env: env(s), encoding: 'utf8' }).stdout;
   const lines = (outs: string[]) => outs.filter(Boolean).flatMap((o) => JSON.parse(o).hookSpecificOutput.additionalContext.split('\n'));

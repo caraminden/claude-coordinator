@@ -177,6 +177,38 @@ test('a dismissed minion\'s wake is held: delivered on a reopen on day 2, droppe
   assert.doesNotMatch(r.sent.at(-1)!.text, /dismissed/);
 });
 
+test('a far-off wake outlives a dismissal until 3 days past its own time', async () => {
+  const now = { t: T0 };
+  const r = fakeRunner();
+  const { outbox, wakes } = server(r, now);
+  await outbox.boot();
+  const back = minion();
+  wakes.add(back, T0 + 10 * DAY, 'reopened on day 5', `minion:${back}`);
+  const gone = minion();
+  wakes.add(gone, T0 + 10 * DAY, 'never reopened', `minion:${gone}`);
+  for (const id of [back, gone]) {
+    store.updateTicket(id, { status: 'closed' });
+    await outbox.poke({ type: 'closed', ticket: id });
+  }
+  now.t = T0 + 5 * DAY;
+  await outbox.poke({ type: 'tick' });
+  assert.deepEqual([rows(back)[0].state, rows(gone)[0].state], ['held', 'held'], 'not dropped 3 days after the dismissal');
+  store.updateTicket(back, { status: 'idle' });
+  await outbox.poke({ type: 'reopened', ticket: back });
+  assert.deepEqual(r.sent, [], 'it waits for its own time');
+  now.t = T0 + 10 * DAY;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(r.sent.length, 1);
+  assert.equal(r.sent[0].id, back);
+  assert.doesNotMatch(r.sent[0].text, /dismissed/);
+  now.t = T0 + 12 * DAY;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(rows(gone)[0].state, 'held', 'still held 2 days past its time');
+  now.t = T0 + 13 * DAY + 1;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(rows(gone)[0].state, 'dropped');
+});
+
 test('a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails and wakes the setter\'s Taskmaster', async () => {
   const id = minion();
   const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' } as any).id;

@@ -212,6 +212,8 @@ test (`test/restart-anywhere.test.ts`): a server killed at each step of the send
    db-writer, access-matrix, boot-imports), and the migration on the live `timed-wakes` list (41 rows on 2026-11-20)
    in a fresh database: all 41 moved with ids and fields kept, the key emptied, a second run a no-op. Not run: a full
    boot on a copy of the live database (625 MB and written constantly, so `.backup` never finished).
+   A dismissed minion's row is held until 3 days past its own time, or 3 days past the dismissal when it was already
+   due (Cara, 2026-11-20, "Keep until 3 days past due"), so a far-off wake survives a reopen before its date.
 1. **`wake_when_live`**: the `live`, `merged` and `closed` events.
 2. **`relay_when_live`**, with the grouped note to the sender's Taskmaster.
 3. **Start-after chains**, with the held rule.

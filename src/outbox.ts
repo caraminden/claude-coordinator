@@ -64,6 +64,8 @@ export type OutboxRunner = {
 };
 
 const LIVE = ['waiting', 'held', 'sending'] as const;
+/** A dismissed minion's row is dropped 3 days after it came due, or after the dismissal if it was already due (Cara, 2026-11-20, "Keep until 3 days past due"). */
+const holdUntil = (r: Delivery, now: number) => Math.max(now, r.when_kind === 'at' ? Number(r.when_arg) : now) + HOLD_MS;
 const target = (r: Delivery) => `${r.to_kind}:${r.to_id}`;
 
 /** "2 h 5 min", "3 d 4 h", "45 min": how late or how long, for people and minions. */
@@ -196,7 +198,7 @@ export class Outbox {
       } else if (r.state === 'waiting') {
         const closed = this.closed(r);
         if (closed === true && kind.onDismiss !== 'deliver') {
-          this.store.updateDelivery(r.id, { state: 'held', due: now + HOLD_MS, reason: 'target closed' }, ['waiting'], now);
+          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: 'target closed' }, ['waiting'], now);
         } else if (r.met_at == null && r.due == null && kind.ready?.(r, event)) {
           this.store.updateDelivery(r.id, { met_at: now, due: now }, ['waiting'], now);
         }
@@ -268,7 +270,7 @@ export class Outbox {
       }
       if (t.status === 'closed') {
         for (const r of rows.filter((r) => this.kinds.get(r.kind)!.onDismiss !== 'deliver')) {
-          this.store.updateDelivery(r.id, { state: 'held', due: now + HOLD_MS, reason: 'target closed' }, ['waiting'], now);
+          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: 'target closed' }, ['waiting'], now);
         }
         rows = rows.filter((r) => this.kinds.get(r.kind)!.onDismiss === 'deliver');
       }

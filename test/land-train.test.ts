@@ -566,7 +566,7 @@ const retro = (dir: string, what: string) => {
 };
 
 test("early next train: the next ship's train is stacked and its CI started while the train ahead deploys, and its run counts (#1366)", async () => {
-  const l = await line([{}, {}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }));
+  const l = await line([{}, {}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }), (r) => writeFileSync(join(r.dir, 'hub.git', 'hooks', 'post-receive'), `#!/bin/sh\nwhile read -r old new ref; do echo "$new $ref" >>'${join(r.dir, 'pushes')}'; done\n`, { mode: 0o755 }));
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
   assert.match(done[1].stderr, /land: early next train: ticket\/4-x \(with ticket\/5-x riding\) is stacked on this train's top and its CI starts now, while this one deploys \(([0-9a-f]{7,})\)/);
@@ -578,6 +578,13 @@ test("early next train: the next ship's train is stacked and its CI started whil
   assert.deepEqual(retro(l.r.dir, ' · early train · '), ["early train · ticket/4-x + 1 riders onto ticket/2-x's train sha · pushed sha", 'early train · ticket/4-x · counted · 0s head start'.replace('0s', retro(l.r.dir, ' · counted · ')[0]?.match(/(\d+)s head/)?.[1] + 's')]);
   assert.match(retro(l.r.dir, 'timing · ticket/4-x').join('\n'), / · ci early \d+s · landed/);
   assert.ok(!existsSync(join(l.state, 'early')), 'the record is used up');
+  // The early run goes with its base, ship 2's train top, for the burn-in (#1443), and both scratch branches are deleted.
+  const pushes = readFileSync(join(l.r.dir, 'pushes'), 'utf8').trim().split('\n');
+  const base = pushes.find((x) => x.endsWith(' refs/heads/land-base/ticket/4-x') && !/^0+ /.test(x))?.split(' ')[0];
+  assert.ok(base, `land-base/ticket/4-x pushed: ${pushes.join('; ')}`);
+  assert.equal(git(l.r.source, 'log', '-1', '--format=%s', base!), 'f3.txt: 3', "its base is ship 2's train top (ship 3 rode it)");
+  const tails = pushes.filter((x) => / refs\/heads\/land(-base)?\/ticket\/4-x$/.test(x)).map((x) => /^0+ /.test(x) ? 'gone' : 'set');
+  assert.equal(tails.at(-1), 'gone', `land refs for ticket/4-x end deleted: ${pushes.join('; ')}`);
   l.done();
 });
 
@@ -590,6 +597,7 @@ test('early next train: an early run that went red is dropped and runs again on 
   for (const i of [1, 2, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4']);
   assert.deepEqual(retro(l.r.dir, ' · discarded · '), ['early train · ticket/4-x · discarded · the early run failed, so it runs again']);
+  assert.ok(!git(l.r.dir + '/hub.git', 'for-each-ref', 'refs/heads/land-base/ticket/4-x', 'refs/heads/land/ticket/4-x'), 'no scratch branch of it is left on GitHub');
   l.done();
 });
 

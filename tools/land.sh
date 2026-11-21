@@ -1317,7 +1317,8 @@ early_next() {
   ) || out=''
   read -r top n x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
   mv -f "$state/stacked.tmp$$" "$state/stacked"
-  hub git push -q "$REMOTE" "+$top:refs/heads/land/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
+  # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
+  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/land/$nb" "+$tip:refs/heads/land-base/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
   echo "$top $nb $(date +%s) $branch" >"$state/early"
   say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while this one deploys ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
   retro_log "early train · $nb${x:+ + $n riders} onto $label's train ($(git rev-parse --short "$tip")) · pushed $(git rev-parse --short "$top")"
@@ -1343,7 +1344,7 @@ early_gate() {
   else w="GitHub has no run of it"; fi
   [[ ! $id =~ ^[0-9]+$ ]] || [ "$st" = completed ] || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
   # Its scratch branch goes too, so a push of the same commit later starts a fresh run.
-  hub git push -q "$REMOTE" ":refs/heads/land/$b" >/dev/null 2>&1 || true
+  hub git push -q "$REMOTE" ":refs/heads/land/$b" ":refs/heads/land-base/$b" >/dev/null 2>&1 || true
   say "early next train: dropped the early CI run on $b's train ($w)"
   retro_log "early train · $label · discarded · $w"
 }

@@ -207,6 +207,7 @@ test('a files guess that names two ships holds neither: a green run without both
 // run as red would blame an innocent ship, so each must give no pin, the files hold ship 4, and the bisect finds ship 3.
 for (const [what, body, env] of [
   ['fails only on its first run here (load)', "import { existsSync, writeFileSync } from 'node:fs';\nif (!existsSync(process.env.FLAKE_ONCE)) { writeFileSync(process.env.FLAKE_ONCE, ''); throw new Error('load'); }\n", {}],
+  // timing-ok: the body of a fake test land.sh runs alone, slower than LAND_PIN_LIMIT; nothing here waits on it
   ['runs past LAND_PIN_LIMIT here', 'await new Promise((r) => setTimeout(r, 8000));\n', { LAND_PIN_LIMIT: '1' }],
 ] as const) {
   test(`a failing test that ${what} pins no ship: the run once more on each side, or a stop, is no answer (#1403)`, async () => {

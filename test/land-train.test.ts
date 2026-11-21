@@ -194,8 +194,9 @@ test("a train's red of flakes only is unchanged: one fresh run, and a ship that 
 // says so; a known flake one rider touched isn't excused, so the train gets #769's one fresh run as before.
 test("a train's red of known flakes only ships every rider on that one run; one a rider touched gets the fresh run", async () => {
   for (const touched of [false, true]) {
+    let shared = '';
     const l = await line([{}, {}, touched ? { change: ['test/slow.test.ts', 'x\n'] } : {}, {}], (dir) => ({ FAKE_FLAKY_PATH: touched ? 'test/slow.test.ts' : 'f2.txt', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: join(dir, 'shared') }),
-      (r) => seen(join(r.dir, 'shared'), ['test/busy.test.ts', 'test/slow.test.ts']));
+      (r) => seen(shared = join(r.dir, 'shared'), ['test/busy.test.ts', 'test/slow.test.ts']));
     const done = await l.go();
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
     if (touched) {
@@ -205,6 +206,9 @@ test("a train's red of known flakes only ships every rider on that one run; one 
     } else {
       assert.doesNotMatch(done[1].stderr, /running CI once more/);
       for (const i of [1, 2, 3]) assert.match(done[i].stderr, /^land: shipped past known flakes test\/busy\.test\.ts \(seen on 1 other branch in 14 days\), test\/slow\.test\.ts \(seen on 1 other branch in 14 days\)$/m, `ship ${i + 1}`);
+      // The train's sighting names its riders, so none of them ships past it later as "another branch's" flake.
+      const log = readdirSync(join(shared, 'retro-log')).map((d) => readFileSync(join(shared, 'retro-log', d, 'land.md'), 'utf8')).join('');
+      assert.match(log, /· flake · test\/busy\.test\.ts · load [\d.]+ · \S+ · in CI · with \S+ \S+$/m);
     }
     assert.equal(l.runs(), 2, "ship 1's and the train's");
     assert.equal(l.deployed().length, 2);

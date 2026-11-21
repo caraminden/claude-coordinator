@@ -74,6 +74,9 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
   assert.deepEqual(at('land: ship train: ticket/1351-f left the line while the train was tested, so it ships without it and the ships after it go back in line'),
     [{ tone: 'info', text: '#1351 left the line during the test; back in line: #1350' }]);
   assert.equal(at('land: only flakes failed (test/a.test.ts), but deleting land/x on GitHub to start a fresh run failed, so this stays red')[0].tone, 'bad');
+  assert.deepEqual(at("land: CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to 3 min 0 s more for them instead of falling back at 360s (https://ci/9)",
+    'land: only known flakes failed in CI (https://ci/9): test/memory.test.ts (seen on 4 other branches in 14 days, fix #1381), test/overlord.test.ts (seen on 1 other branch in 14 days), so this goes on as green, with no fresh run'),
+  [{ tone: 'warn', text: 'Only known flakes failed (memory, overlord): going on as green, with no fresh CI run' }], '#1419: and the reruns\' warning goes');
   assert.deepEqual(at('land: CI FALLBACK: no runner took the run. Running the full suite on perigee instead.'),
     [{ tone: 'warn', text: 'CI fallback: the full suite runs on perigee (no runner took the run)' }]);
   const slow = "land: waiting for CI or a quiet perigee: CI: CI didn't finish within 360s, but perigee is busy";

@@ -93,7 +93,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
-// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
+// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline); FAKE_LEAK: it also has the leak guard's line (#1419)
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
 // file not rerun because a real failure already made the run red).
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
@@ -186,6 +186,7 @@ case "$*" in
           [ "\${FAKE_LOG:-mixed}" != after-real ] || printf '%b test/busy.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
         fi ;;
     esac
+    [ -z "\${FAKE_LEAK:-}" ] || printf 'The tests left 1 process(es) running (now killed). Stop what a test starts before deleting its folder\\n'
     printf '%b the run still fails\\n' "$p" ;;
 esac
 `);

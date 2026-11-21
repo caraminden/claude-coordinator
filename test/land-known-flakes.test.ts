@@ -91,6 +91,20 @@ test('a real failure beside a known flake refuses at once, with no fresh run', (
   assert.equal(pushes(c), 1);
 });
 
+test('a run that also left processes running is no flake run: the leak guard keeps the fresh run', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  seen(shared, ['test/busy.test.ts', 'test/slow.test.ts']);
+  const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', FAKE_LEAK: '1', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /the run also left processes running \(the leak guard\), so no flake is excused/);
+  assert.match(res.stderr, /running CI once more/);
+  assert.equal(pushes(c), 2);
+  assert.doesNotMatch(res.stderr, /shipped past/);
+});
+
 const flaky = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
 
 test("a perigee red of known flakes only lands on that run: no retry in place; an unknown one still goes again (#1360)", () => {

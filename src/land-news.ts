@@ -84,6 +84,9 @@ export function landNews(output: string, name: (branch: string) => string): News
       news.push(bisect);
     } else if ((m = s.match(/^bisect: testing the first (\d+) of (\d+) ships/))) {
       if (bisect) bisect.text = `Finding the ship that turned the train red: testing the first ${m[1]} of ${m[2]}`;
+    } else if ((m = s.match(/^only known flakes failed (?:in CI \([^)]*\)|on perigee): (.*), so this goes on as green/))) {
+      slow = null; // #1419: no fresh run, so the reruns' warning is done
+      news.push({ tone: 'warn', text: `Only known flakes failed (${list([...m[1].matchAll(/(\S+) \(/g)].map((f) => short(f[1])))}): going on as green, with no fresh CI run` });
     } else if ((m = s.match(/^only flakes failed \(([^)]*)\)(.*)$/))) {
       const files = m[1].split(', ').map(short);
       news.push(/stays red/.test(m[2])

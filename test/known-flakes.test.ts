@@ -13,22 +13,14 @@ const root = mkdtempSync(join(tmpdir(), 'known-flakes-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
 
-const git = (cwd: string, ...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' } }).stdout.trim();
 const stamp = (ms: number) => { const d = new Date(ms).toISOString(); return { day: d.slice(0, 10), time: d.slice(11, 19) }; };
 const line = (ago: number, rest: string) => { const s = stamp(Date.now() - ago); return { day: s.day, text: `- ${s.time}Z · flake · ${rest}` }; };
 const MIN = 60_000, DAY = 24 * 60 * MIN;
 
-/** A repo whose test/x.test.ts was committed `fileAgo` ms ago, a retro log of `lines`, and optionally a database. */
-function setup(lines: { day: string; text: string }[], fileAgo = 30 * DAY, fixes?: { file: string; ticket: number; state: string; status: string }[]) {
+/** A retro log of `lines`, and optionally a database of flake fixes (held_at: ms ago). */
+function setup(lines: { day: string; text: string }[], fixes?: { file: string; ticket: number; state: string; status: string; heldAgo?: number }[]) {
   const dir = join(root, String(++n));
-  const repo = join(dir, 'repo');
-  mkdirSync(join(repo, 'test'), { recursive: true });
-  git(repo, 'init', '-q', '-b', 'main');
-  writeFileSync(join(repo, 'test', 'x.test.ts'), '1\n');
-  writeFileSync(join(repo, 'test', 'y.test.ts'), '1\n');
-  git(repo, 'add', '-A');
-  const when = `@${Math.floor((Date.now() - fileAgo) / 1000)} +0000`;
-  spawnSync('git', ['commit', '-qm', 'base'], { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } });
+  mkdirSync(dir, { recursive: true });
   const shared = join(dir, 'shared');
   for (const l of lines) {
     mkdirSync(join(shared, 'retro-log', l.day), { recursive: true });
@@ -37,19 +29,20 @@ function setup(lines: { day: string; text: string }[], fileAgo = 30 * DAY, fixes
   const env: Record<string, string> = { ...process.env as Record<string, string>, COORDINATOR_SHARED_DIR: shared };
   if (fixes) {
     const db = new DatabaseSync(join(dir, 'c.db'));
-    db.exec('CREATE TABLE tickets (id INTEGER PRIMARY KEY, project_id INTEGER, status TEXT); CREATE TABLE flake_fixes (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, file TEXT NOT NULL, ticket_id INTEGER, state TEXT NOT NULL)');
-    db.prepare('INSERT INTO tickets VALUES (1, 2, ?)').run('running'); // the shipping minion, in scheme 2
+    db.exec('CREATE TABLE tickets (id INTEGER PRIMARY KEY, project_id INTEGER, number INTEGER, status TEXT); CREATE TABLE flake_fixes (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, file TEXT NOT NULL, ticket_id INTEGER, state TEXT NOT NULL, held_at INTEGER)');
+    db.prepare('INSERT INTO tickets VALUES (1, 2, 1, ?)').run('running'); // the shipping minion, in scheme 2
     for (const f of fixes) {
-      db.prepare('INSERT INTO tickets VALUES (?, 2, ?)').run(f.ticket, f.status);
-      db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state) VALUES (2, ?, ?, ?)').run(f.file, f.ticket, f.state);
+      // A minion's id isn't its number (#1419's review: the live fix for test/memory.test.ts is id 2930, #1381).
+      db.prepare('INSERT INTO tickets VALUES (?, 2, ?, ?)').run(f.ticket + 1000, f.ticket, f.status);
+      db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state, held_at) VALUES (2, ?, ?, ?, ?)').run(f.file, f.ticket + 1000, f.state, f.heldAgo === undefined ? null : Date.now() - f.heldAgo);
     }
-    db.prepare("INSERT INTO tickets VALUES (900, 3, 'running')").run(); // another scheme's fix of the same file
+    db.prepare("INSERT INTO tickets VALUES (900, 3, 5, 'running')").run(); // another scheme's fix of the same file
     db.prepare("INSERT INTO flake_fixes (project_id, file, ticket_id, state) VALUES (3, 'test/y.test.ts', 900, 'open')").run();
     db.close();
     Object.assign(env, { LAND_FLAKE_DB: join(dir, 'c.db'), COORDINATOR_TICKET: '1' });
   }
   return (branches: string, ...files: string[]) => {
-    const r = spawnSync(process.execPath, ['--no-warnings', script, 'main', branches, ...files], { cwd: repo, encoding: 'utf8', env });
+    const r = spawnSync(process.execPath, ['--no-warnings', script, branches, ...files], { cwd: dir, encoding: 'utf8', env });
     return { status: r.status, out: r.stdout.trim(), err: r.stderr };
   };
 }
@@ -61,25 +54,29 @@ test('a file that passed alone on other branches in the last 14 days is known; t
     line(4 * DAY, 'test/x.test.ts · load 9.1 · ticket/8-b'),
     line(1 * DAY, 'test/y.test.ts · load 3 · ticket/1-me · in CI'),
     line(1 * DAY, 'test/y.test.ts · load 3 · ticket/2-rider · in CI'),
+    line(1 * DAY, 'test/y.test.ts · load 3 · ticket/9-front · in CI · with ticket/8-b ticket/1-me'), // a train the ship rode in
   ]);
   const r = run('ticket/1-me ticket/2-rider', 'test/x.test.ts');
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, 'test/x.test.ts (seen on 2 other branches in 14 days)');
   const both = run('ticket/1-me ticket/2-rider', 'test/x.test.ts', 'test/y.test.ts');
   assert.equal(both.status, 1, 'one unknown file keeps the rerun');
-  assert.equal(both.out, 'test/x.test.ts (seen on 2 other branches in 14 days)\ntest/y.test.ts (not seen on another branch in 14 days since it last changed on main, and no minion is fixing it)');
+  assert.equal(both.out, 'test/x.test.ts (seen on 2 other branches in 14 days)\ntest/y.test.ts (not seen on another branch in 14 days, and no minion is fixing it)');
+  assert.equal(run('ticket/3-other', 'test/y.test.ts').out, 'test/y.test.ts (seen on 3 other branches in 14 days)', "a train's run is one sighting, of its front");
 });
 
-test('a sighting older than 14 days, a smoke line, or one before the file last changed on main does not make it known', () => {
+test('a sighting older than 14 days, a smoke line, or one from before its fix passed its proof does not make it known', () => {
   assert.equal(setup([line(15 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')])('ticket/1-me', 'test/x.test.ts').status, 1);
   assert.equal(setup([line(1 * DAY, 'test/x.test.ts · smoke · ticket/7-a')])('ticket/1-me', 'test/x.test.ts').status, 1);
-  const fixed = setup([line(3 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], 2 * DAY)('ticket/1-me', 'test/x.test.ts');
-  assert.equal(fixed.status, 1, 'the file changed on main after it flaked: maybe fixed');
-  assert.equal(setup([line(1 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], 2 * DAY)('ticket/1-me', 'test/x.test.ts').status, 0, 'flaked since that change');
+  const fixed = setup([line(3 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], [{ file: 'test/x.test.ts', ticket: 41, state: 'held', status: 'closed', heldAgo: 2 * DAY }])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(fixed.status, 1, 'fixed since: a flake now is a new one');
+  assert.equal(fixed.out, 'test/x.test.ts (not seen on another branch in 14 days since its fix passed its proof, and no minion is fixing it)');
+  const again = setup([line(1 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], [{ file: 'test/x.test.ts', ticket: 41, state: 'held', status: 'closed', heldAgo: 2 * DAY }])('ticket/1-me', 'test/x.test.ts');
+  assert.equal(again.status, 0, 'flaked on another branch since that proof');
 });
 
 test("an open fix minion in the ship's own scheme makes a file known; a closed or held one, or another scheme's, does not", () => {
-  const run = setup([line(2 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], 30 * DAY, [
+  const run = setup([line(2 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], [
     { file: 'test/x.test.ts', ticket: 41, state: 'open', status: 'running' },
     { file: 'test/z.test.ts', ticket: 42, state: 'open', status: 'closed' },
     { file: 'test/w.test.ts', ticket: 43, state: 'held', status: 'running' },
@@ -90,9 +87,9 @@ test("an open fix minion in the ship's own scheme makes a file known; a closed o
 });
 
 test('no retro log, no database or a broken one: nothing is known, and it says so rather than fail', () => {
-  const run = setup([], 30 * DAY, []);
+  const run = setup([], []);
   assert.equal(run('ticket/1-me', 'test/x.test.ts').status, 1);
-  const r = spawnSync(process.execPath, ['--no-warnings', script, 'main', 'ticket/1-me', 'test/x.test.ts'], { cwd: root, encoding: 'utf8', env: { ...process.env, COORDINATOR_SHARED_DIR: join(root, 'none'), LAND_FLAKE_DB: join(root, 'none.db'), COORDINATOR_TICKET: '1' } });
+  const r = spawnSync(process.execPath, ['--no-warnings', script, 'ticket/1-me', 'test/x.test.ts'], { cwd: root, encoding: 'utf8', env: { ...process.env, COORDINATOR_SHARED_DIR: join(root, 'none'), LAND_FLAKE_DB: join(root, 'none.db'), COORDINATOR_TICKET: '1' } });
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stdout, /^test\/x\.test\.ts \(not seen on another branch/);
 });

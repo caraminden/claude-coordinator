@@ -1117,7 +1117,7 @@ ci_failed() {
   failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
   tail -n 40 <<<"$failed" >&2
   while read -r f load; do
-    retro_log "flake · $f · load $load · $branch · in CI"
+    retro_log "flake · $f · load $load · $branch · in CI${train_br[*]:+ · with ${train_br[*]}}" # riders: one run (#1419)
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
   done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
 }
@@ -1389,9 +1389,11 @@ known_flakes() {
   local files=() f m out hits=() chg=() ok=1 who
   known_why=''
   [ -f "$tools/known-flakes.ts" ] || return 1
+  # The leak guard fails a run on its own, beside the files (test/leak-guard.ts): that is no flake.
+  ! grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed" || { say "the run also left processes running (the leak guard), so no flake is excused"; return 1; }
   IFS=, read -ra files <<<"${1//, /,}"
   out=$(LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
-    "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$old" "$branch ${train_br[*]}" "${files[@]}" 2>/dev/null) || ok=''
+    "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$branch ${train_br[*]}" "${files[@]}" 2>/dev/null) || ok=''
   [ -n "$out" ] || { say "couldn't tell whether $1 are known flakes (tools/known-flakes.ts gave no answer)"; return 1; }
   [ -n "$ok" ] || { while read -r f; do [[ $f != *'(not seen on another branch'* ]] || say "$f is no known flake"; done <<<"$out"; return 1; }
   train_chg
@@ -1588,6 +1590,7 @@ else
 fi
 if [ "$mode" = full ]; then
   [ -z "$fellback" ] || say "merged on perigee's own test run, not CI: $fellback"
+  [ -z "${known_by[$tip]:-}" ] || say "shipped past known flakes ${known_by[$tip]}"
   merge_into
 fi
 

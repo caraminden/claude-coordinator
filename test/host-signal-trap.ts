@@ -40,8 +40,9 @@ for (const n of ['loadavg', 'availableParallelism', 'cpus', 'freemem', 'totalmem
 syncBuiltinESMExports(); // `import { readFile } from 'node:fs/promises'` and the like see the wrapped functions
 
 // Time of day: a formatter asked for the real Pacific zone decides the day (or the hour) from the real clock.
+// src/host-signals.ts reads Pacific's date once, to pick the fixed zone on it: the one read allowed.
 const pacificAsked = (how: string, opts: unknown) => {
-  if ((opts as { timeZone?: unknown } | undefined)?.timeZone === PACIFIC) note(`${how} in ${PACIFIC}`);
+  if ((opts as { timeZone?: unknown } | undefined)?.timeZone === PACIFIC && !/\/src\/host-signals\.ts:/.test(new Error().stack ?? '')) note(`${how} in ${PACIFIC}`);
 };
 const RealFormat = Intl.DateTimeFormat;
 Intl.DateTimeFormat = new Proxy(RealFormat, {

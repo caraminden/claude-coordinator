@@ -291,8 +291,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       TURN_POOL: '0',
       // The box's pressure, load, memory, cgroups and Pacific day are fixed (src/host-signals.ts, #1485): a busy box paused a
       // test server's indexers (#1301, #1349) and a test went red after midnight (#1421). A test of the gate passes its own
-      // CITADEL_PSI_CPU file; test/host-signals.test.ts checks every test that starts server.ts itself sets this too.
-      CITADEL_HOST_SIGNALS: 'fixed',
+      // CITADEL_PSI_CPU file (none comes in from the runner's env); test/host-signals.test.ts checks every test that starts server.ts itself sets this too.
+      CITADEL_HOST_SIGNALS: 'fixed', CITADEL_PSI_CPU: undefined, CITADEL_PSI_MEMORY: undefined, CITADEL_PSI_IO: undefined,
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
       ...opts.env,

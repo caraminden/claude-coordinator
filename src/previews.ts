@@ -130,6 +130,7 @@ export function previewEnv(port: number, dir: string, password: string, secret: 
     PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
     HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, PREVIEW: '1', BOOT_CHECK: '1', CLAUDE_BIN: '/bin/false',
     CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
+    CITADEL_HOST_SIGNALS: process.env.CITADEL_HOST_SIGNALS, // a test server's preview stays pinned (#1485); unset live
   };
 }
 

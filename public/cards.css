@@ -1,7 +1,28 @@
 /* Cards in a chat: questions, approvals, merges, plans, galleries, ultra reviews, and the pointer back to an answer. */
 /* Ultra review (#432): its dialog, and its card in the chat (busy until the findings land). */
 dialog.ultra-review { --cui-dialog-width: 520px; }
-.ultra-review :is(.ur-paths, .ur-err)[hidden] { display: none; }
+.ultra-review :is(.ur-paths, .ur-err, .ur-batch, .ur-rows-box, .ur-refused, .ur-cost, .cui-notice, button)[hidden] { display: none; }
+/* The batch (#1399): prepped rows, each with its own Start, then the areas to prep. */
+.ultra-review .ur-batch { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
+.ultra-review .ur-batch .ur-cost { margin: 0; }
+.ultra-review .ur-batch h4 { margin: 0; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.ultra-review .ur-rows-box { display: flex; flex-direction: column; gap: 0.5rem; }
+.ultra-review .ur-remove { flex: none; padding-inline: 0.7rem; }
+.ultra-review .ur-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+.ultra-review .ur-row { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.ultra-review .ur-row:has([data-tone="danger"]) { border-left-color: var(--error); }
+.ultra-review .ur-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.ultra-review .ur-row-name { color: var(--ink); }
+.ultra-review .ur-row-size { font-variant-numeric: tabular-nums; margin-left: auto; }
+.ultra-review .ur-row-paths { font-size: 0.85em; overflow-wrap: anywhere; }
+.ultra-review .ur-row-err { color: var(--error); font-size: 0.9em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ultra-review .ur-row-actions, .ultra-review .ur-batch-actions { gap: 0.5rem; }
+.ultra-review fieldset.ur-area { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.ultra-review fieldset.ur-area .row { gap: 0.5rem; }
+.ultra-review fieldset.ur-area .row input { flex: 1; min-width: 0; }
+.ultra-review fieldset.ur-area textarea { font-family: var(--mono); font-size: 0.9em; }
+.ultra-review .ur-areas { display: flex; flex-direction: column; gap: 0.5rem; }
+.ur-card .ur-pr, .ur-card .ur-question { font-size: 0.9em; margin-top: 0.25rem; overflow-wrap: anywhere; }
 .ultra-review .ur-err { margin: 0 0 0.75rem; }
 .ultra-review .ur-modes { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
 .ultra-review label.ur-mode { display: flex; align-items: center; gap: 0.5rem; color: var(--ink); }

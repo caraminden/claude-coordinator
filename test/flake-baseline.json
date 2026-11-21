@@ -9,23 +9,7 @@
    "ok": 0
   }
  },
- "advisor-trial.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "affected.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "agent-replaced.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
@@ -36,30 +20,8 @@
   }
  },
  "agent-task-groups.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 2,
-   "ok": 0
-  }
- },
- "alert-wakes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "apk-build.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "apk-release.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -96,21 +58,11 @@
   }
  },
  "app-services.test.ts": {
-  "rmTemp": {
-   "n": 4,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
   },
   "elapsed": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "app-turns-check.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -127,81 +79,19 @@
    "ok": 0
   }
  },
- "artifacts.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
- "auth.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "auto-deploy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "auto-resume.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
   }
  },
- "azure-speech.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "background-jobs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
   }
  },
- "backup-flag.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "backup-freshness.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "backup.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "base-check.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "boot-check.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "branch.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -217,52 +107,6 @@
   "sleep": {
    "n": 2,
    "ok": 0
-  },
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "build-branches.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "build-cache.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "build-output.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "builds.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "card-links.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "card-send-reveal.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "chain-outbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
   }
  },
  "chained-minions.test.ts": {
@@ -272,12 +116,6 @@
   },
   "sleep": {
    "n": 7,
-   "ok": 0
-  }
- },
- "checkpoint.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -299,42 +137,6 @@
    "ok": 0
   }
  },
- "ci-armed.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ci-failures.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ci-health.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ci-load.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ci-mirror.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ci-numbers.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "ci-store.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -349,23 +151,7 @@
    "ok": 0
   }
  },
- "ci-wait.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "citadel-android-mic.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "citadel-android.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 10,
    "ok": 0
@@ -380,48 +166,18 @@
   }
  },
  "citadel-app-heavy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
   }
  },
- "citadel-callgrind.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "citadel-heavy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
   }
  },
- "citadel-node.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
- "citadel-test.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
  "citadel-wait.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  },
   "elapsed": {
    "n": 2,
    "ok": 0
@@ -438,10 +194,6 @@
   }
  },
  "claude-container.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
@@ -452,48 +204,18 @@
   }
  },
  "claude-link.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "close-on-seen-route.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
  "close-self.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
- "closed-at.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "closed-cleanup.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "codex-lock.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
@@ -503,39 +225,13 @@
    "ok": 0
   }
  },
- "codex-runner.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "codex-turn.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
- "codex-usage.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "codex.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
  "cold-mail.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
@@ -548,18 +244,6 @@
   }
  },
  "contraption-asks.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "contraption-errors.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "contraption-media.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -613,58 +297,18 @@
    "ok": 0
   }
  },
- "coordinator-access.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "costs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "crash-proof.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
- "db-copy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "db-nocow.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "db-setup.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "db-writer.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 2,
    "ok": 0
   },
   "shortUntil": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "deploy-watch.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -679,35 +323,13 @@
    "ok": 0
   }
  },
- "desktop-launcher-trial.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "dev-copy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "doc-preview.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
  "edit-instructions.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "emulator-lease.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -725,18 +347,6 @@
    "ok": 0
   }
  },
- "fallbacks.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "fast-mode.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "fcm.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -747,36 +357,6 @@
    "ok": 0
   }
  },
- "fix-shipped.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "flake-alarm.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "flake-evidence.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "flakes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "follow-origin.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "frame-protocol-browser.test.ts": {
   "sleep": {
    "n": 1,
@@ -784,10 +364,6 @@
   }
  },
  "fresh-session.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 8,
    "ok": 0
@@ -799,54 +375,6 @@
    "ok": 0
   },
   "elapsed": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "github.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "guard.test.ts": {
-  "rmTemp": {
-   "n": 4,
-   "ok": 0
-  }
- },
- "handoff-tidy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "heavy-ci.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "heavy-shim.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "heavy-unit.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "held-list.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "hidden-schemes.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -863,67 +391,13 @@
    "ok": 0
   }
  },
- "home.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "hook-run.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "host-check.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "host-job-lost.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "host-load.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "host-tool-cards.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
- "host-tools.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "icon-gen.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "ideas.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "inbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "incidents.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -939,39 +413,19 @@
    "ok": 0
   }
  },
- "instruction-history.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "instructions-verdicts.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
- "keep-runners.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
  "keepalive.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
  "kill-resume.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 14,
    "ok": 0
@@ -981,35 +435,13 @@
    "ok": 0
   }
  },
- "kit-hooks.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "kit-land-drift.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "kit-sync.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
   },
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "known-flakes.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -1025,12 +457,6 @@
    "ok": 0
   }
  },
- "land-fixture.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "land-handoff.test.ts": {
   "rmTemp": {
    "n": 2,
@@ -1038,12 +464,6 @@
   },
   "shortUntil": {
    "n": 3,
-   "ok": 0
-  }
- },
- "land-news.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -1064,10 +484,6 @@
   }
  },
  "land-recover-fixture.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 2,
    "ok": 0
@@ -1085,12 +501,6 @@
    "ok": 0
   }
  },
- "land-units.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "land.test.ts": {
   "elapsed": {
    "n": 3,
@@ -1101,61 +511,13 @@
    "ok": 0
   }
  },
- "lane.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "last-green.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "launch-plan.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
  "leak-guard.test.ts": {
   "sleep": {
    "n": 3,
    "ok": 0
   }
  },
- "lending-lists.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "light-effort.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "link-check.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "list-order.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "list-tickets.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "long-jobs.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1171,17 +533,9 @@
   "sleep": {
    "n": 3,
    "ok": 0
-  },
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
   }
  },
  "machine-agent-jobs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
@@ -1214,10 +568,6 @@
   }
  },
  "machine-workspace.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
@@ -1269,17 +619,7 @@
    "ok": 0
   }
  },
- "marks.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "mcp-pool.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
@@ -1299,43 +639,7 @@
    "ok": 0
   }
  },
- "media-tools.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "mem-room.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "member-schemes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "memory-curator-routes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "memory-curator-schedule.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "memory-files.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "memory-storms.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1351,19 +655,7 @@
    "ok": 0
   }
  },
- "mentions.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "merge-go.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "minion-budget.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1380,22 +672,12 @@
   }
  },
  "minion-lane.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
   }
  },
  "minion-message.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "minion-rules.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1420,24 +702,8 @@
   }
  },
  "network-resume.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 6,
-   "ok": 0
-  }
- },
- "new-app.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "offbox.test.ts": {
-  "rmTemp": {
-   "n": 2,
    "ok": 0
   }
  },
@@ -1459,17 +725,7 @@
    "ok": 0
   }
  },
- "outbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "outside-kill.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 5,
    "ok": 0
@@ -1491,12 +747,6 @@
    "ok": 0
   },
   "shortUntil": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "own-machines.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -1523,12 +773,6 @@
    "ok": 0
   }
  },
- "pending-deploy.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "people.test.ts": {
   "rmTemp": {
    "n": 2,
@@ -1536,10 +780,6 @@
   }
  },
  "perigee-godot.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
@@ -1556,10 +796,6 @@
   }
  },
  "person-switch-session.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  },
   "sleep": {
    "n": 2,
    "ok": 0
@@ -1577,19 +813,7 @@
    "ok": 0
   }
  },
- "pinned-mcp.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "plan-cards.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "plan-state.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1602,20 +826,12 @@
   }
  },
  "preview-build.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
  "preview-mode.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
@@ -1625,30 +841,8 @@
    "ok": 0
   }
  },
- "previews.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "progress-reporter.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "prompt-hashes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "properties.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -1663,18 +857,6 @@
    "ok": 0
   }
  },
- "prune.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ps1-lint.test.ts": {
-  "rmTemp": {
-   "n": 5,
-   "ok": 0
-  }
- },
  "push-triggers.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -1682,12 +864,6 @@
   },
   "sleep": {
    "n": 5,
-   "ok": 0
-  }
- },
- "push.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -1703,17 +879,7 @@
    "ok": 0
   }
  },
- "queue-give-back.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "quiet.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
@@ -1745,27 +911,9 @@
    "ok": 0
   }
  },
- "recap.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "reconnect-browser.test.ts": {
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "relative-links.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "relay-outbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -1787,29 +935,13 @@
    "ok": 0
   }
  },
- "release-key.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "release-targets.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  },
   "elapsed": {
    "n": 1,
    "ok": 0
   },
   "sleep": {
    "n": 1,
-   "ok": 0
-  }
- },
- "releases.test.ts": {
-  "rmTemp": {
-   "n": 2,
    "ok": 0
   }
  },
@@ -1820,18 +952,6 @@
   }
  },
  "repeat-bugs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "replay-keep.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "replay.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -1852,10 +972,6 @@
   }
  },
  "restart-anywhere.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  },
   "sleep": {
    "n": 11,
    "ok": 0
@@ -1901,53 +1017,13 @@
    "ok": 0
   }
  },
- "review-glance.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "review-set-api.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
- "review-set.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "rollback.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "rule-homes.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "rules-review.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "run-tests-scope.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "run-tests.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
@@ -1967,49 +1043,13 @@
    "ok": 0
   }
  },
- "runner-linux-scripts.test.ts": {
-  "rmTemp": {
-   "n": 3,
-   "ok": 0
-  }
- },
- "runners-back-outbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "saved-views.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "schedule-templates.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "schedules-api.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
   }
  },
- "schema-compat.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "scheme-icon-app.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "scheme-icon-gated.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -2027,21 +1067,9 @@
    "ok": 0
   }
  },
- "scheme-refs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "scheme-setup-land-ci.test.ts": {
   "sleep": {
    "n": 13,
-   "ok": 0
-  }
- },
- "scheme-setup-land-fixture.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -2085,10 +1113,6 @@
   "shortUntil": {
    "n": 1,
    "ok": 0
-  },
-  "rmTemp": {
-   "n": 4,
-   "ok": 0
   }
  },
  "secrets.test.ts": {
@@ -2103,25 +1127,7 @@
    "ok": 0
   }
  },
- "sent-back-replace.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "server-work.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "settle-question.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "shared-folder.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -2130,12 +1136,6 @@
  "shared-pins.test.ts": {
   "rmTemp": {
    "n": 2,
-   "ok": 0
-  }
- },
- "ship-failures.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -2149,49 +1149,7 @@
    "ok": 0
   }
  },
- "ship-line.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ship-stop.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "shipping.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "show-parts.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "sibling-files.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "side-ask.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "skill-evals.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "skill-stocktake-uses.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -2203,50 +1161,8 @@
    "ok": 0
   }
  },
- "slash-commands.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "spend-turn.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "stale-docs.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "stall-signals.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "standing-checks.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "state-db.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "status-browser.test.ts": {
   "sleep": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "status-page.test.ts": {
-  "rmTemp": {
    "n": 2,
    "ok": 0
   }
@@ -2258,26 +1174,12 @@
   }
  },
  "steer.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 5,
    "ok": 0
   }
  },
- "step-times.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "stop-sigint.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 4,
    "ok": 0
@@ -2287,12 +1189,6 @@
    "ok": 0
   },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "strike-text.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -2327,73 +1223,7 @@
    "ok": 0
   }
  },
- "timer-alerts.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "tmp-sweep.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "tripwire.test.ts": {
-  "rmTemp": {
-   "n": 4,
-   "ok": 0
-  }
- },
  "turn-asker.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-grunts.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-launch.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-person-env.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-setup.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-supervisor.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "turn-survives.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "turn-tmp.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "ui-shot-browser.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0
@@ -2411,17 +1241,7 @@
    "ok": 0
   }
  },
- "usage-ledger.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "usage-limit.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 4,
    "ok": 0
@@ -2431,33 +1251,9 @@
    "ok": 0
   }
  },
- "view-list.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "visible.test.ts": {
   "sleep": {
    "n": 8,
-   "ok": 0
-  }
- },
- "waits-readout.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "waits.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "wake-when-live-outbox.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -2472,51 +1268,13 @@
   }
  },
  "wake.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
   }
  },
- "watchdog.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "welcome.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "who-touches.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "wording.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "worktree-base.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "elapsed": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "worktree-sweep.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }

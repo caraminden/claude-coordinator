@@ -20,14 +20,17 @@ test('a stall of the event loop is logged with its length, and a free loop logs 
   const watch = watchLoopLag((text) => logged.push(text), 10, 150);
   try {
     await new Promise((r) => setTimeout(r, 100));
-    assert.deepEqual(logged, [], 'nothing held it');
+    // A loaded box can keep the loop waiting for the CPU past the threshold: a real stall, rightly logged (#1424).
+    // What a free loop never logs is a stall of its own work.
+    assert.deepEqual(logged.filter((l) => /Cause: own work/.test(l)), [], 'nothing in the process held it');
+    const before = logged.length;
     spin(400);
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(logged.length, 1);
-    const held = Number(logged[0].match(/held for (\d+\.\d) s/)?.[1]);
-    assert.ok(held >= 0.3, `it logs the stall's length: ${logged[0]}`); // longer on a busy box, never shorter
+    await waitFor(() => logged.length > before);
+    const line = logged[before]; // the first tick after the spin measures it; any later line is the box's own stall
+    const held = Number(line.match(/held for (\d+\.\d) s/)?.[1]);
+    assert.ok(held >= 0.3, `it logs the stall's length: ${line}`); // longer on a busy box, never shorter
     // Where the kernel tells disk stalls (PSI), the line says how much of it was the disk (#622).
-    if (ioStalledUs() != null) assert.match(logged[0], / Disk: the box was fully stalled on I\/O for \d+\.\d s of it\.$/);
+    if (ioStalledUs() != null) assert.match(line, / Disk: the box was fully stalled on I\/O for \d+\.\d s of it\.$/);
   } finally {
     watch.stop();
   }
@@ -40,10 +43,12 @@ test('with the sampler on, a stall names the code that held the loop (#609)', as
     await new Promise((r) => setTimeout(r, 200)); // the sampler starts
     function holdTheLoopForTest() { spin(600); }
     holdTheLoopForTest();
-    await waitFor(() => logged.length > 0);
-    assert.equal(logged.length, 1);
-    assert.match(logged[0], /held for \d+\.\d s: .* Running: \d+% /);
-    assert.match(logged[0], /holdTheLoopForTest \(test\/loop-lag\.test\.ts:\d+\)/, logged[0]);
+    // On a loaded box other real stalls get lines too (waiting for the CPU, the sampler's own start): this one is
+    // the line that names the function that held the loop, and it gets exactly one (#1424).
+    const ours = () => logged.filter((l) => /holdTheLoopForTest \(test\/loop-lag\.test\.ts:\d+\)/.test(l));
+    await waitFor(() => ours().length > 0);
+    assert.equal(ours().length, 1, logged.join('\n'));
+    assert.match(ours()[0], /held for \d+\.\d s: .* Running: \d+% /);
   } finally {
     watch.stop();
   }

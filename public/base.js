@@ -87,7 +87,7 @@ const send = (path, opts) => fetch(path, {
   ...opts,
   headers: opts.body ? { 'Content-Type': 'application/json' } : {},
   body: opts.body ? JSON.stringify(opts.body) : undefined,
-}).then(async (res) => ({ res, text: await res.text().catch(() => '') }));
+}).then(async (res) => ({ res, body: await res.json().catch(() => ({})) }));
 
 export async function api(path, opts = {}) {
   const get = !opts.method || opts.method === 'GET';
@@ -106,10 +106,9 @@ export async function api(path, opts = {}) {
       sent.then(done, done);
     }
   }
-  const { res, text } = await sent;
-  // Parsed for each caller, so callers that share a request can each change what they're given.
-  let data;
-  try { data = JSON.parse(text); } catch { data = {}; }
+  const { res, body } = await sent;
+  // A copy for each caller, so callers that share a request can each change what they're given.
+  const data = structuredClone(body);
   // A copy, as callers change what they're given; histories are kept from the chat's own page (core.js keepOpenChat).
   if (get && res.ok && !/events/.test(path) && replayable(path)) {
     answers.delete(path); // newest last, so the cap drops the longest unasked

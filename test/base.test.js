@@ -196,7 +196,7 @@ test('missedNews: a tab back within a minute with stream news since it hid asks 
 function fakeFetch(t) {
   const calls = [];
   const real = globalThis.fetch;
-  globalThis.fetch = (path, opts) => new Promise((resolve) => calls.push({ path, method: opts?.method ?? 'GET', answer: (body) => resolve({ ok: true, status: 200, text: async () => JSON.stringify(body) }) }));
+  globalThis.fetch = (path, opts) => new Promise((resolve) => calls.push({ path, method: opts?.method ?? 'GET', answer: (body) => resolve({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) }) }));
   t.after(() => { globalThis.fetch = real; newsArrived(); });
   return calls;
 }

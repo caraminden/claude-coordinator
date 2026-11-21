@@ -21,7 +21,7 @@ function scheme(t, over = {}) {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (path) => {
     fetched.push(path);
-    return { ok: false, status: 500, json: async () => ({}), text: async () => '{}' };
+    return { ok: false, status: 500, json: async () => ({}) };
   };
   setView({ kind: 'project', projectId: 2, coordinator: taskmaster, tickets: new Map([[minion.id, minion]]), ...over });
   t.after(() => { globalThis.fetch = realFetch; setView(null); forgetOtherSchemes(); });

@@ -1,5 +1,6 @@
 // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
+import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
@@ -543,19 +544,7 @@ addEventListener('hashchange', syncUsageLinks);
 export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
 
-/**
- * One window combined across a person's accounts (Cara, 2026-11-16: "just combine all accounts into a single bar"):
- * the average utilization, equal weight. An account with no report, or whose window already reset, counts as 0%.
- * resetsAt is the soonest still-ahead reset. Null when no account has reported that window at all.
- */
-export function combineWindows(accounts, key) {
-  const ws = accounts.map((a) => a.usage?.[key]);
-  if (!ws.some(Boolean)) return null;
-  const now = Date.now();
-  const util = ws.map((w) => (w && (!w.resetsAt || w.resetsAt > now) ? Math.min(1, Math.max(0, w.utilization)) : 0));
-  const resets = ws.filter((w) => w?.resetsAt > now).map((w) => w.resetsAt);
-  return { utilization: util.reduce((x, y) => x + y, 0) / accounts.length, resetsAt: resets.length ? Math.min(...resets) : null };
-}
+export { combineWindows };
 
 /** Where a person's new minions start and why (#793), from usageOf's account, why and pinned. */
 export function pickLine(u, accounts) {
@@ -595,7 +584,7 @@ export function renderUsage(next = usage) {
       session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
       // Several Claude accounts (#779): the bar combines them; the tooltip says where new minions start (#793) and lists each, ▸ on that one.
-      ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => `${a.n === usage.account ? '▸ ' : ''}${a.label}: ${a.usage?.weekly ? `week ${Math.round(a.usage.weekly.utilization * 100)}%` : 'no turns yet'}${a.usage?.session ? `, 5 hours ${Math.round(a.usage.session.utilization * 100)}%` : ''}`)] : []),
+      ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => accountLine(a, a.n === usage.account))] : []),
     ].filter((line) => line != null).join('\n');
   }
   for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(el);

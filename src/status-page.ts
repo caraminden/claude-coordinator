@@ -365,11 +365,13 @@ export class StatusPage {
     // Stalls: count and longest per day, and the last one's line.
     const stallCount = blank();
     const stallLongest = blank();
+    const stallBoot = blank(); // of them, #1295's stalls just after a start: counted too, as they were before it split them
     const stalls = events.filter((e) => e.kind === 'loop-lag' || e.kind === BOOT_STALL);
     for (const s of stalls) {
       const d = dayOf(s.at);
       if (!(d in stallCount)) continue;
       stallCount[d]++;
+      if (s.kind === BOOT_STALL) stallBoot[d]++;
       stallLongest[d] = Math.max(stallLongest[d], stallSeconds(s.detail) ?? 0);
     }
     const lastStall = stalls.at(-1);
@@ -470,7 +472,7 @@ export class StatusPage {
       looks,
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
-      stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
+      stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
       host: { series, latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
@@ -576,7 +578,7 @@ export interface CitadelStatus {
   /** Whether this viewer can see Citadel's scheme, so its tiles carry Investigate (#1273). */
   canInvestigate: boolean;
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
-  stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
+  stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
   host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
     /** CPU by source (#1332): the last hour, day and week as a table, and the week by hour for the stacked chart. */

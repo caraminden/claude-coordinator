@@ -469,6 +469,7 @@ test('the last stall says its cause in words, and a stall just after a boot is s
   const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now });
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(c.stalls.counts.at(-1), 2, 'the boot stall counts on the page');
+  assert.equal(c.stalls.afterBoot.at(-1), 1, 'and the page says how many of them came just after a start (#1414)');
   assert.equal(c.stalls.last?.cause, 'own work');
   assert.equal(c.stalls.last?.afterBoot, true);
   assert.equal(stallCauseOf('The event loop was held for 1.5 s: x. Cause: waited for disk (0.1 s on CPU'), 'waited for disk');

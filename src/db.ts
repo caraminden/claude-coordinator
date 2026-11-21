@@ -21,11 +21,12 @@ import { flakeQueries } from './db/flakes.ts';
 import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
+import { readWarmQueries } from './db/read-warm.ts';
 import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
-import { inScope, scoped, warm } from './read-scope.ts';
+import { inScope, scoped } from './read-scope.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -2665,13 +2666,6 @@ export class Store {
     return e && { ...e };
   }
 
-  /** Inside a read scope (src/read-scope.ts): every one of `ids` in one read, for getEvent. */
-  warmEvents(ids: number[]) {
-    if (!inScope(this.db) || !ids.length) return;
-    const rows = this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as EventRow[];
-    const got = new Map(rows.map((e) => [e.id, e]));
-    warm(this.db, ids.map((id) => [`event:${id}`, got.get(id)]));
-  }
 
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
@@ -2875,6 +2869,13 @@ export class Store {
 
   /** When `name` last looked at each of a project's threads: ticket id -> time. */
   seenTimes(name: string, projectId: number): Record<number, number> {
+    // In a read scope (#1527) one read for every scheme: the scheme list asked twice a scheme, each walking all their marks.
+    if (inScope(this.db)) {
+      const all = scoped(this.db, `seen:${name}`, () => (this.db
+        .prepare('SELECT s.ticket_id, s.seen_at, t.project_id FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ?')
+        .all(name) as { ticket_id: number; seen_at: number; project_id: number }[]));
+      return Object.fromEntries(all.filter((r) => r.project_id === projectId).map((r) => [r.ticket_id, r.seen_at]));
+    }
     const rows = this.db
       .prepare('SELECT s.ticket_id, s.seen_at FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ? AND t.project_id = ?')
       .all(name, projectId) as { ticket_id: number; seen_at: number }[];
@@ -3094,13 +3095,6 @@ export class Store {
     return [...scoped(this.db, `open-cards:${ticketId}`, () => this.openCardsWhere('e.ticket_id = ?', ticketId))];
   }
 
-  /** Inside a read scope (src/read-scope.ts): every open card of `projectId`'s minions in one read, for openCardsOf of each of `ticketIds`. */
-  warmOpenCards(projectId: number, ticketIds: number[]) {
-    if (!inScope(this.db)) return;
-    const by = new Map<number, EventRow[]>(ticketIds.map((id) => [id, []]));
-    for (const e of this.openCards(projectId)) by.get(e.ticket_id)?.push(e);
-    warm(this.db, [...by].map(([id, rows]) => [`open-cards:${id}`, rows]));
-  }
 
   /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
   openCardAt(ticketId: number): number | null {
@@ -3540,14 +3534,6 @@ export class Store {
     return scoped(this.db, `cost:${ticketId}:${hostOnly}`, () => (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c);
   }
 
-  /** Inside a read scope (src/read-scope.ts): ticketCost (both kinds) and lastTurnEnd of every one of `ids`, in one read. */
-  warmTurnTotals(ids: number[]) {
-    if (!inScope(this.db) || !ids.length) return;
-    const rows = this.db.prepare(`SELECT j.value AS id, COALESCE(SUM(t.cost_usd), 0) AS c, COALESCE(SUM(CASE WHEN t.payer IS NULL THEN t.cost_usd END), 0) AS h,
-        (SELECT ended_at FROM turns WHERE ticket_id = j.value AND side IS NULL ORDER BY id DESC LIMIT 1) AS e
-      FROM json_each(?) j LEFT JOIN turns t ON t.ticket_id = j.value GROUP BY j.value`).all(JSON.stringify(ids)) as { id: number; c: number; h: number; e: number | null }[];
-    warm(this.db, rows.flatMap((r) => [[`cost:${r.id}:false`, r.c], [`cost:${r.id}:true`, r.h], [`last-turn-end:${r.id}`, r.e ?? null]] as [string, unknown][]));
-  }
 
   /**
    * Every closed minion created since `since` that cost anything (open ones are still short of their final cost), every scheme (#1114): its `type` property (null untyped),
@@ -3811,13 +3797,6 @@ export class Store {
     return value == null ? null : JSON.parse(value);
   }
 
-  /** Inside a read scope (src/read-scope.ts): every one of `keys` in one read, for getSetting. */
-  warmSettings(keys: string[]) {
-    if (!inScope(this.db) || !keys.length) return;
-    const rows = this.db.prepare('SELECT key, value FROM settings WHERE key IN (SELECT value FROM json_each(?))').all(JSON.stringify(keys)) as { key: string; value: string }[];
-    const got = new Map(rows.map((r) => [r.key, r.value]));
-    warm(this.db, keys.map((k) => [`setting:${k}`, got.get(k) ?? null]));
-  }
 
   /** Every setting whose key starts with `prefix`, as key and value. */
   settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {
@@ -3912,6 +3891,7 @@ const AREAS = [
   machineQueries,
   minionQueries,
   pushQueries,
+  readWarmQueries,
   settingQueries,
   viewQueries,
 ];
@@ -3923,6 +3903,7 @@ type Areas =
   & typeof machineQueries
   & typeof minionQueries
   & typeof pushQueries
+  & typeof readWarmQueries
   & typeof settingQueries
   & typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.

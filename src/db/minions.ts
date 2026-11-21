@@ -34,9 +34,11 @@ export const minionQueries = {
 
   /** All tickets in a project, including the coordinator. */
   listTickets(this: Store, projectId: number): Ticket[] {
-    return scoped(this.db, `tickets:${projectId}`, () => this.db
+    // In a read scope (#1527) the rows are shared, not copied: copying Citadel's 1,500 rows per call cost more than the
+    // read saved. Only read-only code runs in a scope; each caller still gets its own array to filter or sort.
+    return [...scoped(this.db, `tickets:${projectId}`, () => this.db
       .prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(projectId) as unknown as Ticket[]).map((t) => ({ ...t }));
+      .all(projectId) as unknown as Ticket[])];
   },
 
   /** Open tickets whose last turn hit the usage limit, in every project. */

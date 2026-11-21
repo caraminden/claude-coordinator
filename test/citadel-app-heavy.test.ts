@@ -29,10 +29,10 @@ test("it runs the step with its status and puts the app's name in the history", 
 
 test('a hold past the cap is stopped with 124 and told to split the work', () => {
   n++;
-  const began = Date.now();
-  const r = spawnSync(tool, ['sleep', '30'], { env: env('trip', { CITADEL_HEAVY_APP_CAP: '1' }), encoding: 'utf8' });
+  const ran = join(root, 'ran-out');
+  const r = spawnSync(tool, ['sh', '-c', `sleep 30; touch '${ran}'`], { env: env('trip', { CITADEL_HEAVY_APP_CAP: '1' }), encoding: 'utf8' });
   assert.equal(r.status, 124);
-  assert.ok(Date.now() - began < 10_000);
+  assert.ok(!existsSync(ran), 'the cap stopped the step; it did not run out');
   assert.match(r.stderr, /capped at 0 min 1 s\. Split the work into shorter steps/);
 });
 

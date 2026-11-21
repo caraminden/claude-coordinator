@@ -102,9 +102,10 @@ test('the runner saves a turn going quiet, not while it waits on a person, and c
   // An approval waiting: the silence is the person's, and the clock restarts.
   const waiting = (r as any).approvals.waiting;
   (r as any).approvals.waiting = (id: number) => id === t.id;
-  (r as any).checkQuiet(t.id, live);
+  const restartedAt = 4_000_000_000_000;
+  (r as any).checkQuiet(t.id, live, restartedAt);
   assert.equal(saved(), null);
-  assert.ok(Date.now() - live.activity.at < 1000, 'the quiet clock restarted');
+  assert.equal(live.activity.at, restartedAt, 'the quiet clock restarted at the time it was given');
   goQuiet();
   assert.equal(saved(), null, 'never quiet while it waits on a person');
   (r as any).approvals.waiting = waiting;

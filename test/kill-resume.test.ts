@@ -132,6 +132,7 @@ test('a second kill in a row stops with the error and one push, and is not resum
     await kill(id);
     await until('the minion to fail', () => store.getTicket(id)!.status === 'error' && !runner.isRunning(id), 10_000);
     // Give a wrong second resume the time it would take to start.
+    // timing-ok: waits to show nothing happens (no third turn starts); a slow box only makes it wait longer
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(turnsOf(id), 2, 'the turn and its one resume, no third');
     const errors = events(id, 'error');
@@ -151,6 +152,7 @@ test("a person's Stop is never resumed", async () => {
   await until('claude to be up', () => store.listEvents(id).some((e) => e.kind === 'claude'), 10_000);
   runner.stop(id);
   await until('the turn to stop', () => !runner.isRunning(id), 10_000);
+  // timing-ok: waits to show nothing happens (a Stop is not resumed); a slow box only makes it wait longer
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(turnsOf(id), 1);
   assert.equal(runner.killWait(id), null);
@@ -162,6 +164,7 @@ test('"claude exited with code 1" is not resumed, and its error keeps the last l
   const id = minion();
   runner.send(id, 'Cara', 'crash now');
   await until('the turn to fail', () => store.getTicket(id)!.status === 'error' && !runner.isRunning(id), 10_000);
+  // timing-ok: waits to show nothing happens (a crash is not resumed); a slow box only makes it wait longer
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(turnsOf(id), 1, 'not resumed');
   const errors = events(id, 'error');
@@ -186,7 +189,7 @@ test('the resume runs on the killed turn\'s person, not the scheme owner or the 
 test('16 turns killed at once resume one at a time, a few seconds apart, and none starts while the box is starved (bounded)', async () => {
   runner = makeRunner();
   runner.resumeGapMs = 120;
-  runner.killHoldMaxMs = 1_500;
+  runner.killHoldMaxMs = 600_000; // far off until the test brings it in, so a slow box can't reach it first
   // When the line starts each resume's turn: the fakes' own log lines bunch up on a busy box.
   const startedAt = new Map<number, number>();
   const startTurn = (runner as any).startTurn;
@@ -207,15 +210,15 @@ test('16 turns killed at once resume one at a time, a few seconds apart, and non
     try { process.kill(-p.claude, 'SIGKILL'); } catch {}
   }
   await until('the server to see all 16 kills', () => ids.every((id) => !runner.isRunning(id)), 15_000);
-  const killedAt = Date.now();
   assert.ok(ids.every((id) => runner.killWait(id)), 'each waits to resume');
-  // Starved: nothing starts until the hold's bound, though the pressure is read.
-  await new Promise((r) => setTimeout(r, 700));
-  assert.ok(pressureReads > 0, 'the pressure is read');
+  // Starved: nothing starts while the hold lasts, though the pressure is read round after round.
+  const readsBefore = pressureReads;
+  await until('the pressure to be read several times', () => pressureReads >= readsBefore + 4);
   assert.equal(ids.filter((id) => turnsOf(id) > 1).length, 0, 'none resumed while starved');
   // The bound: one starts, starved or not, once the line has held killHoldMaxMs.
-  await until('one resume past the bound', () => ids.some((id) => turnsOf(id) > 1), 5_000);
-  assert.ok(Date.now() - killedAt >= 1_400, `the hold lasted ${Date.now() - killedAt} ms`);
+  runner.killHoldMaxMs = 0;
+  await until('one resume past the bound', () => ids.some((id) => turnsOf(id) > 1));
+  assert.equal(starved, true, 'it started with the box still starved');
   // Pressure falls: the rest go one at a time, a gap apart.
   starved = false;
   await until('all 16 resumes', () => ids.every((id) => turnsOf(id) > 1), 20_000);
@@ -258,6 +261,7 @@ test('a message during the kill wait starts its turn now, which takes the wait',
   await until('that turn to finish', () => promptsOf('carry on').length === 1 && !runner.isRunning(id) && store.getTicket(id)!.status === 'idle', 15_000);
   assert.equal(runner.killWait(id), null, 'the wait went with that turn');
   starved = false;
+  // timing-ok: waits to show nothing happens (no resume on top of the message's turn); a slow box only makes it wait longer
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(turnsOf(id), 2, 'the turn and the message\'s turn, no resume on top of it');
   runner.detachAll();

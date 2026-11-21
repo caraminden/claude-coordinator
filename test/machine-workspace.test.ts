@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './wait.ts';
 // @ts-ignore: a plain .mjs the agent's computers download
 import { WorkspaceHost, expand, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
 import { JOB_WORDS } from '../src/machines.ts';
@@ -267,7 +268,6 @@ test('a task whose jobs folder can\'t be made fails without leaving its workspac
 });
 
 const lineDir = join(root, 'screen-line');
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** A waiter in the screen's line as screen-lock.ps1 writes one: named by when it arrived. */
 const ciWaiter = (pid: number, since: number, token = `ci-${pid}`) => {
   mkdirSync(lineDir, { recursive: true });
@@ -342,7 +342,7 @@ test('a queued task leaves the line when stopped, or when its turn comes and nob
   const b = jobId((await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0 })).text);
   box.jobs.get(b).seen = Date.now() - 4 * 60_000; // its minion's turn ended
   rmSync(lockFile);
-  await sleep(300);
+  await until('the job to leave the line', () => box.jobs.get(b).ended);
   assert.match((await boxCall('job', { id: b })).text, /FAILED \(Left the screen's line: its turn came and nobody had called job for it in 3 minutes\. Nothing was started\.\)/);
   assert.equal(existsSync(lockFile), false, 'it never took the screen');
   assert.deepEqual(readdirSync(lineDir), []);

@@ -31,6 +31,8 @@ process.env.XDG_RUNTIME_DIR = '/run/user/host';
 const bin = join(root, 'bin');
 mkdirSync(bin);
 const calls = join(root, 'podman-calls.jsonl');
+// The pid of the hung fake exec, for a test that ends it by hand.
+const hungPid = join(root, 'hung-exec.pid');
 writeFileSync(
   join(bin, 'podman'),
   `#!${process.execPath}
@@ -43,7 +45,10 @@ const [cmd, ...rest] = args.slice(detached ? 3 : 2);
 const run = cmd === 'node' ? process.execPath : cmd;
 // FAKE_PODMAN_HANGS: a detached exec never returns, as podman does on a stuck lock. FAKE_PODMAN_SLOW: it starts late.
 const start = () => spawn(run, rest, { detached: true, stdio: 'ignore' }).unref();
-if (detached && process.env.FAKE_PODMAN_HANGS) setInterval(() => {}, 1000);
+if (detached && process.env.FAKE_PODMAN_HANGS) {
+  require('node:fs').writeFileSync(${JSON.stringify(hungPid)}, String(process.pid));
+  setInterval(() => {}, 1000);
+}
 else if (detached) setTimeout(start, Number(process.env.FAKE_PODMAN_SLOW ?? 0));
 else process.exit(spawnSync(run, rest, { stdio: 'inherit' }).status ?? 1);
 `,
@@ -637,7 +642,8 @@ test('a podman exec that never returns fails the turn after its time limit, not 
 test('Stop ends a container turn whose claude has not started, and never will (C6)', async () => {
   const id = newTicket();
   const r = runner(inContainer);
-  r.containerStartMs = 1500;
+  // The exec's own give-up (execFile's timer) is far past this test's end: when the turn ends, the stop ended it.
+  r.containerStartMs = 600_000;
   process.env.FAKE_PODMAN_HANGS = '1';
   const dir = () => (r as any).turns.get(id)?.dir as string | undefined;
   try {
@@ -645,13 +651,19 @@ test('Stop ends a container turn whose claude has not started, and never will (C
     await until("status(id) === 'running'", () => status(id) === 'running');
     const turnDir = dir()!;
     assert.ok(!existsSync(join(turnDir, 'pid.json')));
-    const stopped = Date.now();
+    await until('the exec is hanging', () => existsSync(hungPid));
     assert.equal(r.stop(id), true);
     await until('!r.isRunning(id)', () => !r.isRunning(id));
-    assert.ok(Date.now() - stopped < 1000, `ended ${Date.now() - stopped} ms after the stop, not when the exec gave up`);
+    // The give-up ends a turn as an error saying podman did not return; a stop ends it idle and says nothing.
     assert.equal(status(id), 'idle');
-    // The exec gives up later, its turn's folder long gone: nothing is written, said or thrown.
-    await new Promise((res) => setTimeout(res, 1800));
+    assert.deepEqual(errors(id), []);
+    // The exec ends later (killed here, as its give-up would), its turn's folder long gone: nothing is written, said or thrown.
+    const pid = Number(readFileSync(hungPid, 'utf8'));
+    assert.ok(pid > 0);
+    process.kill(pid, 'SIGKILL');
+    await until('the exec is gone', () => { try { process.kill(pid, 0); return false; } catch { return true; } });
+    // timing-ok: a nothing-happens check, a pause for the exec's failure to reach the runner; a late write would only be missed, never failed
+    await new Promise((res) => setTimeout(res, 300));
     assert.ok(!existsSync(turnDir));
     assert.deepEqual(errors(id), []);
   } finally {

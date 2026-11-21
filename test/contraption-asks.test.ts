@@ -193,7 +193,9 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   const events = store.listEvents(tm()!.id).length;
   const dir = join(shared, 'inbox', 'peek-auras', 'josh');
   const jsonl = { name: 'layout.jsonl', data: b64('{"x":1}\n') };
+  const before = Date.now();
   r = await ask({ person: Josh.id, kind: 'data', item: 'Main layout', summary: 'Find my UI confirm', files: [jsonl, { name: 'crop.png', data: b64('PNG') }] });
+  const filedBy = Date.now();
   assert.equal(r.status, 202);
   assert.equal(r.body.proposal, false);
   assert.equal(r.body.member, false);
@@ -202,7 +204,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.equal(readFileSync(join(dir, 'layout.jsonl'), 'utf8'), '{"x":1}\n');
   const record = JSON.parse(readFileSync(join(shared, r.body.sidecar), 'utf8'));
   assert.deepEqual({ ...record, at: undefined }, { contraption: 'peek-auras', person: 'josh', item: 'Main layout', summary: 'Find my UI confirm', text: null, files: r.body.files, at: undefined });
-  assert.ok(Date.now() - Date.parse(record.at) < 60_000);
+  assert.ok(Date.parse(record.at) >= before && Date.parse(record.at) <= filedBy, 'stamped when the ask was filed');
   // Same names again: -2, as for other asks; text alone gives the summary.
   r = await ask({ person: Josh.id, kind: 'data', text: 'Saved twice. Second time.', files: [jsonl] });
   assert.deepEqual(r.body.files, ['inbox/peek-auras/josh/layout-2.jsonl']);

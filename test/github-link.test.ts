@@ -208,7 +208,9 @@ test('a GitHub App left handing out expiring tokens links nothing, tells the per
   const fetch = (async (url: string) => (url.endsWith('/login/oauth/access_token') ? Response.json({ access_token: 'ghu_short', expires_in: 28800, refresh_token: 'ghr_x' }) : Response.json({ login: 'a', id: 1, name: null }))) as typeof globalThis.fetch;
   const link = new GithubLink(store, creds, 'cid', 'csecret', fetch, APP);
   const state = new URL(link.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
+  const before = Date.now();
   await link.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
+  const filedBy = Date.now();
   // The person can't change the App: they're told it isn't theirs to fix, not how to fix it.
   const error = (await link.status(rachel.id)).error!;
   assert.match(error, /nothing you did/i);
@@ -219,7 +221,7 @@ test('a GitHub App left handing out expiring tokens links nothing, tells the per
   const later = new GithubLink(store, creds, 'cid', 'csecret', fetch, APP);
   const r = later.refused()!;
   assert.equal(r.name, 'Rachel');
-  assert.ok(Date.now() - r.at < 60_000);
+  assert.ok(r.at >= before && r.at <= filedBy, 'stamped when the link was refused');
   assert.match(r.fix, /Expire user authorization tokens/);
   assert.equal(r.settings_url, 'https://github.com/settings/apps/citadel-app');
   // A limited link that works afterwards means the setting was changed: the notice goes.

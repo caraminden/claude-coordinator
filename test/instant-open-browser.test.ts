@@ -6,6 +6,7 @@
 // - a ship (SIGHUP with a changed public/, as tools/deploy.sh does) reaches an open app with no refresh by hand.
 import assert from 'node:assert/strict';
 import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as listen, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -62,15 +63,20 @@ for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
     const page = await openOnce(srv, hash, width);
     await srv.stop();
     servers.splice(servers.indexOf(srv), 1);
-    const began = Date.now();
+    // The address now takes every connection and never answers, so the launch's requests hang for good (the test
+    // closes them at the end). The kept chat showing while they hang is what "doesn't wait on the network" means.
+    const held: Socket[] = [];
+    const hole = listen((c) => { held.push(c); });
+    after(() => { for (const c of held) c.destroy(); hole.close(); });
+    await new Promise<void>((ok) => hole.listen(Number(new URL(srv.base).port), '127.0.0.1', ok));
     // The installed app's start: /c/ with no address of its own.
     await page.send('Page.navigate', { url: `${srv.base}/c/` });
     await waitFor(page, 'the kept chat', said('hello from before'));
-    const ms = Date.now() - began;
-    assert.equal(await page.eval('location.hash'), hash, 'the app is at the kept chat\'s address');
     assert.equal(await page.eval(chip), 'Catching up…');
-    assert.ok(ms < 2000, `opened in ${ms} ms`);
-    console.log(`# ${label}: the kept chat showed ${ms} ms after the launch, with no server`);
+    assert.equal(await page.eval('location.hash'), hash, 'the app is at the kept chat\'s address');
+    await until('a request to be held', () => held.length > 0);
+    assert.ok(held.length > 0, 'the launch did ask the network, and was never answered');
+    console.log(`# ${label}: the kept chat showed while ${held.length} connection(s) to the server were held open`);
     await shoot(page, `${label}-offline.png`);
     // It stays as it is, saying so, while there is no server.
     await page.eval('new Promise((r) => setTimeout(r, 500))');

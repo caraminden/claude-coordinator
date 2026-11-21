@@ -225,6 +225,7 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   // U+2028 in the arguments, as script text can hold: JSON leaves it raw, and the line must stay whole.
   b.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'script_patch', arguments: { text: 'a\u2028b\u2029c' } } });
   b.send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+  // timing-ok: waits to show nothing happens (the listing stays held); a slow box only makes it wait longer
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(b.seen(3), false, 'the listing waits behind the held call, to keep the order');
   assert.ok(b.fresh(), 'a tool call counts as use');
@@ -238,9 +239,9 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   b.send({ jsonrpc: '2.0', method: 'test/release' });
   await until('b.seen(2)', () => b.seen(2));
   assert.equal(b.replies.find((r) => r.id === 2).result.params.arguments.text, 'a\u2028b\u2029c');
-  // Answered: nothing in flight, so nothing stamps it any more.
-  await new Promise((r) => setTimeout(r, 30));
+  // Answered (the bridge stamped before it passed the answer on): nothing in flight, so nothing stamps it any more.
   s.used(NOW - 3 * H);
+  // timing-ok: waits to show nothing happens (several keep-alive rounds pass with no stamp)
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(b.fresh(), false);
   assert.equal(await b.close(), 0, 'closing stdin ends the MCP server too');
@@ -254,8 +255,11 @@ test('bridge: a call the client cancelled stops keeping the editor up', async ()
   s.used(NOW - 3 * H);
   await until('b.fresh', b.fresh);
   b.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } });
-  await new Promise((r) => setTimeout(r, 30));
+  // The ping comes behind the cancel on the same stream, so its answer shows the bridge has dropped the call.
+  b.send({ jsonrpc: '2.0', id: 9, method: 'ping' });
+  await until('b.seen(9)', () => b.seen(9));
   s.used(NOW - 3 * H);
+  // timing-ok: waits to show nothing happens (several keep-alive rounds pass with no stamp)
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(b.fresh(), false);
   assert.equal(await b.close(), 0);
@@ -269,6 +273,7 @@ test('bridge: a tool call and its answer each count as use, with no keep-alive t
   b.send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'editor_state' } });
   await until('b.fresh', b.fresh);
   // Past the stamp throttle (300 ms here, 5 s live), as an answer after a long call is.
+  // timing-ok: a lower bound, a slow box only waits longer
   await new Promise((r) => setTimeout(r, 400));
   s.used(NOW - 3 * H);
   b.send({ jsonrpc: '2.0', method: 'test/release' });

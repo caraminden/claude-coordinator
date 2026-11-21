@@ -66,10 +66,6 @@ const inflight = new Map();
 /** The stream brought news: GETs from here on go to the server afresh (core.js connectStream). */
 export const newsArrived = () => inflight.clear();
 
-/**
- * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
- * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message).
- */
 /** Run `fn` now, or once the tab is next shown while it's hidden: a hidden tab's polls ask for nothing (#1528). */
 export function whenShown(fn) {
   const doc = globalThis.document;
@@ -80,7 +76,11 @@ export function whenShown(fn) {
     fn();
   });
 }
-/** Whether a tab coming back may have missed stream news: frozen, hidden a minute or more, or no message since it hid (a dead stream can still read OPEN). */
+/**
+ * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
+ * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message: a dead
+ * stream can still read OPEN).
+ */
 export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
 
 const send = (path, opts) => fetch(path, {

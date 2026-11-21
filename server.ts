@@ -317,6 +317,8 @@ runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!proce
 runner.pool = process.env.TURN_POOL ? process.env.TURN_POOL === '1' : !!process.env.INVOCATION_ID;
 runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
+// The line of kill resumes (#1364) holds while the box is starved; nothing else in the runner waits on it.
+runner.killStarved = () => pressure.read();
 // The server notices a stall (#1139): counts each minion's red tests, file churn and failed ships, and suggests a step-up to its Taskmaster.
 const stallWatch = new StallWatch({
   store,

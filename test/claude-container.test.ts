@@ -307,7 +307,7 @@ test('a container turn frozen past its heartbeat keeps running and keeps its pin
 test('a container turn whose wrapper process is gone and whose heartbeat stopped counts as gone', async () => {
   const id = newTicket();
   const r = runner(inContainer);
-  r.killPressure = async () => ({ starved: false, why: '' });
+  r.killStarved = async () => ({ starved: false, why: '' });
   r.send(id, 'Josh', `hold ${join(root, 'never')}`);
   const turn = () => store.getSetting<{ dir?: string }>(`turn:${id}`)?.dir;
   await until('the wrapper has said its pid', () => !!turn() && existsSync(join(turn()!, 'pid.json')));

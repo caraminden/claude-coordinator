@@ -46,7 +46,7 @@ const project = store.createProject('Test', null);
 const runner = new Runner(store, () => {}, () => ({}), fake);
 runner.pollMs = 10;
 runner.resumeGapMs = 0;
-runner.killPressure = async () => ({ starved: false, why: '' });
+runner.killStarved = async () => ({ starved: false, why: '' });
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
 async function turn(text: string, stop = false) {

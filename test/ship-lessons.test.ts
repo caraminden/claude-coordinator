@@ -94,7 +94,7 @@ test('the weekly run skips free with fewer than two open lines or none new since
       made.push(t.id);
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null } as any,
+    runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/data',

@@ -82,7 +82,8 @@ test('a schedule run held for the box says how long in its log, and still sends 
 });
 
 test('a person, a Taskmaster, a follow-on and a wake never read the pressure', async () => {
-  // The reader is only given to HeldStarts, which only ScheduledRuns and the flake fixer call; runner.send has no gate.
+  // The reader is only given to HeldStarts, which only ScheduledRuns and the flake fixer call, and by server.ts to the
+  // runner's line of kill resumes (#1364), which holds only those; runner.send has no gate.
   const { readFileSync } = await import('node:fs');
   const runner = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
   const wake = readFileSync(new URL('../src/wake.ts', import.meta.url), 'utf8');

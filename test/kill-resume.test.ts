@@ -70,7 +70,7 @@ function makeRunner() {
     places.push({ ticket: placing, person });
     return { host: true };
   };
-  r.killPressure = async () => {
+  r.killStarved = async () => {
     pressureReads++;
     return { starved, why: starved ? 'memory pressure 31%' : '' };
   };

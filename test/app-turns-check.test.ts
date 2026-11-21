@@ -46,7 +46,7 @@ test('the check skips, with no minion, a stretch with no app turns, runs when th
       made.push(t.id);
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null } as any,
+    runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/data',

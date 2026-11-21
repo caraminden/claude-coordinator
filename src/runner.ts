@@ -61,7 +61,6 @@ import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { turnPayer } from './access.ts';
-import { pressure } from './pressure.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -612,11 +611,14 @@ export class Runner {
   /** The wait before the next probe; null for netProbeMs, a fresh outage's first. */
   netDelay: number | null = null;
   private netTimer?: NodeJS.Timeout;
-  /** How starved the box is (src/pressure.ts): the line of kill resumes holds while it is (#1364). Tests fake it. */
-  killPressure: () => Promise<{ starved: boolean; why: string }> = () => pressure.read();
+  /**
+   * Whether the box is starved, which server.ts gives it: only the line of kill resumes holds for it (#1364). Nothing
+   * a person or a Taskmaster starts reads it, so runner.ts never imports the reader (test/held-starts.test.ts).
+   */
+  killStarved: () => Promise<{ starved: boolean; why: string }> = async () => ({ starved: false, why: '' });
   killHoldMaxMs = KILL_HOLD_MAX_MS;
   private killTimer?: NodeJS.Timeout;
-  /** When the line of kill resumes began holding for pressure, or since the last one it let through; null while it moves. */
+  /** When the line of kill resumes began holding for a starved box, or since the last one it let through; null while it moves. */
   private killHeldSince: number | null = null;
   /** Kill waits whose resume this server has started: the line moves past them; the wait goes once their turn takes it. */
   private killStarted = new Map<number, number>();
@@ -1808,13 +1810,13 @@ export class Runner {
 
   /**
    * One kill resume at a time, resumeGapMs apart, so a wave (16 at once on Nov 20) isn't replayed into the same wall.
-   * The line holds while the box is starved (src/pressure.ts), at most killHoldMaxMs before one goes anyway; then the
+   * The line holds while the box is starved (killStarved), at most killHoldMaxMs before one goes anyway; then the
    * clock starts again. It limits only these resumes: nothing a person starts waits on it.
    */
   private async killResumeNext() {
     let r = { starved: false, why: '' };
     try {
-      r = await this.killPressure();
+      r = await this.killStarved();
     } catch {
       // A reading that fails holds nothing.
     }
@@ -1832,7 +1834,7 @@ export class Runner {
         console.log(`[kill-resume] holding the resumes of killed turns: ${r.why}`);
       }
       if (Date.now() - this.killHeldSince < this.killHoldMaxMs) return this.armKillResumes(Math.max(this.resumeGapMs, 250));
-      console.log(`[kill-resume] held ${Math.round((Date.now() - this.killHeldSince) / 1000)} s for pressure (${r.why}): minion ${w.ticket} resumes anyway`);
+      console.log(`[kill-resume] held ${Math.round((Date.now() - this.killHeldSince) / 1000)} s for a starved box (${r.why}): minion ${w.ticket} resumes anyway`);
       this.killHeldSince = Date.now();
     } else this.killHeldSince = null;
     this.killStarted.set(w.ticket, Date.now());

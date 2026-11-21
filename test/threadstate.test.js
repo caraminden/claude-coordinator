@@ -320,6 +320,7 @@ test("waitLine: the list row's wait says what the chat's line does, one counter 
 test('workingBy: one working rule with two sources, a turn and the server; labels say who (#727)', () => {
   assert.equal(workingBy(t({ status: 'running' })), 'turn');
   assert.equal(workingBy(t({ status: 'new' })), 'turn', 'a first turn setting up');
+  assert.equal(workingBy(t({ status: 'new', state: 'parked', wakes_on: 'the box has room' })), null, 'a start held because the box is starved waits, it does not work');
   assert.equal(workingBy(t({ status: 'new', kind: 'coordinator' })), null, "a Taskmaster that hasn't run is only ready");
   assert.equal(workingBy(t({ server_work: { kind: 'land' } })), 'server');
   assert.equal(workingBy(t({ status: 'running', server_work: { kind: 'land' } })), 'turn', 'a person wrote mid-land: its own turn speaks');

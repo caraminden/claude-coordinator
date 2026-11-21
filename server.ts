@@ -20,7 +20,7 @@ import { size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
-import { StatusPage, recordBoot } from './src/status-page.ts';
+import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
 import { Reaper, shownCommand } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
@@ -1950,6 +1950,7 @@ process.on('SIGHUP', () => {
       // HEAD is now live; deploy.sh waits for /api/health to report it.
       app.liveCommit = checkoutHead();
       if (!BOOT_CHECK) liveOn(app.liveCommit);
+      if (!BOOT_CHECK && !PREVIEW && app.liveCommit) recordLive(store, app.liveCommit, Date.now());
     },
     (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
   );

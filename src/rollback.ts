@@ -149,7 +149,7 @@ export class Rollback {
       this.d.set(FAILED, fails);
     }
     const holds = kind === CITADEL_TARGET
-      ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; land the fix with LAND_FIX=1 (the land tool's fix: true) if it touches none of them either.`
+      ? `Until a fix deploys, tools/land.sh refuses lands that touch none of the files ${from.slice(0, 9)} changed; every ship is refused until the roll back's own restart is live (up to 2 h, it waits for running turns), the fix too: wait for it, then ship the fix (ADR 0010). LAND_FIX=1 (the land tool's fix: true) is for a fix that touches none of those files, once that restart is live.`
       : kind === 'apk' ? `Its release workflow signs last green on the citadel/rollback branch as build ${this.d.lastGreen.pinned(projectId, id)?.code ?? '?'}, and Citadel publishes it once signed, so phones see it as an update. It stays there until main has a newer commit that passes the full suite; main's versionCode then needs a bump past it.`
       : kind === 'ci' ? `Its card shows last green's build as current and Citadel's CI store lists it as pinned (GET /api/projects/${projectId}/ci-files/pins), so an app whose updater reads the pins hands it out. It stays there until main has a newer commit that passes the full suite. Land the fix for what broke.`
       : `It stays there until main has a newer commit that passes the full suite (then auto-deploy ships it), or a person presses Deploy on its card; a minion's or Taskmaster's deploy of it is refused meanwhile. Land the fix for what broke.`;

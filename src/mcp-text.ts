@@ -27,7 +27,7 @@ export function usageSplitText(w: any): string {
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
 export function memoryText(hits: any[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
-  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const day = (ms: number) => pacificDay(ms);
   return hits.map((h) => `${h.kind === 'coordinator' ? 'Taskmaster' : `#${h.number} ${h.title}`} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
 }
 

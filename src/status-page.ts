@@ -127,13 +127,19 @@ export function stallSeconds(detail: string): number | null {
   return m[2] === 'ms' ? Number(m[1]) / 1000 : Number(m[1]);
 }
 
+/** A light deploy (SIGHUP) put this commit live without a start: recordBoot compares the next start against it (#1450 L2). */
+export function recordLive(store: Store, commit: string, at: number): void {
+  if (commit) store.addHealthEvent('live', at, commit, 'a light deploy: new code live without a restart');
+}
+
 /**
  * Record this server's start as a 'boot' health event and say why it started: a ship (new code since the last
  * start) or a restart on the same code (a crash, the watchdog or by hand). Returns that reason. Given the last stop's
  * mark (null: none was left), also records why the last process ended as a 'stop' event (#1325, src/sd-watchdog.ts).
  */
 export function recordBoot(store: Store, commit: string, at: number, stop?: StopMark | null): string {
-  const last = store.healthEventsSince(['boot'], 0).at(-1);
+  // A 'live' row (a SIGHUP reload) is code that went live without a start: a crash restart after it is on the same code.
+  const last = store.healthEventsSince(['boot', 'live'], 0).at(-1);
   const newCode = !!(last?.commit_sha && commit && last.commit_sha !== commit);
   const reason = !last ? 'first start on record'
     : newCode ? `a ship: new code ${commit.slice(0, 8)}`

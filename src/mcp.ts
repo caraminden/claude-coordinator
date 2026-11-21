@@ -66,7 +66,7 @@ const MAX_TEXT = 4000;
 const COLD = (who: string) => coldToolText(C().MSG, who);
 import { NEEDS, NEED_LINES } from './needs.ts';
 import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
-import { pacificStamp } from './pacific.ts';
+import { pacificDay, pacificStamp } from './pacific.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
 const URGENT = () => ({ type: 'boolean', description: 'true: wake a cold recipient (idle over ' + C().MSG.coldMin + ' minutes). Only when you are blocked on its reply, or passing on a person\'s go, pick or run-back; anything else stays held mail.' });
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
@@ -1099,7 +1099,7 @@ export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['
 
 /** The kinds of refuted finding a scheme is counting (#1158), one line each: what a minion reads to reuse their words. */
 const countedText = (ls: { kind: string; count: number; last: number; why: string }[]) =>
-  ls.length ? ls.map((l) => `- ${l.kind}: ${l.count}${l.count >= 3 ? ' (a lesson)' : ''}, last ${new Date(l.last).toISOString().slice(0, 10)}: ${l.why}`).join('\n') : '(none yet)';
+  ls.length ? ls.map((l) => `- ${l.kind}: ${l.count}${l.count >= 3 ? ' (a lesson)' : ''}, last ${pacificDay(l.last)}: ${l.why}`).join('\n') : '(none yet)';
 
 const REVIEW_SET = {
   name: 'review_set',
@@ -1218,7 +1218,7 @@ function turnText(t: any, whole: boolean): string {
 
 const SEARCH_MEMORY = {
   name: 'search_memory',
-  description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. For what people decided (who, when, their words, and whether it was reversed), use search_decisions. These chunks are leads to check (read_ticket, search_decisions), not facts: the newest word wins, and a chunk can be out of date.",
+  description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. For what people decided (who, when, their words, and whether it was reversed), use search_decisions. These chunks are leads to check (read_ticket, a minion: read_minion; search_decisions), not facts: the newest word wins, and a chunk can be out of date.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1247,7 +1247,7 @@ const SEARCH_DECISIONS = {
 /** Past minions and handoffs by words (#1156): the index src/minion-index.ts fills as minions close. */
 const SEARCH_MINIONS = {
   name: 'search_minions',
-  description: "Search this scheme's closed minions by words: each one's title, type, brief, last replies and the files it wrote (repo paths, and $TMPDIR/ scratch scripts such as seed or page-driving scripts), plus the shared folder's handoffs. Use it before building tooling, a script or a feature, to find who already built, tried or ruled it out, and before briefing new work. Every word must match first, then any of them fill up; a file path works as words (src/memory.ts). Returns #N, title, type, closed date, the matching text and the files. Leads to check with read_ticket, not facts. For a deeper look at an area, start a citadel:scout Grunt.",
+  description: "Search this scheme's closed minions by words: each one's title, type, brief, last replies and the files it wrote (repo paths, and $TMPDIR/ scratch scripts such as seed or page-driving scripts), plus the shared folder's handoffs. Use it before building tooling, a script or a feature, to find who already built, tried or ruled it out, and before briefing new work. Every word must match first, then any of them fill up; a file path works as words (src/memory.ts). Returns #N, title, type, closed date, the matching text and the files. Leads to check with read_ticket (a minion: read_minion), not facts. For a deeper look at an area, start a citadel:scout Grunt.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -2047,7 +2047,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const q = new URLSearchParams({ ...(args.days ? { days: String(args.days) } : {}), ...(args.taken ? { taken: '1' } : {}) });
       const r = await call('GET', `/api/projects/${C().PROJECT}/ship-lessons?${q}`);
       const head = `This week: ${r.week.ships} ship${r.week.ships === 1 ? '' : 's'} answered, ${r.week.withLines} with lines. Last ${r.days} days: ${r.window.ships} answered, ${r.window.withLines} with lines.`;
-      const rows = r.lessons.map((l: any) => `lesson ${l.id} · #${l.number ?? '?'} · ${new Date(l.at).toISOString().slice(0, 10)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
+      const rows = r.lessons.map((l: any) => `lesson ${l.id} · #${l.number ?? '?'} · ${pacificDay(l.at)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
       return [head, ...(rows.length ? rows : [`No ${args.taken ? '' : 'open '}lines in that window.`])].join('\n');
     }
     case 'report_spend': {

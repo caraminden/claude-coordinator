@@ -48,7 +48,7 @@ Open the source that matches the question first; the others only when a line is 
   is the server; a ship is a unit `citadel-land-*-<ticket id>-*.service`, and `tools/land.sh`
   prints `queue:` lines that name the holder. Where `journalctl --user` fails, call `host_check`
   with `what: "journal"` (`unit`, `since`, `lines`, `grep`) or `what: "status"`; its `since` is
-  host time (UTC): convert.
+  host time (Pacific).
 - **Retro log**: `$COORDINATOR_SHARED_DIR/retro-log/<UTC date>/` (`land.md` has a line per rebase
   conflict, CI fallback, flake and phase timings of every ship; session files hold the rest).
 - **CI**: `tools/ci-failures` (on every turn's PATH; `--help`): `ci-failures <sha|branch|run id>`

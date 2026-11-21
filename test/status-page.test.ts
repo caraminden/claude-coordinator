@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
-import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, stallSeconds, stallCauseOf } from '../src/status-page.ts';
+import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, recordLive, stallSeconds, stallCauseOf } from '../src/status-page.ts';
 import { BOOT_STALL } from '../src/deploy-watch.ts';
 import type { Storm } from '../src/memory-storms.ts';
 
@@ -125,6 +125,15 @@ test('boots say why: a ship when the code changed, else a restart on the same co
   assert.equal(c.uptime.restarts.at(-1) + c.uptime.restarts.at(-2)!, 3);
   assert.equal(c.verdict.tone, 'warn');
   assert.deepEqual(c.verdict.reasons, ['1 restart without a ship in the last day']);
+});
+
+test('a crash restart after a light deploy (SIGHUP) is a restart, not a ship (#1450)', () => {
+  const { store } = setup('boots-live');
+  const now = Date.now();
+  recordBoot(store, 'aaaa1111', now - 3 * HOUR);
+  recordLive(store, 'bbbb2222', now - 2 * HOUR);
+  assert.match(recordBoot(store, 'bbbb2222', now - HOUR), /^a restart on the same code/);
+  assert.match(recordBoot(store, 'cccc3333', now), /^a ship: new code cccc3333/);
 });
 
 test("Citadel's stalls per day with the longest, ships per day with their median, memory and disk hourly", async () => {

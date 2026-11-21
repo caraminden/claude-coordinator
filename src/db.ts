@@ -3620,7 +3620,7 @@ export class Store {
     if (Number(id) % 100 === 0) {
       this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
       // Boots, slow-ship nudges, Investigate clicks and looks (#1273) are few and the Status page and the once-a-day rule need them: only the time keep drops them.
-      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'stop', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
+      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'live', 'stop', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
     }
   }
 

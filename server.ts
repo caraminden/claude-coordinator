@@ -407,10 +407,23 @@ runner.onTurnStart = (ticketId, eventIds) => {
 };
 if (!BOOT_CHECK) void outbox.boot();
 // The scheme whose code this server runs (its repo has the live commit); checked again once a deploy moves the live commit.
-let own: { head: string | null; id: number | null } | null = null;
+// A repo found without that commit is asked again only after a minute (it may fetch it), and one made or cloned since is
+// asked on the next call. Asking every repo on every call held a loaded server's loop for seconds when no scheme has the
+// commit (a test's or dev copy's server): one scheme-sources run made 1,159 git calls and timed a test out (#1469).
+let own: { head: string | null; id: number | null; lacks: Map<string, number> } | null = null;
 function ownScheme(): Project | null {
-  // Only a found scheme is kept: one made or cloned after the first look is found on the next.
-  if (own?.head !== waiters.head || own.id === null) own = { head: waiters.head, id: store.listProjects().find((p) => runsRepo(p.repo_dir, waiters.head))?.id ?? null };
+  if (own?.head !== waiters.head) own = { head: waiters.head, id: null, lacks: new Map() };
+  if (own.id === null && own.head) {
+    const now = Date.now();
+    for (const p of store.listProjects()) {
+      if (!p.repo_dir || now - (own.lacks.get(p.repo_dir) ?? -Infinity) < 60_000) continue;
+      if (runsRepo(p.repo_dir, own.head)) {
+        own.id = p.id;
+        break;
+      }
+      own.lacks.set(p.repo_dir, now);
+    }
+  }
   return own.id === null ? null : store.getProject(own.id) ?? null;
 }
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.

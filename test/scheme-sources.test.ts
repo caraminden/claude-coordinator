@@ -46,9 +46,11 @@ fi
 exit 0
 `);
 chmodSync(join(stub, 'bin', 'gh'), 0o755);
-// A git that logs whose token each clone ran with ("box" for the server's own login) and runs the real one.
+// A git that logs whose token each clone ran with ("box" for the server's own login), and when and where each `cat-file`
+// asked for a commit (#1469), and runs the real one.
 const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 writeFileSync(join(stub, 'bin', 'git'), `#!/bin/sh
+[ "$1" = cat-file ] && echo "$(date +%s) $(pwd)" >> ${JSON.stringify(join(stub, 'cat-file'))}
 [ "$1" = clone ] && echo "\${GH_TOKEN:-box} \${GH_CONFIG_DIR:-box-config} $*" >> ${JSON.stringify(join(stub, 'clones'))}
 exec ${JSON.stringify(realGit)} "$@"
 `);
@@ -393,4 +395,17 @@ test('cloning by URL: an admin uses the box login; anyone else their own token o
   const ssh = await create(linked, { name: 'Rae ssh', source: 'url', repoUrl: 'git@github.com:someone/hub.git' });
   assert.equal(ssh.status, 400);
   assert.match(ssh.data.error, /https:\/\/ URL/);
+});
+
+// #1469: no scheme here has the server's own commit, so the server's look for the scheme it runs finds none. Asking every
+// repo again on every call made 1,159 git calls in one run of this file and held a loaded runner's loop until the folder
+// test timed out; a repo that lacks the commit is asked again only after a minute.
+test('the server asks each scheme\'s repo for its own commit a few times, not on every call', () => {
+  const asks = lines(join(stub, 'cat-file')).map((l) => [Number(l.slice(0, l.indexOf(' '))), l.slice(l.indexOf(' ') + 1)] as const);
+  assert.ok(asks.length > 0, 'the server looked for its scheme');
+  const minutes = (asks.at(-1)![0] - asks[0][0]) / 60;
+  for (const dir of new Set(asks.map(([, d]) => d))) {
+    const n = asks.filter(([, d]) => d === dir).length;
+    assert.ok(n <= 4 + 2 * minutes, `${dir} was asked ${n} times in ${minutes.toFixed(1)} min`);
+  }
 });

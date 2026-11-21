@@ -2,7 +2,7 @@
 // It goes by the basename of argv[0], so these check that the name, never the scheduler: no ananicy needed.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
@@ -76,7 +76,10 @@ test('tools/citadel-node sets a compile cache under TMPDIR, keeps a caller\'s ow
     const file = join(dir, 'm.ts');
     writeFileSync(file, 'const n: number = 1; process.stdout.write(String(n));');
     assert.equal(run([file]).stdout, '1');
-    assert.equal(run([file]).stdout, '1');
+    assert.ok(readdirSync(join(dir, 'citadel-node-cache')).length > 0, 'the run wrote cache files');
+    const bare = { ...process.env, NODE_COMPILE_CACHE: '' } as Record<string, string | undefined>;
+    delete bare.TMPDIR;
+    assert.equal(spawnSync(bin, ['-e', show], { env: bare, encoding: 'utf8' }).stdout, '', 'no TMPDIR, no cache');
     writeFileSync(file, 'const n: number = 2; process.stdout.write(String(n));');
     assert.equal(run([file]).stdout, '2');
     // An unwritable cache folder changes nothing but speed.

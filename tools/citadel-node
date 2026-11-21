@@ -27,8 +27,8 @@ esac
 # Node's compile cache (CPU win 4, #1541): a test file and every server a test boots strip types from ~270 .ts files
 # and compile them again; the cache skips that from the second run on. Under the turn's own temp folder, so it goes
 # away with the minion. Keyed by path with a content checksum, so an edited file runs its new code, and an
-# unwritable folder falls back silently. A caller's own NODE_COMPILE_CACHE wins. The live server doesn't pass here.
-[ -n "${NODE_COMPILE_CACHE:-}" ] || export NODE_COMPILE_CACHE="${TMPDIR:-/tmp}/citadel-node-cache"
+# unwritable folder falls back silently. A caller's own NODE_COMPILE_CACHE wins. With no TMPDIR there is no cache: /tmp is shared. The live server doesn't pass here.
+[ -n "${NODE_COMPILE_CACHE:-}" ] || [ -z "${TMPDIR:-}" ] || export NODE_COMPILE_CACHE="$TMPDIR/citadel-node-cache"
 # A test run's file counts for a minion's wait (#545): with CITADEL_TEST_PROGRESS naming a file (citadel-heavy and
 # run-tests.sh set it), tools/progress-reporter.ts keeps it up to date beside the run's own reporters. It leaves the
 # environment here, so a test that starts its own node --test can't write over the counts. Only when the options

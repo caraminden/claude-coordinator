@@ -26,6 +26,7 @@ import { Reaper, shownCommand } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
+import { judged, noteWould } from './src/judges.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
 import { installing as hostToolInstalls } from './src/host-tools.ts';
@@ -439,12 +440,17 @@ services.githubAs = (c) => {
   return p?.repo_dir ? githubOf(p.repo_dir) : undefined;
 };
 runner.liveHead = () => waiters.head;
+/** Where a log-only judge (#1503, src/judges.ts) notes what it would have done: the retro log of the scheme its act was for, else the home scheme's. */
+const judgeNote = <A extends unknown[]>(schemeOf: (...a: A) => number | null | undefined) => (line: string, ...a: A) => {
+  const id = schemeOf(...a) ?? ownScheme()?.id;
+  noteWould(id != null ? projectSharedDir(DATA_DIR, id) : null, line);
+};
 // After each deploy, compare health before and after it and wake the minions that shipped a regression (#724). No model.
 deployWatch = new DeployWatch({
   store, dbPath: join(DATA_DIR, 'coordinator.db'), bootAt: BOOT_AT, head: () => waiters.head, scheme: ownScheme,
   commits: gitCommits(import.meta.dirname),
-  wake: (id, text) => runner.send(id, APP_NAME, text),
-  mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
+  wake: judged('deploy-watch', 'wake', (id, text) => runner.send(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
+  mail: judged('deploy-watch', 'mail', (id, text) => runner.leaveMail(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
 });
 // The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
 const watchdogAt = takeMark(DATA_DIR);
@@ -1329,14 +1335,15 @@ const ciHealth = new CiHealth(store, {
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
-  tell: (project, text, wake) => {
+  // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
+  tell: judged('ci-red', 'tell', (project, text, wake) => {
     const coordinator = store.getOverlord(project.id);
     if (!coordinator) return false;
     if (!wake) return runner.leaveMail(coordinator.id, APP_NAME, text), true;
     runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
     // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
     return store.eventsOfKinds(coordinator.id, ['user_message']).at(-1)?.id ?? true;
-  },
+  }, () => true, judgeNote((project) => project.id)),
   // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
   // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.
   shipped: (p, t, sha) => (p.repo_dir && t.branch ? fixShipped(p.repo_dir, t.branch, Math.floor(t.created_at / 1000), sha) : Promise.resolve(null)),
@@ -1388,14 +1395,14 @@ if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
 // starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
 const flakeFixes = new FlakeFixes({
   store, sharedDir: (id) => projectSharedDir(DATA_DIR, id),
-  start: async (project, brief) => {
+  start: judged('flake-counter', 'start', async (project, brief) => {
     const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' } }, APP_NAME);
     store.updateTicket(id, { person_id: project.owner_id ?? null });
     runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
     await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));
     return { id };
-  },
-  wake: (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); },
+  }, async () => ({ id: -1 }), judgeNote((project) => project.id)),
+  wake: judged('flake-counter', 'wake', (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); }, () => true, judgeNote((p) => p.id)),
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
   evidence: async (p, branch, file, at) => { const slug = repoSlug(p.repo_url); return slug && p.repo_dir ? ciEvidence(slug, githubOf(p.repo_dir), branch, file, at) : null; },

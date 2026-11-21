@@ -47,7 +47,7 @@ export const JUDGES: Judge[] = [
   },
   {
     id: 'ci-red', name: 'CI health: a red on main (#774, #968, #983)', mode: 'act', replay: true,
-    acts: "wakes the scheme's Taskmaster when a watched workflow goes red on main, and rings people's phones an hour later if no fix minion names the run",
+    acts: "wakes the scheme's Taskmaster when a watched workflow goes red on main, and rings an hour later if no fix minion names the run (log-only covers the Taskmaster's wake and mail: the Mandate alert is shared with the other CI judges)",
     pins: [
       { path: 'src/ci-problems.ts', symbols: ['RED_FIX_MS', 'VERDICTS', 'workflowFile', 'HEAVY_WORKFLOW', 'quietWorkflow', 'redProblem', 'redProblemOf'] },
       { path: 'src/ci-health.ts', symbols: ['ACTIVE_MS', 'CiHealth.outsideRuns'] },
@@ -257,14 +257,14 @@ export function noteWould(sharedDir: string | null, line: string, now = Date.now
 }
 
 /**
- * `fn`, the act of judge `id`, unless the judge runs log-only: then a would-line goes to the retro log (`note`), and
+ * `fn`, the act of judge `id`, unless the judge runs log-only: then a would-line goes to the retro log (`note`, given the act's arguments to find its scheme), and
  * `pretend` stands in for its result, so the judge carries on as if it had acted (and doesn't repeat itself every tick).
  */
-export function judged<A extends unknown[], R>(id: string, act: string, fn: (...a: A) => R, pretend: (...a: A) => R, note: (line: string) => void, mode = judge(id)?.mode): (...a: A) => R {
+export function judged<A extends unknown[], R>(id: string, act: string, fn: (...a: A) => R, pretend: (...a: A) => R, note: (line: string, ...a: A) => void, mode = judge(id)?.mode): (...a: A) => R {
   if (!judge(id)) throw new Error(`judged(): no judge ${id} in src/judges.ts`);
   if (mode !== 'log-only') return fn;
   return (...a: A) => {
-    note(wouldLine(id, act, a.map((x) => (typeof x === 'string' ? x : typeof x === 'object' && x && 'name' in x ? String((x as { name: unknown }).name) : String(x))).join(' · ')));
+    note(wouldLine(id, act, a.map((x) => (typeof x === 'string' ? x : typeof x === 'object' && x && 'name' in x ? String((x as { name: unknown }).name) : String(x))).join(' · ')), ...a);
     return pretend(...a);
   };
 }

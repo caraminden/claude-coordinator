@@ -658,6 +658,16 @@ runner.wakesOn = (id) => {
   return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
 // The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
+// A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).
+for (const fn of ['addDelivery', 'updateDelivery'] as const) {
+  const orig = (store as any)[fn].bind(store);
+  (store as any)[fn] = (...a: any[]) => {
+    const r = orig(...a);
+    const row = fn === 'addDelivery' ? r : store.getDelivery(a[0]);
+    if (row?.to_kind === 'minion') queueMicrotask(() => runner.broadcastTicket(row.to_id));
+    return r;
+  };
+}
 runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
   ...waiters.chains().filter((c) => c.ticket === id && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
   ...waiters.list().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),

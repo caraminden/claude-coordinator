@@ -550,8 +550,10 @@ function waitChip(t, coord) {
   const rows = coord ? [] : t.outbox_waits ?? [];
   const live = rows.filter((w) => w.state !== 'dropped' && w.state !== 'failed');
   const shown = live[0] ?? rows[0];
+  if (!shown) drawnWaits.delete(t.id);
   if (!shown) return h('span', { class: 'wait-chip empty', 'aria-hidden': 'true' });
   drawnWaits.set(t.id, rows);
+  if (waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
   return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.what).join('; ')}` }, shown.chip, more);

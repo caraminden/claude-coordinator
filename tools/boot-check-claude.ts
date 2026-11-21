@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { loadStretch } from '../src/load-stretch.ts';
 
 const args = process.argv.slice(2);
 const role = process.env.COORDINATOR_ROLE ?? '';
@@ -38,9 +39,12 @@ async function check(): Promise<string> {
   let stderr = '';
   mcp.stderr.on('data', (d) => (stderr += d));
   const replies = createInterface({ input: mcp.stdout })[Symbol.asyncIterator]();
-  const call = async (id: number, method: string, params: object) => {
+  const call = async (id: number, method: string, params: { name?: string }) => {
     mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
-    const timeout = new Promise<never>((_, no) => setTimeout(() => no(new Error(`MCP ${method} timed out`)), 10_000).unref());
+    // 10 s on a quiet box, stretched by the load (#1514); the error names the tool, so a slow one can be found.
+    const slow = loadStretch();
+    const what = `${method}${params.name ? ` ${params.name}` : ''}`;
+    const timeout = new Promise<never>((_, no) => setTimeout(() => no(new Error(`MCP ${what} did not answer within ${slow.ms(10_000) / 1000} s${slow.why}`)), slow.ms(10_000)).unref());
     const { value, done } = await Promise.race([replies.next(), timeout]);
     if (done) throw new Error(`The ${role} MCP server exited before answering ${method}${stderr ? `: ${stderr.trim().slice(-1000)}` : ''}`);
     const reply = JSON.parse(value);

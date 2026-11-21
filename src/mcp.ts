@@ -1890,13 +1890,13 @@ async function runTool(name: string, args: any): Promise<string> {
       return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Orders → Properties. Tell people in your reply.`);
     }
     case 'get_project_instructions': {
-      const { project } = await call('GET', `/api/projects/${C().PROJECT}`);
+      const { project } = await call('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
       if (!project.instructions) return 'This scheme has no instructions yet.';
       const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
       return `Scheme instructions${by}:\n\n${project.instructions}`;
     }
     case 'get_project_settings': {
-      const { project } = await call('GET', `/api/projects/${C().PROJECT}`);
+      const { project } = await call('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
       return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nShipping: ship_path ${project.ship_path}; a person's go from: ${project.go_from}; try it first: ${project.try_first}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }

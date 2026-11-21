@@ -715,7 +715,8 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, everyScheme: true,
     // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
-    // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538).
+    // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538). ?tickets=none
+    // sends no minions, for a caller that wants only the scheme's own fields: every minion's view took 9 to 31 s under load (#1514).
     async handler({ res, url, app, session, caller, project }) {
       // A person gets their own Taskmaster once the scheme is split (#919), as the scheme list's coordinator_id does.
       const only = await ensureCoordinator(app, project);
@@ -726,7 +727,7 @@ export const projectRoutes: Route[] = [
       const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
       const dismissed = all.filter((t) => t.status === 'closed').length;
       let picked = all
-        .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : true)
+        .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : which !== 'none')
         .filter((t) => number === null || t.number === number);
       // The dismissed list is read a page at a time, newest first (closed-list-on-demand): ?limit= a page, ?before=<updated_at>&before_id=
       // the last row of the page before, ?q= only those whose number, title or properties match (the page's thread search), ?since= only

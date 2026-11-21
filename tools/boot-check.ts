@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
+import { loadStretch } from '../src/load-stretch.ts';
 import { listeningPort } from '../src/ports.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { projectSharedDir } from '../src/workspace.ts';
@@ -136,13 +137,16 @@ try {
   server.stdout!.on('data', (d) => (log += d));
   server.stderr!.on('data', (d) => (log += d));
   // The checkout's server.ts is the one being deployed, so it reports the port it bound.
-  const base = `http://127.0.0.1:${await listeningPort(server).catch((err) => fail(err.message))}`;
+  // Each step's limit is sized for a quiet box and stretched by the load when it starts (src/load-stretch.ts, #1514).
+  const boot = loadStretch();
+  const base = `http://127.0.0.1:${await listeningPort(server, boot.ms(20_000)).catch((err) => fail(err.message + boot.why))}`;
 
   begin('/api/health');
   let health: any = null;
-  for (const end = Date.now() + 20_000; !health; await new Promise((r) => setTimeout(r, 100))) {
+  const healthy = loadStretch();
+  for (const end = Date.now() + healthy.ms(20_000); !health; await new Promise((r) => setTimeout(r, 100))) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
-    if (Date.now() > end) fail('The server did not answer /api/health within 20 s');
+    if (Date.now() > end) fail(`The server did not answer /api/health within ${healthy.ms(20_000) / 1000} s${healthy.why}`);
     health = await fetch(`${base}/api/health`).then((r) => (r.ok ? r.json() : null), () => null);
   }
   begin('app page and sign-in');
@@ -163,7 +167,7 @@ try {
   begin('Taskmaster and minion turns');
 
   // A person's message starts each turn; the stand-in claude leaves report.json in its folder. Both settle before a
-  // failure is reported: the stop below ends the server, not a turn still running (each has its own 30 s).
+  // failure is reported: the stop below ends the server, not a turn still running (each has its own 30 s, stretched by the load).
   const turns = await Promise.allSettled(turnChecks.map(async ({ what, id, dir }) => {
     const ticket = async () => (await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } }).then((r) => r.json())).ticket;
     const sent = await fetch(`${base}/api/tickets/${id}/messages`, {
@@ -171,7 +175,8 @@ try {
     });
     if (!sent.ok) fail(`Messaging the ${what} answered ${sent.status}: ${await sent.text()}`);
     const report = join(dir, 'report.json');
-    for (const end = Date.now() + 30_000; ; await new Promise((r) => setTimeout(r, 100))) {
+    const slow = loadStretch();
+    for (const end = Date.now() + slow.ms(30_000); ; await new Promise((r) => setTimeout(r, 100))) {
       const t = await ticket();
       if (t.status !== 'running' && t.status !== 'new') {
         if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
@@ -179,7 +184,7 @@ try {
         if (!r.ok) fail(`A ${what} turn started, but: ${r.error}`);
         return console.error(`boot-check: a ${what} turn started (${r.found})`);
       }
-      if (Date.now() > end) fail(`A ${what} turn did not finish within 30 s`);
+      if (Date.now() > end) fail(`A ${what} turn did not finish within ${slow.ms(30_000) / 1000} s${slow.why}`);
     }
   }));
   for (const t of turns) if (t.status === 'rejected') throw t.reason;
@@ -261,10 +266,11 @@ async function pageCheck(url: string, cookie: string) {
   const app = `(() => { const a = document.querySelector('#app'); return a && !a.querySelector('#login-form') ? a.innerText.trim().length : 0; })()`;
   // The first render waits on several rounds of API calls, each seconds long when the box is loaded, so
   // wait while the page is still loading and fail once it has gone quiet with #app still empty.
-  for (const end = Date.now() + 60_000; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
+  const slow = loadStretch();
+  for (const end = Date.now() + slow.ms(60_000); !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
     if (errors.length) break;
-    if (!loading.size && Date.now() - lastLoad > 10_000) fail('The app page finished loading but rendered nothing in #app (nothing loading for 10 s)');
-    if (Date.now() > end) fail(`The app page rendered nothing in #app within 60 s (still loading: ${loading.size} requests)`);
+    if (!loading.size && Date.now() - lastLoad > slow.ms(10_000)) fail(`The app page finished loading but rendered nothing in #app (nothing loading for ${slow.ms(10_000) / 1000} s${slow.why})`);
+    if (Date.now() > end) fail(`The app page rendered nothing in #app within ${slow.ms(60_000) / 1000} s${slow.why} (still loading: ${loading.size} requests)`);
   }
   // Room for errors that come just after the first render (a view's own imports, its first fetches).
   await new Promise((r) => setTimeout(r, 1000));

@@ -74,7 +74,7 @@ import { peopleRoutes } from './src/routes/people.ts';
 import { unitRoutes } from './src/routes/units.ts';
 import { DEPLOY_DIR } from './src/routes/units.ts';
 import { checkUnits, problemKeys, summary as unitSummary } from './src/unit-drift.ts';
-import { Credentials } from './src/credentials.ts';
+import { Credentials, sealKey } from './src/credentials.ts';
 import { Secrets } from './src/secrets.ts';
 import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
@@ -255,6 +255,8 @@ store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 // Before anything reads repo_url: a scheme whose repo moved on GitHub follows its checkout's origin (#456).
 await safely('follow repo moves', () => followOrigins(store));
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
+// Seals machine tokens for their owner's Show (#1355): read here, before SESSION_SECRET leaves the environment below.
+const machineTokenKey = sealKey(process.env.SESSION_SECRET ?? '', 'citadel machine tokens v1');
 // People's own OpenRouter keys (#717). OPENROUTER_BASE_URL points a dev copy or test at a fake.
 const openrouter = new OpenRouter(store, credentials);
 // Outside-API spend and its optional per-scheme cap (#839): crossing the cap tells the scheme's Taskmaster chat and pushes; nothing stops.
@@ -441,6 +443,7 @@ function liveOn(head: string | null) {
   })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
+machines.tokenKey = machineTokenKey;
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
 /** Take a card out of people's way with a line saying why (a machine job's go, a superseded kit sync); an answered or settled one stays. */
 function settleCard(card: { ticket: number; question: string }, by: string, line: string) {

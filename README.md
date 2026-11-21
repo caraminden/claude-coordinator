@@ -91,7 +91,7 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   with its `get_project_instructions` and `set_project_instructions` tools.
 - **Machines** lend minions MCP servers that run on people's own computers, such as a
   Godot editor that runs builds on a laptop. Add one in Settings, on the Machines tab,
-  by name (#439); the app shows a one-time token and one install line for that computer
+  by name (#439); the app shows its token and one install line for that computer
   (Windows, or macOS and Linux), which downloads `public/machine-agent.mjs` (Node 18+, no
   installs) and runs it in the background from then on. The agent reports what it found there:
   the names (never the commands or env) of the MCP servers in that computer's Claude Code
@@ -104,7 +104,8 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   (`mcp__<name>__…`): the turn's shared tool server links it through the app
   (`src/pool-machine.ts`, `src/machines.ts`) on its first call, answering its start from the
   machine's remembered tool list, and the agent runs a separate copy of the MCP server per session.
-  Tokens are stored hashed; a new token or removing the machine disconnects it. With
+  Tokens are checked by their hash; a sealed copy (#1355) lets a machine's owner (an admin, for a shared one) Show
+  and Copy it again on its line, to set up another tool there. A new token or removing the machine disconnects it. With
   `MACHINES_URL` set (perigee uses its tailnet name), agents connect only there, on a second
   listener that serves nothing else, and the public address refuses them.
   An agent installed before ticks (started with `--claude-mcp <name>` or `-- <command>`)

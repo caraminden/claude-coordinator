@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createInterface } from 'node:readline';
-import { agentToken, bootServer, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
+import { SECRET, agentToken, bootServer, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { hashToken, newToken } from '../src/machines.ts';
+import { sealKey, unseal } from '../src/credentials.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -95,6 +96,29 @@ test('an online machine reaches no scheme until it is on its list, and then its 
   await opened.body!.cancel();
   // The per-scheme grant route from #62 is gone.
   await assert.rejects(call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'PUT' }), /404/);
+});
+
+test('a shared machine\'s token shows again to admins, a relink shows the new one, and one linked before #1355 says to relink once', async () => {
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'showme' } });
+  assert.equal(machine.token_showable, true);
+  assert.equal((await call(`/api/machines/${machine.id}/token`)).token, token);
+  const relinked = await call(`/api/machines/${machine.id}/token`, { method: 'POST' });
+  assert.notEqual(relinked.token, token);
+  assert.equal((await call(`/api/machines/${machine.id}/token`)).token, relinked.token);
+  // The sealed copy is bound to its row: moved onto another machine, it doesn't open.
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  const old = store.createMachine('linked-before', hashToken(newToken(999)), 'Cara');
+  assert.equal((await call('/api/machines')).find((m: any) => m.id === old.id).token_showable, false);
+  assert.equal((await fetch(`${base}/api/machines/${old.id}/token`, { headers: { Cookie: cookie } })).status, 409);
+  store.updateMachine(old.id, { token_sealed: store.getMachine(machine.id)!.token_sealed });
+  assert.equal((await fetch(`${base}/api/machines/${old.id}/token`, { headers: { Cookie: cookie } })).status, 409);
+  // Sealed under the server's SESSION_SECRET, not in the clear and not under a key anyone could derive.
+  const sealed = store.getMachine(machine.id)!.token_sealed!;
+  assert.equal(sealed.includes(relinked.token), false);
+  assert.equal(unseal(sealKey(SECRET, 'citadel machine tokens v1'), `machine:${machine.id}`, sealed), relinked.token);
+  assert.equal(unseal(sealKey('', 'citadel machine tokens v1'), `machine:${machine.id}`, sealed), null);
+  for (const id of [machine.id, old.id]) await call(`/api/machines/${id}`, { method: 'DELETE' });
+  store.db.close();
 });
 
 test('a removed machine is cut off, and its token no longer works', async () => {
@@ -424,6 +448,12 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   for (const [method, path] of [['PATCH', `/api/machines/${machine.id}`], ['POST', `/api/machines/${machine.id}/token`], ['DELETE', `/api/machines/${machine.id}`]]) {
     assert.equal((await dana.as(path, { method, body: method === 'PATCH' ? { notes: 'mine now' } : undefined })).status, 404, `${method} ${path}`);
   }
+  // Its token again (#1355): Josh's to show, not Dana's (she can't see it at all), nor an admin's, who can only relink it.
+  assert.deepEqual((await josh.as(`/api/machines/${machine.id}/token`)).data.token, token);
+  assert.equal((await dana.as(`/api/machines/${machine.id}/token`)).status, 404);
+  const asAdmin = await fetch(`${base}/api/machines/${machine.id}/token`, { headers: { Cookie: cookie } });
+  assert.equal(asAdmin.status, 403);
+  assert.ok(!JSON.stringify(await asAdmin.json()).includes(token));
   const [joshHears, danaHears] = [await josh.nextMachines(), await dana.nextMachines()];
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s box, checked by an admin.' } });
   assert.deepEqual(await joshHears(), ['josh-box']);

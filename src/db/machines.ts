@@ -45,7 +45,7 @@ export const machineQueries = {
     return this.getMachine(Number(lastInsertRowid))!;
   },
 
-  updateMachine(this: Store, id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
+  updateMachine(this: Store, id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'token_sealed' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);

@@ -6,7 +6,7 @@ import { constants, DatabaseSync } from 'node:sqlite';
 /** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, saved secrets, push keys. */
 export const SECRET: Record<string, string[]> = {
   users: ['password_hash', 'invite_hash'],
-  machines: ['token_hash'],
+  machines: ['token_hash', 'token_sealed'],
   contraptions: ['key_hash', 'identity_private'],
   credentials: ['secret', 'meta'],
   stored_secrets: ['value'],

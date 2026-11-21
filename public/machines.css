@@ -18,6 +18,11 @@
 .machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
 .machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }
 .machine-setup-ways { margin: 0.6rem 0 0.3rem; }
+.machine-token > .row { gap: 0.4rem; margin-top: 0.4rem; }
+.machine-token-value { display: block; width: fit-content; max-width: 100%; padding: 0.3rem 0.5rem; background: var(--code-bg); border-radius: 6px; font-size: 0.82em; word-break: break-all; user-select: all; }
+.machine-token > p, .machine-token-old { margin: 0.3rem 0 0; }
+.machine-token-old { font-size: 0.88em; }
+.machine-token-old strong { white-space: nowrap; }
 .machine-setup-ways > .row { gap: 0.4rem; }
 .machine-setup-ways .chip { cursor: pointer; }
 .machine-setup code { word-break: break-all; }

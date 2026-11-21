@@ -1009,6 +1009,16 @@
   "m1": "503 That machine went offline",
   "m2": "503 That machine went offline"
  },
+ "GET /api/machines/:m/token": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/machines/:m/token": {
   "anon": "401 Not logged in",
   "person": "200",

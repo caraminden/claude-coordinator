@@ -15,6 +15,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { lendsMachine } from './access.ts';
+import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
 import { every } from './every.ts';
@@ -176,7 +177,7 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-/** A machine's secret: its id (to look it up) and 32 random bytes. Only the hash is stored. */
+/** A machine's secret: its id (to look it up) and 32 random bytes. Its hash checks it; a sealed copy is only for its owner's Show (#1355). */
 export function newToken(machineId: number): string {
   return `ccm_${machineId}_${randomBytes(32).toString('base64url')}`;
 }
@@ -299,6 +300,22 @@ export class MachineRelay {
     this.shown = now;
   }
 
+  /** Seals tokens for their owner's Show (#1355); server.ts derives it from SESSION_SECRET. */
+  tokenKey: Buffer | null = null;
+
+  /** A new token for a machine: its hash checks the agent, and a sealed copy lets its owner show it again (#1355). */
+  issueToken(machineId: number): string {
+    if (!this.tokenKey) throw new Error('MachineRelay.tokenKey is not set');
+    const token = newToken(machineId);
+    this.store.updateMachine(machineId, { token_hash: hashToken(token), token_sealed: seal(this.tokenKey, `machine:${machineId}`, token) });
+    return token;
+  }
+
+  /** The machine's token, or null: linked before #1355, or sealed under another SESSION_SECRET. */
+  shownToken(machine: Pick<Machine, 'id' | 'token_sealed'>): string | null {
+    return this.tokenKey && machine.token_sealed ? unseal(this.tokenKey, `machine:${machine.id}`, machine.token_sealed) : null;
+  }
+
   /** The machine whose token the request carries, or null. */
   authenticate(req: IncomingMessage): Machine | null {
     const m = (req.headers.authorization ?? '').match(/^Bearer (ccm_(\d+)_[\w-]{43})$/);
@@ -337,6 +354,8 @@ export class MachineRelay {
       name: machine.name,
       created_by: machine.created_by,
       owner_id: machine.owner_id,
+      /** Whether its owner can show its token (#1355): false for one linked before, until a relink. */
+      token_showable: !!this.shownToken(machine),
       notes: machine.notes,
       created_at: machine.created_at,
       last_seen_at: machine.last_seen_at,

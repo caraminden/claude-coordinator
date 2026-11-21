@@ -72,6 +72,7 @@ function machineAddForm(runners, label) {
 /** Settings' Machines tab: add machines, show the line that connects one, tick what each lends, and remove them or replace their token. */
 export function machinesPage() {
   view.machineToken = null; // { id, name, token } just made, shown until you leave the page
+  shownTokens.clear();
   const add = machineAddForm(false, 'Add machine');
   // A CI runner host is a different program with a different job, so it has its own add and install line (#439).
   const runners = account?.admin ? machineAddForm(true, 'Add CI runner host') : null;
@@ -156,7 +157,7 @@ function renderMachineSetup() {
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
     h('p', { class: 'small' }, "Don't screenshot this or paste it in a chat: the line holds the token, and anyone who has it can act as this machine."),
-    h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Paste this on that computer:'),
+    h('p', { class: 'small' }, 'Its owner can show the token again from its line below. Paste this on that computer:'),
     h('div', { class: 'row machine-setup-ways' },
       h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
         ways.map((w) => h('button', { type: 'button', class: `chip${w.os === os ? ' on' : ''}`, 'aria-pressed': String(w.os === os), onclick: () => pick(w.os) }, w.tab))),
@@ -199,6 +200,7 @@ async function newMachineToken(m) {
     ? '\n\nAfter that, what it lends is ticked here, from the MCP servers in that computer\'s Claude Code config and its machine-agent.json. If it runs a server from a command of its own, put that under "servers" in machine-agent.json there first.' : ''}`)) return;
   const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
   if (!token) return;
+  shownTokens.delete(m.id); // the old one stopped working
   view.machineToken = setupFor(machine, token, agent_url);
   renderMachineSetup();
   document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
@@ -407,9 +409,40 @@ function machineBody(m) {
       kv('Computer',
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
-      kv('Notes', machineNotes(m))),
+      kv('Notes', machineNotes(m)),
+      tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : []),
     m.jobs ? machineJobsSection(m) : '',
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove));
+}
+
+/** Whether the viewer may show this machine's token (#1355): its owner's own, an admin's for a shared one (Cara, 2026-11-20, "Only its owner"). */
+const tokenIsMine = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
+
+/** Tokens shown on this page, by machine id, so a redraw from the live list keeps one open until Hide or leaving the page. */
+const shownTokens = new Map();
+
+/** Its token again, to set up another tool on that computer without a relink (#1355). */
+function machineTokenShow(m) {
+  if (!m.token_showable) return h('p', { class: 'cui-notice machine-token-old', 'data-tone': 'info' }, 'Linked before Citadel kept tokens, so it can\'t be shown. New token replaces the one ', h('strong', {}, m.name), ' uses now (paste the new setup line on it once); from then on it can be shown here.');
+  const fetchToken = async () => shownTokens.get(m.id) ?? (await api(`api/machines/${m.id}/token`)).token;
+  const shown = shownTokens.get(m.id);
+  const value = h('code', { class: 'machine-token-value' }, shown ?? `ccm_${m.id}_${'•'.repeat(43)}`); // as long as the real one, so Show wraps it the same and the buttons stay put
+  const show = h('button', { type: 'button', class: 'secondary small' }, shown ? 'Hide' : 'Show');
+  show.onclick = async () => {
+    if (shownTokens.delete(m.id)) return renderMachineList();
+    const token = await fetchToken().catch((err) => toast(`Couldn't show the token: ${err.message}`) ?? null);
+    if (token) shownTokens.set(m.id, token);
+    renderMachineList();
+  };
+  const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
+  copy.onclick = async () => {
+    const token = await fetchToken().catch((err) => toast(`Couldn't copy the token: ${err.message}`) ?? null);
+    if (token) toast(await copyText(token) ? 'Token copied' : 'Couldn\'t copy');
+  };
+  return h('div', { class: 'machine-token' },
+    value,
+    h('div', { class: 'row' }, show, copy),
+    h('p', { class: 'small muted' }, 'Use it to connect another tool on that computer; tools already connected keep working. Keep it out of chats.'));
 }
 
 /** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */

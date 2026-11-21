@@ -418,6 +418,8 @@ export interface Machine {
   /** Also the MCP server name threads see, so its tools are mcp__<name>__*. */
   name: string;
   token_hash: string;
+  /** The token sealed under SESSION_SECRET (#1355), for its owner's Show; null for one linked before that, until a relink. */
+  token_sealed?: string | null;
   created_by: string;
   created_at: number;
   /** When its agent last connected or disconnected; null if it never has. */
@@ -1479,6 +1481,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'jobs', 'ALTER TABLE machines ADD COLUMN jobs TEXT'],
   // Its owner's job hours, one-off window and Pause (#857, src/machine-jobs.ts JobSettings); null: the defaults.
   ['machines', 'job_settings', 'ALTER TABLE machines ADD COLUMN job_settings TEXT'],
+  // Its token sealed under SESSION_SECRET (#1355), so its owner can show it again; null for one linked before, until a relink.
+  ['machines', 'token_sealed', 'ALTER TABLE machines ADD COLUMN token_sealed TEXT'],
   ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
   ['projects', 'instructions_updated_by', 'ALTER TABLE projects ADD COLUMN instructions_updated_by TEXT'],
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
@@ -1648,6 +1652,7 @@ export const SCHEMA_HISTORY = [
   [100, 'host_samples.io_psi, swap_used (#1325)'],
   [101, 'claim_queue, claim_spans (#1334)'],
   [102, 'host_samples.cpu_ledger (#1332)'],
+  [103, 'machines.token_sealed (#1355)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

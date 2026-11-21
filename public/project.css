@@ -33,7 +33,7 @@ dialog.start-brief .from { margin: 0 0 0.9rem; }
 .start-brief-form details pre { max-height: 40vh; overflow: auto; margin: 0.25rem 0 0; font-size: 0.8rem; white-space: pre-wrap; }
 .start-brief-form .sheet-actions { gap: 0.5rem; }
 a.nav-item:has(> .scheme-count) { display: flex; align-items: center; gap: 0.5rem; }
-a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+a.nav-item > .name:has(~ .scheme-count) { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 /* A scheme's favicon (#222). */
 .scheme-icon { flex: none; width: 1.25em; height: 1.25em; border-radius: 4px; object-fit: contain; vertical-align: -0.25em; }
 .scheme-crumb { display: inline-flex; align-items: center; gap: 0.35em; vertical-align: bottom; max-width: 100%; }

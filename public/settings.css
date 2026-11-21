@@ -11,7 +11,7 @@
 /* The desktop app's link (#1186) sits between the name and Sign out on one line, as "Get app": "Download app" never
    fits the shelf's 190px beside them. At the overview's narrowest the name and Sign out stay whole and it gives way. */
 .shelf .account .foot:has(.get-app) { gap: 0.4rem; }
-.shelf .account .foot:has(.get-app) > * { flex: none; white-space: nowrap; }
+.shelf .account .foot > :is(.get-app, .get-app ~ *, :has(~ .get-app)) { flex: none; white-space: nowrap; }
 .shelf .account .foot .get-app { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: block; line-height: var(--control-h); color: var(--accent); }
 .shelf .account .foot > :is(a, button):is(:hover, :focus-visible) { text-decoration: underline; }
 .shelf .account .foot .sign-out:is(:hover, :focus-visible) { color: var(--ink); }
@@ -34,15 +34,19 @@
 .settings-tabs a .count { display: inline-block; font-weight: 600; }
 /* One reading width for every settings page (Cara picked "One reading width"). */
 .artifacts-main:has(> .ticket-head > .settings-tabs) { --settings-w: 48rem; }
-.artifacts-main:has(> .ticket-head > .settings-tabs) > :not(.ticket-head), .ticket-head:has(> .settings-tabs) > .meta { max-width: var(--settings-w); }
+/* Never `X:has(…) > *` (or ` *`, `> :not(…)`): a :has() before a child or descendant with no class costs about 20 ms of
+   style on every node added anywhere on the page (#1534). The head is the section's first child and the tabs follow
+   its title row, so the siblings around them name the same children at the same specificity. */
+.artifacts-main > .ticket-head:has(> .settings-tabs) ~ :not(.ticket-head), .artifacts-main > :not(.ticket-head):has(~ .ticket-head > .settings-tabs),
+.ticket-head:has(> .settings-tabs) > .meta { max-width: var(--settings-w); }
 @media (min-width: 801px) {
   /* The head comes apart: its first row (Settings, close) spans the page and stays pinned, the menu takes the left
      column beside everything else. Its span ends on a 1fr row, so a menu taller than the page never spaces out the
      rows beside it. */
   .artifacts-main:has(> .ticket-head > .settings-tabs) { display: grid; grid-template-columns: 11.5rem minmax(0, 1fr); grid-template-rows: repeat(40, auto) 1fr; column-gap: 1.75rem; align-content: start; }
-  .artifacts-main:has(> .ticket-head > .settings-tabs) > * { grid-column: 2; min-width: 0; }
+  .artifacts-main > .ticket-head:has(> .settings-tabs) ~ *, .artifacts-main > :has(~ .ticket-head > .settings-tabs) { grid-column: 2; min-width: 0; }
   .artifacts-main > .ticket-head:has(> .settings-tabs) { display: contents; }
-  .ticket-head:has(> .settings-tabs) > * { grid-column: 2; min-width: 0; }
+  .ticket-head > .settings-tabs, .ticket-head > .settings-tabs ~ *, .ticket-head > :has(~ .settings-tabs) { grid-column: 2; min-width: 0; }
   .ticket-head:has(> .settings-tabs) > .row:first-child { grid-column: 1 / -1; position: sticky; top: inherit; z-index: 4; background: var(--bg); border-bottom: 1px solid var(--line); padding-block: 0.6rem; margin: -0.6rem 0 1rem; }
   .ticket-head > .settings-tabs { grid-column: 1; grid-row: 2 / -1; align-self: start; position: sticky; top: calc(var(--top-inset, 0px) + var(--banner-h, 0px) + 4.5rem); flex-direction: column; gap: 0; margin: 0; overflow: visible; }
   .settings-group { display: flex; flex-direction: column; gap: 0.1rem; }

@@ -85,7 +85,7 @@ function Close-App([string]$Dir) {
     Get-Process -Name App -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { [void]$_.CloseMainWindow() }
 }
 
-if (Test-Path $root) { Remove-Item -Recurse -Force $root }
+if (Test-Path $root) { Stop-Install $root; Remove-Item -Recurse -Force $root }  # a run cut short may have left its apps up
 New-Item -ItemType Directory -Path (Join-Path $root 'bin') | Out-Null
 Invoke-WebRequest -Uri "$From/launcher.exe" -OutFile (Join-Path $root 'bin\launcher.exe') -UseBasicParsing
 Invoke-WebRequest -Uri "$From/testapp.exe" -OutFile (Join-Path $root 'bin\testapp.exe') -UseBasicParsing

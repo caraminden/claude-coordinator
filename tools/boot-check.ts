@@ -74,6 +74,7 @@ try {
   // in folders of their own, never a real worktree, and nothing is held for the usage limit in the copy.
   begin('migrating the copy');
   const turnStore = new Store(copy);
+  arm(); // migrating grows with the database too: moving the chat log into events.db took ~30 s on a copy (#1169)
   // A running ultra review's record names its live working folder, which a server recovering it would delete.
   turnStore.deleteSetting('ultrareview_running');
   // The stand-in tests Claude's launch, not a real Codex turn or review. Copied volume paths can

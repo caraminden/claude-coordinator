@@ -27,7 +27,7 @@ import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 import { copyRow, inScope, scoped } from './read-scope.ts';
-import { CHAT, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema } from './events-db.ts';
+import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -1752,6 +1752,7 @@ export const SCHEMA_HISTORY = [
   [105, 'ci_numbers, ci_number_steps (#1369)'],
   [106, 'flake_events.test_name, message, class (#1438)'],
   [107, 'host_samples cache-health columns (#1501)'],
+  [108, 'events moved to events.db; the main file keeps them as events_old (#1169)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1885,17 +1886,15 @@ export class Store {
   }
 
   /**
-   * Attach events.db, the chat log's own file (#1169), and say where the events table is: the main file until the
-   * database is moved, events.db after. A new database keeps them in the main file for now. One marked moved whose
-   * events.db has no events refuses to open: starting on an empty chat log would bury the real one.
+   * Attach events.db, the chat log's own file (#1169), moving the events there from the main file if they are still in
+   * it. A new database starts its chat log there. One marked moved whose events.db has no events refuses to open:
+   * starting on an empty chat log would bury the real one.
    */
-  private attachEvents(): 'main' | typeof CHAT {
-    this.db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(this.eventsPath ?? ':memory:');
-    this.db.exec(`PRAGMA ${CHAT}.journal_mode = WAL; PRAGMA ${CHAT}.synchronous = NORMAL; PRAGMA ${CHAT}.journal_size_limit = 16777216;`);
-    const home = eventsHome(this.db);
-    if (home) return home;
-    if (eventsMoved(this.db)) throw new Error(`This database's chat log moved to ${this.eventsPath}, which has no events table: put events.db back from backups/ (events-<day>.db or the pre-deploy copy) before starting.`);
-    return 'main';
+  private attachEvents(): typeof CHAT {
+    attachEventsForWrite(this.db, this.eventsPath ?? ':memory:');
+    if (eventsHome(this.db) === 'main') moveEvents(this.db, this.eventsPath ?? ':memory:'); // the server moves them on a worker first (moveEventsOffThread)
+    if (eventsHome(this.db) !== CHAT && eventsMoved(this.db)) throw new Error(`This database's chat log moved to ${this.eventsPath}, which has no events table: put events.db back from backups/ (events-<day>.db) before starting, or run tools/events-unsplit.ts on a copy taken before the move.`);
+    return CHAT;
   }
 
   /**

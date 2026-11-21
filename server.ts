@@ -37,6 +37,7 @@ import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github
 import { ciFinished, postCard, registerCiArmed, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
+import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
@@ -237,8 +238,11 @@ let deployWatch: DeployWatch | null = null;
 // Once, at the first start with it, before anything opens the database: the live file into a no-COW file (#761).
 // Not a dev copy's, a preview's or a boot check's: each would keep a second 1 GB file. NOCOW_DB=1 runs it anywhere, to try it.
 if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DIR)) {
-  const { moved, note } = moveToNoCow(join(DATA_DIR, 'coordinator.db'));
-  if (note !== 'already no-COW') (moved ? console.log : console.warn)(`coordinator.db: ${note}`);
+  // events.db too (#1169): before the move below fills it, it is the empty file the last release made.
+  for (const file of ['coordinator.db', 'events.db']) {
+    const { moved, note } = moveToNoCow(join(DATA_DIR, file));
+    if (note !== 'already no-COW' && note !== 'no database yet') (moved ? console.log : console.warn)(`${file}: ${note}`);
+  }
 }
 const BOOT_AT = Date.now();
 let writerQueued = () => 0;
@@ -247,6 +251,9 @@ if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record
 startWatchdog();
 // Before any unit starts: whether systemd-run takes MemoryTHP= (src/unit-thp.ts).
 await Promise.all([loadAssets(), probeThp()]);
+// The chat log's move into events.db (#1169), off the event loop so the watchdog's pings go on; the Store finds it done.
+const eventsMove = await moveEventsOffThread(join(DATA_DIR, 'coordinator.db'));
+if (eventsMove) console.log(eventsMove);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.

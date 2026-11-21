@@ -3731,8 +3731,8 @@ export class Store {
     });
   }
 
-  /** The "Shipped …" notes posted at or after `since`, newest first, each with its minion's scheme, number and title: Home's "Shipped since your last visit" (#1140). A push that failed isn't one; one waiting for the restart is (main has it). */
-  /** `ids`, [from, to): only the notes of those event ids, `since` aside: Home's paced first read, a range at a time (#1414). */
+  /** The "Shipped …" notes posted at or after `since`, newest first, each with its minion's scheme, number and title: Home's "Shipped since your last visit" (#1140). A push that failed isn't one; one waiting for the restart is (main has it).
+   * `ids`, [from, to): only the notes of those event ids, `since` aside: Home's paced first read, a range at a time (#1414). */
   shippedNotes(since: number, ids?: [number, number]): { ticket_id: number; project_id: number; number: number | null; kind: TicketKind; title: string; text: string; at: number }[] {
     return this.db.prepare(`SELECT e.ticket_id, t.project_id, t.number, t.kind, t.title, json_extract(e.data, '$.text') AS text, e.created_at AS at
       FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.id < ? AND e.kind = 'note' AND e.data LIKE '{"text":"Shipped %'

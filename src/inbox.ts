@@ -184,8 +184,8 @@ function bucketShips(notes: ShipNote[]): HomeBuckets {
  * The server's copy of the window's ship notes and their buckets, the same for everyone. A ship note is written once,
  * so each call reads only the notes past the last event read. The first read goes a
  * range of event ids at a time, yielding between them: await ready() before homeView. Without a cache (a test), every
- * call reads fresh. shortcut: a minion deleted or moved after its ship stays counted under its old scheme until the
- * note leaves the window or the server restarts; rebuild on a timer if that ever shows.
+ * call reads fresh. shortcut: a note written into ids freed by deleting the newest events, between two calls, is
+ * missed until the server restarts; key on a delete counter if that ever shows.
  */
 export class HomeBucketCache {
   private held: { store: Store; mark: number; at: number; notes: ShipNote[]; buckets: HomeBuckets } | null = null;
@@ -219,7 +219,13 @@ export class HomeBucketCache {
     h.mark = top;
     // Old notes leave the window once a minute; the buckets are worked out again only when the notes changed.
     const prune = now - h.at >= HOME_BUCKETS_MS || now < h.at;
-    if (prune) h.notes = h.notes.filter((n) => n.at >= homeWindow(now)), (h.at = now);
+    if (prune) {
+      // A minion deleted since drops out, and one moved to another scheme counts there, as a fresh read would have it.
+      const where = new Map<number, number | null>();
+      for (const n of h.notes) if (!where.has(n.ticket_id)) where.set(n.ticket_id, store.getTicket(n.ticket_id)?.project_id ?? null);
+      h.notes = h.notes.filter((n) => n.at >= homeWindow(now) && where.get(n.ticket_id) != null).map((n) => ({ ...n, project_id: where.get(n.ticket_id)! }));
+      h.at = now;
+    }
     if (fresh.length) h.notes = [...h.notes, ...fresh];
     if (prune || fresh.length) h.buckets = bucketShips(h.notes);
     return h;

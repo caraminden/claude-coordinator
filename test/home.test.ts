@@ -111,6 +111,31 @@ test('Home\'s ship buckets are held for everyone, a new ship shows at once, and 
   assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 0, 'past the window they are dropped');
 });
 
+test('Home\'s held ship notes follow a deleted minion, newest events deleted, and a visit older than the window', () => {
+  const { store, josh, scheme, minion, approvals } = setup('cache-drift.sqlite');
+  const peek = scheme('Peek Auras');
+  const one = minion(peek, 'one'), two = minion(peek, 'two'), three = minion(peek, 'three');
+  const cache = new HomeBucketCache();
+  const who = { name: 'josh', uid: josh.id };
+  const total = (h: ReturnType<typeof homeView>) => h.schemes[0].daily.reduce((a: number, b: number) => a + b, 0);
+  const now = Date.now();
+  store.addEvent(one.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
+  store.addEvent(two.id, 'note', { text: 'Shipped bbb2222: two. Risk low: x.' });
+  assert.equal(total(homeView(store, approvals, who, () => false, now - 1000, now, cache)), 2);
+  store.deleteTicket(two.id);
+  assert.equal(total(homeView(store, approvals, who, () => false, now - 1000, now + HOME_BUCKETS_MS, cache)), 1, 'a deleted minion drops out within the minute');
+  // The newest event deleted outright: its id may come back, so the window is read afresh.
+  const extra = store.addEvent(three.id, 'note', { text: 'Shipped ccc3333: three. Risk low: x.' });
+  assert.equal(total(homeView(store, approvals, who, () => false, now - 1000, now + HOME_BUCKETS_MS + 1, cache)), 2);
+  store.db.prepare('DELETE FROM events WHERE id = ?').run(extra.id);
+  assert.equal(total(homeView(store, approvals, who, () => false, now - 1000, now + HOME_BUCKETS_MS + 2, cache)), 1);
+  // A visit from before the window counts from the store, not the held notes.
+  store.db.prepare('UPDATE events SET created_at = ?').run(now - 30 * 86_400_000);
+  const fresh = new HomeBucketCache();
+  assert.equal(total(homeView(store, approvals, who, () => false, now - 1000, now, fresh)), 0, 'nothing in the window');
+  assert.equal(homeView(store, approvals, who, () => false, now - 40 * 86_400_000, now, fresh).schemes[0].shipped, 1, 'but the visit sees its ship');
+});
+
 test('Home\'s days are the last 14 Pacific dates, oldest first, each once, across both clock changes', () => {
   const fallBack = homeDays(Date.UTC(2026, 10, 2, 12)); // Nov 2, 4 AM PST: the day before was 25 hours
   assert.equal(fallBack.length, 14);

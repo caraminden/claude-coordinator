@@ -1466,13 +1466,13 @@ gate() {
         retro_log "cut-off rerun · $branch · $cut · not started"
         rc=2
       else
-        say "only flakes failed ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
+        say "failed in the full run but passed alone ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
         retro_log "flake rerun · $branch · $reran · not started"
         reran=''
       fi
     else
       if [ -n "$cut" ]; then say "the CI run on $short was cut off before any test failed ($cut), so it says nothing about this commit: running CI once more"
-      else say "only flakes failed ($reran); running CI once more on $short, the land needs a fully green run"; fi
+      else say "failed in the full run but passed alone ($reran); running CI once more on $short, the land needs a fully green run"; fi
       ci_id='' ci_pushed=''
       rc=0
       ci_gate || rc=$?
@@ -1873,7 +1873,7 @@ else
     cp "$log" "$kept" 2>/dev/null || kept=$log
     failed=$(cat "$kept" 2>/dev/null) || failed=''
     if ! flakes=$(flake_only) || ! known_flakes "$flakes"; then
-      [ -z "$flakes" ] || retry_in_place "only flakes failed on perigee: $flakes"
+      [ -z "$flakes" ] || retry_in_place "failed in the full run but passed alone on perigee: $flakes"
       # Killed from outside before any test failed (#1393): no verdict on the change, so it goes again once, as flakes do.
       if cut_off; then
         retry_in_place "the suite on perigee was killed from outside before any test failed"

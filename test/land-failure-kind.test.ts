@@ -32,7 +32,7 @@ test('CI or runner trouble with no failing test, but not once tests ran red afte
 
 test('a flake: the second red whose files all passed alone', () => {
   const out = `run-tests: test/fresh-session.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 9.1)\nland: tests failed on the rebased branch in CI (https://x/2), so main is untouched`;
-  assert.equal(kind(out), 'flake');
+  assert.equal(kind(out), 'passed-alone');
   // CI's failed log carries a job/step prefix on every line, and one real red among the flakes is not a flake
   const mixed = `build\ttests\t2026-11-18T10:00:00Z run-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nbuild\ttests\t2026-11-18T10:00:01Z run-tests: test/b.test.ts: failed again alone: a real failure\nland: tests failed on the rebased branch in CI (https://x/3), so main is untouched`;
   assert.equal(kind(mixed), null);
@@ -49,9 +49,9 @@ test('a burn-in red (#1443) is the ship\'s own, even when the failing copy quote
 });
 
 test('after a retry in place (#1360), only the second attempt is read: its real red is not a flake', () => {
-  const first = `run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change\nland: refused by the pipeline (only flakes failed on perigee: test/a.test.ts), not your change: keeping its place in line and riding the next train, once`;
-  assert.notEqual(kind(`${first}\nland: back at the front\n✖ test/b.test.ts › x › y (3ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`), 'flake');
-  assert.equal(kind(`${first}\nland: back at the front\nrun-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nland: refused by the pipeline again`), 'flake');
+  const first = `run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change\nland: refused by the pipeline (failed in the full run but passed alone on perigee: test/a.test.ts), not your change: keeping its place in line and riding the next train, once`;
+  assert.notEqual(kind(`${first}\nland: back at the front\n✖ test/b.test.ts › x › y (3ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`), 'passed-alone');
+  assert.equal(kind(`${first}\nland: back at the front\nrun-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nland: refused by the pipeline again`), 'passed-alone');
 });
 
 test('a repo-wide snapshot or budget test, and the change\'s own test', () => {
@@ -65,4 +65,22 @@ test('a repo-wide snapshot or budget test, and the change\'s own test', () => {
 test('anything else is unknown (null), so the wake keeps today\'s text', () => {
   assert.equal(kind('land: tools/land.sh exited 1\nsomething odd'), null);
   assert.equal(kind(''), null);
+});
+
+test('a file land.sh would not call passed alone makes the red real, whatever else passed alone (G1)', () => {
+  const ok = 'run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 9.1)';
+  const end = 'land: tests failed on the rebased branch in CI (https://x/4), so main is untouched';
+  for (const bad of [
+    'run-tests: test/b.test.ts: rerun alone stopped after 40s, when CI\'s answer was due: counts as a real failure',
+    'run-tests: test/b.test.ts: not rerun: the reruns\' 300s ran out',
+    'run-tests: test/b.test.ts: not rerun: CI\'s answer is due (land.sh stops waiting then), so the run counts as a real red',
+    'run-tests: test/b.test.ts: not rerun: a real failure already makes this run red',
+  ])
+    assert.notEqual(kind(`${ok}\n${bad}\n${end}`), 'passed-alone', bad);
+});
+
+test('the line for a red whose files all passed alone does not call it a flake (Cara, 2026-11-21)', () => {
+  const c = classifyLandFailure('run-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nland: tests failed on the rebased branch in CI (https://x/2), so main is untouched');
+  assert.doesNotMatch(c!.line, /flake/i);
+  assert.match(c!.line, /passed alone/);
 });

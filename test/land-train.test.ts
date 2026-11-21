@@ -314,7 +314,7 @@ test("a train's red of flakes only is unchanged: one fresh run, and a ship that 
   const l = await line([{}, {}, { change: ['test/slow.test.ts', 'x\n'] }, {}], { FAKE_FLAKY_PATH: 'test/slow.test.ts', FAKE_LOG: 'flakes' });
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
-  assert.match(done[1].stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
+  assert.match(done[1].stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
   assert.doesNotMatch(done[1].stderr, /suspects|bisect/);
   shipped(l, done[2], 3, 2, 3);
   shipped(l, done[3], 4, 2, 3);
@@ -334,7 +334,7 @@ test("a train's red of known flakes only ships every rider on that one run; one 
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
     if (touched) {
       assert.match(done[1].stderr, /test\/slow\.test\.ts is a known flake, but #3 changed it or what it imports, so it isn't excused/);
-      assert.match(done[1].stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
+      assert.match(done[1].stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
       assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /shipped past/);
     } else {
       assert.doesNotMatch(done[1].stderr, /running CI once more/);

@@ -713,7 +713,7 @@ test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
   assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
   assert.equal(landPhase('land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara\'s desktop (at most 6 min, then it runs here)\n'), 'landing: waiting on CI');
-  assert.equal(landPhase('land: waiting for CI on abc\nland: only flakes failed (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: failed in the full run but passed alone (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: CI FALLBACK: no runner. Running the full suite on perigee instead.\n'), 'landing: running tests');
   assert.equal(landPhase('land: waiting for CI on abc\nland: waiting for CI or a quiet perigee: CI: no runner, but perigee is busy (load 40.00 on 16 cores (quiet is under half)), so this keeps asking CI\n'), 'landing: waiting for CI or a quiet perigee');
   assert.equal(landPhase('land: waiting for CI on abc\nqueue: waiting for the restart ahead to have its verdict; main and the live checkout stay as they are until then\n'), 'landing: in line');

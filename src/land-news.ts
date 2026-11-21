@@ -87,11 +87,14 @@ export function landNews(output: string, name: (branch: string) => string): News
     } else if ((m = s.match(/^only known flakes failed (?:in CI \([^)]*\)|on perigee): (.*), so this goes on as green/))) {
       slow = null; // #1419: no fresh run, so the reruns' warning is done
       news.push({ tone: 'warn', text: `Only known flakes failed (${list([...m[1].matchAll(/(\S+) \(/g)].map((f) => short(f[1])))}): going on as green, with no fresh CI run` });
-    } else if ((m = s.match(/^only flakes failed \(([^)]*)\)(.*)$/))) {
+    } else if ((m = s.match(/^failed in the full run but passed alone \(([^)]*)\)(.*)$/))) {
       const files = m[1].split(', ').map(short);
       news.push(/stays red/.test(m[2])
-        ? { tone: 'bad', text: `Only flakes failed (${list(files)}), but a fresh CI run couldn't start, so it stays red` }
-        : { tone: 'warn', text: `Only flakes failed (${list(files)}): one fresh CI run` });
+        ? { tone: 'bad', text: `${list(files)} failed in the full suite but passed alone, but a fresh CI run couldn't start, so it stays red` }
+        : { tone: 'warn', text: `${list(files)} failed in the full suite but passed alone: one fresh CI run` });
+    } else if ((m = s.match(/^suspects: (.*): CI is red on the ship train \(/))) {
+      done(); // the guess replaces the bisect's progress line
+      news.push({ tone: 'bad', text: `Sent back to their minions: ${m[1].replace(/\(([^)]*)\)/g, (_, fs: string) => `(${fs.split(', ').map(short).join(', ')})`)}` });
     } else if ((m = s.match(/^the bisect found (\S+) the first ship that turned the train red .*?the (\d+) before it ship/))) {
       done();
       const at = riders.indexOf(m[1]);

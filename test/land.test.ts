@@ -340,7 +340,7 @@ test('a red of flakes only gets one fresh CI run, and lands when that run is gre
   const shared = join(r.dir, 'shared');
   const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
+  assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
   // src/flakes.ts parses these lines (a pipeline test can't import it; test/flakes.test.ts pins the same format).
   assert.match(res.stderr, /^land: flake: test\/busy\.test\.ts · in CI$/m);
@@ -382,7 +382,7 @@ test("a red of flakes only stays red when the scratch branch can't be deleted fo
   const shared = join(r.dir, 'shared');
   const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but deleting land\/ticket\/1-x on GitHub to start a fresh run failed \(.*deletes refused.*\), so this stays red\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but deleting land\/ticket\/1-x on GitHub to start a fresh run failed \(.*deletes refused.*\), so this stays red\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
   assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'no second run asked for');
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · .* · not started$/m);
@@ -840,11 +840,11 @@ test('a perigee red of flakes only goes again once: green lands, red again refus
     const main = git(r.source, 'rev-parse', 'main');
     const res = c.run({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: fails, COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, status, res.stderr);
-    assert.match(res.stderr, /refused by the pipeline \(only flakes failed on perigee: test\/flaky\.test\.mjs\), not your change/);
+    assert.match(res.stderr, /refused by the pipeline \(failed in the full run but passed alone on perigee: test\/flaky\.test\.mjs\), not your change/);
     assert.equal(readFileSync(join(r.dir, 'count'), 'utf8'), fails === '1' ? '3' : '4', 'the full run and the rerun alone, twice over at most');
-    assert.match(retries(shared)[0], new RegExp(`· retry in place · ticket/1-x · only flakes failed on perigee: test/flaky\\.test\\.mjs · ${outcome}$`));
+    assert.match(retries(shared)[0], new RegExp(`· retry in place · ticket/1-x · failed in the full run but passed alone on perigee: test/flaky\\.test\\.mjs · ${outcome}$`));
     if (status) {
-      assert.match(res.stderr, /refused by the pipeline again \(only flakes failed on perigee: test\/flaky\.test\.mjs\), after its one retry in place.*tests failed on the rebased branch/s);
+      assert.match(res.stderr, /refused by the pipeline again \(failed in the full run but passed alone on perigee: test\/flaky\.test\.mjs\), after its one retry in place.*tests failed on the rebased branch/s);
       assert.equal(git(r.source, 'rev-parse', 'main'), main, 'red stays red');
     }
   }

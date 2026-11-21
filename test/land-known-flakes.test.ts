@@ -46,7 +46,7 @@ test('one failed file seen for the first time gets the one fresh run, as before,
   const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', FAKE_LOG_RERUN: 'mixed', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /test\/busy\.test\.ts \(not seen on another branch in 14 days, and no minion is fixing it\) is no known flake/);
-  assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run/);
+  assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run/);
   assert.match(res.stderr, /on the one fresh run after a red of flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/);
   assert.equal(pushes(c), 2);
   assert.doesNotMatch(res.stderr, /shipped past/);
@@ -72,7 +72,7 @@ test("a known flake the ship changed, or that imports what it changed, gets the 
     const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stderr, /test\/slow\.test\.ts is a known flake, but #1 changed it or what it imports, so it isn't excused/, how);
-    assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/, how);
+    assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/, how);
     assert.equal(pushes(c), 2, how);
     assert.doesNotMatch(res.stderr, /shipped past/, how);
     assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · green$/m, how);
@@ -129,7 +129,7 @@ test("a perigee red of known flakes only lands on that run: no retry in place; a
       assert.doesNotMatch(res.stderr, /refused by the pipeline|retry in place/);
       assert.equal(readFileSync(join(r.dir, 'count'), 'utf8'), '2', 'the full run and its rerun alone, once');
     } else {
-      assert.match(res.stderr, /refused by the pipeline \(only flakes failed on perigee: test\/flaky\.test\.mjs\), not your change/);
+      assert.match(res.stderr, /refused by the pipeline \(failed in the full run but passed alone on perigee: test\/flaky\.test\.mjs\), not your change/);
       assert.doesNotMatch(res.stderr, /shipped past/);
     }
   }

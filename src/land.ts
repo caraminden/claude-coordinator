@@ -358,10 +358,11 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
     return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
   if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output))
     return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
-  // Only when every rerun-alone label is "passed alone": one "failed again alone" or "hung" makes it a real red, and a
-  // rerun killed from outside (#1393) leaves its file unlabelled, so that red isn't all flakes either.
-  if (/: failed in the full run, passed alone/.test(output) && !/: (failed again alone|hung when rerun alone|killed \(exit \d+\) when rerun alone)/.test(output))
-    return k('flake', 'Kind: flake (the failed files passed alone, so load, not your change). Not yours: hand off again; no code change needed.');
+  // What land.sh's flake_only would call passed-alone (#1013, G1 of #1283): some file passed alone and none has another label
+  // from tools/run-tests.sh: "failed again alone", "hung when rerun alone", "rerun alone stopped … counts as a real failure",
+  // "not rerun: …". Not a "flake" for people: that word is for a known one (#1419), which ships and is never refused.
+  if (/: failed in the full run, passed alone/.test(output) && !/run-tests: \S+: (failed again alone|hung when rerun alone|rerun alone stopped|not rerun:|killed \(exit \d+\) when rerun alone)/.test(output))
+    return k('passed-alone', 'Kind: the failed files failed in the full run but passed alone (so load, not your change, going by that). Not yours: hand off again; no code change needed.');
   const always = failedFiles.filter((f) => ALWAYS_TESTS.some((a) => f.includes(a)));
   if (always.length)
     return k('always-test', `Kind: repo-wide snapshot or budget test (${always.join(', ')}). Your change moved it: regenerate the snapshot, or trim what you added (prompt text, tools, routes), then re-test that file and hand off again.`);
@@ -374,7 +375,7 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 const PHASES: [RegExp, string][] = [
   [/^(deploy: |land: main is now at )/, 'deploying'],
   [/^land: waiting for CI or a quiet perigee/, 'waiting for CI or a quiet perigee'],
-  [/^land: (waiting for CI|only flakes failed.*running CI once more)/, 'waiting on CI'],
+  [/^land: (waiting for CI|failed in the full run but passed alone.*running CI once more)/, 'waiting on CI'],
   [/^land: (running |CI FALLBACK)/, 'running tests'],
   [/^land: (rebasing|merging main)/, 'rebasing'],
   [/^land: smoke: /, 'smoke check'],

@@ -62,7 +62,7 @@ for p in ${CITADEL_HEAVY_UNIT_PROPS:-}; do props+=(-p "$p"); done
 
 # Scratch on disk (#1339): a caller with no TMPDIR of its own, or one on perigee's RAM-backed /tmp, would put a test run's
 # files and a build's intermediates in memory. The folder is named by this pid (an --exec'd command keeps it), so the
-# server's sweep (src/tmp-sweep.ts) can tell a live one from a leftover; without --exec it goes when the command ends.
+# server's sweep (src/tmp-sweep.ts) can tell a live one from a leftover; without --exec it goes when the command ends (a command that runs in place after systemd-run failed leaves it to the sweep).
 case ${TMPDIR:-/tmp} in
   /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*|/run|/run/*)
     heavytmp=${CITADEL_HEAVY_TMP:-${XDG_CACHE_HOME:-$HOME/.cache}/citadel-heavy-tmp}/heavy-$$

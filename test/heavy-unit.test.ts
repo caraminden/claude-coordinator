@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { scriptEnv } from './script-env.ts';
@@ -161,14 +161,15 @@ test("its scope gets a TMPDIR on disk when the caller's is perigee's RAM-backed 
   const bus = createServer().listen(join(run, 'bus'));
   try {
     const disk = join(root, 'heavy-tmp');
-    const r = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"; touch "$TMPDIR/scratch"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: '/tmp', CITADEL_HEAVY_TMP: disk }), encoding: 'utf8' });
+    const onDisk = join(homedir(), '.cache'); // not under tmpdir(): CI has none set, so that is /tmp
+    const r = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"; touch "$TMPDIR/scratch"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: '/tmp', CITADEL_HEAVY_TMP: disk, CITADEL_HEAVY_SLICE: 'citadel-heavy-test.slice' }), encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     const seen = r.stdout.trim();
     assert.match(seen, new RegExp(`^${disk}/heavy-\\d+$`));
     assert.equal(existsSync(seen), false, 'its folder is gone once the command ended');
     // A TMPDIR already on disk stays the caller's.
-    const kept = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: root, CITADEL_HEAVY_TMP: disk }), encoding: 'utf8' });
-    assert.equal(kept.stdout.trim(), root);
+    const kept = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: onDisk, CITADEL_HEAVY_TMP: disk, CITADEL_HEAVY_SLICE: 'citadel-heavy-test.slice' }), encoding: 'utf8' });
+    assert.equal(kept.stdout.trim(), onDisk);
   } finally {
     bus.close();
   }

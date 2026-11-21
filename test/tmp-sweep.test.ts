@@ -38,7 +38,7 @@ test('a folder a running process works inside stays, and another uid\'s is never
   const mine = make('citadel-boot-check-other1', 2 * HOUR);
   const proc = join(root, 'fakeproc');
   mkdirSync(join(proc, '123'), { recursive: true });
-  symlinkSync(join(proc, '123', 'cwd'), join(busy, 'sub'));
+  symlinkSync(join(busy, 'sub'), join(proc, '123', 'cwd')); // the fake process's cwd is inside busy
   assert.deepEqual(sweepOrphanTmp([root], now, { proc }), [mine]);
   assert.equal(existsSync(busy), true);
   const foreign = make('citadel-boot-check-foreign', 2 * HOUR);

@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
+import { scoped } from './read-scope.ts';
 import type { Delivery, DeliveryState, NewDelivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
 import { HELD_CLOSED, type Outbox, type Outcome, span } from './outbox.ts';
@@ -452,10 +453,13 @@ export class LiveWaiters {
    * the old key (the dual read).
    */
   chains(): Chain[] {
-    const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
-    if (!this.outbox) return old;
-    const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf);
-    return [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
+    // Read once in a request's read scope (src/read-scope.ts): a scheme's list asked four times a minion (#1527).
+    return [...scoped(this.store.db, 'wake:chains', () => {
+      const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
+      if (!this.outbox) return old;
+      const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf);
+      return [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
+    })];
   }
 
   /** The repo of `ticket`'s scheme, when this server doesn't run its code: there live means merged. */

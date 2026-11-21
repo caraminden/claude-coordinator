@@ -15,6 +15,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { readScope } from '../read-scope.ts';
 import { isShipping, isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
 import { FLAG_RULE, findRepeats, flagBlock, flagNote, ownBrief, steppedTier } from '../repeat-bugs.ts';
@@ -506,7 +507,8 @@ export const projectRoutes: Route[] = [
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
       const schemes = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
-      json(res, 200, await Promise.all(schemes.map(async (p) => {
+      // Each scheme's part up to its icon's await runs in one read scope (src/read-scope.ts, #1527): the people, settings and waits it reads per minion come once.
+      json(res, 200, await Promise.all(readScope(store.db, () => schemes.map(async (p) => {
         const tickets = store.listTickets(p.id);
         const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
         const seen = seenItems.get(p.id);
@@ -525,7 +527,7 @@ export const projectRoutes: Route[] = [
           // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
           coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
         };
-      })));
+      }))));
     },
   },
   {

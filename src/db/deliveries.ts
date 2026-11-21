@@ -1,5 +1,6 @@
 // The one outbox's table (ADR 0021, #1385): every saved "send this later" row. src/outbox.ts is the only writer.
 import type { Store } from '../db.ts';
+import { inScope, scoped } from '../read-scope.ts';
 
 export type DeliveryState = 'waiting' | 'held' | 'sending' | 'sent' | 'dropped' | 'failed';
 export type Delivery = {
@@ -29,6 +30,8 @@ export type NewDelivery = Pick<Delivery, 'project_id' | 'kind' | 'to_kind' | 'to
   Partial<Pick<Delivery, 'id' | 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>>;
 export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'>>;
 
+// The states of a row not yet sent or dropped, which a read scope keeps.
+const LIVE: DeliveryState[] = ['waiting', 'held', 'sending'];
 const row = (r: any): Delivery => ({ ...r, when_arg: JSON.parse(r.when_arg), payload: JSON.parse(r.payload) });
 const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'attempts', 'last_error', 'reason', 'event_id']);
 
@@ -53,6 +56,13 @@ export const deliveryQueries = {
 
   /** Rows in id order, narrowed by kind, target (a minion's id unless toKind says otherwise), states or dedupe key. */
   listDeliveries(this: Store, q: { kind?: string; to?: number; toKind?: string; states?: DeliveryState[]; dedupe?: string } = {}): Delivery[] {
+    // In a read scope (src/read-scope.ts) every row still to go is read once (or every row in the states asked, which the
+    // prune keeps short), and each ask for some of them filters that: a scheme's list asked twice a minion (#1527).
+    if (inScope(this.db) && q.dedupe == null && q.states?.length) {
+      const states = q.states.every((s) => LIVE.includes(s)) ? LIVE : [...new Set(q.states)].sort();
+      const live = scoped(this.db, `deliveries:${states.join(',')}`, () => this.db.prepare(`SELECT * FROM deliveries WHERE state IN (${states.map(() => '?').join(', ')}) ORDER BY id`).all(...states) as any[]);
+      return live.filter((r) => (q.kind == null || r.kind === q.kind) && (q.to == null || (r.to_kind === (q.toKind ?? 'minion') && Number(r.to_id) === Number(q.to))) && q.states!.includes(r.state)).map(row);
+    }
     const where: string[] = [];
     const args: (string | number)[] = [];
     if (q.kind != null) (where.push('kind = ?'), args.push(q.kind));

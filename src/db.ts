@@ -25,6 +25,7 @@ import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
+import { inScope, scoped, warm } from './read-scope.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -2111,7 +2112,8 @@ export class Store {
   }
 
   getProject(id: number): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined;
+    const p = scoped(this.db, `project:${id}`, () => this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined);
+    return p && { ...p };
   }
 
   createProject(name: string, repoUrl: string | null, ownerId: number | null = null): Project {
@@ -2249,12 +2251,14 @@ export class Store {
   }
 
   getUser(id: number): User | undefined {
-    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined;
+    const u = scoped(this.db, `user:id:${id}`, () => this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined);
+    return u && { ...u };
   }
 
   /** By login, name or open invite, either case: cookies from the shared-password days carry only the name. */
   findUser(field: 'login' | 'name' | 'invite_hash', value: string): User | undefined {
-    return this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined;
+    const u = scoped(this.db, `user:${field}:${value}`, () => this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined);
+    return u && { ...u };
   }
 
   /** A new person gets an id no one has ever had: a removed person's cookie names their id (#468 S05-1). */
@@ -2426,8 +2430,8 @@ export class Store {
 
   /** The schemes a person owns or is a member of, admin or not: the Releases page's All view (#625). */
   memberSchemes(uid: number | undefined): Set<number> {
-    const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
-      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(uid ?? -1) as { id: number }[];
+    const rows = scoped(this.db, `member-schemes:${uid ?? -1}`, () => this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
+      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(uid ?? -1) as { id: number }[]);
     return new Set(rows.map((r) => r.id));
   }
 
@@ -3078,7 +3082,15 @@ export class Store {
 
   /** One minion's open cards (openCards), oldest first. */
   openCardsOf(ticketId: number): EventRow[] {
-    return this.openCardsWhere('e.ticket_id = ?', ticketId);
+    return [...scoped(this.db, `open-cards:${ticketId}`, () => this.openCardsWhere('e.ticket_id = ?', ticketId))];
+  }
+
+  /** Inside a read scope (src/read-scope.ts): every open card of `projectId`'s minions in one read, for openCardsOf of each of `ticketIds`. */
+  warmOpenCards(projectId: number, ticketIds: number[]) {
+    if (!inScope(this.db)) return;
+    const by = new Map<number, EventRow[]>(ticketIds.map((id) => [id, []]));
+    for (const e of this.openCards(projectId)) by.get(e.ticket_id)?.push(e);
+    warm(this.db, [...by].map(([id, rows]) => [`open-cards:${id}`, rows]));
   }
 
   /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
@@ -3511,13 +3523,21 @@ export class Store {
   /** When a ticket's last finished turn ended (ms), or null before its first. */
   lastTurnEnd(ticketId: number): number | null {
     // A side question's fork (#932) isn't the minion's turn: its prefix may sit on another login, and the minion's own is no warmer for it.
-    const r = this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined;
-    return r?.ended_at ?? null;
+    return scoped(this.db, `last-turn-end:${ticketId}`, () => (this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined)?.ended_at ?? null);
   }
 
   /** What a ticket's turns have cost so far; `hostOnly`: the server login's turns only. */
   ticketCost(ticketId: number, hostOnly = false): number {
-    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c;
+    return scoped(this.db, `cost:${ticketId}:${hostOnly}`, () => (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c);
+  }
+
+  /** Inside a read scope (src/read-scope.ts): ticketCost (both kinds) and lastTurnEnd of every one of `ids`, in one read. */
+  warmTurnTotals(ids: number[]) {
+    if (!inScope(this.db) || !ids.length) return;
+    const rows = this.db.prepare(`SELECT j.value AS id, COALESCE(SUM(t.cost_usd), 0) AS c, COALESCE(SUM(CASE WHEN t.payer IS NULL THEN t.cost_usd END), 0) AS h,
+        (SELECT ended_at FROM turns WHERE ticket_id = j.value AND side IS NULL ORDER BY id DESC LIMIT 1) AS e
+      FROM json_each(?) j LEFT JOIN turns t ON t.ticket_id = j.value GROUP BY j.value`).all(JSON.stringify(ids)) as { id: number; c: number; h: number; e: number | null }[];
+    warm(this.db, rows.flatMap((r) => [[`cost:${r.id}:false`, r.c], [`cost:${r.id}:true`, r.h], [`last-turn-end:${r.id}`, r.e ?? null]] as [string, unknown][]));
   }
 
   /**
@@ -3777,8 +3797,17 @@ export class Store {
   }
 
   getSetting<T>(key: string): T | null {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
-    return row ? JSON.parse(row.value) : null;
+    // The text, not the parsed value, is what a read scope keeps: each caller gets its own copy to change.
+    const value = scoped(this.db, `setting:${key}`, () => (this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null);
+    return value == null ? null : JSON.parse(value);
+  }
+
+  /** Inside a read scope (src/read-scope.ts): every one of `keys` in one read, for getSetting. */
+  warmSettings(keys: string[]) {
+    if (!inScope(this.db) || !keys.length) return;
+    const rows = this.db.prepare('SELECT key, value FROM settings WHERE key IN (SELECT value FROM json_each(?))').all(JSON.stringify(keys)) as { key: string; value: string }[];
+    const got = new Map(rows.map((r) => [r.key, r.value]));
+    warm(this.db, keys.map((k) => [`setting:${k}`, got.get(k) ?? null]));
   }
 
   /** Every setting whose key starts with `prefix`, as key and value. */

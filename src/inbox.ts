@@ -36,6 +36,9 @@ const forPerson = (card: { to?: string }, person: string) => !card.to || card.to
  */
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
   const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
+  // One read for every open minion's properties in a request's read scope (src/read-scope.ts, #1527), for minionPerson and requester.
+  store.props.warmTargets('minion', all.map((t) => t.id));
+  store.warmSettings(all.filter((t) => t.status === 'running').map((t) => `turn:${t.id}`));
   // In a split scheme (#919) a person's own Taskmaster is theirs alone; the Overlord's (coordinator_of null) is everyone's.
   // A minion is its assignee's, the scheme owner's once they're gone (Store.minionPerson, as push, #1449), else everyone's.
   const me = store.findUser('name', person)?.id;

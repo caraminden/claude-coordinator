@@ -3,6 +3,7 @@
 import type { Store, Ticket, TicketKind } from '../db.ts';
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
+import { inScope, scoped, warm } from '../read-scope.ts';
 
 export const minionQueries = {
   /**
@@ -33,9 +34,9 @@ export const minionQueries = {
 
   /** All tickets in a project, including the coordinator. */
   listTickets(this: Store, projectId: number): Ticket[] {
-    return this.db
+    return scoped(this.db, `tickets:${projectId}`, () => this.db
       .prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(projectId) as unknown as Ticket[];
+      .all(projectId) as unknown as Ticket[]).map((t) => ({ ...t }));
   },
 
   /** Open tickets whose last turn hit the usage limit, in every project. */
@@ -171,11 +172,21 @@ export const minionQueries = {
   /** Everyone touching a minion: the recorded ones plus its requester and assignee, less those who left it or the scheme (#1449). */
   touchedBy(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id),
     hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number[] {
-    const rows = this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[];
+    const rows = scoped(this.db, `touches:${ticket.id}`, () => this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[]);
     const left = new Set(rows.filter((r) => r.left_at != null).map((r) => r.user_id));
     const ids = [...rows.map((r) => r.user_id), this.personId(props.requestedBy), this.personId(props.assigned)];
     const projectId = ticket.project_id ?? this.getTicket(ticket.id)?.project_id;
     return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id) && projectId != null && hears(id, projectId));
+  },
+
+  /** Inside a read scope (src/read-scope.ts): touchedBy's rows for every one of `ids`, and the tickets themselves, in two reads. */
+  warmTouches(this: Store, tickets: Ticket[]) {
+    if (!inScope(this.db) || !tickets.length) return;
+    const ids = tickets.map((t) => t.id);
+    const rows = this.db.prepare('SELECT ticket_id, user_id, left_at FROM ticket_touches WHERE ticket_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as { ticket_id: number; user_id: number; left_at: number | null }[];
+    const by = new Map<number, { user_id: number; left_at: number | null }[]>(ids.map((id) => [id, []]));
+    for (const r of rows) by.get(r.ticket_id)!.push({ user_id: r.user_id, left_at: r.left_at });
+    warm(this.db, [...by].map(([id, rs]) => [`touches:${id}`, rs]));
   },
 
   /** A line for the scheme's other Taskmasters' digests (#919). Lines older than a week go. */
@@ -201,7 +212,8 @@ export const minionQueries = {
   },
 
   getTicket(this: Store, id: number): Ticket | undefined {
-    return this.db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as unknown as Ticket | undefined;
+    const t = scoped(this.db, `ticket:${id}`, () => this.db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as unknown as Ticket | undefined);
+    return t && { ...t };
   },
 
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */

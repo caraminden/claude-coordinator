@@ -28,6 +28,7 @@ import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, re
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
+import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
 import { type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
@@ -65,7 +66,7 @@ import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
-import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
+import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
@@ -936,10 +937,20 @@ export class Runner {
    * row's properties in one query. Read per row, Citadel's ~1,000 dismissed minions held the server 0.4 s a page load.
    */
   views(tickets: Ticket[]) {
-    const memo = new Map<string, unknown>();
-    const once = <T>(key: string, read: () => T): T => (memo.has(key) ? memo.get(key) : (memo.set(key, read()), memo.get(key))) as T;
-    const properties = this.store.props.forTargets('minion', tickets.map((t) => t.id));
-    return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
+    // In one read scope (src/read-scope.ts, #1527): what every row reads per minion comes in one query per kind, and what
+    // they all read (the chains, the waits, the people) is read once, so the count stops growing with the list.
+    return readScope(this.store.db, () => {
+      const memo = new Map<string, unknown>();
+      const once = <T>(key: string, read: () => T): T => (memo.has(key) ? memo.get(key) : (memo.set(key, read()), memo.get(key))) as T;
+      const ids = tickets.map((t) => t.id);
+      const properties = this.store.props.forTargets('minion', ids);
+      const open = tickets.filter((t) => t.status !== 'closed');
+      this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id)]));
+      this.store.warmTurnTotals(ids);
+      this.store.warmTouches(open);
+      for (const pid of new Set(open.map((t) => t.project_id))) this.store.warmOpenCards(pid, open.filter((t) => t.project_id === pid).map((t) => t.id));
+      return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
+    });
   }
 
   /** A ticket as the API shows it: plus queued messages and its task-list steps. */

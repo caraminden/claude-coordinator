@@ -5,6 +5,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { DELVE_SEED, GLOBAL_SEED, type SeedKey } from './property-seed.ts';
 import { HttpError } from './http.ts';
+import { inScope, scoped, warm } from './read-scope.ts';
 
 /** The scheme whose Taskmaster owns the global keys (Citadel itself). */
 export const GLOBAL_OWNER = 2;
@@ -275,7 +276,13 @@ export class Registry {
 
   /** A minion's or artifact's properties: key → value, or a list for multi keys. */
   forTarget(type: TargetType, id: number): Record<string, string | number | string[]> {
-    return this.forTargets(type, [id]).get(id)!;
+    return { ...scoped(this.db, `props:${type}:${id}`, () => this.forTargets(type, [id]).get(id)!) };
+  }
+
+  /** Inside a read scope (src/read-scope.ts): forTarget of every one of `ids` in one read. */
+  warmTargets(type: TargetType, ids: number[]) {
+    if (!inScope(this.db) || !ids.length) return;
+    warm(this.db, [...this.forTargets(type, ids)].map(([id, r]) => [`props:${type}:${id}`, r]));
   }
 
   /** forTarget for many targets in one query (a minions list, #1029): each id's record, {} when it has none. */
@@ -302,6 +309,10 @@ export class Registry {
    * nobody. The inbox matches assigned against the name (#582: a Taskmaster stored Josh's GitHub login and his cards vanished).
    */
   personName(raw: string): string | null {
+    return scoped(this.db, `person-name:${raw.trim()}`, () => this.personNameRead(raw));
+  }
+
+  private personNameRead(raw: string): string | null {
     const row = this.db.prepare(`SELECT u.name FROM users u LEFT JOIN credentials c ON c.user_id = u.id AND c.kind = 'github'
       WHERE lower(u.name) = lower(?1) OR lower(u.login) = lower(?1) OR lower(json_extract(c.meta, '$.login')) = lower(?1)
       ORDER BY lower(u.name) = lower(?1) DESC, lower(u.login) = lower(?1) DESC LIMIT 1`).get(raw.trim()) as { name: string } | undefined;

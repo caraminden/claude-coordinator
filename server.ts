@@ -246,7 +246,7 @@ if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DI
 }
 const BOOT_AT = Date.now();
 let writerQueued = () => 0;
-if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
+if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db', 'events.db'].map((f) => join(DATA_DIR, f)) });
 // systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
 startWatchdog();
 // Before any unit starts: whether systemd-run takes MemoryTHP= (src/unit-thp.ts).

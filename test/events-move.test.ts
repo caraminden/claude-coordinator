@@ -93,6 +93,34 @@ test("the server's move runs on a worker thread, and a second start has nothing 
   assert.equal(look(path).old!.length, rows);
 });
 
+test('a copy left by a move that stopped halfway is made again, and a main file with events again after the move stops the start', () => {
+  const dir = mkdtempSync(join(root, 'd-'));
+  const path = join(dir, 'coordinator.db');
+  let s = new Store(path);
+  const t = s.createTicket({ project_id: s.createProject('p', null).id, title: 't', permission_mode: 'default', created_by: 'Cara' });
+  s.addEvent(t.id, 'note', { text: 'kept' });
+  s.db.close();
+  unsplitEvents(path);
+  // A move that stopped after its first commit, then an event deleted in the main file, which stayed in charge.
+  const ev = new DatabaseSync(join(dir, 'events.db'));
+  ev.exec(`CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO events VALUES (999, ${t.id}, 'note', '{"text":"deleted since"}', 1)`);
+  ev.close();
+  s = new Store(path);
+  assert.deepEqual(chat(s, t.id), [`${t.id}:note:${JSON.stringify(JSON.stringify({ text: 'kept' }))}`]);
+  s.db.close();
+
+  // A release older than events.db started after the move: it made an empty events table in the main file and wrote to it.
+  const raw = new DatabaseSync(path);
+  raw.exec(`CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO events VALUES (1, ${t.id}, 'note', '{"text":"older release"}', 2)`);
+  raw.close();
+  assert.throws(() => new Store(path), /main file has an events table again/);
+  const ev2 = new DatabaseSync(join(dir, 'events.db'), { readOnly: true });
+  assert.deepEqual(ev2.prepare('SELECT data FROM events').all().map((r: any) => r.data), [JSON.stringify({ text: 'kept' })]);
+  ev2.close();
+});
+
 test('the rollback tool refuses a database whose events are already in the main file', () => {
   const dir = mkdtempSync(join(root, 'c-'));
   const path = join(dir, 'coordinator.db');

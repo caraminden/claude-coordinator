@@ -95,15 +95,21 @@ export function attachEventsForWrite(db: DatabaseSync, file: string) {
  * Move the events from the main file into events.db (attached as `chat`), in two commits, since SQLite doesn't commit
  * two WAL files as one: copy them and check every row arrived (same id, minion, kind, time and size), then rename the
  * main table to events_old and mark the database moved. A crash between the two leaves the main table in charge and
- * the next start repeats the copy. events_old stays until a person says it can go: renaming is instant, dropping
+ * the next start drops that copy and makes it again. events_old stays until a person says it can go: renaming is instant, dropping
  * 1.6 GB took 33 s on a copy; tools/events-unsplit.ts moves the rows back from it.
  */
 export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: number } {
   const started = Date.now();
   const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  // Moved already, yet the main file has events again: a release older than the one that reads events.db ran without
+  // tools/events-unsplit.ts and wrote new events there, whose ids collide with events.db's. Merging either way loses rows.
+  if (eventsMoved(db) || hasTable(db, 'main', 'events_old'))
+    throw new Error(`The chat log moved to ${file}, but the main file has an events table again: an older release wrote it after the move. Nothing was changed; merge the two by hand (their ids collide) or restore both files from backups/.`);
+  // A copy left by a move that stopped before its second commit is stale: the main file stayed in charge since.
   db.exec(`BEGIN IMMEDIATE;
-    CREATE TABLE IF NOT EXISTS ${CHAT}.events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
-    INSERT OR REPLACE INTO ${CHAT}.events (id, ticket_id, kind, data, created_at) SELECT id, ticket_id, kind, data, created_at FROM main.events ORDER BY id;
+    DROP TABLE IF EXISTS ${CHAT}.events;
+    CREATE TABLE ${CHAT}.events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO ${CHAT}.events (id, ticket_id, kind, data, created_at) SELECT id, ticket_id, kind, data, created_at FROM main.events ORDER BY id;
     ${eventsSchema(CHAT)}
     COMMIT;`);
   const rows = n('SELECT count(*) AS n FROM main.events');
@@ -111,10 +117,9 @@ export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: 
   const same = n(`SELECT count(*) AS n FROM main.events m JOIN ${CHAT}.events c ON c.id = m.id
     WHERE c.ticket_id = m.ticket_id AND c.kind = m.kind AND c.created_at = m.created_at AND octet_length(c.data) = octet_length(m.data)`);
   if (same !== rows) throw new Error(`Moving the chat log to ${file}: ${rows - same} of ${rows} events didn't arrive whole, so the main file keeps them; nothing was renamed.`);
-  const old = hasTable(db, 'main', 'events_old');
   db.exec(`BEGIN IMMEDIATE;
     DROP TRIGGER IF EXISTS main.card_fates_events_deleted;
-    ${old ? 'DROP TABLE main.events' : 'ALTER TABLE main.events RENAME TO events_old'};
+    ALTER TABLE main.events RENAME TO events_old;
     INSERT OR REPLACE INTO main.settings (key, value) VALUES ('${MOVED_KEY}', '${Date.now()}');
     COMMIT;`);
   return { rows, ms: Date.now() - started };

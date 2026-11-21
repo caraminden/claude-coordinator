@@ -637,7 +637,10 @@ test("a train red only on a test that fails on main too ships through main's red
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, {}, {}],
     (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
-    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+    (r) => {
+      r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+      seen(join(r.dir, 'shared'), ['test/slow.test.ts']);
+    },
   );
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
@@ -646,6 +649,7 @@ test("a train red only on a test that fails on main too ships through main's red
   assert.match(front, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here too, and it is the only real failure of this train's CI run \(https:\/\/ci\/\d+\)/);
   assert.match(front, /Main still needs a fix for test\/real\.test\.ts/);
   assert.match(front, /^land: shipped through main's red on test\/real\.test\.ts$/m, "the front's shipped line names main's red");
+  assert.match(front, /^land: shipped past known flakes test\/slow\.test\.ts \(seen on 1 other branch in 14 days\)$/m, 'its flake is a known one (#1419)');
   for (const i of [3, 4]) {
     shipped(l, done[i - 1], i, 2, 3);
     assert.match(done[i - 1].stderr, /^land: shipped through main's red on test\/real\.test\.ts$/m, `ship ${i}'s shipped line names main's red`);
@@ -662,7 +666,10 @@ test("a ship alone red only on main's red test ships through it too (#1478)", as
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}],
     (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
-    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+    (r) => {
+      r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+      seen(join(r.dir, 'shared'), ['test/slow.test.ts']);
+    },
   );
   const [first, one] = await l.go();
   assert.equal(first.status, 0, first.stderr);
@@ -707,7 +714,10 @@ test("a train with a rider that changed main's red test doesn't ship through it;
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, { change: ['test/real.test.ts', "throw new Error('still red');\n"] }],
     (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d) }),
-    (r) => r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n"),
+    (r) => {
+      r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+      seen(join(r.dir, 'shared'), ['test/slow.test.ts']);
+    },
   );
   const done = await l.go();
   assert.equal(done[0].status, 0, done[0].stderr);
@@ -736,6 +746,28 @@ test("a train whose other red file was never rerun doesn't ship through main's r
   assert.doesNotMatch(one.stderr, /SHIPPING THROUGH|shipped through/);
   assert.match(one.stderr, /main is red, not this change, so main is untouched\. The run was also red on test\/busy\.test\.ts, which may be yours/);
   l.done();
+});
+
+// The run's other reds go by #1419's rule: a flake never seen on another branch may be the ship's own, and the leak
+// guard's red is never a flake, so neither ships through main's red (#1478 review).
+test("a ship red on main's red test plus a new flake, or the leak guard, doesn't ship through (#1478)", async () => {
+  for (const leak of [false, true]) {
+    const l = await line(
+      [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}],
+      (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...(leak ? { FAKE_LEAK: '1' } : {}), ...shared(d) }),
+      (r) => {
+        r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+        if (leak) seen(join(r.dir, 'shared'), ['test/slow.test.ts']);
+      },
+    );
+    const [first, one] = await l.go();
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(one.status, 1, one.stderr);
+    assert.doesNotMatch(one.stderr, /SHIPPING THROUGH|shipped through/);
+    const other = leak ? 'the leak guard \\(the tests left processes running\\)' : 'test\\/slow\\.test\\.ts \\(passed alone, but no known flake\\)';
+    assert.match(one.stderr, new RegExp(`main is red, not this change, so main is untouched\\. The run was also red on ${other}, which may be yours`));
+    l.done();
+  }
 });
 
 // A ship that changed main's red test and left it red is still no culprit for a bisect, but it hears its change doesn't make

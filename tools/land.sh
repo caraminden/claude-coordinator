@@ -1221,8 +1221,9 @@ cut_off() {
 # today's path. A red file this ship changed, or what it imports (the suspects' map), is still main's red, but the ship
 # hears that its change doesn't make it pass, with no retry (main_red_mine). Fails when no real failure is red on main.
 # Ship through (#1478, Cara, 2026-11-21, on #1430's card: "Ship through"): when every real failure is main's red, no ship
-# on it changed one of them or what it imports, and every other failed file passed alone (a flake: one never rerun, or
-# whose rerun was killed, may be the train's own), the train is no worse than main, so the gate counts as green (rc=0)
+# on it changed one of them or what it imports, and every other failed file passed alone and is a known flake no ship
+# changed (#1419; one never rerun, whose rerun was killed, or a new flake may be the train's own, as may the leak guard's
+# red), the train is no worse than main, so the gate counts as green (rc=0)
 # and it ships, riders and all, saying so loudly; main's fix ships separately. Its shipped line names main's red
 # (through_by). The cost: a second break in the same test stays hidden until main's fix ships.
 main_red='' main_red_other='' main_red_mine='' main_red_riders=0
@@ -1257,12 +1258,23 @@ train_main_red() {
     for i in "${hits[@]}"; do [ "$i" = 0 ] || [[ " ${touched[*]} " == *" ${train_br[$((i - 1))]} "* ]] || touched+=("${train_br[$((i - 1))]}"); done
   done
   main_red=$(sed 's/ /, /g' <<<"${reds[*]}") main_red_other=$(sed 's/ /, /g' <<<"${other[*]}") main_red_mine=$(sed 's/ /, /g' <<<"${mine[*]}") main_red_riders=${#train_n[@]}
-  local who="this train's" more
+  local who="this train's" more flakes
   [ ${#train_n[@]} -gt 0 ] || who="this ship's"
+  # Its passed-alone files go by #1419's rule (Cara, "Known flakes only"): a known flake no ship changed is excused; a new
+  # one may be the train's own, and the leak guard's red is never a flake. Either counts as another red: no ship through.
+  flakes=$(train_labels | sed -n 's/^failed in the full run, passed alone //p' | paste -sd, - | sed 's/,/, /g') || true
+  if [ -n "$main_red_other$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; then
+    :
+  elif grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then
+    main_red_other='the leak guard (the tests left processes running)'
+  elif [ -n "$flakes" ] && ! known_flakes "$flakes"; then
+    main_red_other="$flakes (passed alone, but no known flake)"
+  fi
   if [ -z "$main_red_other" ] && [ -z "$main_red_mine" ] && [ ${#touched[@]} = 0 ]; then
     through_by[$tip]=$main_red rc=0
+    [ -z "$flakes" ] || known_by[$tip]=$known_why
     say "=========================================================================="
-    say "SHIPPING THROUGH MAIN'S RED: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is the only real failure of $who CI run ($ci_url): no ship on it changed $main_red or what it imports, and its other failed files passed alone. So it is no worse than main and ships as green$([ ${#train_n[@]} = 0 ] || echo ", all $((${#train_n[@]} + 1)) ships"). Main still needs a fix for $main_red, which ships separately; until then a new break in $main_red goes unseen"
+    say "SHIPPING THROUGH MAIN'S RED: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is the only real failure of $who CI run ($ci_url): no ship on it changed $main_red or what it imports, and its other failed files, if any, are known flakes (#1419). So it is no worse than main and ships as green$([ ${#train_n[@]} = 0 ] || echo ", all $((${#train_n[@]} + 1)) ships"). Main still needs a fix for $main_red, which ships separately; until then a new break in $main_red goes unseen"
     say "=========================================================================="
     retro_log "shipped through main's red · $label · $main_red · $ci_url"
     return 0

@@ -14,9 +14,15 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
 - Each chat message spawns one `claude -p --input-format stream-json --output-format stream-json` process
   in the minion's working directory, with `--resume <session_id>` after the
   first turn. Idle minions cost nothing, and a restart loses nothing.
-- Each turn runs in a transient user unit of its own (`systemd-run`, in
-  `citadel-turns.slice`) through `src/turn-wrapper.mjs`, which writes claude's
-  output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
+- Each turn runs in a memory group of its own (`systemd-run`, in
+  `citadel-turns.slice`), its claude's output written to a file in
+  `$DATA_DIR/run/turns/` that the server tails. A host turn starts in the shared
+  turn supervisor (#1343, `src/turn-supervisor.mjs`, one process per turns folder
+  and version, about 21 MB in all), which runs it in a scope of its own; a turn it
+  can't take at once, and container, test and dev turns, get a node wrapper of their
+  own instead (`src/turn-wrapper.mjs` in a unit, about 21 MB each). A turn outlives a
+  supervisor crash and a new one adopts it; `TURN_SUPERVISOR=0` goes back to a wrapper
+  per turn. A restart
   leaves running turns alone: the next server re-attaches and catches up, and the
   turns' MCP calls wait for it (up to 2 min). If `systemd-run` fails, the turn
   (or landing, or ultra review) still runs, inside the server: `/api/health`'s
@@ -177,6 +183,7 @@ uses the built-in `node:sqlite`.
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |
+| `src/turn-supervisor.mjs`, `src/supervisor-client.ts`, `src/turn-run.mjs` | The shared turn supervisor (#1343) that starts host turns' claude, each in a scope of its own; the runner's side of it; and what it and the per-turn wrapper (`src/turn-wrapper.mjs`) both run |
 | `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |

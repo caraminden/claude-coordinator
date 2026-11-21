@@ -17,7 +17,7 @@ export interface PromptHashes {
   claude?: string;
 }
 
-/** The env vars src/mcp.ts reads to decide its tool list and refusals. */
+/** The env vars src/mcp.ts reads to decide its tool list and refusals; not every one it reads (a path constant, and one that feeds the hashed `jobs` part, are left out on purpose). */
 export const TOOL_INPUTS = ['COORDINATOR_ROLE', 'COORDINATOR_APPROVALS', 'COORDINATOR_DEPLOYS', 'COORDINATOR_CONTAINER', 'COORDINATOR_APP_INSTRUCTIONS', 'COORDINATOR_HOME_CONTRAPTIONS', 'COORDINATOR_MACHINES', 'COORDINATOR_MEMORY', 'COORDINATOR_MEDIA', 'COORDINATOR_CODEX_IMAGES', 'COORDINATOR_APP_TURNS_RUN', 'COORDINATOR_MSG', 'COORDINATOR_SEAM_TRIAL'];
 
 export const shortHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 10);

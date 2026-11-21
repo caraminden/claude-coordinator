@@ -29,3 +29,14 @@ test('setup reaching done books one first-week run, seven days out, once only, i
   store.setProjectSettings(q, { onboarding: 'done' });
   assert.equal(store.schedules.list(q).length, 1);
 });
+
+test('the brief booked in a non-Citadel scheme sends its kit gaps by relay_when_live to Citadel, not message_coordinator (A1)', () => {
+  const store = new Store(':memory:');
+  const p = store.createProject('Other scheme', null).id;
+  store.setProjectSettings(p, { onboarding: 'interview' });
+  store.setProjectSettings(p, { onboarding: 'done' });
+  const [s] = store.schedules.list(p);
+  assert.match(s.brief, /relay_when_live/);
+  assert.match(s.brief, /to: "Citadel"/);
+  assert.doesNotMatch(s.brief, /message_coordinator/);
+});

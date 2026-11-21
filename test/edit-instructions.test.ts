@@ -152,6 +152,23 @@ test('Save anyway refuses when the text changed under the card, and a Citadel-wi
   assert.match(store.appInstructions().text, /tuning details/);
 });
 
+test('a newer held edit posted while Save anyway is writing does not turn the saved card back into "superseded" (A2)', async () => {
+  const was = store.getProject(project.id)!.instructions;
+  await edit('scheme', [{ find: 'Moved on.', replace: `Moved on.\n\n${COPY} First.` }]);
+  const first = lastCard();
+  const n = turns().length;
+  const save = fetch(`${base}/api/tickets/${ticket.id}/verdict`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: first.id, verdict: 'approve' }) });
+  const again = edit('scheme', [{ find: 'Moved on.', replace: `Moved on.\n\n${COPY} Second.` }]).catch((e) => e);
+  const res = await save;
+  await again;
+  assert.equal(res.status, 202);
+  const cards = store.eventsOfKinds(ticket.id, ['plan']).map((e) => JSON.parse(e.data));
+  assert.equal(cards.find((c) => c.id === first.id).status, 'approved', 'the card that was saved says so');
+  assert.match(store.getProject(project.id)!.instructions!, /First\./);
+  assert.notEqual(store.getProject(project.id)!.instructions, was);
+  await until('the answer\'s turn', () => turns().length > n && store.getTicket(ticket.id)!.status !== 'running');
+});
+
 test('a person\'s own Settings save is checked by the same matcher', async () => {
   const r = await api(`/api/projects/${project.id}/instructions/overlaps`, 'POST', { scope: 'scheme', text: `Hello.\n\nOne card, one choice: ask early and together, with your pick marked.` });
   assert.equal(r.found.length, 1);

@@ -49,7 +49,7 @@ import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJso
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { homeApp, makeKey } from './app.ts';
-import { postPlan } from '../plan-cards.ts';
+import { deciding, postPlan } from '../plan-cards.ts';
 import { saveInstructions, type HeldEdit } from '../instructions-save.ts';
 
 export { postPlan };
@@ -324,8 +324,6 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   return { spec, size };
 }
 
-/** Plan cards (by event id) a person is answering right now: a second answer to the same card is refused (#1287 F3). */
-const deciding = new Set<number>();
 
 export const ticketRoutes: Route[] = [
   {

@@ -35,6 +35,13 @@ interface Item { key: string; rank: number; waited: number; line: string }
 /** The minions `taskmaster` manages (its scheme's, reporting to it) that are stuck, oldest first within each kind. */
 export function stuckItems(store: Store, runner: Pick<Runner, 'view'>, taskmaster: Ticket, now = Date.now()): Item[] {
   const items: Item[] = [];
+  // Its own cards too: a by-hand step put to a person on a card sits in the Taskmaster's chat.
+  const own = taskmaster.status === 'closed' ? [] : runner.view(taskmaster).open_cards ?? [];
+  const ownAt = new Map(store.openCardsOf(taskmaster.id).map((e) => [cardHref(taskmaster, e.id), e.created_at]));
+  for (const c of own) {
+    const waited = now - (ownAt.get(c.href) ?? now);
+    if (waited > STUCK_CARD_MS) items.push({ key: `card:${c.href}`, rank: 2, waited, line: `Your own card, waited ${ago(waited)} on ${c.to ?? 'anyone in the scheme'}: ${cardText(c)}` });
+  }
   for (const t of store.listTickets(taskmaster.project_id)) {
     if (t.kind === 'coordinator' || t.status === 'closed' || store.ownerCoordinator(t)?.id !== taskmaster.id) continue;
     const v = runner.view(t);
@@ -45,7 +52,7 @@ export function stuckItems(store: Store, runner: Pick<Runner, 'view'>, taskmaste
     for (const c of f.cards) {
       const waited = now - (at.get(c.href) ?? now);
       const who = c.to ?? v.assignee ?? 'anyone in the scheme';
-      if (waited > STUCK_CARD_MS) items.push({ key: `card:${c.href}`, rank: 2, waited, line: `${head}, card waited ${ago(waited)} on ${who}): ${cardText(c)}` });
+      if (waited > STUCK_CARD_MS) items.push({ key: `card:${c.href}`, rank: 2, waited, line: `${head}, card waited ${ago(waited)} on ${who}): ${cardText(c)}${note}` });
     }
     if (f.cards.length || coming(t, v)) continue;
     const idle = now - t.updated_at;

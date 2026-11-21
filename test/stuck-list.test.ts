@@ -74,13 +74,22 @@ test("a park whose leader was dismissed without its work (a held chain: nothing 
 
 test('a card waiting over a day is listed with who it waits on; a younger one is not, and its minion is not listed as idle', () => {
   const w = world();
-  const a = w.minion('Asks Josh', 40);
+  const a = w.minion('Asks Josh', 40, {}, { note: 'waits on Josh' });
   w.card(a, 30, 'Josh');
   const b = w.minion('Asks today', 40);
   w.card(b, 3);
   const got = lines(w);
   assert.equal(got.length, 1);
-  assert.match(got[0], new RegExp(`^#${a.number} Asks Josh \\(idle, card waited 30 h on Josh\\): question card for Josh "Ship it\\?": \\[open it\\]`));
+  assert.match(got[0], new RegExp(`^#${a.number} Asks Josh \\(idle, card waited 30 h on Josh\\): question card for Josh "Ship it\\?": \\[open it\\]\\(.*\\) · note: waits on Josh$`));
+});
+
+test("the Taskmaster's own card waiting over a day is listed, a younger one is not", () => {
+  const w = world();
+  w.card(w.tm, 26, 'Cara');
+  assert.match(lines(w)[0] ?? '', /^Your own card, waited 26 h on Cara: question card for Cara "Ship it\?": \[open it\]/);
+  const v = world();
+  v.card(v.tm, 5, 'Cara');
+  assert.deepEqual(lines(v), []);
 });
 
 test('something coming leaves a minion out: a wait, a wake, a ship under way, a land wait, a running or queued turn', () => {

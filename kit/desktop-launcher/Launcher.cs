@@ -61,7 +61,7 @@ namespace Citadel.Desktop
     public static class Program
     {
         /// <summary>This launcher's version: the feed offers a newer one by a higher number. Raise it with every change.</summary>
-        public const int Version = 2;
+        public const int Version = 3;
 
         [STAThread]
         public static int Main(string[] args)

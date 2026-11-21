@@ -126,20 +126,20 @@ export const minionQueries = {
    * scheme; when it names someone who doesn't (taken out of it, disabled, or nobody), the scheme's owner if they
    * do; else null, as for a minion assigned to no one: everyone's. Push, the Needs-you list and minionOwner all ask this.
    */
-  minionPerson(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, key = 'assigned'): number | null {
-    const raw = this.props.forTarget('minion', ticket.id)[key];
+  minionPerson(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, key = 'assigned',
+    props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id), hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number | null {
+    const raw = props[key];
     if (!String(raw ?? '').trim()) return null;
     const projectId = ticket.project_id ?? this.getTicket(ticket.id)?.project_id;
     if (projectId == null) return null;
     const id = this.personId(raw);
-    if (id != null && this.hearsScheme(id, projectId)) return id;
+    if (id != null && hears(id, projectId)) return id;
     const owner = this.getProject(projectId)?.owner_id ?? null;
-    return owner != null && this.hearsScheme(owner, projectId) ? owner : null;
+    return owner != null && hears(owner, projectId) ? owner : null;
   },
 
   /** Whether a person is still in a scheme: here, enabled, its owner or a member. Admin reach doesn't count; hiding it doesn't take them out (push drops a hidden one itself). */
-  hearsScheme(this: Store, userId: number, projectId: number): boolean {
-    const user = this.getUser(userId);
+  hearsScheme(this: Store, userId: number, projectId: number, user = this.getUser(userId)): boolean {
     return !!user && !user.disabled_at && this.memberSchemes(user.id).has(projectId);
   },
 
@@ -169,12 +169,13 @@ export const minionQueries = {
   },
 
   /** Everyone touching a minion: the recorded ones plus its requester and assignee, less those who left it or the scheme (#1449). */
-  touchedBy(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id)): number[] {
+  touchedBy(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id),
+    hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number[] {
     const rows = this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[];
     const left = new Set(rows.filter((r) => r.left_at != null).map((r) => r.user_id));
     const ids = [...rows.map((r) => r.user_id), this.personId(props.requestedBy), this.personId(props.assigned)];
     const projectId = ticket.project_id ?? this.getTicket(ticket.id)?.project_id;
-    return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id) && projectId != null && this.hearsScheme(id, projectId));
+    return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id) && projectId != null && hears(id, projectId));
   },
 
   /** A line for the scheme's other Taskmasters' digests (#919). Lines older than a week go. */

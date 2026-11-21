@@ -959,6 +959,11 @@ export class Runner {
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
+    // Who is still in the scheme and their names, read once per list (#1449).
+    const props = list?.properties ?? this.store.props.forTarget('minion', ticket.id);
+    const user = (id: number) => once(`user:${id}`, () => this.store.getUser(id));
+    const hears = (id: number, pid: number) => once(`hears:${id}:${pid}`, () => this.store.hearsScheme(id, pid, user(id)));
+    const nameOf = (id: number | null) => id == null ? null : user(id)?.name ?? null;
     return {
       // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
       ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -990,11 +995,11 @@ export class Runner {
       pending_card_at: cards[0]?.created_at ?? null,
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
       open_cards: this.cardLinks(ticket, false, cards),
-      properties: list?.properties ?? this.store.props.forTarget('minion', ticket.id),
+      properties: props,
       // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
-      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket, list?.properties) : [],
+      touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket, props, hears) : [],
       // Whose its cards are (#1449: the owner's once its assignee left the scheme), as push and Needs you count it; null for anyone's.
-      assignee: ticket.kind === 'ticket' ? this.store.getUser(this.store.minionPerson(ticket) ?? -1)?.name ?? null : null,
+      assignee: ticket.kind === 'ticket' ? nameOf(this.store.minionPerson(ticket, 'assigned', props, hears)) : null,
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),
@@ -1007,7 +1012,7 @@ export class Runner {
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
-      payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id)),
+      payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id, user)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
       context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
@@ -4311,10 +4316,10 @@ export class Runner {
   }
 
   /** A plan as the minion's chip names it: payerOf's id, and whose it is (the server login's owner for it). */
-  private payerView(uid: number | null): { id: number | null; name: string } | null {
+  private payerView(uid: number | null, user = (id: number) => this.store.getUser(id)): { id: number | null; name: string } | null {
     if (!uid) return null;
-    const id = this.payerOf(uid);
-    const name = this.store.getUser(id ?? this.store.serverLoginOwner() ?? uid)?.name;
+    const id = user(uid)?.server_login ? null : uid;
+    const name = user(id ?? this.store.serverLoginOwner() ?? uid)?.name;
     return name ? { id, name } : null;
   }
 

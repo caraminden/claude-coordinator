@@ -24,6 +24,7 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
     return store.getTicket(t.id)!;
   });
   store.props.set('minion', tickets[0].id, project.id, { assigned: 'josh' }, 'Cara');
+  store.addMember(project.id, josh.id); // a gone assignee isn't touching it (#1449)
   store.setSetting('net-resumes', [{ ticket: tickets[3].id, queued: [{ id: 7, author: 'Cara', text: 'x', images: [] }] }]);
   store.setSetting('limit-resumes', [{ ticket: tickets[6].id, at: 123, accounts: null }]);
   const runner = new Runner(store, () => {}, () => ({}), 'true');

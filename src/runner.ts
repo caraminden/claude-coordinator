@@ -65,7 +65,7 @@ import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
-import { KILL_HOLD_MAX_MS, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
+import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -929,7 +929,7 @@ export class Runner {
   view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
     const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
     const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
-    const limit = once('limit-resumes', () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
+    const limit = once(LIMIT_RESUMES, () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).

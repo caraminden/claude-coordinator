@@ -93,6 +93,8 @@ export function nextLimitResume(list: LimitResume[], lastResume: number, gap: nu
   return best;
 }
 
+/** The settings key of the usage-limit waits. */
+export const LIMIT_RESUMES = 'limit-resumes';
 /** How long the kill line waits for the last resume it started to take its wait before the next goes anyway. */
 export const KILL_START_MAX_MS = 2 * 60_000;
 /** The longest the line of kill resumes holds for a starved box before one starts anyway (then the clock starts again). */
@@ -142,7 +144,7 @@ export class Resumes {
     this.host = host;
     this.net = new WaitList(host.store, 'net-resumes');
     this.kill = new WaitList(host.store, 'kill-resumes');
-    this.limit = new WaitList(host.store, 'limit-resumes');
+    this.limit = new WaitList(host.store, LIMIT_RESUMES);
   }
 
   /** Stop the timers, for a server shutting down: the next server probes and resumes from what is saved. */

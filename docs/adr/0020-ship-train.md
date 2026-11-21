@@ -47,6 +47,12 @@ the last one in line waited for every run ahead of it.
   file not rerun included) puts them back in line unrefused, and the bisect runs if a real failure came back (else
   another round). A guessed suspect that is the front itself can't wait off its own train, so the bisect looks.
   So the "accepted" innocent refusal above no longer happens.
+- **Red on main too refuses nobody** (#1430, before #1403's run alone on the train; Cara, 2026-11-21, picked on #1427's card after main's own clock test
+  refused #1356, #1378, #1414 and #1366 between 00:00 and 01:30 PST). Before the suspects or the bisect, or a red
+  ship alone's refusal, each real failure (at most 6 files) runs alone on main's tip here, niced. One that fails there
+  too is main's red: every run on top of main stays red on it, so no suspect or bisect can judge. The output and the
+  retro log say "red on main too: not this train's" and name the test; the riders go back in line, the front takes its
+  one retry in place (so it can ride with main's fix), and a ship alone is refused saying main is red, not its change.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`
   and `deploy:` lines, so the server posts its shipped line and risk label as for any ship (`src/land.ts`).

@@ -30,7 +30,8 @@
 #
 # The ship train (#1166, docs/adr/0020-ship-train.md): at step 2 the landing at the front of the line stacks up to
 # LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
-# main and deploy once for them all. A red train first refuses the ship that turns its really failing tests red run
+# main and deploy once for them all. A red train whose really failing test fails on main's tip too refuses nobody
+# (train_main_red, #1430). Otherwise it first refuses the ship that turns its really failing tests red run
 # alone here, or holds off those whose change touched them (train_suspects, #1346, #1403) and runs again with the next ships in line in their places; failing that, it is bisected by
 # its prefixes: the green part ships, the first ship that turned it red is refused with its own failure, and the ships
 # after it stay in line. Each rider waits in line
@@ -1209,6 +1210,55 @@ cut_off() {
   if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
   grep -qE 'run-tests: the tests were killed \(exit [0-9]+\)|Process completed with exit code 137\.' <<<"$failed" && ! grep -qF '✖' <<<"$failed"
 }
+# Red on main too (#1430; Nov 21 00:00-01:30 PST main's own clock test refused #1356, #1378, #1414 and #1366): before a
+# red train's suspects or bisect, or a red ship alone's refusal, each real failure (train_real) runs alone here on main's tip ($old), niced, one file at
+# a time, without the lock's fds. One that fails there too is main's red, not the train's: every CI run on top of main
+# stays red on it, so neither the suspects' refill nor a bisect can judge, and a bisect would blame the front. So no ship
+# is refused for it: the riders go back in line, and this one takes its one retry in place (main_red, below), so it can
+# ride with a fix for main that waits in line; a ship alone is refused at once, saying main is red, not its change. A file main
+# hasn't got, or a run stopped at LAND_PIN_LIMIT s or by a test's own timeout (load on perigee, not proof), is no main red:
+# today's path. A red file this ship changed, or what it imports (the suspects' map), is still main's red, but the ship
+# hears that its change doesn't make it pass, with no retry (main_red_mine). Fails when no real failure is red on main.
+main_red='' main_red_other='' main_red_mine='' main_red_riders=0
+train_main_red() {
+  local f wt r n=0 real=() reds=() other=() chg=() hits=() mine=()
+  [ -z "$burn_red" ] || return 1 # a burn-in red is the ship's own new or changed test (#1443)
+  mapfile -t real < <(train_real) || true
+  for f in "${real[@]}"; do git cat-file -e "$old:$f" 2>/dev/null && n=1; done
+  [ "$n" = 1 ] || return 1
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-main.XXXXXX") && git worktree add -q --detach "$wt" "$old" 2>/dev/null || { [ -z "${wt:-}" ] || rm -rf "${wt:?}"; return 1; }
+  say "red on main?: running ${real[*]} alone on main's tip ($(git rev-parse --short "$old")) here before blaming a ship"
+  : >"$state/main-red.log"
+  n=0
+  for f in "${real[@]}"; do
+    r=0
+    if [ $((n++)) -lt 6 ] && [ -e "$wt/$f" ]; then # shortcut: at most 6 files, so a badly red main costs minutes, not an hour
+      (cd "$wt" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$f") >"$state/main-red.one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
+      cat "$state/main-red.one" >>"$state/main-red.log"
+      [ "$r" != 1 ] || ! grep -q 'test timed out after' "$state/main-red.one" || r=timeout
+    fi
+    if [ "$r" = 1 ]; then reds+=("$f"); else other+=("$f"); fi
+  done
+  git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  [ ${#reds[@]} -gt 0 ] || return 1
+  train_chg
+  for f in "${reds[@]}"; do
+    mapfile -t hits < <(train_suspects_of "$f")
+    [[ " ${hits[*]} " != *' 0 '* ]] || mine+=("$f")
+  done
+  main_red=$(sed 's/ /, /g' <<<"${reds[*]}") main_red_other=$(sed 's/ /, /g' <<<"${other[*]}") main_red_mine=$(sed 's/ /, /g' <<<"${mine[*]}") main_red_riders=${#train_n[@]}
+  local who="this train's" more="no ship on the train is to blame and none is refused: the ${#train_n[@]} riders go back in line"
+  [ ${#train_n[@]} -gt 0 ] || who="this ship's" more="$branch isn't to blame"
+  if [ -n "$main_red_mine" ] && [ ${#train_n[@]} = 0 ]; then
+    more="$branch changed $main_red_mine or what it imports and it still fails, so its change doesn't make it pass"
+  elif [ -n "$main_red_mine" ]; then
+    more+=", though the front, $branch, changed $main_red_mine or what it imports and it still fails, so it is refused"
+  fi
+  say "red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here, so $more${main_red_other:+ (its other real failures, $main_red_other, cannot be pinned on a ship while every run is red on the main ones)}. Main needs a fix for $main_red"
+  retro_log "red on main too: not $who · $label · $main_red · $ci_url${main_red_other:+ · also red: $main_red_other}"
+  train_drop
+  return 0
+}
 
 # The ship train (#1166), the front's side: up to LAND_TRAIN_MAX plain lands waiting behind this one, in line order,
 # each replayed onto the one before it in a scratch worktree, so CI runs once on the top. Its riders: own=this ship's
@@ -1829,7 +1879,7 @@ else
   gate "$tip" || rc=$?
   # A train keeps its riders while it waits (#1361): they go back only once the gate gives up for good, to run here.
   busy_gate
-  [ "$rc" != 1 ] || [ ${#train_n[@]} = 0 ] || train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect
+  [ "$rc" != 1 ] || train_main_red || [ ${#train_n[@]} = 0 ] || train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect
   if [ "$rc" = 2 ] && [ ${#train_n[@]} -gt 0 ]; then
     say "the ship train goes back in line, since CI gave no answer ($why): $branch goes on alone"
     train_drop
@@ -1847,6 +1897,12 @@ elif [ "$rc" = 0 ]; then
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
   burn_said=$(burn_lines | paste -sd';' - | sed 's/;/; /g')
+  if [ -n "$main_red_mine" ]; then
+    refuse "tests failed in CI ($ci_url) in $main_red, which fails on main's own tip too (run alone here), and $branch changed $main_red_mine or what it imports, yet it still fails: main is red and this change doesn't make it pass, so $untouched${main_red_other:+. The run was also red on $main_red_other}. If it is meant to fix it, look into why, re-test, commit, then run this again; if not, run this again once main is green"
+  elif [ -n "$main_red" ]; then
+    [ "$main_red_riders" = 0 ] || retry_in_place "red on main too: $main_red" # alone, a retry would only run CI on it again
+    refuse "tests failed in CI ($ci_url) in $main_red, which fails on main's own tip too (run alone here): main is red, not this change, so $untouched${main_red_other:+. The run was also red on $main_red_other, which may be yours}. Run this again once main is green (a fix for $main_red has shipped)"
+  fi
   [ -z "$suspect_tests" ] || [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause: the ships behind it went back in line, so $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
   [ -z "$suspect_pinned" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. Fix it, re-test, commit, then run this again"
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"

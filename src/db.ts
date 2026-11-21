@@ -2666,7 +2666,6 @@ export class Store {
     return e && { ...e };
   }
 
-
   /** Replace an event's data, for cards whose status lives in the card (plans). */
   setEventData(id: number, data: unknown) {
     this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
@@ -3094,7 +3093,6 @@ export class Store {
   openCardsOf(ticketId: number): EventRow[] {
     return [...scoped(this.db, `open-cards:${ticketId}`, () => this.openCardsWhere('e.ticket_id = ?', ticketId))];
   }
-
 
   /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
   openCardAt(ticketId: number): number | null {
@@ -3534,7 +3532,6 @@ export class Store {
     return scoped(this.db, `cost:${ticketId}:${hostOnly}`, () => (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c);
   }
 
-
   /**
    * Every closed minion created since `since` that cost anything (open ones are still short of their final cost), every scheme (#1114): its `type` property (null untyped),
    * the model it was set to or last ran on, and what its turns cost. src/minion-budget.ts takes the usual cost from these.
@@ -3796,7 +3793,6 @@ export class Store {
     const value = scoped(this.db, `setting:${key}`, () => (this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null);
     return value == null ? null : JSON.parse(value);
   }
-
 
   /** Every setting whose key starts with `prefix`, as key and value. */
   settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {

@@ -181,7 +181,7 @@ export const minionQueries = {
     return [...new Set(ids)].filter((id): id is number => id != null && !left.has(id) && projectId != null && hears(id, projectId));
   },
 
-  /** Inside a read scope (src/read-scope.ts): touchedBy's rows for every one of `ids`, and the tickets themselves, in two reads. */
+  /** Inside a read scope (src/read-scope.ts): touchedBy's rows for every one of `tickets`, in one read. */
   warmTouches(this: Store, tickets: Ticket[]) {
     if (!inScope(this.db) || !tickets.length) return;
     const ids = tickets.map((t) => t.id);

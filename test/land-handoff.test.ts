@@ -849,6 +849,9 @@ test('a land stopped from the Status page says who stopped it and that nothing l
   assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
   let pid: number | null = null;
   await until('land.sh runs', () => (pid = s.landings.landPid(1)) !== null);
+  const cmd = (p: number) => (p === 5 ? 'mv\0pid.tmp\0pid' : 'bash\0tools/land.sh\0');
+  assert.equal(s.landings.landPid(1, () => '5\n', cmd), null, "the wrapper's mv, just after its pid file appears, is not the ship");
+  assert.equal(s.landings.landPid(1, () => '5 6\n', cmd), 6);
   s.landings.markStopped(1, 'Josh', Date.UTC(2026, 10, 20, 21, 5));
   signalTree(pid!);
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);

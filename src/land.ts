@@ -230,11 +230,12 @@ export class Landings {
   }
 
   /** The pid of the land.sh a minion's running landing started (its wrapper's child), or null when none runs. */
-  landPid(ticketId: number, children = (pid: number) => readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8')): number | null {
+  landPid(ticketId: number, children = (pid: number) => readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8'), cmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8')): number | null {
     if (this.get(ticketId)?.code !== null) return null;
     try {
       const wrapper = Number(readFileSync(join(this.dir(ticketId), 'pid'), 'utf8'));
-      return Number(children(wrapper).trim().split(/\s+/)[0]) || null;
+      // Only land.sh itself: the wrapper's own mv and rm run just after its pid file appears, and a stop sent to one of them missed the ship.
+      return children(wrapper).trim().split(/\s+/).map(Number).find((p) => { try { return p > 0 && cmdline(p).includes('tools/land.sh'); } catch { return false; } }) ?? null;
     } catch {
       return null;
     }

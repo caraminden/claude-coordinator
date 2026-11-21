@@ -23,8 +23,8 @@ test("a stale progress temp file from a killed run does not hide the next run's 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 test('watch', async () => {
   const f = process.env.CITADEL_TEST_PROGRESS_TO;
-  // poll-ok: this runs in a fixture child in a temp dir and can't import ./wait.ts
-  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25));
+  // timing-ok: fixture child in a temp dir, can't import ./wait.ts
+  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25)); // poll-ok: fixture child, no ./wait.ts
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
 `);

@@ -8,7 +8,7 @@ import { clock, type Problem } from './ci-problems.ts';
 // what Waits.poll already sees every 2 s, the land line and ci-wait's view of each gate run: no GitHub calls of its own.
 // On 11-10 and 11-11, 130 lands: 30 min was passed once outside the outage; 2 fallbacks in a row only in it, and
 // while Cara's desktop was off, which isn't the gate failing (the runner-offline alert says it), so a land that never
-// reached the CI wait (no runner online, LAND_CI=0, GitHub not answering) neither counts nor clears.
+// reached the CI wait (no runner online, LAND_CI=0, GitHub not answering, or the light lane) neither counts nor clears.
 export const LAND_STREAK = 2;
 // #1342: the line, not a ship, is what is slow. A ship 15th in line waits over an hour with nothing wrong, so the clock is
 // how long the line has been still (its head land, that land's phase or CI run, and who is in it all unchanged), not a
@@ -77,7 +77,8 @@ export function landStep(s: LandState, seen: LandSeen[], now: number): LandState
     } else if (x.phase === 'tests' && !l.tests) {
       l.tests = true;
       if (l.ciSince != null) s.fellBack.push({ name: l.name, why: fellBackWhy(l, now), run: l.run ?? null });
-    } else if (x.phase === 'deploy' && !l.tests && !l.green) {
+    } else if (x.phase === 'deploy' && !l.tests && !l.green && l.ciSince != null) {
+      // #1521 (CA3): only a ship that waited on CI is a green gate; a light-lane ship (rebase then deploy) never asked CI.
       l.green = true;
       s.fellBack = [];
     }

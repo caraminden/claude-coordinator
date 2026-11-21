@@ -685,6 +685,20 @@ test("the land gate's alarm: a job no runner took is named as that, not as a cap
   assert.equal(landProblems(s, through(s, 6, 'tools/deploy.sh', [['deploy', null, MIN]], t)).length, 1);
 });
 
+test("the land gate's alarm: a light-lane ship (rebase then deploy, neither CI nor the suite) doesn't clear the fallback streak; only a ship that waited on CI does (#1521, CA3)", () => {
+  const s = newLandState();
+  let t = NOW;
+  const light: [string, string | null, number][] = [['rebase', null, 5_000], ['deploy', null, MIN]];
+  t = through(s, 1, '#1', capHit, t, 9);
+  t = through(s, 2, '#2', light, t);
+  t = through(s, 3, '#3', noJob, t);
+  assert.match(landProblems(s, t)[0]?.title ?? '', /fell back to perigee on 2 ships in a row: #1 .*, #3 /, 'the light-lane ship between two fallbacks is neither');
+  t = through(s, 4, '#4', light, t);
+  assert.equal(landProblems(s, t).length, 1, 'still open after another light-lane ship');
+  t = through(s, 5, '#5', green, t);
+  assert.deepEqual(landProblems(s, t), [], 'a ship that waited on a green gate clears it');
+});
+
 test('the ship line is a quiet item once it has been still 20 min and rings at 40; a deep line whose head keeps moving never does (#561, #968, #1342)', () => {
   const s = newLandState();
   const t = NOW;

@@ -310,7 +310,8 @@ test('a scan-style guard test that imports nothing still pins the ship that turn
 // #1479: the guard tests (land.sh's guards(), #1240) on the train, not just its front. On Nov 21, 03:46 to 04:20 PST,
 // #1460 rode trains with a break of the one-until guard that passed on its front in 1 s, and it took 6 CI runs to
 // refuse it. A stand-in citadel-test: the guard run (the one naming the one-until guard) fails on a commit whose
-// test/loop-lag.test.ts says "sleep", and logs "<commit> <exit>" for each guard run.
+// test/loop-lag.test.ts says "sleep", and logs "guard <commit> <exit>" for each guard run into the fake gh's call log,
+// so a test can see whether a commit's guard run came before CI was asked about it.
 // Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
 const oneUntil = `test/${'one-until'}.test.ts`;
 function guarded(r: ReturnType<typeof setup>) {
@@ -319,15 +320,15 @@ function guarded(r: ReturnType<typeof setup>) {
 case " $* " in *" ${oneUntil} "*) ;; *) exit 0 ;; esac
 rc=0
 ! grep -qs sleep test/loop-lag.test.ts || { echo "✖ ${oneUntil}:22 › loop-lag.test.ts has 5 \\\`sleep\\\` hits, the baseline allows 3"; echo "full output: /somewhere/citadel-test.log"; rc=1; }
-echo "$(git rev-parse HEAD) $rc" >>"$GUARD_LOG"
+echo "guard $(git rev-parse HEAD) $rc" >>"$GUARD_LOG"
 exit $rc
 `, { mode: 0o755 });
   writeFileSync(join(r.source, oneUntil), '');
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'guard tools');
 }
-const guardEnv = (extra: Record<string, string>) => (dir: string) => ({ GUARD_LOG: join(dir, 'guard-log'), LAND_SMOKE: '0', ...extra });
-const guardRuns = (l: { r: { dir: string } }) => readFileSync(join(l.r.dir, 'guard-log'), 'utf8').trim().split('\n').map((s) => s.split(' '));
+const guardEnv = (extra: Record<string, string>) => (dir: string) => ({ GUARD_LOG: join(dir, 'gh-calls'), LAND_SMOKE: '0', ...extra });
+const guardRuns = (l: { c: { calls: () => string } }) => l.c.calls().split('\n').filter((s) => s.startsWith('guard ')).map((s) => s.split(' ').slice(1));
 
 test('a rider that breaks a guard test is refused on the guard run on the train, before any CI run, and the riders after it still ride (#1479)', async () => {
   const l = await line([{}, {}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts' }), guarded);
@@ -346,6 +347,16 @@ test('a rider that breaks a guard test is refused on the guard run on the train,
   l.done();
 });
 
+test("a train's only rider refused on its guards leaves the front to ship alone (#1479)", async () => {
+  const l = await line([{}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }], guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts' }), guarded);
+  const done = await l.go();
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.match(done[2].stderr, /the guard tests failed on ticket\/2-x's ship train in test\/one-until\.test\.ts with ticket\/3-x on it/);
+  for (const i of [1, 2]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.match(done[1].stderr, /main is now at [0-9a-f]{7,}/, 'the front shipped on its own');
+  l.done();
+});
+
 test("each step of a red train's bisect runs the guard tests before asking CI, and a guard red needs no CI run (#1479)", async () => {
   // Ship 5 fixes ship 4's guard break, so the train's top passes the guards, but CI is red on both (FAKE_RED_PATH) and
   // names no suspect (FAKE_LOG=due), so the bisect looks: ship 3's step asks CI, ship 4's stops at its guards.
@@ -359,6 +370,10 @@ test("each step of a red train's bisect runs the guard tests before asking CI, a
   const red = guardRuns(l).filter(([, rc]) => rc === '1').map(([c]) => c);
   assert.equal(red.length, 1, 'one guard red: ship 4\'s bisect step');
   assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${red[0]}`), "CI was never asked about ship 4's step");
+  const log = l.c.calls();
+  const asked = guardRuns(l).map(([c]) => c).filter((c) => log.includes(`head_sha=${c}`));
+  assert.ok(new Set(asked).size >= 3, `the front, the train's top and ship 3's step: ${asked.join(' ')}`);
+  for (const c of asked) assert.ok(log.indexOf(`guard ${c} `) < log.indexOf(`head_sha=${c}`), `the guards ran on ${c} before CI was asked`);
   l.done();
 });
 

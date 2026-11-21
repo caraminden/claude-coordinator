@@ -13,7 +13,7 @@ const NAMES: { re: RegExp; pid: boolean }[] = [
   { re: /^lint-ps1-(\d+)$/, pid: true },
   { re: /^heavy-(\d+)$/, pid: true },
   { re: /^citadel-boot-check-[A-Za-z0-9]+$/, pid: false },
-  { re: /^land-train\.[A-Za-z0-9]+$/, pid: false },
+  { re: /^land-(train|guard)\.[A-Za-z0-9]+$/, pid: false },
 ];
 
 const alive = (pid: number) => {

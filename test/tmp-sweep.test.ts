@@ -22,15 +22,16 @@ test('an orphaned lint, boot-check or ship-train folder goes; a live, young or f
   const dead = make('lint-ps1-999999999', 2 * HOUR);
   const boot = make('citadel-boot-check-aB3dEf', 2 * HOUR);
   const train = make('land-train.Xy12Zq', 2 * HOUR);
+  const guard = make('land-guard.Ab34Cd', 2 * HOUR);
   const heavy = make('heavy-999999998', 2 * HOUR);
   const live = make(`lint-ps1-${process.pid}`, 2 * HOUR);
   const young = make('citadel-boot-check-young1', 10 * 60_000);
   const other = make('someone-elses-scratch', 5 * HOUR);
   const lookalike = make('lint-ps1-notapid', 5 * HOUR);
   const removed = sweepOrphanTmp([root], now, { proc: '/proc' });
-  assert.deepEqual(removed.sort(), [boot, dead, heavy, train].sort());
+  assert.deepEqual(removed.sort(), [boot, dead, guard, heavy, train].sort());
   for (const d of [live, young, other, lookalike]) assert.equal(existsSync(d), true, d);
-  for (const d of [dead, boot, train, heavy]) assert.equal(existsSync(d), false, d);
+  for (const d of [dead, boot, train, guard, heavy]) assert.equal(existsSync(d), false, d);
 });
 
 test('a folder a running process works inside stays, and another uid\'s is never touched', () => {

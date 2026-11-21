@@ -1432,6 +1432,8 @@ early_next() {
   ) || out=''
   read -r top n x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
   mv -f "$state/stacked.tmp$$" "$state/stacked"
+  # Not on a top the guard tests fail (#1479): its front's own train_guards refuses the ship that broke them.
+  guard_at "$top" || [ $? != 1 ] || { say "early next train: the guard tests fail on $nb's train, so its CI waits for its turn"; return 0; }
   # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
   hub git push -q --atomic "$REMOTE" "+$top:refs/heads/land/$nb" "+$tip:refs/heads/land-base/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
   echo "$top $nb $(date +%s) $branch" >"$state/early"
@@ -1565,6 +1567,7 @@ train_guards() {
       [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
     done
   done
+  return 0 # the loop's last test can read a refused rider's verdict, and land.sh runs under set -e
 }
 
 # <commit>: the gate on it. 0: green, 1: red (its log in $failed, its run in $ci_url; $reran when it was the one fresh

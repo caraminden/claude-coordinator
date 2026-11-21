@@ -21,6 +21,7 @@ test('workers are the room over 350 MB, at least 1 and at most half the cores', 
   assert.equal(workers(1200), 3);
   assert.equal(workers(100000), 8, 'half of 16 cores');
   assert.equal(workers(100000, { CITADEL_MEM_CORES: '1' }), 1);
+  assert.equal(workers(100000, { CITADEL_MEM_CORES: '5' }), 3, 'rounded up, as the old default was');
   assert.equal(workers(600, { CITADEL_TEST_MB_PER_WORKER: '100' }), 6);
 });
 
@@ -34,6 +35,9 @@ test('room is the smaller of MemAvailable and the heavy slice\'s headroom below 
   writeFileSync(join(cg, 'memory.high'), String(8192 * 1048576));
   writeFileSync(join(cg, 'memory.max'), 'max');
   assert.equal(run(['mb'], { CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: cg }).stdout.trim(), '1192', 'the slice is nearly full');
+  writeFileSync(join(cg, 'memory.stat'), `anon 1\ninactive_file ${2000 * 1048576}\n`);
+  assert.equal(run(['mb'], { CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: cg }).stdout.trim(), '3192', 'reclaimable cache is room');
+  rmSync(join(cg, 'memory.stat'));
   writeFileSync(join(cg, 'memory.current'), String(9000 * 1048576));
   assert.equal(run(['mb'], { CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: cg }).stdout.trim(), '0', 'over its high mark: no room');
   assert.equal(run(['workers'], { CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: cg }).stdout.trim(), '1');

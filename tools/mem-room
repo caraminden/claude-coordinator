@@ -2,7 +2,7 @@
 # How much memory heavy work has room for (#1340, piece E of #1335's memory design), and how many test workers that
 # pays for:
 #   mem-room mb                  the room, in whole MB
-#   mem-room workers [per-MB]    --test-concurrency: room / per-worker MB (default 350), at least 1, at most half the cores
+#   mem-room workers [per-MB]    --test-concurrency: room / per-worker MB (default 350), at least 1, at most half the cores, rounded up
 # Room is the smaller of the box's MemAvailable and, where citadel-heavy.slice can be read from this unit's own cgroup
 # path (a host turn), the slice's headroom below its MemoryHigh/MemoryMax (deploy/citadel-heavy.slice: 8G/10G). Without
 # either reading (a container, no /proc/meminfo) it says nothing and fails, so a caller keeps its old default.
@@ -25,6 +25,10 @@ room_mb() {
   fi
   best=$avail
   if [ -n "$cg" ] && cur=$(cat "$cg/memory.current" 2>/dev/null) && [[ $cur =~ ^[0-9]+$ ]]; then
+    # Page cache stays charged to the slice after its scopes exit but the kernel frees it at once: not used memory.
+    local cache
+    cache=$(sed -n 's/^inactive_file \([0-9]*\)$/\1/p' "$cg/memory.stat" 2>/dev/null | head -n 1)
+    [[ $cache =~ ^[0-9]+$ ]] && [ "$cache" -le "$cur" ] && cur=$((cur - cache))
     for f in memory.high memory.max; do
       limit=$(cat "$cg/$f" 2>/dev/null) || continue
       [[ $limit =~ ^[0-9]+$ ]] || continue
@@ -42,7 +46,7 @@ case ${1:-} in
     per=${2:-${CITADEL_TEST_MB_PER_WORKER:-350}}
     [[ $per =~ ^[1-9][0-9]*$ ]] || per=350
     cores=${CITADEL_MEM_CORES:-$(nproc 2>/dev/null || echo 2)}
-    cap=$((cores / 2)); [ "$cap" -ge 1 ] || cap=1
+    cap=$(((cores + 1) / 2)); [ "$cap" -ge 1 ] || cap=1
     room=$(room_mb) || exit 1
     n=$((room / per)); [ "$n" -ge 1 ] || n=1; [ "$n" -le "$cap" ] || n=$cap
     echo "$n" ;;

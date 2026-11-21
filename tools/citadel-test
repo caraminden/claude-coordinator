@@ -73,7 +73,7 @@ conc=${CITADEL_TEST_CONCURRENCY:-$("$root/tools/mem-room" workers 2>/dev/null)}
 workers=()
 if [[ $conc =~ ^[1-9][0-9]*$ ]]; then
   workers=("--test-concurrency=$conc")
-  [ -n "${CITADEL_TEST_CONCURRENCY:-}" ] || [ "$conc" -ge $((($(nproc 2>/dev/null || echo 2)) / 2)) ] || say "memory room is short ($("$root/tools/mem-room" mb) MB free for heavy work): running $conc worker(s) at a time"
+  [ -n "${CITADEL_TEST_CONCURRENCY:-}" ] || [ "$conc" -ge $((($(nproc 2>/dev/null || echo 2) + 1) / 2)) ] || say "memory room is short ($("$root/tools/mem-room" mb) MB free for heavy work): running $conc worker(s) at a time"
 fi
 log=${TMPDIR:-/tmp}/citadel-test.log
 err=$(mktemp) out=$(mktemp)

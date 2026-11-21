@@ -96,6 +96,7 @@ export function buildWait(heavy: ReturnType<typeof readHeavy>, who: string): str
   const i = heavy.waiters.findIndex((w) => w.who === who);
   if (i < 0) return null;
   if (heavy.waiters[i].reason === 'load') return 'perigee is busy · waiting for load to ease';
+  if (heavy.waiters[i].reason === 'memory') return 'perigee is short on memory · waiting for room';
   return i === 0 ? 'in line for a build slot · next' : `in line for a build slot · ${i} ahead`;
 }
 

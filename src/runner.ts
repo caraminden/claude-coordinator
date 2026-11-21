@@ -828,9 +828,9 @@ export class Runner {
     return this.turns.has(ticketId);
   }
 
-  /** The message ids each of these minions would take into its next turn, read only (the standing checks, #1415). */
+  /** The message ids each of these minions would take into its next turn, a usage-limit wait's too (as `holds`), read only (the standing checks, #1415). */
   queuedIds(ticketIds: number[]): Record<number, number[]> {
-    return Object.fromEntries(ticketIds.map((id) => [id, this.peekQueue(id).flatMap((m) => m.id ?? [])]).filter(([, ids]) => (ids as number[]).length));
+    return Object.fromEntries(ticketIds.map((id) => [id, [...this.peekQueue(id), ...(this.limitWait(id)?.queued ?? [])].flatMap((m) => m.id ?? [])]).filter(([, ids]) => (ids as number[]).length));
   }
 
   /** gh's env for a lookup the server makes for a running turn (#200): the GitHub login that turn runs as; null with no turn. */

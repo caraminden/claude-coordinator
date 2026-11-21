@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
+import { nextRun } from './schedules.ts';
 
 /** One broken promise. `key` names it across runs (check, minion, subject), so one stays one health row. */
 export interface Finding {
@@ -18,6 +19,8 @@ export interface Finding {
   key: string;
   /** The minion's id, when one minion owns it. */
   ticket: number | null;
+  /** The scheme's id, when a scheme and no one minion owns it (a schedule). Neither: Citadel's own (the DB, app turns). */
+  project?: number | null;
   /** "#N: what's wrong", for people. */
   text: string;
 }
@@ -152,28 +155,29 @@ export const CHECKS: Check[] = [
         }
         if (n > 1) out.push({ check: 'fired-once', key: `fired-once:twice:${r.id}`, ticket: r.to_id, text: `${name(r.to_id)}: delivery #${r.id} arrived ${n} times.` });
       }
-      // Schedules: a slot not fired, or fired twice (two minions started from one schedule within minutes).
-      for (const s of db.prepare('SELECT s.id, s.name, s.next_run_at, p.name AS scheme FROM schedules s LEFT JOIN projects p ON p.id = s.project_id WHERE s.paused = 0 AND s.next_run_at IS NOT NULL AND s.next_run_at < ?').all(late) as { id: number; name: string; next_run_at: number; scheme: string | null }[]) {
-        out.push({ check: 'fired-once', key: `fired-once:schedule:${s.id}:${s.next_run_at}`, ticket: null, text: `The schedule "${s.name}"${s.scheme ? ` (${s.scheme})` : ''} was due ${minutes(now - s.next_run_at)} ago and hasn't run.` });
+      // Schedules: a slot not fired (late, or its start failed), or fired twice.
+      for (const s of db.prepare('SELECT s.id, s.project_id, s.name, s.next_run_at, s.last_error, p.name AS scheme FROM schedules s LEFT JOIN projects p ON p.id = s.project_id WHERE s.paused = 0 AND ((s.next_run_at IS NOT NULL AND s.next_run_at < ?) OR s.last_error IS NOT NULL)').all(late) as { id: number; project_id: number; name: string; next_run_at: number | null; last_error: string | null; scheme: string | null }[]) {
+        const which = `The schedule "${s.name}"${s.scheme ? ` (${s.scheme})` : ''}`;
+        // A failed start moves next_run_at on, so the slot it missed is only in last_error (schedules.ts, ran).
+        if (s.last_error) out.push({ check: 'fired-once', key: `fired-once:schedule-error:${s.id}`, ticket: null, project: s.project_id, text: `${which}: its last slot didn't start (${s.last_error.slice(0, 160)}).` });
+        else if (s.next_run_at !== null) out.push({ check: 'fired-once', key: `fired-once:schedule:${s.id}:${s.next_run_at}`, ticket: null, project: s.project_id, text: `${which} was due ${minutes(now - s.next_run_at)} ago and hasn't run.` });
       }
-      const first = db.prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1");
-      const starts = new Map<string, { id: number; at: number }[]>();
-      for (const t of db.prepare("SELECT id, project_id, created_at FROM tickets WHERE created_at >= ? AND kind = 'ticket'").all(since) as { id: number; project_id: number; created_at: number }[]) {
-        const e = first.get(t.id) as { data: string } | undefined;
-        let schedule: unknown;
-        try {
-          schedule = e ? (JSON.parse(e.data) as { schedule?: unknown }).schedule : undefined;
-        } catch { /* not ours */ }
-        if (typeof schedule !== 'string') continue;
-        const k = `${t.project_id}\n${schedule}`;
-        starts.set(k, [...(starts.get(k) ?? []), { id: t.id, at: t.created_at }]);
-      }
-      for (const [k, list] of starts) {
-        list.sort((a, b) => a.at - b.at);
+      // Twice: two minions it started with no slot between them. By title, since a start that crashed before its
+      // slot was marked (schedules.ts: newMinion, then ran) has no brief yet, and its retry makes the second.
+      const all = db.prepare('SELECT id, project_id, name, cron FROM schedules').all() as { id: number; project_id: number; name: string; cron: string }[];
+      const started = db.prepare("SELECT id, created_at FROM tickets WHERE project_id = ? AND title = ? AND kind = 'ticket' AND created_at >= ? ORDER BY created_at");
+      for (const sc of all) {
+        if (all.some((o) => o.id !== sc.id && o.project_id === sc.project_id && o.name === sc.name)) continue; // two of one name: can't tell whose
+        const list = started.all(sc.project_id, sc.name, since) as { id: number; created_at: number }[];
         for (let i = 1; i < list.length; i++) {
-          if (list[i].at - list[i - 1].at > TWICE_WINDOW_MS) continue;
           const [a, b] = [list[i - 1], list[i]];
-          out.push({ check: 'fired-once', key: `fired-once:schedule-twice:${a.id}:${b.id}`, ticket: b.id, text: `The schedule "${k.split('\n')[1]}" started ${name(a.id)} and ${name(b.id)} ${minutes(b.at - a.at)} apart: one slot fired twice.` });
+          if (b.created_at - a.created_at > TWICE_WINDOW_MS) continue;
+          let slot: number | null = null;
+          try {
+            slot = nextRun(sc.cron, a.created_at);
+          } catch { /* a cron that doesn't parse: no slot to tell them apart */ }
+          if (slot !== null && slot <= b.created_at) continue; // a schedule this frequent: two slots
+          out.push({ check: 'fired-once', key: `fired-once:schedule-twice:${a.id}:${b.id}`, ticket: b.id, text: `The schedule "${sc.name}" started ${name(a.id)} and ${name(b.id)} ${minutes(b.created_at - a.created_at)} apart: one slot fired twice.` });
         }
       }
       return out;
@@ -188,8 +192,9 @@ export const CHECKS: Check[] = [
       let names: string[];
       try {
         names = readdirSync(root).filter((n) => /^\d+$/.test(n));
-      } catch {
-        return out;
+      } catch (err: any) {
+        if (err?.code === 'ENOENT') return out; // no ship has run on this box yet
+        throw err; // unreadable: an error line, never "All kept"
       }
       for (const n of names) {
         const dir = join(root, n);
@@ -211,10 +216,16 @@ export const CHECKS: Check[] = [
     promise: 'A ship that said "shipped, not live yet" is live within an hour, or its minion was told why not.',
     run({ db, now }, name) {
       const out: Finding[] = [];
-      const last = db.prepare('SELECT created_at FROM events WHERE ticket_id = ? ORDER BY id DESC LIMIT 1');
+      // Counted from the ship line (land.ts writes it, then sets pending-deploy), else the newest event for a
+      // minion that set the state itself; a chat that goes on after it doesn't reset the clock.
+      const shipped = db.prepare("SELECT id, created_at FROM events WHERE ticket_id = ? AND kind = 'note' AND (json_extract(data, '$.text') LIKE 'Shipped %' OR json_extract(data, '$.text') LIKE 'Merged %') ORDER BY id DESC LIMIT 1");
+      const last = db.prepare('SELECT id, created_at FROM events WHERE ticket_id = ? ORDER BY id DESC LIMIT 1');
+      // Runner.deployLive's notes: it went live and the minion was told why it stays open (a card, a message).
+      const told = db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'note' AND id > ? AND json_extract(data, '$.text') LIKE 'The deploy is live%' LIMIT 1");
       for (const t of db.prepare("SELECT id FROM tickets WHERE state = 'pending-deploy' AND status NOT IN ('closed', 'running')").all() as { id: number }[]) {
-        const at = (last.get(t.id) as { created_at: number } | undefined)?.created_at;
-        if (at !== undefined && now - at > NOT_LIVE_MS) out.push({ check: 'shipped-live', key: `shipped-live:${t.id}`, ticket: t.id, text: `${name(t.id)} has waited ${minutes(now - at)} for its ship to go live, and nothing has told it why not.` });
+        const from = (shipped.get(t.id) ?? last.get(t.id)) as { id: number; created_at: number } | undefined;
+        if (!from || now - from.created_at <= NOT_LIVE_MS || told.get(t.id, from.id)) continue;
+        out.push({ check: 'shipped-live', key: `shipped-live:${t.id}`, ticket: t.id, text: `${name(t.id)} has waited ${minutes(now - from.created_at)} for its ship to go live, and nothing has told it why not.` });
       }
       return out;
     },
@@ -321,8 +332,14 @@ export function keptChecks(store: Pick<Store, 'getSetting'>): Kept | null {
 
 /** The Status page's tile: the promises checked, and the last run's findings (null before the first). */
 export type StandingStatus = { checks: { name: string; promise: string }[]; last: Kept | null };
-export function standingStatus(store: Pick<Store, 'getSetting'>): StandingStatus {
-  return { checks: CHECKS.map((c) => ({ name: c.name, promise: c.promise })), last: keptChecks(store) };
+export function standingStatus(store: Pick<Store, 'getSetting' | 'getTicket'>, canSee: (projectId: number) => boolean, citadel: boolean): StandingStatus {
+  const last = keptChecks(store);
+  // Schemes stay apart (ADR 0015): a viewer gets the findings of schemes they see, and Citadel's own only in Citadel's.
+  const shown = (f: Finding) => {
+    const project = f.ticket != null ? store.getTicket(f.ticket)?.project_id : f.project;
+    return project != null ? canSee(project) : citadel;
+  };
+  return { checks: CHECKS.map((c) => ({ name: c.name, promise: c.promise })), last: last && { ...last, findings: last.findings.filter(shown), error: citadel ? last.error : null } };
 }
 
 /** Two passes this far apart: a promise broken in both is a finding (a turn starting or a delivery in flight is not). */

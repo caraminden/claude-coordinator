@@ -476,7 +476,7 @@ export class StatusPage {
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
       jobs: ciVisible ? jobList(now) : [],
-      checks: ciVisible ? standingStatus(this.deps.store) : null,
+      checks: standingStatus(this.deps.store, (id) => viewer.canSee(id), ciVisible),
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,
       unitsFailed: units === null,

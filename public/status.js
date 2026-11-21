@@ -233,7 +233,7 @@ function checksTile(c, now) {
   const list = found.length
     ? found.map((f) => h('li', { title: named.get(f.check) ?? '' }, h('code', {}, f.check), h('span', {}, f.text), h('span', { class: 'muted' }, `since ${ago(f.since)}`)))
     : c.checks.map((x) => h('li', {}, h('code', {}, x.name), h('span', { class: 'muted' }, x.promise)));
-  return tile('Standing checks', !c.last ? 'Not run yet' : found.length ? `${plural(found.length, 'broken promise')}` : 'All kept', sub,
+  return tile('Standing checks', !c.last ? 'Not run yet' : found.length ? `${plural(found.length, 'broken promise')}` : c.last.error ? 'Last run failed' : 'All kept', sub,
     h('ul', { class: 'st-list st-checks' }, ...list),
     { tone: found.length || c.last?.error ? 'warn' : null, wide: true, key: 'checks', chart: found.map((f) => `${f.check}: ${f.text}`).join('; ') });
 }

@@ -8,7 +8,9 @@ import { after, test } from 'node:test';
 import { READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { json, ownWrites, writes } from '../src/http.ts';
+import { attachEventsIfThere } from '../src/events-db.ts';
 import { until } from './wait.ts';
+
 
 // #795: with WAL and synchronous=NORMAL, the first write after a checkpoint fsyncs the WAL's new header on the
 // writer's thread, and on the event loop a stalled disk held the whole server (14.3 s, #791). The server's void
@@ -151,6 +153,7 @@ test('addEvent hands out ids at once, past any row another connection wrote', ()
   assert.equal(b.id, a.id + 1);
   w.drain();
   const other = new DatabaseSync(store.path);
+  attachEventsIfThere(other, store.path); // the chat log lives in events.db (#1169)
   other.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)').run(t.id, 'note', '{}', Date.now());
   other.close();
   const c = store.addEvent(t.id, 'note', { text: 'c' });

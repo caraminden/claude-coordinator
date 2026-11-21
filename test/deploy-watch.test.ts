@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
+import { attachEventsIfThere } from '../src/events-db.ts';
 import { HttpError } from '../src/http.ts';
 import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, BOOT_STALL, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
 import { git } from './git.ts';
@@ -152,6 +153,7 @@ test('a share of failed turns that doubles past the floor is a regression', asyn
   // ... plus a turn that crashed before its result: an error event, dated inside the window.
   const err = store.addEvent(a.id, 'error', { message: 'claude exited 1' });
   const db = new DatabaseSync(file);
+  attachEventsIfThere(db, file); // the chat log lives in events.db (#1169)
   db.prepare('UPDATE events SET created_at = ? WHERE id = ?').run(at + 3 * MIN, err.id);
   db.close();
   assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 11, failed: 3, first: at + 2 * MIN, loggedOut: [] });

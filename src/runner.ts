@@ -61,6 +61,7 @@ import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { turnPayer } from './access.ts';
+import { pressure } from './pressure.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -173,6 +174,8 @@ interface TurnState {
   limitTries?: number;
   /** Network-outage resumes in a row that led to this turn (#366). */
   netTries?: number;
+  /** Kill resumes in a row that led to this turn (#1364). */
+  killTries?: number;
   /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
   codex?: true;
   /** A Claude turn that starts with the Codex turns before it: their thread is dropped once it succeeds. */
@@ -378,7 +381,7 @@ const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 /** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
 const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
 /** A resume a restart must still start: its count, the messages it carries, and (an account switch's, #779) how it resumes. */
-type OwedResume = { resumes: number; queued?: QueuedMessage[]; limitTries?: number; onAccount?: true };
+type OwedResume = { resumes: number; queued?: QueuedMessage[]; limitTries?: number; onAccount?: true; killTries?: number };
 /** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
 export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
@@ -460,6 +463,31 @@ interface NetResume {
 const NET_NOTE = 'Network outage: resumes once it is back';
 const RESUME_NET_PROMPT =
   `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a ship, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
+
+/**
+ * A turn killed from outside (out of memory, a container stop, a stray signal) is resumed by the server once (RL1, #1364).
+ * Cara, 2026-11-20: "So if it crashes again would it stop for good? I dont want to get in restart loops": a second kill in
+ * a row stops for good, with the error and a push.
+ */
+export const MAX_KILL_RESUMES = 1;
+const KILL_RESUMES = 'kill-resumes';
+/** Killed turns waiting for their resume, in the settings table so the wait outlives a restart. */
+interface KillResume {
+  ticket: number;
+  /** Kill resumes in a row this one will be. */
+  tries: number;
+  /** The killed turn's restart resumes in a row, carried so the two caps together still end a loop. */
+  resumes: number;
+  /** Messages queued behind the killed turn; they go into the resume. */
+  queued?: QueuedMessage[];
+}
+/** How long the kill line waits for the last resume it started to take its wait before the next goes anyway. */
+const KILL_START_MAX_MS = 2 * 60_000;
+/** The longest the line of kill resumes holds for a starved box before one starts anyway (then the clock starts again). */
+export const KILL_HOLD_MAX_MS = 5 * 60_000;
+const KILL_NOTE = 'Killed: resumes by itself shortly';
+const RESUME_KILL_PROMPT =
+  `Your last turn was killed from outside before it finished (out of memory, a container stop or a stray signal), and Citadel resumed it by itself. A command may have half-run when it died (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps, and don't restart whatever heavy job was running without thinking about why the turn was killed.`;
 
 /** Whether the API answers at all: any HTTP response counts, only a failure to connect (DNS, socket, 10 s timeout) doesn't. */
 export async function apiReachable(): Promise<boolean> {
@@ -584,6 +612,16 @@ export class Runner {
   /** The wait before the next probe; null for netProbeMs, a fresh outage's first. */
   netDelay: number | null = null;
   private netTimer?: NodeJS.Timeout;
+  /** How starved the box is (src/pressure.ts): the line of kill resumes holds while it is (#1364). Tests fake it. */
+  killPressure: () => Promise<{ starved: boolean; why: string }> = () => pressure.read();
+  killHoldMaxMs = KILL_HOLD_MAX_MS;
+  private killTimer?: NodeJS.Timeout;
+  /** When the line of kill resumes began holding for pressure, or since the last one it let through; null while it moves. */
+  private killHeldSince: number | null = null;
+  /** Kill waits whose resume this server has started: the line moves past them; the wait goes once their turn takes it. */
+  private killStarted = new Map<number, number>();
+  /** Set once detachAll hands the turns to the next server: this one starts no more resumes. */
+  private detached = false;
   /** When each account error last pushed: one push per error for everyone, not one per minion. */
   private accountPushes = new Map<string, number>();
   /** Copies a session into the database (src/sessions.ts); tests hold it open to race the next step against it. */
@@ -802,8 +840,10 @@ export class Runner {
 
   /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */
   detachAll() {
-    // The next server probes for the threads waiting on the network.
+    // The next server probes for the threads waiting on the network, and resumes the killed turns waiting for theirs.
     clearTimeout(this.netTimer);
+    clearTimeout(this.killTimer);
+    this.detached = true;
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
       clearTimeout(t.stopTimer);
@@ -832,6 +872,7 @@ export class Runner {
     const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
     const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
     const net = once(NET_RESUMES, () => this.netResumes()).find((w) => w.ticket === ticket.id) ?? null;
+    const kill = once(KILL_RESUMES, () => this.killResumes()).find((w) => w.ticket === ticket.id) ?? null;
     const limit = once(LIMIT_RESUMES, () => this.limitResumes()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
@@ -844,8 +885,8 @@ export class Runner {
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
-      // A network wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (net?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(net?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
+      // A network or kill wait's held messages are queued too: they go first into its resume (takeQueue).
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (net?.queued?.length ?? 0) + (kill?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(net?.queued ?? []), ...(kill?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
@@ -955,6 +996,7 @@ export class Runner {
   close(ticketId: number, text: string): Promise<void> {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
     this.cancelNetWait(ticketId);
+    this.cancelKillWait(ticketId);
     this.store.deleteSetting(closeCancelledKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
@@ -1417,7 +1459,7 @@ export class Runner {
         if (owed) {
           const q = waiting?.length ? waiting : owed.queued;
           if (q?.length) this.queues.set(t.id, [...q]);
-          later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount));
+          later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount, owed.killTries ?? 0));
         }
         if (t.status === 'running') {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
@@ -1457,8 +1499,10 @@ export class Runner {
               later.push(() => !this.isRunning(t.id) && this.next(t.id));
             }
           } else {
-            this.store.setSetting(owedKey(t.id), { resumes: resumes + 1, ...(queued.length ? { queued } : {}) });
-            later.push(() => this.resume(t.id, resumes + 1));
+            // A kill resume's count rides along, so a kill after the restart still counts as the second in a row.
+            const killTries = turn?.killTries ?? 0;
+            this.store.setSetting(owedKey(t.id), { resumes: resumes + 1, ...(queued.length ? { queued } : {}), ...(killTries ? { killTries } : {}) } satisfies OwedResume);
+            later.push(() => this.resume(t.id, resumes + 1, 0, false, 0, false, killTries));
           }
         }
         if (/^Using \w+$/.test(t.last_activity ?? '')) {
@@ -1480,6 +1524,8 @@ export class Runner {
     this.armLimitTimer();
     // Threads waiting on the network keep waiting: the probe starts over (#366).
     this.armNetProbe();
+    // Killed turns waiting for their resume take their turns in the line again (#1364).
+    this.armKillResumes();
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
@@ -1550,7 +1596,7 @@ export class Runner {
    * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
    * that were queued behind the cut-off one.
    */
-  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false) {
+  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false, killTries = 0, killLine = false): Promise<void> | undefined {
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
     const token = this.limitStarting.get(ticketId);
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
@@ -1560,26 +1606,35 @@ export class Runner {
     const ran = this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
-      if (!ticket || !project || ticket.status === 'closed') return this.store.deleteSetting(owedKey(ticketId));
+      if (!ticket || !project || ticket.status === 'closed') {
+        if (killLine) this.cancelKillWait(ticketId);
+        return this.store.deleteSetting(owedKey(ticketId));
+      }
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
+      // So does one from the kill line (#1364).
+      if (killLine && !this.killWait(ticketId)) return;
       // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
       if (token && !ours()) return;
       const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
+        // A kill wait's messages join them: the wait ends here, as the turn that would have taken it.
+        const held = killLine ? this.cancelKillWait(ticketId)?.queued ?? [] : [];
+        if (held.length) this.queues.set(ticketId, [...held, ...(this.queues.get(ticketId) ?? [])]);
         const q = this.queues.get(ticketId);
         if (q?.length) this.store.setSetting(waitingKey(ticketId), q);
         this.store.deleteSetting(owedKey(ticketId));
         return;
       }
-      // An account switch's note went with the turn that stopped (switchAccount).
-      if (!onAccount) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
+      // An account switch's note went with the turn that stopped (switchAccount); a kill resume's with the kill (one line).
+      if (!onAccount && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries, killTries);
     }));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
     if (token) void ran.then(() => ours() && this.cancelLimitWait(ticketId));
+    return ran;
   }
 
   /**
@@ -1621,7 +1676,7 @@ export class Runner {
 
   /** What takeQueue would take, left where it is. */
   private peekQueue(ticketId: number): QueuedMessage[] {
-    return [...(this.netWait(ticketId)?.queued ?? []), ...(this.queues.get(ticketId) ?? []), ...(this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [])];
+    return [...(this.netWait(ticketId)?.queued ?? []), ...(this.killWait(ticketId)?.queued ?? []), ...(this.queues.get(ticketId) ?? []), ...(this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [])];
   }
 
   /** Whether `person`'s Claude can't run a turn now (Runner.placeFor); the chat says why. Asked before the queue is taken. */
@@ -1637,7 +1692,7 @@ export class Runner {
   private takeQueue(ticketId: number): QueuedMessage[] {
     this.store.deleteSetting(waitingKey(ticketId));
     this.store.deleteSetting(owedKey(ticketId));
-    const held = this.cancelNetWait(ticketId)?.queued ?? [];
+    const held = [...(this.cancelNetWait(ticketId)?.queued ?? []), ...(this.cancelKillWait(ticketId)?.queued ?? [])];
     // Held mail rides along after what woke the turn, so the turn is still that message's.
     const mail = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
     if (mail.length) this.store.deleteSetting(mailKey(ticketId));
@@ -1704,6 +1759,110 @@ export class Runner {
   private netResume(ticketId: number) {
     const w = this.netWait(ticketId);
     if (w) this.resume(ticketId, 0, 0, false, w.tries);
+  }
+
+  private killResumes(): KillResume[] {
+    return this.store.getSetting<KillResume[]>(KILL_RESUMES) ?? [];
+  }
+
+  /** The minion's wait for its resume after a kill (#1364), if it has one. */
+  killWait(ticketId: number): KillResume | null {
+    return this.killResumes().find((w) => w.ticket === ticketId) ?? null;
+  }
+
+  /**
+   * A turn killed from outside joins the line of kill resumes, holding the messages queued behind it. One chat line says
+   * so; no push: a kill wave costs minutes, not messages (#1364).
+   */
+  private waitForKillResume(ticketId: number, live: LiveTurn, turn: TurnState, killed: string) {
+    // What is left of it goes first: a claude whose wrapper alone was killed (no unit) would race its resume on the session.
+    this.signal(live, 'SIGKILL');
+    const queued = this.queues.get(ticketId)?.splice(0);
+    const list = this.killResumes().filter((w) => w.ticket !== ticketId);
+    list.push({ ticket: ticketId, tries: (turn.killTries ?? 0) + 1, resumes: turn.resumes ?? 0, ...(queued?.length ? { queued } : {}) });
+    this.store.setSetting(KILL_RESUMES, list);
+    this.killStarted.delete(ticketId);
+    this.emit(ticketId, 'note', { text: `${killed}\nCitadel resumes it by itself in a moment, once: killed again, it stops for good. Messages queued behind it go into that resume.` });
+    this.store.updateTicket(ticketId, { note: KILL_NOTE });
+    this.armKillResumes();
+  }
+
+  /** End the minion's kill wait (its resume's turn, a person's message, a stop, a dismissal); returns the wait it had. */
+  private cancelKillWait(ticketId: number): KillResume | null {
+    const list = this.killResumes();
+    const w = list.find((x) => x.ticket === ticketId);
+    this.killStarted.delete(ticketId);
+    if (!w) return null;
+    const rest = list.filter((x) => x !== w);
+    if (rest.length) this.store.setSetting(KILL_RESUMES, rest);
+    else this.store.deleteSetting(KILL_RESUMES);
+    return w;
+  }
+
+  /** The next step of the kill line in resumeGapMs, unless one is due or under way, or nobody waits whose resume hasn't started. */
+  private armKillResumes(wait = this.resumeGapMs) {
+    if (this.killTimer || this.detached || !this.killResumes().some((w) => !this.killStarted.has(w.ticket))) return;
+    this.killTimer = setTimeout(() => void this.killResumeNext(), wait);
+    this.killTimer.unref();
+  }
+
+  /**
+   * One kill resume at a time, resumeGapMs apart, so a wave (16 at once on Nov 20) isn't replayed into the same wall.
+   * The line holds while the box is starved (src/pressure.ts), at most killHoldMaxMs before one goes anyway; then the
+   * clock starts again. It limits only these resumes: nothing a person starts waits on it.
+   */
+  private async killResumeNext() {
+    let r = { starved: false, why: '' };
+    try {
+      r = await this.killPressure();
+    } catch {
+      // A reading that fails holds nothing.
+    }
+    this.killTimer = undefined;
+    if (this.detached) return;
+    const list = this.killResumes();
+    const w = list.find((x) => !this.killStarted.has(x.ticket));
+    if (!w) return void (this.killHeldSince = null);
+    // The last one started may still be behind its session save (afterRestore): it goes first, so a slow save can't
+    // bunch the line up; one stuck that long doesn't hold the rest.
+    if (list.some((x) => Date.now() - (this.killStarted.get(x.ticket) ?? 0) < KILL_START_MAX_MS)) return this.armKillResumes(Math.max(this.resumeGapMs, 250));
+    if (r.starved) {
+      if (this.killHeldSince === null) {
+        this.killHeldSince = Date.now();
+        console.log(`[kill-resume] holding the resumes of killed turns: ${r.why}`);
+      }
+      if (Date.now() - this.killHeldSince < this.killHoldMaxMs) return this.armKillResumes(Math.max(this.resumeGapMs, 250));
+      console.log(`[kill-resume] held ${Math.round((Date.now() - this.killHeldSince) / 1000)} s for pressure (${r.why}): minion ${w.ticket} resumes anyway`);
+      this.killHeldSince = Date.now();
+    } else this.killHeldSince = null;
+    this.killStarted.set(w.ticket, Date.now());
+    let ran: Promise<void> | undefined;
+    try {
+      ran = this.resume(w.ticket, w.resumes, 0, false, 0, false, w.tries, true);
+    } catch (err: any) {
+      console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${err?.message ?? err}`);
+    }
+    void Promise.resolve(ran).then(() => this.killResumeEnded(w.ticket));
+    this.armKillResumes();
+  }
+
+  /**
+   * A kill resume's start is over. Its turn took the wait (takeQueue), or it bailed and cancelled it; a wait still
+   * there means the start threw, so it stops here with an error, and its held messages run next as a normal turn.
+   */
+  private killResumeEnded(ticketId: number) {
+    if (!this.killStarted.has(ticketId) || this.isRunning(ticketId)) return;
+    const w = this.cancelKillWait(ticketId);
+    if (!w) return;
+    const held = w.queued ?? [];
+    if (held.length) this.queues.set(ticketId, [...held, ...(this.queues.get(ticketId) ?? [])]);
+    const text = `Its resume after the kill failed to start, so it stopped: ${held.length ? 'the messages queued behind it run next.' : 'send a message to carry on.'}`;
+    const event = this.emit(ticketId, 'error', { text });
+    this.setFailNote(ticketId, { note: 'Kill resume failed to start' });
+    this.onTurnError(ticketId, text, event.id);
+    // As a message arriving now would: next() keeps them for a busy lane (waiting setting) and runs them on a free one.
+    if (held.length) this.next(ticketId);
+    this.armKillResumes();
   }
 
   private limitResumes(): LimitResume[] {
@@ -1961,7 +2120,7 @@ export class Runner {
    */
   cold(ticketId: number): boolean {
     const t = this.store.getTicket(ticketId);
-    if (!t?.session_id || t.status === 'closed' || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return false;
+    if (!t?.session_id || t.status === 'closed' || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId)) return false;
     const ended = this.store.lastTurnEnd(ticketId);
     return !!ended && this.now() - ended > this.relays.settings(ticketId).coldMin * 60_000;
   }
@@ -2193,6 +2352,13 @@ export class Runner {
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
     if (!live) {
+      // Waiting for its resume after a kill (#1364): likewise.
+      if (this.cancelKillWait(ticketId)) {
+        this.setFailNote(ticketId, { note: 'Killed: stopped, send a message to carry on' });
+        this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+        this.broadcastTicket(ticketId);
+        return true;
+      }
       // Waiting on the network: a stop ends the wait, and as with a turn, its held messages go too.
       if (this.cancelNetWait(ticketId)) {
         this.setFailNote(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
@@ -2329,7 +2495,7 @@ export class Runner {
   private freshStep(ticketId: number): QueuedMessage | null {
     const f = this.store.getSetting<FreshState>(freshKey(ticketId));
     // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
-    if (!f || f.summary || this.netWait(ticketId)) return null;
+    if (!f || f.summary || this.netWait(ticketId) || this.killWait(ticketId)) return null;
     // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
     // its /compact fallback; the step follows that turn (#423).
     if (f.auto && this.queued(ticketId)) return null;
@@ -2392,7 +2558,7 @@ export class Runner {
     if (this.noTurns) return;
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
-        if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id) || this.lanes.busy(t.id) || this.limitWait(t.id) || this.netWait(t.id)) continue;
+        if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id) || this.lanes.busy(t.id) || this.limitWait(t.id) || this.netWait(t.id) || this.killWait(t.id)) continue;
         const size = this.store.getSetting<number>(contextKey(t.id));
         const ended = this.store.lastTurnEnd(t.id);
         if (!size || size <= FRESH_IDLE_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
@@ -2445,6 +2611,7 @@ export class Runner {
     if (t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id)) return 'busy';
     if (this.limitWait(t.id)) return 'limit wait';
     if (this.netWait(t.id)) return 'net wait';
+    if (this.killWait(t.id)) return 'kill wait';
     if (this.parked(t)) return 'parked';
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     if (!(t.state === null || t.state === 'ready' || t.state === 'try' || this.store.openCardsOf(t.id).length)) return `state ${t.state}`;
@@ -2518,7 +2685,7 @@ export class Runner {
    * never after a fresh-start step's own turn: one that leaves it big waits for the next real turn.
    */
   private freshAtTurnEnd(ticketId: number, turn: TurnState) {
-    if (turn.fresh || this.queued(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return;
+    if (turn.fresh || this.queued(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId)) return;
     const t = this.store.getTicket(ticketId);
     const size = this.store.getSetting<number>(contextKey(ticketId));
     if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
@@ -2584,7 +2751,7 @@ export class Runner {
       }
       // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
       const skew = this.keepalivePending.get(ticketId);
-      if (this.keepalivePending.delete(ticketId) && !this.queues.get(ticketId)?.length && !this.netWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
+      if (this.keepalivePending.delete(ticketId) && !this.queues.get(ticketId)?.length && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
         return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
       }
       // Everything queued while the last turn ran goes into one turn.
@@ -2644,7 +2811,7 @@ export class Runner {
     this.broadcastTicket(ticketId);
   }
 
-  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {
+  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0, killTries = 0) {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -2685,7 +2852,7 @@ export class Runner {
     // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
-    const askers = [...(resumes || limitTries || netTries || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const askers = [...(resumes || limitTries || netTries || killTries || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
     const asker = askers.find((a) => !this.store.isAdmin(this.store.getUser(a))) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
@@ -2712,7 +2879,7 @@ export class Runner {
     // the effort of the turn whose cache it keeps warm, so its launch matches that turn's.
     const light = !codex && ticket.kind !== 'coordinator' && (keepalive
       ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light
-      : !resumes && !limitTries && !netTries && batch.length > 0 && batch.every((m) => m.light));
+      : !resumes && !limitTries && !netTries && !killTries && batch.length > 0 && batch.every((m) => m.light));
     const effort = light ? 'low' : itsEffort;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
@@ -2800,7 +2967,7 @@ export class Runner {
       else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
-      if (ticket.note === NET_NOTE) this.store.updateTicket(ticket.id, { note: null });
+      if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
       else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
@@ -2866,7 +3033,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(killTries ? { killTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
@@ -3257,7 +3424,12 @@ export class Runner {
       const reason = killed || resultError?.trim() || startError;
       const switched = turn ? this.switchAccount(ticketId, turn, reason, usage, authFailed) : null;
       if (authFailed && switched !== true) this.emit(ticketId, 'note', { text: `${this.store.getUser(turn!.person!)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
-      if (switched !== true) this.turnFailed(ticketId, reason, hideSecrets(stderr.slice(-10).join('\n'), secrets), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
+      // Killed from outside before it finished: the server resumes it once (#1364); a second kill in a row stops.
+      // A fresh-start step or a turn set to close isn't carried on, as after a restart (recover).
+      const resumable = !!killed && !!turn && !sawResult && !authFailed && !turn.fresh && !('closing' in turn);
+      const again = resumable && (turn!.killTries ?? 0) >= MAX_KILL_RESUMES;
+      if (switched !== true && resumable && !again) this.waitForKillResume(ticketId, live, turn!, killed!);
+      else if (switched !== true) this.turnFailed(ticketId, again ? `${reason}\nIt was already resumed once after a kill, so it stopped for good: send a message to carry on.` : reason, hideSecrets(stderr.slice(-10).join('\n'), secrets), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
     } else if (turn?.handBack) {
       // Claude has the Codex turns now.
       this.store.deleteSetting(codexThreadKey(ticketId));

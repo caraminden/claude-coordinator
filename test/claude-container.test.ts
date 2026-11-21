@@ -307,6 +307,7 @@ test('a container turn frozen past its heartbeat keeps running and keeps its pin
 test('a container turn whose wrapper process is gone and whose heartbeat stopped counts as gone', async () => {
   const id = newTicket();
   const r = runner(inContainer);
+  r.killPressure = async () => ({ starved: false, why: '' });
   r.send(id, 'Josh', `hold ${join(root, 'never')}`);
   const turn = () => store.getSetting<{ dir?: string }>(`turn:${id}`)?.dir;
   await until('the wrapper has said its pid', () => !!turn() && existsSync(join(turn()!, 'pid.json')));
@@ -317,7 +318,10 @@ test('a container turn whose wrapper process is gone and whose heartbeat stopped
   const old = new Date(Date.now() - 60_000);
   utimesSync(join(dir, 'beat'), old, old);
   await until('the turn is cut off', () => status(id) !== 'running');
-  assert.ok(errors(id).some((e) => /killed before it finished/.test(e)));
+  assert.ok(notes(id).some((e) => /killed before it finished[\s\S]*its container was killed/.test(e)), 'named as killed');
+  // A first kill is resumed by the server (#1364); the resume's prompt has no hold, so it ends well.
+  await until('the resume ends', () => status(id) === 'idle' && !r.isRunning(id) && !r.killWait(id));
+  assert.deepEqual(errors(id), []);
 });
 
 test('podman run arguments: keep-id, host network, a :U volume, binds at their own path, the spec label', () => {

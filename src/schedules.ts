@@ -531,8 +531,8 @@ export class ScheduledRuns {
     const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
     if (!project) return store.schedules.remove(s.id);
     // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
-    // or waits to resume after a usage limit or an outage. Not state 'limited': a run that gave up keeps it for good.
-    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id))) return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+    // or waits to resume after a usage limit, an outage or a kill. Not state 'limited': a run that gave up keeps it for good.
+    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
     // The activity gate (#745): a quiet stretch costs nothing, no minion and no note, and the window keeps growing.
     const minions = store.schedules.minionsSince(s, by);
     if (s.min_minions != null && minions < s.min_minions) {

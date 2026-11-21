@@ -217,7 +217,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const src = merged?.src ?? chatId;
   const guessed = chatId && chatId === early && !merged;
   const cached = guessed ? earlyCached : chatId ? cachedEvents(src) : null;
-  const page = cached?.page ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(src) : null);
+  const page = cached ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(src) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   // Coming to Home from elsewhere is a new visit: its rows start afresh.
@@ -330,7 +330,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'shared') renderSharedHead();
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
-  await mountChat(chatId, ticket, page, cached?.fresh);
+  await mountChat(chatId, ticket, page, !!cached);
 }
 
 // The schemes you've left this session, each as you left it, most recent last (#538).
@@ -411,7 +411,7 @@ async function switchChat(main, seq) {
   if (!ticket) return false; // a dismissed one the page hasn't read: the full load fetches it
   const merged = chatId === view.coordinator.id ? mergedView(view.projectId, chatId, view.taskmasters, tmViewMode()) : null;
   const cached = cachedEvents(merged?.src ?? chatId);
-  const page = cached?.page ?? await loadEvents(merged?.src ?? chatId);
+  const page = cached ?? await loadEvents(merged?.src ?? chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
   const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
@@ -431,6 +431,6 @@ async function switchChat(main, seq) {
   revealActiveRow();
   const v = view;
   api(`api/tickets/${chatId}`).then((r) => { if (view === v) onTicketUpdate(r.ticket); }).catch(() => {});
-  await mountChat(chatId, ticket, page, cached?.fresh);
+  await mountChat(chatId, ticket, page, !!cached);
   return true;
 }

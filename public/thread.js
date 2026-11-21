@@ -65,13 +65,11 @@ async function setTmView(mode) {
   renderTicketHead();
   const { src } = v.merged;
   try {
-    const cached = cachedEvents(src);
-    const page = cached?.page ?? await loadEvents(src);
+    const page = cachedEvents(src) ?? await loadEvents(src);
     if (view !== v || v.merged.src !== src) return; // another view, or another flip, overtook this one
     v.page = page;
     renderHistory();
     scrollToBottom();
-    if (cached && await cached.fresh && view === v && v.page === page) renderHistory();
     await catchUpEvents();
   } catch {
     if (view !== v || v.merged.src !== src) return;
@@ -135,8 +133,11 @@ function watchYourScrolling() {
   }
 }
 
-/** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
-export async function mountChat(chatId, ticket, page, fresh) {
+/**
+ * Fill in a chat section just put on the page: its head, its history, and where you were in it. `fromCache`: the
+ * history came from this session's cache (#527), so what came since is still to come.
+ */
+export async function mountChat(chatId, ticket, page, fromCache) {
   renderTicketHead();
   view.page = page;
   view.openedSeenAt = view.seen?.[chatId] ?? 0;
@@ -158,26 +159,34 @@ export async function mountChat(chatId, ticket, page, fresh) {
   };
   await place();
   if (view?.id !== chatId) return; // you moved on while it loaded back
-  // Drawn from the cache (#527): what came since is drawn in once it arrives, opening at the first unread
-  // as a fresh load would, unless you've scrolled meanwhile.
   const v = view;
-  if (fresh) watchYourScrolling(); // a short chat has no Load earlier to have started it
-  const settled = (fresh ?? Promise.resolve(false)).then(async (added) => {
-    if (!added || view !== v || view.page !== page) return;
-    renderHistory();
-    if (!view.scrolledByYou) await place();
-  });
+  if (fromCache) watchYourScrolling(); // a short chat has no Load earlier to have started it
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
       document.querySelector('.composer textarea')?.focus();
     }
   } catch {}
-  // Events broadcast while the snapshot was loading arrived before `view` existed. Not awaited: the chat is
-  // drawn, so the route's dim (body.navigating) clears now rather than after these round trips (#494).
-  settled.then(catchUpEvents)
+  // What came since the cached copy, or was broadcast while the snapshot was loading (before `view` existed): one
+  // request, its events added below what's drawn (#1531). Not awaited: the chat is drawn, so the route's dim
+  // (body.navigating) clears now rather than after this round trip (#494).
+  catchUpEvents()
+    .then(async (added) => {
+      // From the cache, it opens at the first unread as a fresh load would, unless you've scrolled meanwhile.
+      if (!fromCache || !added || view !== v || view.page !== page) return;
+      markUnread();
+      if (!view.scrolledByYou) await place();
+    })
     .then(() => isCoordinator(ticket) && view?.id === chatId && showRecap())
     .catch(() => {}); // a missed catch-up is made good by the stream's next resync
+}
+
+/** Mark the first item you haven't seen New, unless one is marked already. */
+function markUnread() {
+  const log = document.getElementById('log');
+  if (!log || log.querySelector(':scope > .unread-divider')) return;
+  const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
+  at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
 }
 
 /**
@@ -205,8 +214,7 @@ function renderHistory() {
   }
   for (const ev of page.events) appendEvent(ev, false);
   renderCardJump();
-  const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
-  at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
+  markUnread();
   // Messages still on their way or not sent; the replay swapped out any that reached the server meanwhile, by sendId.
   log.append(...view.pendingMessages.map((m) => m.el), ...(recap ? [recap] : []));
   renderProgress();
@@ -455,7 +463,7 @@ export function renderTicketHead() {
   renderModelPicker();
   const el = document.getElementById('ticket-head');
   if (!el) return;
-  const t = view.ticket;
+  const t = headTicket(view.ticket);
   const coord = isCoordinator(t);
   // A dismissed minion's message box is tinted and says so (style.css), following reopen and dismiss live.
   const chat = el.closest('.chat');
@@ -536,8 +544,6 @@ export function renderTicketHead() {
   const working = !!workingBy(t);
   const stateLabel = h('span', { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${dismissedWhen(t.closed_at).full}` : state }, h('span', { class: 'state-text' }, state),
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
-  stateFit?.disconnect();
-  if (working) stateFit?.observe(stateLabel);
   const phone = narrow.matches;
   // Leaves the thread as it is and goes back to the project's coordinator, or to Home for a chat opened from it (#1140).
   const close = view?.home ? h('a', { class: 'close-view', href: '#/home', title: 'Back to Home', 'aria-label': 'Back to Home' }, icon('close'))
@@ -563,7 +569,7 @@ export function renderTicketHead() {
   // ‹ › × sit right of Find (Josh, 2026-11-13); on phones × stays on the title's line.
   const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen, 'data-part': phone ? null : 'minion-menu', 'data-part-opener': phone ? 'minion-menu' : null }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t), budgetChip(t),
     h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
-  el.replaceChildren(
+  patchParts(el, [
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${working ? 'running' : t.status}` }),
       h('h2', coord ? {} : { title: threadFullName(t) }, threadTitleParts(t)),
@@ -577,7 +583,9 @@ export function renderTicketHead() {
     coord && view.merged?.mode === 'mine' ? tmBanner() : '',
     phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
     sub,
-    phone ? '' : view.progressEl);
+    phone ? '' : view.progressEl], new Set([view.findEl, view.progressEl, noteEdit?.el]));
+  stateFit?.disconnect();
+  if (working) stateFit?.observe(el.querySelector('.head-state'));
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
   syncHeldBrief();
@@ -585,6 +593,38 @@ export function renderTicketHead() {
   const send = document.querySelector('.composer button[type=submit]');
   if (send) send.title = t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
   scheduleProgress();
+}
+
+// The head's kept parts keep their handlers (patchParts), so every part closes over this one copy of its minion, kept current.
+let headCopy = null;
+function headTicket(t) {
+  if (headCopy?.id !== t.id) headCopy = {};
+  for (const k of Object.keys(headCopy)) if (!(k in t)) delete headCopy[k];
+  return Object.assign(headCopy, t);
+}
+
+/**
+ * Make `parent`'s children `want`, keeping each old part whose markup is as it was drawn (#1531): the head redraws
+ * on every update to its minion, and a part kept keeps hover, focus and an open menu. A row or the line under the
+ * title is opened up, a part in it compared on its own; `live` nodes (Find, the readout, a note being written) are
+ * the same node each time, so they move rather than compare.
+ */
+function patchParts(parent, want, live, rows = true) {
+  want = want.filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : document.createTextNode(String(c))));
+  want.forEach((c, i) => {
+    const at = parent.childNodes[i];
+    if (at === c) return;
+    const sig = c.nodeType === 1 ? c.outerHTML : c.nodeValue;
+    if (live.has(c) || !at || live.has(at)) parent.insertBefore(c, at ?? null);
+    else if (at.sig === sig) return;
+    else if (rows && c.nodeType === 1 && at.nodeName === c.nodeName && at.className === c.className && /\b(row|head-sub|head-line)\b/.test(c.className)) {
+      for (const { name } of [...at.attributes]) if (!c.hasAttribute(name)) at.removeAttribute(name);
+      for (const { name, value } of c.attributes) if (at.getAttribute(name) !== value) at.setAttribute(name, value);
+      return void patchParts(at, [...c.childNodes], live, false);
+    } else at.replaceWith(c);
+    c.sig = sig;
+  });
+  while (parent.childNodes.length > want.length) parent.lastChild.remove();
 }
 
 /** The chat whose ⋯ menu is open on a phone: the head redraws often, so it is kept here. */
@@ -802,7 +842,7 @@ function deliverMail(t, btn) {
 function unpark(t) {
   const was = { state: t.state, parked_for: t.parked_for, held_brief: t.held_brief };
   const show = (v) => {
-    for (const x of new Set([t, view?.tickets?.get(t.id)])) if (x) Object.assign(x, v);
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) Object.assign(x, v);
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
   };
@@ -819,7 +859,7 @@ function unpark(t) {
 function setStatus(t, status) {
   const was = t.status;
   const show = (s) => {
-    for (const x of new Set([t, view?.tickets?.get(t.id)])) if (x) x.status = s;
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) x.status = s;
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
   };
@@ -872,8 +912,19 @@ export function appendEvent(event, scroll = true) {
     Object.assign(view, own);
   }
   renderTyping(); // the typing line is your own Taskmaster's
-  if (scroll && followChat) scrollToBottom();
-  if (scroll) renderCardJump();
+  if (scroll) afterLiveDraw();
+}
+
+// Live events drawn in one frame scroll and look for out-of-sight cards once, both reading layout, not once each (#1531).
+let liveDrawn = false;
+function afterLiveDraw() {
+  if (liveDrawn) return;
+  liveDrawn = true;
+  requestAnimationFrame(() => {
+    liveDrawn = false;
+    if (followChat) scrollToBottom();
+    renderCardJump();
+  });
 }
 
 function drawEvent(event, scroll) {
@@ -1162,8 +1213,7 @@ function drawEvent(event, scroll) {
   if (event.kind === 'claude' && data.type === 'result') flushFolds();
   mergePushNotes(log);
   renderTyping();
-  if (scroll && followChat) scrollToBottom();
-  if (scroll) renderCardJump();
+  if (scroll) afterLiveDraw();
 }
 
 /** The chat's cards still waiting on people that are out of sight (above the thread bar or under the composer), oldest first. */

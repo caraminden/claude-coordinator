@@ -446,7 +446,7 @@ dialog.viewer > .chat { min-height: 0; overflow-y: auto; overscroll-behavior: co
 dialog.viewer .ticket-head { top: 0; margin: 0 0 0.75rem; }
 dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
 dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav > :not(.refresh-btn), .close-view, button[title='Dismiss minion']) { display: none; }
-dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
+dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { --pic-max: 10rem; max-height: var(--pic-max); }
 dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; max-height: 10rem; }
 dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display: none; }
 @media (max-width: 800px) {

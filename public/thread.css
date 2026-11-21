@@ -224,7 +224,9 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
 .msg .who .unsent-tag { color: var(--error); }
 .msg .who .unsent-tag.waiting-tag { color: var(--muted); }
 .msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
-.msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.msg .images img { --pic-max: 14rem; display: block; max-height: var(--pic-max); max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+/* A picture whose size is known (core.js holdPicSize) takes the box it will load into: its width capped as max-width and max-height cap it. */
+img.pic-held { aspect-ratio: auto var(--pic-r); width: min(var(--pic-w), 100%, calc(var(--pic-max, 100vh) * var(--pic-r))); height: auto; }
 .msg .files { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }
 .file-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 0.9em; line-height: 1.3; text-decoration: none; }
 a.file-chip:hover { border-color: var(--muted); }
@@ -250,7 +252,7 @@ a.file-chip:hover { border-color: var(--muted); }
 .md .file-card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .md .file-card .meta { font-size: 0.78em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .md .file-preview { display: inline-block; max-width: 100%; margin: 0.35rem 0; text-decoration: none; }
-.md .file-preview img, .md .file-preview video { display: block; max-width: 100%; max-height: 22rem; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+.md .file-preview img, .md .file-preview video { --pic-max: 22rem; display: block; max-width: 100%; max-height: var(--pic-max); border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
 .md .file-preview:hover img, .md .file-preview:hover video { border-color: var(--accent); }
 .md .file-preview .caption { display: block; font-size: 0.82em; color: var(--muted); margin-top: 0.2rem; }
 /* Not clickable until the server has found the file (checkFileLinks in core.js). */

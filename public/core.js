@@ -104,6 +104,7 @@ function fileLinkInfo(ticketId, path) {
  */
 function checkFileLinks(root, ticketId) {
   for (const el of root.querySelectorAll('[data-file]')) {
+    holdPicSize(el.querySelector('img'));
     const path = el.dataset.file;
     const card = el.classList.contains('file-card');
     const title = card ? el.querySelector('.name').innerHTML : el.querySelector('.caption')?.innerHTML ?? '';
@@ -113,6 +114,7 @@ function checkFileLinks(root, ticketId) {
       else if (info === null) t.innerHTML = `<span class="file-missing" title="${escapeHtml(`Not found: ${path}`)}">${title || escapeHtml(baseName(path))} <span class="mark">(file not found)</span></span>`;
       const fresh = t.content.firstElementChild ?? el;
       fresh.classList.remove('checking');
+      if (fresh !== el) holdPicSize(fresh.querySelector('img'));
       if (fresh !== el) el.replaceWith(fresh);
     });
   }
@@ -224,8 +226,21 @@ export function scrollToBottom() {
 }
 // Images finish loading after they are added; stay pinned to the bottom if you were following.
 document.addEventListener('load', (e) => {
-  if (followChat && e.target.tagName === 'IMG' && e.target.closest('#log')) scrollToBottom();
+  if (e.target.tagName !== 'IMG' || !e.target.closest('#log')) return;
+  if (e.target.naturalWidth) picSizes.set(e.target.getAttribute('src'), [e.target.naturalWidth, e.target.naturalHeight]);
+  if (followChat) scrollToBottom();
 }, true);
+
+// Chat pictures' sizes once one has loaded this session: drawn again (Load earlier, a chat reopened), it holds its box
+// before it loads, so nothing under it moves (#1531). shortcut: only seen ones; a size from the server would cover a first load.
+const picSizes = new Map(); // src -> [width, height]
+export function holdPicSize(img) {
+  const size = img && picSizes.get(img.getAttribute('src'));
+  if (!size) return;
+  img.style.setProperty('--pic-w', `${size[0]}px`);
+  img.style.setProperty('--pic-r', `${size[0] / size[1]}`);
+  img.classList.add('pic-held');
+}
 
 /** Where each thread was scrolled to, so coming back lands in the same place. */
 function saveScroll() {
@@ -326,6 +341,14 @@ export async function goLive(who) {
     catchUpChip = null;
   }
   keepOpenChat();
+}
+
+// Keeping it stringifies and stores up to 1.5 MB, which blocks: after a route, wait for the page to be idle (#1531).
+let keepSoon = false;
+function keepOpenChatSoon() {
+  if (keepSoon) return;
+  keepSoon = true;
+  (window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500)))(() => { keepSoon = false; keepOpenChat(); }, { timeout: 5000 });
 }
 
 /** Keep the open chat on the device for the next launch (base.js keepChat): the newest of its history and what opening it asked for. */
@@ -782,21 +805,14 @@ export async function loadEvents(ticketId) {
 }
 
 /**
- * A thread's history from the cache, to draw at once, with what came since on its way (#527): `fresh`
- * resolves true once newer events have joined the page. Null when it isn't cached (or is still prefetching).
+ * A thread's history from the cache, to draw at once (#527), or null when it isn't cached (or is still prefetching).
+ * What came since is the chat's own catch-up once it is drawn (mountChat): one request, appended, not drawn again (#1531).
  */
 export function cachedEvents(ticketId) {
   const page = eventCache.get(ticketId);
   if (!page || prefetching.has(ticketId)) return null;
   remember(ticketId, page);
-  const fresh = api(eventsUrl(ticketId, `after=${page.events.at(-1)?.id ?? 0}`)).then((events) => {
-    // Live events may have joined the page while this was on its way, so go by id, not by position.
-    const have = new Set(page.events.map((e) => e.id));
-    const added = events.filter((e) => !have.has(e.id));
-    if (added.length) page.events = page.events.concat(added).sort((a, b) => a.id - b.id);
-    return added.length > 0;
-  }).catch(() => false); // the chat's catch-up fetches them again
-  return { page, fresh };
+  return page;
 }
 
 /** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
@@ -850,12 +866,15 @@ export function prefetchTopRows() {
   });
 }
 
+/** Draw what the open chat's history is missing since its newest event; how many were added. */
 export async function catchUpEvents() {
   const v = view;
-  if (!v?.id) return;
+  if (!v?.id) return 0;
   const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
-  if (view !== v) return; // another view (or chat) opened meanwhile: these aren't its events
-  for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
+  if (view !== v) return 0; // another view (or chat) opened meanwhile: these aren't its events
+  let added = 0;
+  for (const ev of events) if (ev.id > view.lastEventId) { appendEvent(ev); added++; }
+  return added;
 }
 
 export function onTicketUpdate(ticket) {
@@ -1032,7 +1051,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await openStartScheme();
-    if (seq === routeSeq) keepOpenChat();
+    if (seq === routeSeq) keepOpenChatSoon();
   } catch (err) {
     if (err.message !== 'Not logged in' && seq === routeSeq) {
       // A notice with a way out, not a bare red line on a blank page.

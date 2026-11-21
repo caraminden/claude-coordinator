@@ -3,7 +3,7 @@ import { GITHUB_NAME, machineAuthor, senderTone } from './chattext.js';
 import { api, fileHref, formatSize, h, me, taskmasterName, view } from './base.js';
 import { askHeader } from './askcard.js';
 import { loadDraft, saveDraft } from './composer.js';
-import { markdown, threadRefs } from './core.js';
+import { markdown, threadRefs, holdPicSize } from './core.js';
 import { noteStrike, struckSource } from './strike.js';
 import { optimistic } from './ui/optimistic.js';
 import { threadNumberHref } from './threadrefs.js';
@@ -138,8 +138,11 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   if (text) msg.append(event ? messageBody(text, event.strikes, null, event.id) : markdown(text));
   if (event?.mentions?.length) chipMentions(msg, event.mentions);
   if (imageSrcs.length) {
-    msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
-      h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
+    msg.append(h('div', { class: 'images' }, imageSrcs.map((src) => {
+      const img = h('img', { src, alt: 'Attached image', loading: 'lazy' });
+      holdPicSize(img);
+      return h('a', { href: src, target: '_blank', rel: 'noopener' }, img);
+    })));
   }
   if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
   // A contraption's ask: its header and summary, the full text behind the toggle (askcard.js).

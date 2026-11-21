@@ -15,10 +15,10 @@ const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 
 /** The "tag N" chip in a minion's header; it opens to the minion's properties. */
 export function propertyChip(t) {
-  const entries = Object.entries(t.properties ?? {});
+  const count = Object.keys(t.properties ?? {}).length;
   const body = h('div', {});
   const chip = h('details', { class: 'prop-chip' },
-    h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${entries.length} properties` }, icon('tag'), String(entries.length)),
+    h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${count} properties` }, icon('tag'), String(count)),
     h('div', { class: 'prop-pop' },
       h('h4', {}, 'Properties'),
       body,
@@ -27,6 +27,8 @@ export function propertyChip(t) {
   // Drawn on opening: which values the filter offers, and whether assigned exists, depend on the registry, which may load later.
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
+    // Read on opening: a header part that didn't change is kept, chip and all, while its minion's values may have (#1531).
+    const entries = Object.entries(t.properties ?? {});
     const assignable = propFilter.projectId === t.project_id && propFilter.keys?.some((k) => k.key === 'assigned' && k.status === 'active');
     const rows = entries.filter(([k]) => !(assignable && k === 'assigned')).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, filterLinks(t, k, v))]);
     if (assignable) rows.push(h('dt', {}, 'assigned'), h('dd', {}, assignPicker(t)));
@@ -90,6 +92,8 @@ function filterLinks(t, key, value) {
 export function closeOnClickAway(chip) {
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
+    // Read on opening: a header part that didn't change is kept, chip and all, while its minion's values may have (#1531).
+    const entries = Object.entries(t.properties ?? {});
     const away = (e) => {
       if (chip.contains(e.target)) return;
       chip.open = false;

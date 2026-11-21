@@ -126,18 +126,22 @@ export class MinionIndex {
     for (const sub of ['', 'shipped', 'not-picked']) {
       const at = await stat(join(dir, sub)).then((s) => Math.floor(s.mtimeMs), () => null);
       if (at === null) continue; // no such folder
-      dirs.set(sub, at);
       const prefix = sub ? `${sub}/` : '';
+      const keep = () => { for (const [name, mtime] of seen?.files ?? []) if (name.startsWith(prefix) && (sub || !name.includes('/'))) files.set(name, mtime); };
       if (sub && seen?.dirs.get(sub) === at) {
-        for (const [name, mtime] of seen.files) if (name.startsWith(prefix)) files.set(name, mtime);
+        dirs.set(sub, at);
+        keep();
         continue;
       }
       let names: string[];
       try {
         names = (await readdir(join(dir, sub))).filter((n) => n.endsWith('.md'));
       } catch {
+        keep(); // a listing that failed (EMFILE, EIO) drops no rows, and the next pass lists it again
         continue;
       }
+      // Noted only once listed: a folder whose listing failed is listed again next pass.
+      dirs.set(sub, at);
       // A few stats at a time: the thread pool is shared with every other file call the server makes.
       for (let i = 0; i < names.length; i += 8) {
         const batch = names.slice(i, i + 8);

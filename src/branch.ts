@@ -118,7 +118,8 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
   const localSha = refs.sha.get(`refs/heads/${localDefault}`);
   if (localSha) bases.push({ name: localDefault, sha: localSha });
   if (originHead) bases.push({ name: originHead, sha: refs.sha.get('refs/remotes/origin/HEAD') });
-  const empty = await once(`empty\0${repoDir}\0${branch}\0${tip}\0${startedAt}`, () => emptyBranch(repoDir, branch, startedAt, tip)) as boolean;
+  // Only "it has commits" is kept: a git call that fails (a timeout under load) reads as empty, so empty is asked again.
+  const empty = (await once<boolean>(`made\0${repoDir}\0${branch}\0${tip}\0${startedAt}`, async () => ((await emptyBranch(repoDir, branch, startedAt, tip)) ? null : false))) ?? true;
   let ahead = 0;
   let merged = false;
   for (const base of bases) {

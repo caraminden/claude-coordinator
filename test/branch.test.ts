@@ -283,3 +283,28 @@ test('a second look at a branch where nothing moved starts one git, even while i
     process.env.PATH = path;
   }
 });
+
+test('a git that fails once is asked again: a failed look never pins a branch as empty (#1463 review)', async () => {
+  branch('t/21');
+  merge('t/21');
+  const bin = join(root, 'bin-fail');
+  mkdirSync(bin, { recursive: true });
+  const fail = join(root, 'git-fails');
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  // While the flag file is there, the reflog and log reads fail, as a timeout would.
+  writeFileSync(join(bin, 'git'), `#!/bin/sh
+if [ -e '${fail}' ] && { [ "$1" = reflog ] || [ "$1" = log ]; }; then exit 1; fi
+exec '${real}' "$@"
+`, { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    forgetSettled();
+    writeFileSync(fail, '');
+    assert.equal((await status('t/21'))?.merged, false, 'git failed: it reads as empty, so not shipped');
+    rmSync(fail);
+    assert.equal((await status('t/21'))?.merged, true, 'git works again: the next look sees it shipped');
+  } finally {
+    process.env.PATH = path;
+  }
+});

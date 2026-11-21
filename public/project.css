@@ -479,7 +479,8 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-li { display: grid; grid-template-columns: 0.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
-.ci-all-link { display: block; text-decoration: none; color: var(--accent); }
+/* All (#1423): Releases' board of every scheme and every app's Status, one row above the schemes. */
+.ci-all { margin-bottom: 0.3rem; }
 .ci-more { display: none; }
 .ci-runs-on { margin: var(--space-3) 0 0; }
 .ci-runs-on button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
@@ -544,12 +545,16 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
   .ci-more { display: grid; gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
   .ci-more .ci-li-name { font-weight: 500; }
   .ci-more .ci-li-state { max-width: 55vw; }
-  .ci-list:not(.greens-open) .ci-li[data-state="ready"]:not(.on) { display: none; }
+  .ci-list:not(.greens-open) .ci-li:is([data-state="ready"], [data-state="none"]):not(.on, .ci-all) { display: none; }
   .ci-run { grid-template-columns: 0.6rem 4.5rem minmax(0, 1fr) 4rem; }
   .ci-run-who { grid-column: 3 / -1; grid-row: 2; }
   .ci-run.ci-now { grid-template-columns: 0.6rem 4rem minmax(0, 1fr) 3.5rem; }
 }
-/* The Status page (#1123): the CI page's list and detail, with fixed-size tiles so a 30 s re-read moves nothing. */
+/* The Status tab (#1123, a tab of the Releases page since #1423): Citadel and the scheme's apps as chips, the picked one's tiles under them, fixed-size so a 30 s re-read moves nothing. */
+.st-page { display: grid; gap: var(--space-3); min-width: 0; }
+.st-apps { margin: 0; }
+.st-apps .chip { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 0; padding: 0.3rem 0.75rem; font: inherit; font-size: 0.85em; cursor: pointer; }
+.st-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }
 .st-why { margin: 0; color: var(--muted); min-height: 1.5em; }
 .st-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr)); gap: var(--space-3); }
 .st-tile { display: grid; grid-template-rows: auto auto 2.6em 1fr auto; gap: 0.2rem; min-height: 9.5rem; min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: var(--panel); box-shadow: inset 3px 0 0 var(--running); font-variant-numeric: tabular-nums; }

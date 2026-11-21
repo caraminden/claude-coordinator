@@ -31,11 +31,9 @@ b.waits { color: var(--held); }
 .releases-main { min-width: 0; padding-bottom: 2rem; }
 /* The head matches a chat's (thread.css): the title's line, then the pills where a chat has its state, ‹ › × at the end. */
 @media (min-width: 801px) { .rel-head .close-view.narrow-only { display: none; } }
-.rel-head .rel-sub { flex-wrap: nowrap; }
-.rel-chips { flex: 0 1 auto; min-width: 0; margin: 0; }
-/* Pills that wrap to a second line keep ‹ › × on the first. */
-.rel-sub > .head-nav { align-self: flex-start; }
-.rel-chips .chip { padding: 0.25rem 0.75rem; text-decoration: none; }
+/* Since #1423 it holds the CI page's list and tabs: Releases' own board is its first tab, its holds above the board. */
+.rel-tab, .rel-holds { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.rel-holds:empty { display: none; }
 .rel-body { display: flex; flex-direction: column; gap: 0.75rem; }
 .rel-empty { margin: 0.5rem 0; }
 .rel-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 0.9rem; }
@@ -107,34 +105,11 @@ b.waits { color: var(--held); }
 .rel-grid .rel-card-sm { background: var(--panel); }
 .rel-grid .rel-card-sm:not(:hover, .hl) { border-color: color-mix(in srgb, var(--tint, var(--line)) 40%, var(--line)); }
 .rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
-/* A phone's scheme picker (#820, take A): one box naming the scheme you're on, which opens .rel-sheet. */
-.rel-pick { display: none; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px; margin-top: 0.35rem; padding: 0 0.85rem 0 0.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
-.rel-pick-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.rel-pick-sub { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--muted); font-size: 0.9em; }
-.rel-pick-caret { flex: none; color: var(--muted); }
-.rel-pick-icon { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 9%, var(--panel)); color: var(--muted); font-size: 0.7rem; font-weight: 700; position: relative; overflow: hidden; }
-.rel-pick-icon > .scheme-icon { position: absolute; inset: 0; width: 100%; height: 100%; }
-.rel-pick-icon.all { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent); font-size: 0.85rem; }
-/* The list in .rel-sheet (a new-scheme dialog: a sheet along the bottom on phones), 48 px rows. */
-.rel-opts { display: flex; flex-direction: column; gap: 2px; }
-.rel-opt { display: flex; align-items: center; gap: 0.75rem; min-height: 48px; padding: 0 0.75rem; border-radius: 10px; color: var(--ink); text-decoration: none; }
-.rel-opt:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--ink) 5%, transparent); }
-.rel-opt.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.rel-opt-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-opt.on .rel-opt-name { font-weight: 600; }
-.rel-opt-sub { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--muted); font-size: 0.85em; }
-.rel-opt-check { flex: none; width: 1rem; text-align: center; color: var(--accent); font-weight: 700; }
 @media (max-width: 800px) {
   .rel-head .close-view.wide-only { display: none; }
   .ticket-head.rel-head > .row > h2 { flex: 1 1 0; }
   .rel-all-wide { display: none; }
   .rel-all-narrow { display: flex; }
-  /* ↻ ‹ › join the title's line, and the box takes the whole line under it in place of the chips. */
-  .ticket-head.rel-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-  .rel-head > .rel-sub { display: contents; }
-  .rel-head .rel-sub > :is(.rel-chips, .spacer) { display: none; }
-  .rel-head .rel-sub > .head-nav { grid-row: 1; grid-column: 2; align-self: center; }
-  .rel-head .rel-pick { display: flex; grid-column: 1 / -1; }
   .rel-list li { align-items: center; }
   .rel-list li > a { display: flex; align-items: center; min-height: var(--control-h); padding-block: 0; }
 }

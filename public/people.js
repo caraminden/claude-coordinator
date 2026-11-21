@@ -378,14 +378,13 @@ function claudeCard() {
       const own = st.host && a.n === 1;
       const same = st.usage?.accounts?.find((x) => x.n === a.n)?.same;
       const [chip, cls] = a.expired ? ['Needs linking again', 'warn']
-        : same ? [`Same Claude account as ${same}`, 'warn']
         : a.limitedUntil > now ? [`Limited until ${clock(a.limitedUntil)}`, 'warn']
         : a.n === st.pinned ? ['Pinned', 'use']
         : a.n === st.inUse ? ['Next up', 'use']
         : ['Ready', 'ok'];
       return h('li', { class: `acct${a.n === st.inUse ? ' in-use' : ''}` },
         h('span', { class: 'n' }, String(a.n)),
-        h('span', { class: 'who' }, h('strong', {}, own ? 'Server login' : a.email || `Account ${a.n}`), h('span', { class: `link-chip ${cls}` }, chip), a.plan ? h('span', { class: 'muted small' }, a.plan) : ''),
+        h('span', { class: 'who' }, h('strong', {}, own ? 'Server login' : a.email || `Account ${a.n}`), h('span', { class: `link-chip ${cls}` }, chip), same ? h('span', { class: 'link-chip warn' }, `Same Claude account as ${same}`) : '', a.plan ? h('span', { class: 'muted small' }, a.plan) : ''),
         h('span', { class: 'acts' },
           a.expired && !own ? link('Link again', a.n) : '',
           accounts.length < 2 ? '' : a.n === st.pinned ? pin(a, false) : a.expired ? '' : pin(a, true),
@@ -401,7 +400,7 @@ function claudeCard() {
       accounts.length > 1 ? h('p', { class: 'small' }, st.pinned
         ? `Pinned to account ${st.pinned}: new minions and cold wakes run on it while it's ready. If it hits a limit they carry on with another, and come back once it resets. `
         : 'New minions and cold wakes go to the account whose week resets soonest, so its allowance isn\'t lost at the reset. ',
-      'A minion that ran in the last hour stays on its account, since moving it rereads its whole conversation. A usage limit moves turns at once, mid-turn included.') : '',
+      'A minion that ran in the last hour stays on its account while it has room, since moving it rereads its whole conversation; once that account is nearly out for the week, it moves at its next turn. A usage limit moves turns at once, mid-turn included.') : '',
       h('ol', { class: 'acct-list' }, rows),
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: full, title: full ? 'Three accounts at most' : 'Sign in another Claude account of yours',
         onclick: (e) => { e.target.disabled = true; api('api/me/claude', { method: 'POST', body: {} }).then(render).catch((err) => render({ ...st, error: err.message })); } }, 'Link another account'),

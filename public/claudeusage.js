@@ -22,6 +22,6 @@ export function accountLine(a, current, now = Date.now()) {
   const wk = a.usage?.weekly;
   const week = wk ? `week ${pct(wk)}%${live(wk, now) ? '' : ' (week reset, no turns since)'}` : 'no turns yet';
   const sess = a.usage?.session ? `, 5 hours ${pct(a.usage.session)}%` : '';
-  // Two links to one Claude organization share one allowance (#1461): their bars always read alike.
+  // Two links to one Claude organization share one allowance (#1461), whatever their last readings say.
   return `${current ? '▸ ' : ''}${a.label}: ${week}${sess}${a.same ? ` (the same Claude account as ${a.same})` : ''}`;
 }

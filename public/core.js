@@ -555,7 +555,7 @@ export function pickLine(u, accounts) {
     : u.pinned ? `account ${u.pinned}, which you pinned, isn't ready`
     : u.why === 'full' ? 'every account is close to its limit'
     : `of the accounts with room, its week resets first${reset}`;
-  return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm.`;
+  return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm, until it's nearly out.`;
 }
 
 /** Fill in every usage bar from the latest usage report from Claude turns. */

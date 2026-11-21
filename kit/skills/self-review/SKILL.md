@@ -18,6 +18,7 @@ line: everything is on, as written here.
 
 - **Pre-ship review off:** skip 2 and 4 and give no label. Fix what you find yourself, then ship as
   the line says: a ship card, and ship only on its go (`hand_off_land` with no risk, naming the go).
+  The fix route in 5 needs the review, so it doesn't apply.
   When the line names another entry that gives the label instead, run that one in 2's place, label
   from its verdict, and ship with that label as usual.
 - **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
@@ -42,7 +43,7 @@ Commit first (the facts above already cover it when nothing says UNCOMMITTED), t
   user-visible text in the front end with no logic touched. Label it `low: docs/copy only` and go
   to 5. Never skip `CLAUDE.md`, `.claude/` or the Citadel kit: a few lines there change how every
   minion works, and a kit change reaches every scheme.
-- **Deep** when the change is high in 4, or the diff is over about 300 lines.
+- **Deep** when the change is high in 4, takes the fix route in 5 whatever its size, or the diff is over about 300 lines.
 - **Light** for everything else.
 
 **Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
@@ -204,7 +205,30 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **The go threshold:** the Shipping line in your prompt says which labels wait for a person's go
   (with no Shipping line: high only; "No change waits": none). Below it, the label ships by itself;
   at or above it, it takes the High route below, whatever the label, unless the line says the
-  merge's own Approve is the go: then open the pull request and merge it, with no card.
+  merge's own Approve is the go: then open the pull request and merge it, with no card. One way
+  out: a bug fix that passes the fix route below ships with no go.
+- **The fix route** (Cara, 2026-11-20, "Fixes ship; data still asks": "the thing we are trying to
+  protect is already broken, shouldnt we just fix it?"). At or above the threshold, a change skips
+  the go when your minion's `type` is bug and all four hold:
+  1. **A test proves it.** A test file that ran red on main's tip and green on your branch. Record
+     it, don't claim it: write or change the test, commit, run that file with your branch's code
+     on the main commit your branch is built on (`git merge-base HEAD main`, e.g. a scratch clone
+     checked out there with your test file copied in) and keep the failing lines it prints, then
+     run it green on your branch. The test file, that main commit's sha and the failing lines are
+     the proof.
+  2. **The deep review is clean:** run deep whatever the diff's size, and nothing real is left
+     unfixed.
+  3. **No data, no auth:** no migration that changes rows or columns already there, no deletion
+     of data, and no change to `src/auth.ts` or any file Project facts marks as auth.
+  4. **A plain revert undoes it** (two-way door in 4).
+  On `hand_off_land`, pass `fix_proof` in place of `go`: `{ test, red_on, red_output, review }`
+  (`review` starts "clean"). The server checks what git can show: type bug, the test file in your
+  worktree, `red_on` on main and in your branch, and a diff with no auth file, migration or SQL
+  that rewrites or deletes data; anything else it refuses for gets the High route. The rest is your
+  word. On a pull-request path, the PR description carries the same proof and the line
+  `Shipped as a fix without a go: <test>`. Members get that one line on the shipped line and the
+  Releases row, no card. It never applies where every change waits for a person, and a new rule or
+  feature is not a fix, even in a high-risk file.
 - **Below the threshold:** carry on with how a change ships, as the Shipping line says (with none,
   the scheme instructions; with neither, open the PR and stop there). The ready note leads
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and
@@ -219,7 +243,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
-- **At or above the threshold (High):** stop before shipping. Post the same line, the findings you fixed in one line each,
+- **At or above the threshold (High), unless the fix route above holds:** stop before shipping. Post the same line, the findings you fixed in one line each,
   and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
   Hold, with your pick marked recommended). A feeder's change merges into its build, so its card says Merge: header "Merge", "Merge this <label>-risk change into Build <n>?" (Merge / Hold). Set state null, note `risk <label>: waiting for a go`,
   and end the turn. Ship only on a go.

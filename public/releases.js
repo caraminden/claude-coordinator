@@ -73,7 +73,6 @@ const redrawn = new Set();
 export const onReleasesRedraw = (fn) => redrawn.add(fn);
 
 function redraw() {
-  for (const fn of redrawn) fn();
   // Not under a row being dragged in the land line: it would drop the row from the finger. Again once it's let go.
   if (pageEl?.querySelector('.rel-changes.reorder-active')) return void setTimeout(redraw, 250);
   for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
@@ -83,6 +82,7 @@ function redraw() {
     slot.replaceChildren(releaseChip(view.ticket) ?? '');
     view.branchEl.hidden = !view.branchEl.querySelector(':scope > :not(.rel-chip-slot)') && !slot.firstChild;
   }
+  for (const fn of redrawn) fn(); // after Releases' own, so a listener that throws can't keep the page from drawing
 }
 
 // ---------- words and numbers ----------

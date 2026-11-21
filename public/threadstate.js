@@ -197,7 +197,7 @@ export function rowWhy(t, st, now = Date.now()) {
   // The note says what's left or what it's stuck on; complete's label already has it.
   if (t.note && st.rank !== 1 && !st.label.includes(t.note)) lines.push(`Note: ${t.note}`);
   if (card && (st.rank === 0 || t.pending_card_at)) link = { href: card.href, text: `Open the ${card.what ?? card.kind} card →` };
-  else if (t.release) link = { href: `#/p/${t.project_id}/releases/${Number(t.project_id) === 2 ? 'all' : t.project_id}`, text: 'Releases →' };
+  else if (t.release) link = { href: `#/p/${t.project_id}/releases/${t.project_id}`, text: 'Releases →' };
   return { title: st.quiet ? `Quiet ${shortAgo(t.activity.at, now)}` : st.label, lines, more, link, quiet: !!st.quiet };
 }
 

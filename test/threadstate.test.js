@@ -397,7 +397,7 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
   }
   const of = (over) => { const m = t({ project_id: 2, ...over }); return rowWhy(m, rowState(m, null, NOW), NOW); };
   assert.deepEqual(of({ pending_card_at: NOW - HOUR, open_cards: [card] }).link, { href: card.href, text: 'Open the question card →' });
-  assert.equal(of({ status: 'closed', release }).link.href, '#/p/2/releases/all');
+  assert.equal(of({ status: 'closed', release }).link.href, '#/p/2/releases/2');
   // A wait says what and against its usual; a ready minion says since when.
   const landing = of({ state: 'outside', wait });
   assert.equal(landing.lines[0], 'Waiting to ship: 2nd in line, behind #513 (testing).');

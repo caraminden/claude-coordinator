@@ -15,7 +15,11 @@ test('admin tabs fall back to the first tab for a non-admin', () => {
 test('files, CI and releases keep their place', () => {
   assert.equal(schemeSwitchHash('#/p/3/shared', 5), '#/p/5/shared');
   assert.equal(schemeSwitchHash('#/p/3/ci/history', 5), '#/p/5/ci/history');
-  assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 2), '#/p/2/releases/all');
+  // The Releases page (#1423) opens on the scheme you switch to, Citadel too, and keeps a tab but not a highlighted change.
+  assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 2), '#/p/2/releases/2');
+  assert.equal(schemeSwitchHash('#/p/3/releases/3/history', 5), '#/p/5/releases/5/history');
+  assert.equal(schemeSwitchHash('#/p/3/releases/all/status', 5), '#/p/5/releases/5/status');
+  assert.equal(schemeSwitchHash('#/p/3/ci/health', 5), '#/p/5/ci/health');
   assert.equal(schemeSwitchHash('#/p/3/ci', 5), '#/p/5/ci');
   assert.equal(schemeSwitchHash('#/p/3/status', 5), '#/p/5/status');
   assert.equal(schemeSwitchHash('#/p/3/releases/7/12', 5), '#/p/5/releases/5');

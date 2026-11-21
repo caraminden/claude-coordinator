@@ -366,7 +366,7 @@ export function elsewhereRows(scheduleCount) {
     h('span', { class: 'settings-row-chev' }, icon('forward')));
   return [
     link('rows', 'teal', 'Schedules', scheduleCount == null ? 'Minions that start on a timer' : `${scheduleCount} active`, `#/p/${id}/schedules`),
-    link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/${Number(id) === 2 ? 'all' : id}`),
+    link('spark', 'running', 'Releases', 'What shipped and what is live', `#/p/${id}/releases/${id}`),
     link('users', 'running', 'Members', 'Who works in this scheme', `#/p/${id}/members`),
     link('bell', 'held', 'Notifications', 'You: push, and what pings you', `#/p/${id}/notifications`),
   ];

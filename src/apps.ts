@@ -190,7 +190,9 @@ export const appDown = (title: string, home = '') =>
   `<div class="row"><button type="button" class="cui-btn cui-primary" id="retry">Retry</button><button type="button" class="cui-btn cui-ghost" id="back">Back to ${APP_NAME}</button></div>` +
   `<p class="again"><span class="cui-spin" aria-hidden="true"></span><span>This page opens by itself once it's back.</span></p></main>` +
   `<script>(function(){var d=2000;` +
-  `function check(){fetch(location.href,{cache:'no-store',redirect:'manual'}).then(function(r){if(r.status<500)location.reload();else later()},later)}` +
+  // Its checks say so (X-Citadel-Down-Check), so they stay out of the error digest. Any answer but 502-504 means the app
+  // is back, its own 500 included (the reload shows it).
+  `function check(){fetch(location.href,{method:'HEAD',cache:'no-store',redirect:'manual',headers:{'X-Citadel-Down-Check':'1'}}).then(function(r){if(r.status>=502&&r.status<=504)later();else location.reload()},later)}` +
   `function later(){d=Math.min(d*1.5,15000);setTimeout(check,d)}setTimeout(check,d);` +
   `document.getElementById('retry').onclick=function(){location.reload()};` +
   `document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='${home}/c/'}})()</script></body>`;
@@ -300,10 +302,12 @@ export class AppProxy {
       return void res.writeHead(400, text).end('Bad request');
     }
     if (url.pathname.startsWith('/apps/_citadel/')) return void this.kit(req, res, url, host).catch(() => res.headersSent ? res.destroy() : res.writeHead(500, text).end('Internal error'));
+    // The down page's own checks (appDown) aren't news: the load that showed it was counted. Read before admit drops X-Citadel-*.
+    const check = !!req.headers['x-citadel-down-check'];
     const a = host !== null && url.pathname.startsWith('/_citadel/') ? this.enter(req, url, host) : this.admit(req, url, host);
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
-    const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
+    const failed = check ? () => {} : (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
     const downPage = isPage(req) ? appDown(a.row.title, host !== null ? this.origin(req, null) : '') : undefined;
     const go = (held?: boolean) => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed, downPage, ...(held || this.restarts.isStopped(a.row.name) ? { retryMs: 0 } : {}) });
     this.restarts.whenUp(a.row.name, a.row.port, res, go);

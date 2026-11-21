@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { appDown } from '../src/apps.ts';
 import { forward } from '../src/proxy.ts';
@@ -86,6 +87,19 @@ test('a stream to an app that is down gets an empty 200 stream with retry once t
   assert.ok(Date.now() - t >= 900, 'it waited out the hold first');
 });
 
+test('a stream to an app still warming up (it answers 503) is told to come back too, and the 503 is counted', async () => {
+  const appPort = await freePort();
+  const warming = createServer((req, res) => res.writeHead(503, { 'Content-Type': 'text/plain' }).end('warming up'));
+  servers.push(warming);
+  await listen(warming, appPort);
+  const failed: string[] = [];
+  const proxy = await front(appPort, failed);
+  const res = await fetch(`http://127.0.0.1:${(proxy.address() as { port: number }).port}/x`, { headers: { Accept: 'text/event-stream' } });
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), 'retry: 3000\n\n');
+  assert.deepEqual(failed, ['503 ']);
+});
+
 test('the down page: the kit\'s look, Retry, Back, and it checks again by itself', () => {
   const html = appDown('Peek <Auras>', 'https://citadel.example');
   assert.match(html, /<link rel="stylesheet" href="\/apps\/_citadel\/theme\.css">/);
@@ -94,6 +108,7 @@ test('the down page: the kit\'s look, Retry, Back, and it checks again by itself
   assert.match(html, /class="cui-btn cui-primary" id="retry">Retry</);
   assert.match(html, /location\.href='https:\/\/citadel\.example\/c\/'/);
   assert.match(html, /setTimeout\(check,d\)/);
+  assert.match(html, /'X-Citadel-Down-Check':'1'/);
 });
 
 test('through Citadel: a page load of an app that isn\'t answering gets the down page, a script\'s fetch still a 502', async () => {
@@ -109,7 +124,10 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
   assert.equal((await srv.call(`/api/contraptions/fixture/people/${me}`, { enabled: true }, 'PUT')).status, 200);
   // Stopped on purpose first, so the proxy's 5 s retry is skipped and the answer comes at once.
   assert.equal((await srv.call('/api/contraptions/fixture/service', { action: 'stop' })).status, 200);
-  const get = (accept: string) => fetch(`${srv!.base}/apps/fixture/`, { headers: { Cookie: srv!.cookie, Accept: accept, Connection: 'close' } });
+  const get = (accept: string, extra: Record<string, string> = {}) => fetch(`${srv!.base}/apps/fixture/`, { headers: { Cookie: srv!.cookie, Accept: accept, Connection: 'close', ...extra } });
+  // The down page's own check comes first: it gets the 502 that keeps it waiting, and isn't counted in the error digest.
+  const check = await fetch(`${srv.base}/apps/fixture/`, { method: 'HEAD', headers: { Cookie: srv.cookie, 'X-Citadel-Down-Check': '1', Connection: 'close' } });
+  assert.equal(check.status, 502);
   const page = await get('text/html,application/xhtml+xml,*/*;q=0.8');
   assert.equal(page.status, 503);
   assert.equal(page.headers.get('retry-after'), '5');
@@ -119,4 +137,15 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
   const script = await get('*/*');
   assert.equal(script.status, 502);
   assert.equal(await script.text(), 'Fixture is not answering');
+  // The digest's writes go through one worker in order, so once the later two are in, the check would be too.
+  const rows = () => {
+    const db = new DatabaseSync(join(srv!.data, 'coordinator.db'), { readOnly: true });
+    try {
+      return db.prepare("SELECT key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
+    } finally {
+      db.close();
+    }
+  };
+  await until('the page load and the fetch counted', () => rows().reduce((n, r) => n + Number(r.count), 0) >= 2);
+  assert.deepEqual(rows(), [{ key: '502 GET /apps/fixture/ (not answering: ECONNREFUSED)', count: 2 }]);
 });

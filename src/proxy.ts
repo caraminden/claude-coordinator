@@ -47,6 +47,12 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
   let upstream: ClientRequest;
   const send = () => {
     upstream = request({ host: '127.0.0.1', port, method: req.method, path, headers }, (up) => {
+      // A service still warming up may answer a stream 502-504, which would close an EventSource for good too.
+      if (stream && [502, 503, 504].includes(up.statusCode ?? 0)) {
+        opts.failed?.(up.statusCode!);
+        up.resume();
+        return void comeBack(res);
+      }
       const out = { ...up.headers };
       opts.answer?.(out);
       res.writeHead(up.statusCode ?? 502, out);
@@ -63,8 +69,8 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
       if (res.headersSent) return void res.destroy();
       // Refused (not listening yet) or dropped (stopping, or a kept-alive socket it closed): a restart, so ask again.
       if (again && Date.now() < until && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) return void setTimeout(() => gone || send(), Date.now() - start < RETRY_MS ? 200 : 1000);
-      // Nobody sees this one: the page's EventSource just asks again (so it isn't in the error digest either).
-      if (stream) return void res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' }).end(`retry: ${STREAM_RETRY_MS}\n\n`);
+      // Nobody sees this one: the page's EventSource just asks again, so it isn't in the error digest either.
+      if (stream) return void comeBack(res);
       opts.failed?.(502, err.code ? `not answering: ${err.code}` : 'not answering');
       if (opts.downPage) return void res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '5', 'X-Content-Type-Options': 'nosniff' }).end(opts.downPage);
       res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`${opts.what} is not answering`);
@@ -90,6 +96,9 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
   if (again) req.resume();
   send();
 }
+
+/** An empty event stream that tells the EventSource to ask again in STREAM_RETRY_MS: nobody sees it (#1376). */
+const comeBack = (res: ServerResponse) => res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' }).end(`retry: ${STREAM_RETRY_MS}\n\n`);
 
 function tooBig(req: IncomingMessage, res: ServerResponse, max: number) {
   if (res.headersSent) return void res.destroy();

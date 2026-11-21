@@ -33,9 +33,9 @@ html:has(#app > .login-map), html:has(#splash) { scrollbar-gutter: auto; }
 @media (prefers-color-scheme: dark) {
   :root .login-map .sc-m.st-parchment { --m-paper: #16142a; --m-edge: #0a0914; --m-ink: #b7a8e6; --m-soft: rgb(183 168 230 / .45); --m-fill: #221f3d; --m-route: #f5b840; --m-sea: #121a2c; --m-pawn: #c084fc; --m-lava: #ff8a3d; --m-label: #e9dcc0; --m-grid: rgb(183 168 230 / .07); --m-red: #ff8a5c; --m-ripple: rgb(183 168 230 / .3); }
 }
-.login-map .scene-m:has(.st-parchment) { --top: #f3e9d2; }
+.login-map .scene-m { --top: #f3e9d2; }
 @media (prefers-color-scheme: dark) {
-  :root .login-map .scene-m:has(.st-parchment) { --top: #16142a; }
+  :root .login-map .scene-m { --top: #16142a; }
 }
 .login-map .sc-m .grid { fill: none; stroke: var(--m-grid); stroke-width: 1; }
 .login-map .sc-m .ink { stroke: var(--m-ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }

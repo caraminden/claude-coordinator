@@ -82,16 +82,40 @@ function stageStrip(c) {
   }));
 }
 
-/** The open row: the holder's box, then the line in order, each with its chip and, when history allows, its expected start. */
-function claimBody(c) {
+/**
+ * The queue with the waiting steps in `order` (minion numbers), at once: expected starts stay with their places in line, a
+ * removed step leaves the count. The server's view replaces it.
+ */
+function reordered(c, order) {
+  const done = c.queue.filter((q) => q.state === 'done');
+  const waiting = c.queue.filter((q) => q.state !== 'done');
+  const next = order.map((n, i) => ({ ...waiting.find((q) => q.number === n), starts_text: waiting[i].starts_text }));
+  return { ...c, queue: [...done, ...next], total: c.total - (waiting.length - next.length) };
+}
+
+/**
+ * The open row: the holder's box, then the line in order, each with its chip and, when history allows, its expected start.
+ * A waiting step moves up or down or leaves the line (Cara, 2026-11-20, "Reorder and remove"); adding one stays with the
+ * Taskmaster's tools. `edit(order, label)` saves a new waiting order.
+ */
+function claimBody(c, edit) {
   const step = c.step ? `plan step ${Math.min(c.step.done + 1, c.step.of)} of ${c.step.of}` : STAGES[STAGE_AT[c.stage] ?? 0];
   const box = h('div', { class: 'claim-holder' }, h('div', { class: 'claim-who' },
     h('span', {}, h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)),
     c.stage ? h('span', { class: 'muted num' }, step) : null), c.stage ? stageStrip(c) : null);
+  // A dismissed minion still in the line can't be sent back (the server refuses closed minions): any edit drops it.
+  const order = c.queue.filter((q) => q.state !== 'done' && q.state !== 'gone' && q.number != null).map((q) => q.number);
+  const swap = (i, j) => order.map((n, k) => (k === i ? order[j] : k === j ? order[i] : n));
   const rows = c.queue.map((q, i) => {
     const [tone, word] = q.state === 'chained' ? ['warn', `After #${q.after}`] : q.state === 'done' ? ENDED[q.how] ?? QUEUED.done : QUEUED[q.state] ?? QUEUED.waiting;
+    const at = order.indexOf(q.number);
+    const btn = (glyph, label, enabled, next) => h('button', { type: 'button', class: 'claim-mv', 'aria-label': `${label} #${q.number}`, 'data-tip': `${label} #${q.number}`, disabled: !enabled,
+      onclick: () => edit(next(), `${label.toLowerCase()} #${q.number}`) }, glyph);
+    const moves = at < 0 ? h('span', { class: 'claim-mvs' }) : h('span', { class: 'claim-mvs' },
+      btn('↑', 'Move up', at > 0, () => swap(at, at - 1)), btn('↓', 'Move down', at < order.length - 1, () => swap(at, at + 1)),
+      btn('✕', 'Take out of the line', true, () => order.filter((n) => n !== q.number)));
     return h('li', { class: `claim-q${q.state === 'done' ? ' d' : ''}` }, h('span', { class: 'pos' }, String(i + 1)),
-      h('span', { class: 'nm' }, `#${q.number} ${q.title}`), toneChip(tone, word), h('span', { class: 'eta' }, q.starts_text ?? ''));
+      h('span', { class: 'nm' }, `#${q.number} ${q.title}`), toneChip(tone, word), h('span', { class: 'eta' }, q.starts_text ?? ''), moves);
   });
   return [box, h('div', {}, h('div', { class: 'claim-sub' }, c.estimate ? 'Queue · expected start' : 'Queue'), h('ol', { class: 'claim-qlist' }, ...rows))];
 }
@@ -114,7 +138,13 @@ export function claimsBlock(projectId, redraw) {
     const stage = c.stage ? ` · ${STAGES[STAGE_AT[c.stage]]}` : '';
     const [row] = settingsRow({ key: `claim:${projectId}/${c.name}`, icon: 'lock', hue: 'held', title: c.name,
       summary: [toneChip('violet', 'Held'), `${c.holder_name}${queued ? stage : ` · ${c.since_text}`}`] },
-    ...(queued ? claimBody(c) : []),
+    ...(queued ? claimBody(c, (order, label) => optimistic({
+      key: `claim:${projectId}/${c.name}`,
+      apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).map((x) => (x.name !== c.name ? x : reordered(x, order)))); redraw(); },
+      send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}/queue`, { method: 'PUT', body: { queue: order } }),
+      undo: () => { claims.set(projectId, list); redraw(); },
+      label,
+    })) : []),
     hueRow({ hue: 'held', meta: h('button', { type: 'button', class: 'btn-small', title: queued ? `Pass ${c.name} to the first in its queue, who is told` : `Free ${c.name}; its holder is told nothing`, onclick: () => optimistic({
       key: `claim:${projectId}/${c.name}`,
       apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).flatMap((x) => (x.name !== c.name ? [x] : passedOn(x)))); redraw(); },

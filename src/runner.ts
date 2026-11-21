@@ -922,9 +922,11 @@ export class Runner {
   }
 
   /**
-   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, parked or not; a chained
-   * minion still holding its brief gets the line as a note and starts when its chain does, so it is never woken without
-   * its brief. Whoever keeps the scheme's claims hears it as held mail. A scheme's page redraws either way.
+   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, parked or not. One wake
+   * when a chain or wake_when_live fires for it at the same go-live (Cara, 2026-11-20, "Separate, one wake"): a chained
+   * minion still holding its brief gets the line as held mail, read with its brief when its chain starts it, and one
+   * already running (just started by its chain or wake) takes it mid-turn. Whoever keeps the scheme's claims hears it as
+   * held mail. A scheme's page redraws either way.
    */
   claimPassed(projectId: number, passed: ({ from: Claim; to?: Claim } | { from?: undefined; to: Claim })[], why: string, author: string) {
     if (!passed.length) return;
@@ -933,10 +935,10 @@ export class Runner {
       const next = to && this.store.getTicket(to.holder);
       if (next && next.status !== 'closed') {
         const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when you are dismissed.`;
-        if (this.heldFor(next.id)) this.emit(next.id, 'note', { text: line });
+        if (this.heldFor(next.id)) this.send(next.id, APP_NAME, line, [], { hold: true });
         else {
           if (next.state === 'parked') this.store.updateTicket(next.id, { state: null });
-          this.send(next.id, APP_NAME, line);
+          this.send(next.id, APP_NAME, line, [], {}, this.isRunning(next.id));
         }
       }
       if (keeper && keeper.id !== to?.holder) {

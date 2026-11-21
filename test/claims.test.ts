@@ -111,7 +111,7 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
     const p = store.createProject('Shipped', null).id;
     const mk = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'default', created_by: 'Cara' });
-    const [a, b, other] = [mk('A'), mk('B'), mk('Not a holder')];
+    const [a, b, c, other] = [mk('A'), mk('B'), mk('C, chained'), mk('Not a holder')];
     const how = () => new DatabaseSync(join(dir, 'test.db'), { readOnly: true }).prepare('SELECT holder, how FROM claim_spans ORDER BY rowid').all().map((r: any) => [r.holder, r.how]);
     store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
     runner.holderShipped(a.id);
@@ -119,7 +119,13 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     assert.ok(!store.getSetting(`claim-shipped:${other.id}`), 'only a holder is marked');
     await runner.close(a.id, 'Shipped and live, so the server dismissed this minion.');
     store.claims.take(p, 'pipeline-lane', b.id, 'Cara');
+    // C waits in the queue and on a start_after chain: the claim line waits with its brief, so the chain's start is its one wake.
+    store.claims.setQueue(p, 'pipeline-lane', [c.id], 'Cara');
+    runner.heldFor = (id) => (id === c.id ? '#2 B\'s work is live' : null);
     await runner.close(b.id, 'Cara dismissed this minion.');
+    assert.equal(store.claims.get(p, 'pipeline-lane')?.holder, c.id);
+    assert.match(JSON.stringify(store.getSetting(`mail:${c.id}`)), /You hold the pipeline-lane claim now/);
+    assert.equal(runner.isRunning(c.id), false, 'no turn of its own');
     assert.deepEqual(how(), [[a.id, 'live'], [b.id, 'dismissed']]);
     assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');
   } finally {

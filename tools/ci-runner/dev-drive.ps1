@@ -81,7 +81,7 @@ function Move-Runner($p) {
       if (Test-Path $old) { throw "$old is already there: move it aside by hand first" }
       # owners kept (git refuses a checkout NETWORK SERVICE doesn't own); /B needs the admin's backup right, which -Test may lack
       $keep = if ($Test) { @('/COPY:DAT') } else { @('/COPY:DATO', '/B') }
-      robocopy $live $new /E @keep /DCOPY:DAT /SJ /SL /MT:16 /R:1 /W:1 /NFL /NDL /NP | Select-Object -Last 12
+      robocopy $live $new /E $keep /DCOPY:DAT /SJ /SL /MT:16 /R:1 /W:1 /NFL /NDL /NP | Select-Object -Last 12
       if ($LASTEXITCODE -ge 8) { throw "copying $f failed (robocopy $LASTEXITCODE); $f is untouched" }
       Rename-Item $live (Split-Path $old -Leaf)
       try { New-Item -ItemType Junction -Path $live -Target $new | Out-Null }

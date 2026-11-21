@@ -40,6 +40,7 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
+import { stuckList } from './stuck-list.ts';
 import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial, trialLine } from './seam-trial.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
@@ -825,6 +826,16 @@ export class Runner {
   /** Run `step` on the minion's lane (src/lanes.ts): after a turn of its running now and that turn's save, before its next turn. */
   onLane(ticketId: number, what: string, step: () => unknown): Promise<void> {
     return this.lanes.run(ticketId, what, step);
+  }
+
+  /** The stuck list for a Taskmaster's turn (src/stuck-list.ts), or null; a fault in it never stops the turn. */
+  stuckText(taskmaster: Ticket): string | null {
+    try {
+      return stuckList(this.store, this, taskmaster);
+    } catch (err) {
+      console.error(`Taskmaster ${taskmaster.id}: its stuck list could not be built:`, err);
+      return null;
+    }
   }
 
   isRunning(ticketId: number): boolean {
@@ -2919,6 +2930,9 @@ export class Runner {
     // What this scheme's other Taskmasters did since this one's last turn (#919), written by code, at most ten lines.
     const digest = ticket.kind === 'coordinator' && !step && !keepalive ? this.store.digestFor(ticket.id) : [];
     const digestLine = digest.length ? [{ author: 'System', text: `Since your last turn, this scheme's other ${AGENT_NAME}s:\n${digest.map((l) => `- ${l}`).join('\n')}`, images: [] }] : [];
+    // Its minions and cards that have waited with nothing set to move them (#1506), only on a turn a person started: no wakes of its own.
+    const stuck = ticket.kind === 'coordinator' && !step && !keepalive && batch.some((m) => m.own && !m.from) ? this.stuckText(ticket) : null;
+    const stuckLine = stuck ? [{ author: 'System', text: stuck, images: [] }] : [];
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
@@ -3058,7 +3072,7 @@ export class Runner {
     }
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
       : keepalive ? promptMessage(batch)
-      : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...digestLine, ...batch]);
+      : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...digestLine, ...stuckLine, ...batch]);
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     if (codex) {

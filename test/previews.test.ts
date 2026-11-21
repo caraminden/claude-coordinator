@@ -45,8 +45,6 @@ createServer((req, res) => res.end(JSON.stringify({ ok: true }))).listen(Number(
 `);
 store.setTicketDir(old.id, oldDir, 'ticket/2-old');
 store.savePushSubscription('Josh', 'https://push.example/x', 'k', 'a');
-// A running turn's record, as live has for a turn in its own systemd unit.
-store.setSetting(`turn:${ticket.id}`, { resumes: 0, unit: 'citadel-turn-x.service' });
 store.db.close();
 
 let base = '';
@@ -72,6 +70,12 @@ before(async () => {
   cookie = res.headers.get('set-cookie')!.split(';')[0];
   // What a page load through Caddy would record as the app's address.
   await fetch(`${base}/api/me`, { headers: { Cookie: cookie, 'X-Forwarded-Host': 'app.example', 'X-Forwarded-Proto': 'https' } });
+  // A running turn's record, as live has for a turn in its own systemd unit. Written after boot: seeded before it,
+  // the server's recovery deleted it and resumed a turn on this minion 3 s in, which under load still ran when
+  // the dismissal test came and got its 409 (#1457).
+  const db = new DatabaseSync(join(data, 'coordinator.db'), { timeout: 10_000 });
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(`turn:${ticket.id}`, JSON.stringify({ resumes: 0, unit: 'citadel-turn-x.service' }));
+  db.close();
 });
 
 test('a minion has no preview until it starts one', async () => {
@@ -109,6 +113,9 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   assert.equal(logout.status, 200);
   assert.equal(logout.headers.get('set-cookie'), null);
   // The copy came without push subscriptions or turn records, though the live database has them.
+  const live = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true });
+  assert.equal(live.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 1);
+  live.close();
   const copy = new DatabaseSync(join(data, 'previews', String(ticket.id), 'coordinator.db'), { readOnly: true });
   assert.equal(copy.prepare('SELECT count(*) AS n FROM push_subscriptions').get()!.n, 0);
   assert.equal(copy.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 0);

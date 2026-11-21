@@ -306,8 +306,11 @@ const FLOWS: Flow[] = [
       r.heldFor = () => '#9 ships';
     },
     steps: [
-      { name: 'Cara asks the held minion something', run: async (c) => {
+      { name: 'the minion is held on another\'s work', run: async (c) => {
         c.store.updateTicket(c.id, { state: 'parked', note: 'waits on #9' });
+        await sleep(30);
+      } },
+      { name: 'Cara asks the held minion something', run: async (c) => {
         setRelease(null);
         c.say('Cara', 'a question while you wait');
         await until('the turn to start', () => c.runner.isRunning(c.id));
@@ -608,6 +611,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
   }
   const problems: string[] = [];
   const saved = store.getSetting<{ keepalive?: true }>(`turn:${id}`);
+  const owedBefore = !!r.queue.get(id).owed;
   try {
     r.recover();
     void outbox?.boot();
@@ -626,8 +630,10 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     const { from, parkedAs, status } = cut.mem;
     if (saved && !saved.keepalive && from !== undefined && r.relayedBy(id) !== from) problems.push(`its turn answered #${from}'s relay, but now answers ${r.relayedBy(id) ?? 'no one'}'s`);
     if (saved && !saved.keepalive && status && started.length && !isDeepStrictEqual((r as any).statuses.get(id), status)) problems.push(`its reply's status trailer ${JSON.stringify(status)} is lost`);
+    // shortcut: from its turn record's delete to the put-back, a finished turn's end is one task, so only a hard crash
+    // (not a restart) lands there, and it leaves the turn's own state; checked where a turn record or owed resume holds it.
     const parkedNow = (r as any).parkedAs.get(id) ?? { state: t.state, note: t.note };
-    if (parkedAs && !isDeepStrictEqual(parkedNow, parkedAs)) problems.push(`it was parked as ${JSON.stringify(parkedAs)}, but is now ${JSON.stringify(parkedNow)} with nothing to put that back`);
+    if (parkedAs && (saved || owedBefore) && !isDeepStrictEqual(parkedNow, parkedAs)) problems.push(`it was parked as ${JSON.stringify(parkedAs)}, but is now ${JSON.stringify(parkedNow)} with nothing to put that back`);
     const limit = r.limitWait(id);
     const net = r.netWait(id);
     const q = r.queue.get(id);

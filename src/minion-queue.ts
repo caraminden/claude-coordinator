@@ -9,7 +9,11 @@ export const queueKey = (ticketId: number) => `minion-queue:${ticketId}`;
 export const QUEUE_PREFIX = 'minion-queue:';
 
 /** A resume a restart must still start (a cut-off turn's, or an account switch's, #779): its count and how it resumes. */
-export type OwedResume = { resumes: number; limitTries?: number; onAccount?: true; killTries?: number; switchTries?: number };
+export type OwedResume = {
+  resumes: number; limitTries?: number; onAccount?: true; killTries?: number; switchTries?: number;
+  /** What the cut-off turn set and its resume reads (Runner's TurnState from, parkedAs, status, #1452), so a restart before the resume keeps them. */
+  carry?: { from?: number; parkedAs?: { state: string | null; note: string | null }; status?: Record<string, unknown> };
+};
 
 /** A steer appended to a running turn's steer.jsonl, with where it ends there; those past steer.sent never reached claude. */
 export type Steer = { end: number; msg: QueuedMessage };

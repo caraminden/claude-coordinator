@@ -178,6 +178,8 @@ interface TurnState {
   parkedAs?: { state: string | null; note: string | null };
   /** Its reply's last status trailer (Runner.statuses), applied with its result (R6, #1452). */
   status?: StatusFields;
+  /** A reply of its was sent back (Runner.sentBack, #281): its rewrite replaces it at the result (#1452). */
+  sentBack?: true;
   limitTries?: number;
   netTries?: number;
   killTries?: number;
@@ -1578,7 +1580,10 @@ export class Runner {
           // one turn, not a plain one and then the resume.
           if (!owed && this.queue.size(t.id)) later.push(() => this.next(t.id));
         }
-        if (owed) later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
+        if (owed) {
+          this.carryIn(t.id, owed.carry);
+          later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
+        }
         if (cut) {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // What the turn set and reads later (#1452): kept for a re-attached turn's end, or the resume that carries it on.
@@ -1596,6 +1601,8 @@ export class Runner {
           // Its trailer, as last saved (a vanished turn's result, read by reattach, applied it): only its resume's end applies it.
           const status = this.store.getSetting<TurnState>(turnKey(t.id))?.status;
           this.statuses.delete(t.id);
+          // With its record gone (a crash after the resume was owed), the owed resume's carry stands.
+          const carry = turn ? { ...(turn.from ? { from: turn.from } : {}), ...(turn.parkedAs ? { parkedAs: turn.parkedAs } : {}), ...(status ? { status } : {}) } : this.queue.owed(t.id)?.carry ?? {};
           // Steers it never passed on go back to the queue.
           this.queue.endSteers(t.id, turn?.dir ? unsentSteers({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
           // A line read, or output it never read, says claude had its prompt (#1364): that turn resumes with its batch.
@@ -1609,11 +1616,15 @@ export class Runner {
           const back = !turn?.stopped && !saving && !wrote;
           const rerun = back && !!this.queue.get(t.id).taken?.length;
           if (back) this.queue.giveBack(t.id);
+          // The same rows as a watched turn's end (src/turn-outcome.ts), under the restart's own cap.
+          const out = outcome({ turn, exit: null, stderr: [], closing: false, ran: { unit: false, container: false }, cut: { rerun } });
+          const resumed = out.kind !== 'stopped' && !out.followUps.includes('rerun') ? out.retry : undefined;
+          // Owed before the turn's record goes, so a crash between finds one of them, with what the resume carries on (#1452).
+          // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
+          if (resumed) this.queue.owe(t.id, { ...owedOf(resumed.via, resumed.retries), ...(Object.keys(carry).length ? { carry } : {}) });
           this.store.deleteSetting(turnKey(t.id));
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
-          // The same rows as a watched turn's end (src/turn-outcome.ts), under the restart's own cap.
-          const out = outcome({ turn, exit: null, stderr: [], closing: false, ran: { unit: false, container: false }, cut: { rerun } });
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
           // what came after waits for a turn of its own.
           if (out.kind === 'stopped') {
@@ -1625,16 +1636,13 @@ export class Runner {
             later.push(() => !this.isRunning(t.id) && this.next(t.id));
             continue;
           }
-          const resumed = out.retry;
           if (!resumed) {
             const skipped = out.spent ? `It was not resumed: it had already been resumed ${out.spent.tries} times in a row.` : 'It was set to be dismissed, so it was not resumed.';
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
             this.queue.done(t.id);
             if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
           } else {
-            // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
-            this.queue.owe(t.id, owedOf(resumed.via, resumed.retries));
-            if (status) this.statuses.set(t.id, status);
+            this.carryIn(t.id, carry);
             later.push(() => this.resume(t.id, resumed.via, resumed.retries));
           }
         }
@@ -1703,6 +1711,7 @@ export class Runner {
     if (turn.container && turn.dir && !wrapperInProc(turn.dir, true) && !['pid.json', 'exit.json'].some((f) => existsSync(join(turn.dir!, f)))) return false;
     // Before following: what it wrote while no server read it may hold its result, which applies the trailer.
     if (turn.status) this.statuses.set(ticketId, turn.status);
+    if (turn.sentBack) this.sentBack.add(ticketId);
     const live = this.follow(ticketId, turn);
     if (this.gone(live)) {
       // What it wrote while no server read it reaches the chat before recovery deletes its folder, as poll's does (C8, #1406).
@@ -2126,6 +2135,13 @@ export class Runner {
     this.limitStarting.set(w.ticket, {});
     this.armLimitTimer();
     this.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
+  }
+
+  /** A cut-off turn's values (OwedResume.carry), back in memory for the resume that carries the turn on (#1452). */
+  private carryIn(ticketId: number, carry: OwedResume['carry']) {
+    if (carry?.from) this.turnFrom.set(ticketId, carry.from);
+    if (carry?.parkedAs) this.parkedAs.set(ticketId, carry.parkedAs);
+    if (carry?.status) this.statuses.set(ticketId, carry.status as StatusFields);
   }
 
   /** Merge into the saved state of a ticket's running turn. */
@@ -3982,8 +3998,11 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
-    if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK))) this.sentBack.add(ticketId);
-    // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
+    if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.sentBack.has(ticketId)) {
+      this.sentBack.add(ticketId);
+      this.saveTurn(ticketId, { sentBack: true });
+    }
+    // shortcut: a turn stopped, or cut off and resumed, before the result keeps both versions (a re-attached one doesn't, #1452); rare, so left.
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.store.getSetting<TurnState>(turnKey(ticketId));

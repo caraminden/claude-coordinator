@@ -7,7 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { request } from 'node:http';
 import { dirname, join } from 'node:path';
 import { TASKMASTER_SLICE, TURN_NODE } from './turn-launch.ts';
-import { THP_PROPS } from './unit-thp.ts';
+import { thpProps } from './unit-thp.ts';
 
 /** Where one turns folder's supervisor of one version lives, and what starts it. */
 export interface SupervisorSpec {
@@ -36,7 +36,7 @@ export function supervisorSpec(turnsDir: string, unitTag: string, pins: { MCP_DI
     // it left starting a turn runs on through that restart and starts the turn; the runner, seeing it there, waits for it
     // (runner.ts rescue).
     systemdRun: ['--user', '--collect', '--quiet', `--unit=citadel-supervisor-${unitTag}-${version.slice(0, 8)}`, `--slice=${TASKMASTER_SLICE}`,
-      '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', '-p', 'Restart=on-failure', '-p', 'KillMode=process', ...THP_PROPS],
+      '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', '-p', 'Restart=on-failure', '-p', 'KillMode=process', ...thpProps()],
     env: Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]!])),
   };
 }

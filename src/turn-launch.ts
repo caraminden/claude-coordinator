@@ -21,7 +21,7 @@ import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { advisedModel } from '../public/model-table.js';
 import { ZONE } from './pacific.ts';
-import { THP_PROPS } from './unit-thp.ts';
+import { thpProps } from './unit-thp.ts';
 
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
@@ -812,7 +812,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // a Taskmaster turn is `omit`, never picked. A turn unit or scope is a leaf cgroup, which is where oomd reads the mark.
   const group = [`--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15'];
   const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
-    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...THP_PROPS, ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
+    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
     : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
@@ -823,7 +823,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
   const pool: PoolSpec | undefined = pooled ? {
     dir: poolDir, script: pinned(pins.POOL), node, version: pins.POOL_VERSION, env: poolEnv,
-    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', ...THP_PROPS] } : {}),
+    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', ...thpProps()] } : {}),
   } : undefined;
   return { command, args, env, configDir, files, spawn, ...(pool ? { pool } : {}) };
 }

@@ -6,7 +6,7 @@
 // own name, so it stays up without a unit file to install, and work goes in with `podman exec`.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { THP_PROPS } from './unit-thp.ts';
+import { thpProps } from './unit-thp.ts';
 
 export interface Mount {
   /** A host path, or with `volume` a named volume. */
@@ -105,7 +105,7 @@ export class Containers {
     // Every turn of the person runs in this one container, so an OOM kill must take only the process the
     // kernel picked: systemd's default OOMPolicy=stop would stop the unit and every turn with it. The memory limits sit
     // on this unit, whose cgroup holds conmon and the payload, so going past them OOM-kills inside the container only.
-    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${this.slice}`, '-p', 'TimeoutStopSec=20', '-p', 'OOMPolicy=continue', ...THP_PROPS, ...unitProps(spec), 'podman', 'run', ...runArgs(spec)]);
+    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${this.slice}`, '-p', 'TimeoutStopSec=20', '-p', 'OOMPolicy=continue', ...thpProps(), ...unitProps(spec), 'podman', 'run', ...runArgs(spec)]);
     if (unit.code !== 0) throw new Error(`could not start ${spec.name}: ${unit.stderr.trim() || `systemd-run exited ${unit.code}`}`);
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {

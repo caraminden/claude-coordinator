@@ -20,7 +20,7 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
 import { track } from './settled.ts';
 import { listSnapshots, restoreSnapshot, snapshotsDir, takeSnapshot, type Snapshot } from './app-snapshots.ts';
-import { THP_LINE, THP_PROPS } from './unit-thp.ts';
+import { THP_LINE, thpProps } from './unit-thp.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -1027,7 +1027,7 @@ export class AppServices {
             const unit = buildUnit(row.name);
             const argv = this.opts.systemdRun
               ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, '--slice=contraptions.slice', `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
-                `--property=StandardError=append:${view.log}`, ...THP_PROPS, ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
+                `--property=StandardError=append:${view.log}`, ...thpProps(), ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
               : inner;
             // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).
             const code = await sh(argv, appRoot(row, next), secs * 1000 + 15_000, stepEnv);

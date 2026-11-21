@@ -26,6 +26,8 @@ after(async () => {
 // A fixed environment, set before anything reads it: a turn inherits HOME, PATH, the locale and every
 // CLAUDE_* and ANTHROPIC_* variable of the server, and a snapshot can't depend on whose shell runs it.
 const { turnEnv } = await import('../src/turn-launch.ts');
+// The snapshot pins a systemd new enough for MemoryTHP=, whatever the host runs (CI's runners don't).
+(await import('../src/unit-thp.ts')).setThpSupport(true);
 for (const k of Object.keys(turnEnv(process.env))) if (k !== 'PATH') delete process.env[k];
 const bin = join(root, 'bin');
 mkdirSync(bin);

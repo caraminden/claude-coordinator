@@ -43,6 +43,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
+import { probeThp } from './src/unit-thp.ts';
 import { fillPinSpares } from './src/pin-spares.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
@@ -238,7 +239,8 @@ let writerQueued = () => 0;
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db'].map((f) => join(DATA_DIR, f)) });
 // systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
 startWatchdog();
-await loadAssets();
+// Before any unit starts: whether systemd-run takes MemoryTHP= (src/unit-thp.ts).
+await Promise.all([loadAssets(), probeThp()]);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.

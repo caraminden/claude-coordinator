@@ -21,7 +21,7 @@ export const WRITES = [
   'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
   'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
-  'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
+  'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
   'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
   'props.backfillOther', 'props.setBuild', 'schedules.ran', 'schedules.heldNote', 'memory.deleteTicket',
@@ -34,6 +34,9 @@ export const VALUE_WRITES = [
   'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView', 'addFlakeFix',
   // CI numbers: the step-up check reads them back at once, so they never wait in the queue behind a stalled disk.
   'putCiNumbers', 'addCiNumberStep', 'pruneCiNumbers',
+  // Machines and their jobs: the code reads a row back at once (a job's card, the slot, the go; the lend sent to the agent and
+  // checked), so a read that gave up on the queue never acts on the state before (main red, Nov 21). Rare writes: none per beat.
+  'updateMachine', 'updateMachineJob', 'allowJobKind',
   'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
   'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index', 'reviews.create', 'reviews.save', 'reviews.restore',
   'addDelivery', 'updateDelivery', 'pruneDeliveries', 'importDeliveries', 'deliveryTransaction',

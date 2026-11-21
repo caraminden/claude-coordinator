@@ -24,6 +24,9 @@ The Store's void writes run on one worker thread with its own connection, in the
   response waits the same way. Settings are the exception: a setting sent and not yet written is read
   from memory, so a get-then-set (merge goes, turn nonces) never loses the update before it. A cached
   card row is dropped both when its change is sent and when it lands.
+- A few void writes the code reads right back run on the server's thread too, as value writes do: CI numbers,
+  and machines and their jobs (`updateMachine`, `updateMachineJob`, `allowJobKind`). A read that gave up on the
+  queue once skipped a job's chat card and sent an agent the lend from before (main red, 2026-11-21).
 - Writes that return a value (createTicket and about 30 more) still run on the server's thread, after the
   whole queue. If the queue doesn't empty within 30 s they throw instead of running ahead of it.
   Step 2 moves them.

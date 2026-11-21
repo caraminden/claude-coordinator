@@ -52,6 +52,10 @@
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
+# The clock for the history line's wait and run: microseconds, so a difference is the time that passed. Two reads of
+# $SECONDS count the second ticks crossed between them, and a job that took a free slot at once said it waited 1 s
+# whenever its setup ran across a tick (#1367). $SECONDS where bash is older than 5.0, which has no EPOCHREALTIME.
+us() { local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}; echo "${t:-${SECONDS}000000}"; }
 here=${CITADEL_HEAVY_HERE:-}
 [ "${1:-}" != --here ] || { here=1; shift; }
 [ $# -gt 0 ] || { say "usage: citadel-heavy [--here] <command> [args...]"; exit 2; }
@@ -66,7 +70,7 @@ poll=${CITADEL_HEAVY_POLL:-2}
 
 ci=("$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts")
 if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
-  started=$(date +%s) since=$SECONDS
+  started=$(date +%s) since=$SECONDS t0=$(us)
   # One job per repo on CI at a time: this waits for the repo's turn, then holds fd 5 while its job runs there.
   # shortcut: this wait writes no wait-* file, so Citadel shows the minion as running, not waiting; add one if people ask.
   key=${slug//\//-} n=${CITADEL_HEAVY_CI_SLOTS:-1} cislot=
@@ -87,7 +91,7 @@ if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
     done
     printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/ci-$key-$cislot.who" 2>/dev/null
   fi
-  waited=$((SECONDS - since)) ran=$SECONDS fell=$(mktemp)
+  t1=$(us) fell=$(mktemp)
   CITADEL_HEAVY_FALLBACK_FILE=$fell "${ci[@]}" "$@"
   status=$?
   # The file, not the status, says nothing ran there: a command may exit 120 itself.
@@ -95,7 +99,7 @@ if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
   rm -f "$fell"
   [ -z "$cislot" ] || { rm -f "$dir/ci-$key-$cislot.who"; exec 5>&-; }
   if [ "$status" != fallback ]; then
-    { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$waited" "$((SECONDS - ran))" "$status" >>"$dir/history"; } 2>/dev/null
+    { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000))" "$((($(us) - t1) / 1000000))" "$status" >>"$dir/history"; } 2>/dev/null
     exit "$status"
   fi
 fi
@@ -251,7 +255,7 @@ head_age() {
 first_waits() { [ -z "$first" ] && age=$(head_age "$dir/first") && [ "$age" -lt "$head_stale" ]; }
 first_who() { local l; l=$(cat "$dir/first" 2>/dev/null); echo "${l%%: *}"; }
 exec 7<>"$dir/queue${first:+.first}"
-since=$SECONDS
+since=$SECONDS t0=$(us)
 exec 6<>"$dir/queue.past"
 past= told_past= got= # past: it is the one going past a stopped head; got: it holds a slot already, taken past a stopped head
 if ! flock -n 7; then
@@ -313,7 +317,7 @@ export CITADEL_TEST_PROGRESS=$progress
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
 export CITADEL_HEAVY_HELD=1
-waited=$((SECONDS - since)) ran=$SECONDS
+t1=$(us)
 nicer=()
 [ -n "$first" ] || { nicer=(nice -n 19); ! command -v ionice >/dev/null || nicer+=(ionice -c 3); }
 "${nicer[@]}" "$@" 8>&-
@@ -325,7 +329,7 @@ trap - EXIT
 exec 8>&-
 history="$dir/history"
 [ -z "$forced" ] || reason=forced
-line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((SECONDS - ran))	$status	${pressure:--}"
+line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$(((t1 - t0) / 1000000))	$((($(us) - t1) / 1000000))	$status	${pressure:--}"
 { printf '%s\n' "$line" >>"$history"; } 2>/dev/null
 max=${CITADEL_HEAVY_HISTORY_MAX:-5000000}
 if [ "$(stat -c %s "$history" 2>/dev/null || echo 0)" -gt "$max" ]; then

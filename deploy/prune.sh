@@ -17,6 +17,8 @@ DATA_DIR=${DATA_DIR:-$HOME/.local/share/claude-coordinator}
 DB=$DATA_DIR/coordinator.db
 STATE_DAYS=${STATE_DAYS:-14}
 COPY_DAYS=${COPY_DAYS:-7}
+# The pause after each transaction on state.db, so the server's writes get in (#1480).
+PAUSE=${PAUSE:-0.25}
 apply=0 backups=0
 for a in "$@"; do
   case $a in
@@ -30,8 +32,8 @@ done
 # the server has moved it.
 STATE_DB=$DATA_DIR/state.db
 sql() {
-  if [[ -f $STATE_DB ]]; then sqlite3 -cmd ".timeout 30000" -cmd "ATTACH '$STATE_DB' AS state" "$DB" "$@"
-  else sqlite3 -cmd ".timeout 30000" "$DB" "$@"; fi
+  if [[ -f $STATE_DB ]]; then sqlite3 -cmd ".timeout 30000" -cmd "ATTACH '$STATE_DB' AS state" -cmd "PRAGMA state.synchronous = NORMAL" "$DB" "$@"
+  else sqlite3 -cmd ".timeout 30000" -cmd "PRAGMA synchronous = NORMAL" "$DB" "$@"; fi
 }
 mb() { awk -v b="$1" 'BEGIN { printf "%.1f MB", b / 1e6 }'; }
 now=$(date +%s%3N)
@@ -50,20 +52,51 @@ while IFS=$'\t' read -r name num files bytes; do # tab-separated: a scheme name 
 done <<<"$rows"
 echo "Total: $(mb $total)"
 if [[ $apply == 1 && $total -gt 0 ]]; then
-  sql "DELETE FROM claude_state WHERE ticket_id IN ($closed_state)"
-  # state.db is auto_vacuum=incremental: hand the freed pages back to the disk.
-  # 16 MB a step, so the server's writes to state.db never wait long behind it; stops when a step frees
-  # nothing (a state.db without auto_vacuum).
-  free() { sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA freelist_count;"; }
-  if [[ -f $STATE_DB ]]; then
-    left=$(free) was=$((left + 1))
-    while ((left > 0 && left < was)); do
-      sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA incremental_vacuum(4096);" >/dev/null
-      was=$left left=$(free)
+  # Short transactions with a pause between: each holds state.db's write lock, and the server's writer, which polls a
+  # held lock every 100 ms, gets in during the pause. One DELETE of 2.5 GB held it for 27 s and stalled the server (#1480).
+  # A step's cost varies 100-fold with the load and with where its pages are, so each step's size follows the last one's
+  # time, aiming at 0.1-0.25 s: halved when slower, doubled when faster, between lo and hi.
+  us() { echo "${EPOCHREALTIME/[.,]/}"; }
+  n=0 longest=0
+  timed() {
+    local t
+    t=$(us)
+    "$@"
+    t=$(($(us) - t)) n=$((n + 1))
+    ((t <= longest)) || longest=$t
+    if ((t > 250000 && size > lo)); then size=$((size / 2)); elif ((t < 100000 && size < hi)); then size=$((size * 2)); fi
+    sleep "$PAUSE"
+  }
+  took() { awk -v w="$1" -v n=$n -v u=$longest -v e="$2" 'BEGIN { printf "%s in %d steps, the longest %.2f s%s\n", w, n, u / 1e6, e }'; n=0 longest=0; }
+
+  # The rows, listed once (a read: no lock), deleted in batches of about `size` bytes of data and at most 1000 rows.
+  # The closed check again in each: a minion reopened since the list keeps its state.
+  list=() i=0 size=8000000 lo=1000000 hi=64000000
+  out=$(sql "SELECT rowid, length(data) FROM claude_state WHERE ticket_id IN ($closed_state) ORDER BY rowid")
+  [[ -z $out ]] || mapfile -t list <<<"$out"
+  batch() { sql "DELETE FROM claude_state WHERE rowid IN ($ids) AND ticket_id IN ($closed_state)"; }
+  while ((i < ${#list[@]})); do
+    ids='' b=0
+    for ((k = 0; k < 1000 && i < ${#list[@]} && b < size; k++, i++)); do
+      ids+=${ids:+,}${list[i]%|*} b=$((b + ${list[i]#*|}))
     done
+    timed batch
+  done
+  took Deleted .
+
+  # state.db is auto_vacuum=incremental: hand the freed pages back to the disk, at most 4096 pages (16 MB) a step. Right
+  # after the deletes a step is slowest (each free page at the file's end is looked up in the whole freelist: 4096 pages
+  # took 7 s on a copy, 90 ms later on; a 64 MB cache, more than the freelist's trunk pages, halves it). Each step counts
+  # the free pages before and after itself, so the server freeing pages between steps can't end it early; it stops at 0
+  # free or a step that freed nothing.
+  if [[ -f $STATE_DB && $(sqlite3 "$STATE_DB" "PRAGMA auto_vacuum;") == 2 ]]; then # 2: incremental
+    st() { sqlite3 -cmd ".timeout 30000" -cmd "PRAGMA synchronous = NORMAL" -cmd "PRAGMA cache_size = -65536" "$STATE_DB" "PRAGMA freelist_count;" "$@" "PRAGMA freelist_count;"; }
+    vacuum() { local o; o=$(st "PRAGMA incremental_vacuum($size);"); was=${o%%$'\n'*} left=${o##*$'\n'}; }
+    left=$(st | tail -n 1) was=$((left + 1)) size=64 lo=8 hi=4096
+    while ((left > 0 && left < was)); do timed vacuum; done
+    took Vacuumed "; $left pages still free."
   fi
 fi
-
 [[ $backups == 1 ]] || exit 0
 echo "== Ad-hoc database copies beside coordinator.db"
 latest=$(ls -1 "$DATA_DIR"/backups/coordinator-[0-9]*.db 2>/dev/null | sort | tail -n 1 || true)

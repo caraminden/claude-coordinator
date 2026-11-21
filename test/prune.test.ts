@@ -156,3 +156,27 @@ test('a scheme name with a space is listed, counted and deleted like any other (
   assert.equal(s.db.listClaudeState(spaced.project_id, spaced.id).length, 0);
   assert.equal(s.db.listClaudeState(plain.project_id, plain.id).length, 0);
 });
+
+test('--apply deletes in batches of at most 1000 rows and 64 MB, and vacuums state.db until nothing is free (#1480)', () => {
+  const s = scratch('Batches');
+  const huge = s.closed(0, 'huge');
+  const big = s.closed(0, 'big');
+  const kept = s.closed(0, 'kept', 2);
+  // 80 MB in 40 rows needs 2 steps or more by bytes alone; the 2500 small rows after them need 3 by count, sharing at most one.
+  for (let i = 0; i < 40; i++) {
+    s.db.putClaudeState({ path: `projects/x/${huge.id}/${i}`, project_id: huge.project_id, ticket_id: huge.id, size: 3, mtime: 1, data: new Uint8Array(2_000_000) });
+  }
+  for (let i = 0; i < 2500; i++) {
+    s.db.putClaudeState({ path: `projects/x/${big.id}/${i}`, project_id: big.project_id, ticket_id: big.id, size: 3, mtime: 1, data: new Uint8Array(2000) });
+  }
+  const res = spawnSync(prune, ['--apply'], { env: { ...process.env, DATA_DIR: s.dir, PAUSE: '0' }, encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  const steps = Number(/Deleted in (\d+) steps/.exec(res.stdout)?.[1]);
+  assert.ok(steps >= 4, res.stdout);
+  assert.match(res.stdout, /Vacuumed in \d+ steps, the longest [\d.]+ s; 0 pages still free\./);
+  assert.equal(s.db.listClaudeState(huge.project_id, huge.id).length, 0);
+  assert.equal(s.db.listClaudeState(big.project_id, big.id).length, 0);
+  assert.equal(s.db.listClaudeState(kept.project_id, kept.id).length, 1);
+  const free = execFileSync('sqlite3', [join(s.dir, 'state.db'), 'PRAGMA freelist_count;'], { encoding: 'utf8' }).trim();
+  assert.equal(free, '0');
+});

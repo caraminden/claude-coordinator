@@ -1,12 +1,14 @@
 // Armed for CI (#715): a minion leaves a card or a Taskmaster message to go out once CI passes on the commit it pushed,
 // so "CI passed" starts no turn just to relay it. CI failing, CI on another head or a turn still running falls back to
 // today's wake, with a line saying what wasn't sent. Schemes that land with land.sh run no PR CI, so they can't arm.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cardHref } from './card-links.ts';
 import { gitOut } from './git.ts';
-import type { Ticket, TicketState } from './db.ts';
+import type { Store, Ticket, TicketState } from './db.ts';
+import type { Delivery, NewDelivery } from './db/deliveries.ts';
+import type { Outbox, Outcome } from './outbox.ts';
 import { runsOnPullRequest, type PrSnapshot } from './github.ts';
 import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
@@ -110,8 +112,7 @@ export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card
   // Passed wins over failed: a re-run that went green after a red one.
   if (seen.some((k) => k.endsWith(`:ci:${sha}:passed`))) return null;
   if (seen.some((k) => k.endsWith(`:ci:${sha}:failed`))) throw new HttpError(409, `when_ci_passes: CI already failed on ${short(sha)}. Fix it and push, then arm again`);
-  const prev = store.getSetting<Armed>(armedKey(ticket.id));
-  store.setSetting(armedKey(ticket.id), { ...(prev?.sha === sha ? prev : {}), sha, at: Date.now(), ...part });
+  app.outbox!.add({ project_id: ticket.project_id, kind: 'ci_armed', to_kind: 'minion', to_id: ticket.id, when_kind: 'ci', when_arg: sha, payload: { sha, at: Date.now(), ...part }, set_by: `minion:${ticket.id}`, dedupe_key: String(ticket.id) });
   const pushed = await git(ticket.cwd, ['rev-parse', `origin/${ticket.branch}`]);
   const what = part.card ? 'the card' : 'the message';
   const push = pushed === sha ? '' : ` origin/${ticket.branch} isn't at ${short(sha)} yet: push it, or CI never runs on it and ${what} never goes out.`;
@@ -119,45 +120,77 @@ export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card
 }
 
 /**
- * The GitHub watcher saw CI finish on a minion's PR head. With nothing armed: null. Otherwise the armed record is used up:
- * `fired` when its card or message went out (the CI line then goes to held mail), or a `note` on why it didn't, for the wake.
+ * The ci_armed outbox kind (ADR 0021, step 5, #1391): a row waits on a minion for CI to pass on its sha, and goes out as the
+ * armed card and/or Taskmaster message. `getApp` is a thunk: the outbox boots before the app exists, and a send that runs
+ * first throws and is retried.
+ */
+export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox): void {
+  const newRow = (ticketId: number, a: Armed, origin: string): NewDelivery => {
+    const { sha, ...payload } = a;
+    return { project_id: store.getTicket(ticketId)?.project_id ?? 0, kind: 'ci_armed', to_kind: 'minion', to_id: ticketId, when_kind: 'ci', when_arg: sha, payload: { sha, ...payload }, set_by: `minion:${ticketId}`, dedupe_key: String(ticketId), origin };
+  };
+  outbox.register({
+    kind: 'ci_armed',
+    // The dual read: each old `ci-armed:<id>` key moves into the table in its own transaction that empties it: none dropped.
+    // Then rows whose CI went red on their sha (no green re-run) are dropped: the watcher marks a result seen before it calls on, so a crash between leaves them.
+    migrate: () => {
+      for (const { key, value } of store.settingsWithPrefix<Armed>('ci-armed:')) {
+        const id = Number(key.slice('ci-armed:'.length));
+        if (!Number.isInteger(id) || !value?.sha) { store.deleteSetting(key); continue; }
+        store.importDeliveries(key, [newRow(id, value, `${key}:${createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)}`)], outbox.clock());
+      }
+      for (const r of store.listDeliveries({ kind: 'ci_armed', states: ['waiting'] })) {
+        const seen = store.githubSeen(r.to_id, 'pr');
+        if (!seen.some((k) => k.endsWith(`:ci:${r.when_arg}:passed`)) && seen.some((k) => k.endsWith(`:ci:${r.when_arg}:failed`))) outbox.cancel(r.id, 'CI failed');
+      }
+    },
+    // At boot only (ciFinished meets a row itself, with its checks): CI already passed on the sha while the server was down.
+    ready: (r, event) => event.type === 'boot' && store.githubSeen(r.to_id, 'pr').some((k) => k.endsWith(`:ci:${r.when_arg}:passed`)),
+    // A second arm on the same commit adds to it; on a new commit it replaces.
+    merge: (row, incoming) => (row.when_arg === incoming.when_arg ? { ...row.payload, ...(incoming.payload as object) } : incoming.payload),
+    describe: (r) => `armed ${[r.payload.card && 'card', r.payload.coordinator && 'Taskmaster message'].filter(Boolean).join(' and ')} for CI on ${short(String(r.when_arg))}`,
+    deliver: async (rows) => {
+      const out: Outcome[] = [];
+      for (const r of rows) out.push(await sendArmed(r).catch((err): Outcome => ({ state: 'retry', reason: String(err?.message ?? err) })));
+      return out;
+    },
+  });
+  async function sendArmed(r: Delivery): Promise<Outcome> {
+    const app = getApp();
+    const ticket = app.store.getTicket(r.to_id);
+    if (!ticket) return { state: 'drop', reason: 'minion deleted' };
+    const armed = r.payload as Armed;
+    if (armed.card) {
+      postCard(app, ticket, armed.card);
+      if (armed.coordinator) store.updateDelivery(r.id, { payload: { ...r.payload, card: undefined } }, ['sending']); // a retry of the message must not post the card again
+    }
+    if (armed.coordinator) {
+      const { text, urgent, wake, need } = armed.coordinator;
+      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false, need)) === true) return { state: 'retry', reason: 'the Taskmaster message is held by the 6-in-10-minutes guard' };
+    }
+    // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
+    const state: TicketState | null = armed.card ? null : 'ready';
+    app.store.updateTicket(ticket.id, { state, note: `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}` });
+    app.runner.broadcastTicket(ticket.id);
+    if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note: app.store.getTicket(ticket.id)!.note });
+    return { state: 'accepted' };
+  }
+}
+
+/**
+ * The GitHub watcher saw CI finish on a minion's PR head. With nothing armed: null. Otherwise the armed row is used up:
+ * `fired` when it was handed to the outbox to go out (the CI line then goes to held mail), or a `note` on why it was dropped, for the wake.
  */
 export async function ciFinished(app: App, ticket: Ticket, pr: PrSnapshot, result: 'passed' | 'failed'): Promise<{ fired: boolean; note: string } | null> {
-  const { store, runner } = app;
-  const armed = store.getSetting<Armed>(armedKey(ticket.id));
-  if (!armed) return null;
-  store.deleteSetting(armedKey(ticket.id));
+  const { store, runner, outbox } = app;
+  const [row] = store.listDeliveries({ kind: 'ci_armed', dedupe: String(ticket.id), states: ['waiting'] });
+  if (!row || !outbox) return null;
+  const armed = row.payload as Armed;
   const what = [armed.card && 'card', armed.coordinator && 'Taskmaster message'].filter(Boolean).join(' and ');
-  const dropped = (why: string) => ({ fired: false, note: `The ${what} you armed for CI on ${short(armed.sha)} wasn't sent: ${why}. Post it yourself if it still holds.` });
+  const dropped = (why: string) => (outbox.cancel(row.id, why), { fired: false, note: `The ${what} you armed for CI on ${short(armed.sha)} wasn't sent: ${why}. Post it yourself if it still holds.` });
   if (armed.sha !== pr.headSha) return dropped(`the PR's head is now ${short(pr.headSha)}`);
   if (result === 'failed') return dropped('CI failed');
   if (runner.isRunning(ticket.id) || runner.queued(ticket.id)) return dropped('a turn was running');
-  // All of it out is a firing; anything that didn't go out wakes the minion, saying what did.
-  const sent: string[] = [];
-  const failed: string[] = [];
-  if (armed.card) {
-    try {
-      sent.push(`The card you armed is posted: ${postCard(app, ticket, armed.card).href}`);
-    } catch (err: any) {
-      failed.push(`the card (${err.message})`);
-    }
-  }
-  if (armed.coordinator) {
-    const { text, urgent, wake, need } = armed.coordinator;
-    try {
-      if ((await tellTaskmaster(app, ticket, text, urgent, wake !== false, need)) === true) failed.push('the Taskmaster message (held by the 6-in-10-minutes guard)');
-      else sent.push('Your armed message went to the Taskmaster.');
-    } catch (err: any) {
-      failed.push(`the Taskmaster message (${err.message})`);
-    }
-  }
-  if (failed.length) return { fired: false, note: `CI passed on ${short(armed.sha)}. ${sent.join(' ')}${sent.length ? ' ' : ''}Not sent: ${failed.join(', ')}. Post it yourself if it still holds.` };
-  // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
-  const state: TicketState | null = armed.card ? null : 'ready';
-  store.updateTicket(ticket.id, { state, note: `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}` });
-  runner.broadcastTicket(ticket.id);
-  if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note: store.getTicket(ticket.id)!.note });
-  return { fired: true, note: sent.join(' ') };
+  if (!outbox.meet(row.id)) return null;
+  return { fired: true, note: `Your armed ${what} is going out.` };
 }
-// shortcut: a record armed on a PR that then merges or closes, or on a minion that's dismissed, stays in settings until the
-// next arm or CI result on that minion; fine while records are a few hundred bytes each. Clear them on close if that grows.

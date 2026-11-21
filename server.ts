@@ -32,7 +32,7 @@ import { installing as hostToolInstalls } from './src/host-tools.ts';
 import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
-import { ciFinished, postCard, tellTaskmaster } from './src/ci-armed.ts';
+import { ciFinished, postCard, registerCiArmed, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
@@ -393,6 +393,7 @@ if (!BOOT_CHECK && !PREVIEW && runner.units) {
 const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
 const timedWakes = new TimedWakes(store, outbox);
 registerRunnersBack(store, outbox);
+registerCiArmed(() => app, store, outbox); // armed for CI (#715, ADR 0021 step 5)
 // News of a minion's test-box job (#1425, machines.watchBoxes below): its start, its end with the exit code and last lines.
 outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.payload.text).slice(0, 120)}`, deliver: (rows, ctx) => rows.map((r) => ctx.send(r, String(r.payload.text))) });
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent

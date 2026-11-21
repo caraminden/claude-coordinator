@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { armedKey, armForCi, ciFinished, type Armed } from '../src/ci-armed.ts';
+import { armedKey, armForCi, ciFinished, registerCiArmed, type Armed } from '../src/ci-armed.ts';
+import { Outbox, type OutboxRunner } from '../src/outbox.ts';
 import { Store } from '../src/db.ts';
 import { GithubWatcher, type Check, type PrSnapshot } from '../src/github.ts';
 import { git } from './git.ts';
@@ -38,18 +39,30 @@ function setup(name: string, prCi = true) {
     queued: () => 0,
     relay: (_from: number, _to: number, _author: string, text: string, _urgent: boolean, wake: boolean) => (log.held === true ? true : (log.relays.push(text), log.wakes.push(wake), log.held)),
   };
-  const app = { store, runner, dataDir: join(root, `${name}-data`), notify: (_id: number, n: any) => log.notified.push(n) } as any;
-  return { dir, sha, store, ticket, app, log };
+  const outbox = new Outbox(store, { send: () => ({ event: { id: 1 } }), holds: () => false, onLane: (_i: number, _w: string, step: () => unknown) => Promise.resolve().then(step), leaveMail: () => {} } as unknown as OutboxRunner, { author: 'Citadel' });
+  const app = { store, runner, outbox, dataDir: join(root, `${name}-data`), notify: (_id: number, n: any) => log.notified.push(n) } as any;
+  registerCiArmed(() => app, store, outbox);
+  const armedRow = () => store.listDeliveries({ kind: 'ci_armed', to: ticket.id, states: ['waiting'] })[0];
+  return { dir, sha, store, ticket, app, log, outbox, armedRow };
+}
+const boot = (s: { outbox: Outbox }) => s.outbox.boot();
+/** CI finished: the watcher's call, then the outbox's send. */
+async function finish(s: ReturnType<typeof setup>, ...args: [any, 'passed' | 'failed']) {
+  await s.outbox.boot(); // nothing is sent before boot
+  const got = await ciFinished(s.app, s.ticket, ...args);
+  await s.outbox.poke({ type: 'tick' });
+  return got;
 }
 
 test('arming holds a card on HEAD, says to push, and a second arm on the same commit adds to it', async () => {
-  const { sha, store, ticket, app, log } = setup('arm');
+  const { sha, ticket, app, log, armedRow } = setup('arm');
   const said = await armForCi(app, ticket, { card });
   assert.match(said!, new RegExp(`CI passes on ${sha.slice(0, 7)}`));
   assert.match(said!, /push it/, 'origin has no copy of HEAD yet');
   await armForCi(app, ticket, { coordinator: { text: 'ready to merge', urgent: false } });
-  const armed = store.getSetting<Armed>(armedKey(ticket.id))!;
+  const armed = armedRow().payload as Armed;
   assert.equal(armed.sha, sha);
+  assert.equal(armedRow().when_arg, sha);
   assert.deepEqual(armed.card, card);
   assert.equal(armed.coordinator!.text, 'ready to merge');
   assert.equal(log.events.length, 0, 'nothing posted yet');
@@ -66,28 +79,32 @@ test("arming is refused where PRs run no CI, or CI already failed on HEAD; CI al
   assert.equal(await armForCi(green.app, green.ticket, { card }), null);
   green.store.addGithubSeen(green.ticket.id, [`pr12:ci:${green.sha}:failed`], true);
   assert.equal(await armForCi(green.app, green.ticket, { card }), null, 'a green re-run after a red one counts as green');
-  assert.equal(green.store.getSetting(armedKey(green.ticket.id)), null, 'nothing armed: the caller posts it');
+  assert.equal(green.armedRow(), undefined, 'nothing armed: the caller posts it');
 });
 
 test('CI passing on the armed commit posts the card and tells the Taskmaster, with no turn, once', async () => {
-  const { sha, store, ticket, app, log } = setup('fire');
+  const s = setup('fire');
+  const { sha, store, ticket, app, log } = s;
   await armForCi(app, ticket, { card, coordinator: { text: 'PR #12 is green', urgent: false } });
-  const got = await ciFinished(app, ticket, pr(sha), 'passed');
+  const got = await finish(s, pr(sha), 'passed');
   assert.equal(got!.fired, true);
-  assert.match(got!.note, /card you armed is posted: #\/p\/\d+\/t\/\d+\?e=1/);
+  assert.match(got!.note, /armed card and Taskmaster message is going out/);
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'once');
   const question = log.events.find(([k]) => k === 'question')![1];
   assert.deepEqual(question.questions, card.questions);
   assert.equal(question.kind, 'merge');
   assert.deepEqual(log.relays, ['PR #12 is green']);
   assert.equal(store.getTicket(ticket.id)!.state, null, "a card is people's turn");
   assert.match(store.getTicket(ticket.id)!.note!, /CI passed on \w{7}: card posted/);
-  assert.equal(await ciFinished(app, ticket, pr(sha), 'passed'), null, 'used up');
+  assert.equal(await finish(s, pr(sha), 'passed'), null, 'used up');
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'still once');
 });
 
 test('a message alone leaves the minion ready for a person', async () => {
-  const { sha, store, ticket, app } = setup('msg');
+  const s = setup('msg');
+  const { sha, store, ticket, app } = s;
   await armForCi(app, ticket, { coordinator: { text: 'ready to merge', urgent: false } });
-  assert.equal((await ciFinished(app, ticket, pr(sha), 'passed'))!.fired, true);
+  assert.equal((await finish(s, pr(sha), 'passed'))!.fired, true);
   assert.equal(store.getTicket(ticket.id)!.state, 'ready');
 });
 
@@ -100,11 +117,11 @@ test("CI failing, CI on another head or a running turn drops what was armed and 
     const s = setup(name);
     s.log.running = running;
     await armForCi(s.app, s.ticket, { card });
-    const got = await ciFinished(s.app, s.ticket, pr(head ?? s.sha), result);
+    const got = await finish(s, pr(head ?? s.sha), result);
     assert.equal(got!.fired, false, name);
     assert.match(got!.note, why);
     assert.equal(s.log.events.filter(([k]) => k === 'question').length, 0, `${name}: no card`);
-    assert.equal(s.store.getSetting(armedKey(s.ticket.id)), null, `${name}: dropped`);
+    assert.equal(s.armedRow(), undefined, `${name}: dropped`);
   }
 });
 
@@ -142,19 +159,73 @@ test('a fired arm on the first look at a PR still lands as held mail', async () 
 });
 
 test('an armed held-mail message stays held mail when it goes out', async () => {
-  const { sha, ticket, app, log } = setup('quietmsg');
+  const s = setup('quietmsg');
+  const { sha, ticket, app, log } = s;
   await armForCi(app, ticket, { coordinator: { text: 'landed, nothing to do', urgent: false, wake: false } });
-  assert.equal((await ciFinished(app, ticket, pr(sha), 'passed'))!.fired, true);
+  assert.equal((await finish(s, pr(sha), 'passed'))!.fired, true);
   assert.deepEqual(log.wakes, [false]);
 });
 
-test("a message the loop guard holds isn't a firing: the minion wakes, told the card is out and the message isn't", async () => {
-  const { sha, store, ticket, app, log } = setup('heldmsg');
+test("a message the loop guard holds is retried, and the card isn't posted twice", async () => {
+  const s = setup('heldmsg');
+  const { sha, store, ticket, app, log } = s;
   log.held = true;
   await armForCi(app, ticket, { card, coordinator: { text: 'PR #12 is green', urgent: false } });
-  const got = await ciFinished(app, ticket, pr(sha), 'passed');
-  assert.equal(got!.fired, false);
-  assert.match(got!.note, /card you armed is posted: .*Not sent: the Taskmaster message \(held/);
+  await finish(s, pr(sha), 'passed');
+  const [row] = store.listDeliveries({ kind: 'ci_armed' });
+  assert.equal(row.state, 'waiting');
+  assert.match(row.last_error!, /6-in-10-minutes/);
   assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'the card went out once');
-  assert.equal(store.getTicket(ticket.id)!.note, null, 'no fired note');
+  assert.equal(store.getTicket(ticket.id)!.note, null, 'no fired note yet');
+  log.held = false;
+  store.updateDelivery(row.id, { due: Date.now() - 1 }, ['waiting']);
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(store.getDelivery(row.id)!.state, 'sent');
+  assert.deepEqual(log.relays, ['PR #12 is green']);
+  assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'still once');
+});
+
+test('a second arm on a new commit replaces the first', async () => {
+  const s = setup('rearm');
+  await armForCi(s.app, s.ticket, { card });
+  git(s.dir, 'commit', '-q', '--allow-empty', '-m', 'two');
+  await armForCi(s.app, s.ticket, { coordinator: { text: 'm', urgent: false } });
+  const rows = s.store.listDeliveries({ kind: 'ci_armed' });
+  assert.equal(rows.length, 1);
+  assert.notEqual(rows[0].when_arg, s.sha);
+  assert.equal(rows[0].payload.card, undefined);
+});
+
+test('boot moves an old ci-armed key into the table in one step, and none is dropped', async () => {
+  const s = setup('migrate');
+  s.store.setSetting(armedKey(s.ticket.id), { sha: s.sha, at: 1, card } satisfies Armed);
+  s.store.setSetting('ci-armed:99999', { sha: 'abc', at: 1, card } satisfies Armed);
+  await boot(s);
+  assert.equal(s.store.getSetting(armedKey(s.ticket.id)), null);
+  assert.equal(s.armedRow().when_arg, s.sha);
+  assert.deepEqual(s.armedRow().payload.card, card);
+  assert.equal(s.store.listDeliveries({ kind: 'ci_armed' }).length, 2);
+});
+
+test('boot reconciles: CI that passed while the server was down posts the card; red CI drops the row', async () => {
+  const ok = setup('bootok');
+  await armForCi(ok.app, ok.ticket, { card });
+  ok.store.addGithubSeen(ok.ticket.id, [`pr12:ci:${ok.sha}:passed`], true);
+  await boot(ok);
+  assert.equal(ok.log.events.filter(([k]) => k === 'question').length, 1);
+  const red = setup('bootred');
+  await armForCi(red.app, red.ticket, { card });
+  red.store.addGithubSeen(red.ticket.id, [`pr12:ci:${red.sha}:failed`], true);
+  await boot(red);
+  assert.equal(red.log.events.length, 0);
+  assert.equal(red.store.listDeliveries({ kind: 'ci_armed' })[0].state, 'dropped');
+});
+
+test("a dismissed minion's armed row is held, then dropped after 3 days", async () => {
+  const s = setup('dismissed');
+  await armForCi(s.app, s.ticket, { card });
+  await boot(s);
+  s.store.updateTicket(s.ticket.id, { status: 'closed' });
+  await s.outbox.poke({ type: 'closed' });
+  assert.equal(s.store.listDeliveries({ kind: 'ci_armed' })[0].state, 'held');
 });

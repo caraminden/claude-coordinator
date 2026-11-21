@@ -62,7 +62,7 @@ import { readGrunts } from './grunts.ts';
 import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
-import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
+import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
@@ -3224,7 +3224,7 @@ export class Runner {
       writeFileSync(join(dir, 'system-prompt.md'), system);
       // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
       const reviewDir = join(dir, 'review-set');
-      const reviews = this.store.reviews.list(project.id);
+      const reviews = withoutGoneAgents(this.store.reviews.list(project.id), readAgentFiles(project.repo_dir));
       // Phase 3: people's recorded verdicts, and the minion's ask for entries that read the requester's words.
       const verdicts = this.store.reviews.verdicts(project.id);
       const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);

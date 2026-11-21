@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -451,4 +451,13 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   assert.deepEqual([row.name, row.opened, row.critics, row.trial, row.preship, row.rate, row.last, row.closed, row.judged],
     ['Glance Grove', true, 1, 1, true, 100, at, 2, 1]);
   assert.deepEqual(row.coverage, { changes: 3, watched: 1, gap: { folder: 'game/logic', changes: 2 } });
+});
+
+// RV5: the page's Save sends the version its form opened with. Pinned in the source: the form's flow needs a live broadcast
+// mid-edit to differ, which the page's browser test can't stage.
+test("RV5: the edit form's Save sends the version it opened with, not the list's current one", () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'public', 'reviews.js'), 'utf8');
+  const save = src.slice(src.indexOf('const submit = async (ev)'), src.indexOf('state.mode = \'view\'', src.indexOf('const submit = async (ev)')));
+  assert.match(save, /version: e\.version\b/);
+  assert.doesNotMatch(save, /entry\(e\.slug\)\?\.version/);
 });

@@ -263,6 +263,11 @@ export function agentKind(name: string, description: string, kind = ''): string 
   return null;
 }
 
+/** The entries a turn is told about: an agent-file entry whose file is gone (deleted, or set to `kind: none`) is left out, or every turn would be told to run an agent that isn't there. */
+export function withoutGoneAgents(entries: ReviewEntry[], files: AgentFile[]): ReviewEntry[] {
+  return entries.filter((e) => !isAgentFile(e) || files.some((f) => e.source === `agent:${f.path}`));
+}
+
 /** A scheme repo's `.claude/agents/*.md` that agentKind counts as judges, read live (at most 100 files of 256 KB). */
 export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] {
   if (!repoDir) return [];
@@ -524,6 +529,9 @@ export class ReviewSet {
     if (expect !== undefined && expect !== was.version) throw new ReviewError(`stale: ${slug} is at version ${was.version} now (${was.updated_by} saved it); reload it and make your change again`);
     if (patch.slug !== undefined && patch.slug !== slug && this.get(projectId, patch.slug)) throw new ReviewError(`This scheme already has an entry named ${patch.slug}`);
     const next = snapshotOf({ ...was, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as EntryFields);
+    // A changed `when` moves the entry's column only when it sat where its old triggers put it: a critic a person
+    // chose to run "Before ship" stays there (RV3). The page sends the stage it opened with, which isn't a pick.
+    if (patch.triggers !== undefined && (patch.stage === undefined || patch.stage === was.stage) && was.stage === stageFor(was.triggers)) next.stage = stageFor(next.triggers);
     next.panel = next.panel?.trim() || null;
     if (next.on_fail && !next.on_fail.length) next.on_fail = null;
     // Back on trial, it only advises (Q12): a person putting a blocker back on trial means that, not "switch it to Advise first".
@@ -702,7 +710,12 @@ export class ReviewSet {
   removeVerdict(projectId: number, slug: string, id: number): void {
     const e = this.get(projectId, slug);
     if (!e) throw new ReviewError(`No entry named ${slug}`);
-    if (!this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
+    const v = this.db.prepare('SELECT ticket_id FROM review_verdicts WHERE id = ? AND entry_id = ?').get(id, e.id) as { ticket_id: number | null } | undefined;
+    if (!v || !this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
+    // The run it turned amber is clean again, unless that minion has another verdict standing on the entry.
+    if (v.ticket_id != null && !this.db.prepare('SELECT 1 FROM review_verdicts WHERE entry_id = ? AND ticket_id = ?').get(e.id, v.ticket_id)) {
+      this.db.prepare('UPDATE review_runs SET disagreed = 0 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL)').run(e.id, v.ticket_id);
+    }
   }
 
   /**

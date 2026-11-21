@@ -686,7 +686,7 @@ function editForm(e) {
     err.hidden = true;
     try {
       const context = { ...e.context, verdicts: verdicts.checked, requester: requester.checked };
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: entry(e.slug)?.version ?? e.version } });
+      const saved = await api(url(e.slug), { method: 'PATCH', body: { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: e.version } });
       state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';
@@ -725,7 +725,7 @@ function kitForm(e) {
     save.disabled = true;
     err.hidden = true;
     try {
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { body: body.value, note: note.value, version: entry(e.slug)?.version ?? e.version } });
+      const saved = await api(url(e.slug), { method: 'PATCH', body: { body: body.value, note: note.value, version: e.version } });
       state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
       toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
       state.mode = 'view';

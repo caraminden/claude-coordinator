@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { readProposals } from '../src/review-describe.ts';
-import { agentKind, BACKFILL_KEY, backfillRuns, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, VERDICTS, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText } from '../src/review-set.ts';
+import { agentKind, BACKFILL_KEY, backfillRuns, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, VERDICTS, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText, withoutGoneAgents } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -606,4 +606,47 @@ test('lessons (#1158): a kind refuted 3 times with no 30-day gap reaches the rev
   set.removeLesson(3, 'Kind 2');
   assert.ok(!set.lessons(3, t0 + 61 * day, true).some((x) => x.kind === 'kind 2'), 'a person removes one, and its count starts again');
   assert.throws(() => set.removeLesson(3, 'kind 2'), /No lesson/);
+});
+
+test('RV3: a changed `when` moves the column only when the entry sat where its old triggers put it', () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'asked', name: 'Asked', triggers: {} }, 'Cara');
+  assert.equal(set.get(3, 'asked')!.stage, 'ask');
+  // The page sends the stage it opened with along with the new `when`: that is no pick.
+  assert.equal(set.save(3, 'asked', { triggers: { diff: ['src/**'] }, stage: 'ask' }, 'Cara', 'when').stage, 'work');
+  assert.equal(set.save(3, 'asked', { triggers: { schedule: 'weekly' } }, 'Cara', 'when').stage, 'schedule');
+  // A critic a person put in "Before ship" stays there when its triggers change.
+  set.create(3, { slug: 'ship-critic', name: 'Ship critic', triggers: { diff: ['src/**'] }, stage: 'ship' }, 'Cara');
+  assert.equal(set.save(3, 'ship-critic', { triggers: { diff: ['public/**'] } }, 'Cara', 'when').stage, 'ship');
+  // A person choosing another column in the same save is the pick.
+  assert.equal(set.save(3, 'asked', { triggers: { diff: ['a/**'] }, stage: 'ship' }, 'Cara', 'both').stage, 'ship');
+});
+
+test('RV4: an agent file that is gone, or set to kind: none, is left out of what the turn is told', () => {
+  const { set } = fresh();
+  const files = [{ path: '.claude/agents/auditor.md', slug: 'auditor', description: 'audits', kind: 'critic', text: '' }, { path: '.claude/agents/judge.md', slug: 'judge', description: 'judges', kind: 'critic', text: '' }];
+  set.ensureAgents(3, files);
+  set.create(3, { slug: 'own', name: 'Own' }, 'Cara');
+  const all = set.list(3);
+  const dir = join(root, 'rv4-kit');
+  assert.match(kitLine(withoutGoneAgents(all, files), dir), /`auditor` \(\.claude\/agents\/auditor\.md\)/);
+  const left = withoutGoneAgents(all, files.slice(1));
+  assert.deepEqual(left.map((e) => e.slug).sort(), ['judge', 'own']);
+  const line = kitLine(left, dir);
+  assert.doesNotMatch(line, /auditor/);
+  assert.match(line, /judge/);
+});
+
+test('RV8: removing a person\'s verdict clears "a person disagreed" on its run, unless another verdict on that minion stands', () => {
+  const { set } = fresh();
+  set.create(3, { slug: 'ui', name: 'UI' }, 'Josh');
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
+  const a = set.recordVerdict(3, 'ui', { person: 'Josh', words: 'Too loose', ticketId: 40, minion: '#40' });
+  const b = set.recordVerdict(3, 'ui', { person: 'Cara', words: 'Too tight', ticketId: 40, minion: '#40' });
+  const amber = () => set.record(3).get(set.get(3, 'ui')!.id)!.runs.map((r) => r.disagreed);
+  assert.deepEqual(amber(), [true]);
+  set.removeVerdict(3, 'ui', a.id);
+  assert.deepEqual(amber(), [true], 'Cara\'s verdict still stands');
+  set.removeVerdict(3, 'ui', b.id);
+  assert.deepEqual(amber(), [false]);
 });

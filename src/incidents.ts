@@ -156,6 +156,8 @@ export interface Entry {
   /** Entries with the same source and key are one line, with a count and the last time. Defaults to the text. */
   key?: string;
   url?: string;
+  /** The CI run's branch, so a merged line can list every branch it hit. */
+  branch?: string;
 }
 export interface CiRun {
   id: number;
@@ -193,10 +195,10 @@ export function ciEntries(runs: CiRun[]): Entry[] {
   return runs.map((r) => {
     if (r.conclusion === 'failure') {
       const where = r.failed ? ` at ${r.failed}` : '';
-      return { at: r.updated, source: 'ci' as const, key: `${r.workflow} failed${where}`, url: r.url, text: `${r.workflow} failed${where}${r.runner ? ` on ${r.runner}` : ''} (${r.branch})` };
+      return { at: r.updated, source: 'ci' as const, key: `${r.workflow} failed${where}`, url: r.url, branch: r.branch, text: `${r.workflow} failed${where}${r.runner ? ` on ${r.runner}` : ''} (${r.branch})` };
     }
     const said = r.conclusion ?? 'still running';
-    return { at: r.updated, source: 'ci' as const, key: `${r.workflow} ${said}`, url: r.url, text: `${r.workflow} ${said === 'success' ? 'passed' : said} (${r.branch})` };
+    return { at: r.updated, source: 'ci' as const, key: `${r.workflow} ${said}`, url: r.url, branch: r.branch, text: `${r.workflow} ${said === 'success' ? 'passed' : said} (${r.branch})` };
   });
 }
 
@@ -273,15 +275,17 @@ export function journalEntries(text: string): Entry[] {
 }
 
 /** One line per (source, key): the first time, how many, and the last time. Sorted by when each began. */
-export function group(entries: Entry[]): { first: Entry; n: number; last: number }[] {
-  const groups = new Map<string, { first: Entry; n: number; last: number }>();
+export interface Group { first: Entry; n: number; last: number; branches: Map<string, number> }
+export function group(entries: Entry[]): Group[] {
+  const groups = new Map<string, Group>();
   for (const e of [...entries].sort((a, b) => a.at - b.at)) {
     const k = `${e.source}\u0000${e.key ?? e.text}`;
     const g = groups.get(k);
     if (g) {
       g.n++;
       g.last = Math.max(g.last, e.at);
-    } else groups.set(k, { first: e, n: 1, last: e.at });
+      if (e.branch !== undefined) g.branches.set(e.branch, (g.branches.get(e.branch) ?? 0) + 1);
+    } else groups.set(k, { first: e, n: 1, last: e.at, branches: new Map(e.branch !== undefined ? [[e.branch, 1]] : []) });
   }
   return [...groups.values()].sort((a, b) => a.first.at - b.first.at);
 }
@@ -329,14 +333,31 @@ export async function gather(store: IncidentStore, src: Sources, from: number, t
   return { entries, read };
 }
 
+const MAX_BRANCHES = 4;
+/** A merged CI line's branches: "a ×4, b ×1, +2 more", most hit first. Empty unless more than one branch hit it. */
+export function branchList(branches: Map<string, number>): string {
+  if (branches.size < 2) return '';
+  const all = [...branches].sort((a, b) => b[1] - a[1]);
+  const shown = all.slice(0, MAX_BRANCHES).map(([b, c]) => `${b} ×${c}`);
+  return all.length > MAX_BRANCHES ? `${shown.join(', ')}, +${all.length - MAX_BRANCHES} more` : shown.join(', ');
+}
+/** The group's text, its one branch swapped for the list when several branches hit it. */
+const textWithBranches = (g: Group, text: string) => {
+  const list = branchList(g.branches);
+  if (!list) return text;
+  const own = g.first.branch !== undefined ? ` (${g.first.branch})` : '';
+  return own && text.endsWith(own) ? `${text.slice(0, -own.length)} (${list})` : `${text} (${list})`;
+};
+
 /** The timeline file's markdown. */
 export function render(incident: Open, from: number, to: number, g: Gathered, dbPath: string): string {
   const groups = group([...incident.why.map((why) => ({ at: incident.from, source: 'trigger' as const, text: why })), ...g.entries]);
   const shown = groups.slice(0, MAX_LINES);
-  const line = ({ first, n, last }: (typeof groups)[number]) => {
+  const line = (g: Group) => {
+    const { first, n, last } = g;
     const more = n > 1 ? ` (×${n}, the last ${pacific(last)})` : '';
     const link = first.url ? ` [run](${first.url})` : '';
-    return `- **${pacific(first.at)}** · ${SOURCE_NAME[first.source]} · ${first.text.replace(/\n/g, ' ')}${more}${link}`;
+    return `- **${pacific(first.at)}** · ${SOURCE_NAME[first.source]} · ${textWithBranches(g, first.text).replace(/\n/g, ' ')}${more}${link}`;
   };
   const biggest = groups.filter((x) => x.n > 1 && x.first.source !== 'trigger').sort((a, b) => b.n - a.n).slice(0, 5);
   const firstBad = groups.find((x) => x.first.source === 'ci' && / failed/.test(x.first.text));
@@ -355,7 +376,7 @@ export function render(incident: Open, from: number, to: number, g: Gathered, db
     '## At a glance',
     '',
     ...(firstBad ? [`- First failed CI run: ${line(firstBad).slice(2)}`] : []),
-    ...biggest.map((x) => `- Most repeated: ${x.n}× ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? x.first.key : x.first.text}, ${pacific(x.first.at)} to ${pacific(x.last)}`),
+    ...biggest.map((x) => `- Most repeated: ${x.n}× ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? `${x.first.key}${branchList(x.branches) ? ` (${branchList(x.branches)})` : ''}` : x.first.text}, ${pacific(x.first.at)} to ${pacific(x.last)}`),
     ...(firstBad || biggest.length ? [] : ['- Nothing repeated.']),
     '',
     '## Timeline (Pacific)',

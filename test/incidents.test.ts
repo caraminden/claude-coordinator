@@ -62,8 +62,8 @@ test('a two-hour storm of red runs makes one timeline and one ask, written once 
   assert.equal(s.files[0].name, 'incident-2026-11-17-0144.md');
   assert.match(text, /a burst of red CI runs/);
   // The clock step reads as the cause of the red runs, from the first one, and the 36 reds are one counted line.
-  assert.match(text, /First failed CI run: \*\*Nov 17, 01:44 PST\*\* · CI · tests failed at test › the runner's clock on DESKTOP-linux-2/);
-  assert.match(text, /Most repeated: 36× CI: tests failed at test › the runner's clock, Nov 17, 01:44 PST to Nov 17, 03:50 PST/);
+  assert.match(text, /First failed CI run: \*\*Nov 17, 01:44 PST\*\* · CI · tests failed at test › the runner's clock on DESKTOP-linux-2 \(land\/ticket\/860-x ×1, [^)]*\+32 more\)/);
+  assert.match(text, /Most repeated: 36× CI: tests failed at test › the runner's clock \([^)]*\+32 more\), Nov 17, 01:44 PST to Nov 17, 03:50 PST/);
   assert.match(text, /- \*\*Nov 17, 01:24 PST\*\* · Deploy · the live checkout moved to abcdef12/);
   assert.match(text, /Journal · Land of #866 fell back to perigee/);
   const timeline = text.slice(text.indexOf('## Timeline'));
@@ -358,4 +358,22 @@ test('stopsTrigger and stallTrigger: below the line, and planned stops, open not
   assert.equal(stallTrigger([row(0, held(15)), row(4 * MIN, held(15))]), null);
   assert.equal(stallTrigger([row(0, held(16)), row(6 * MIN, held(16))]), null, 'more than 5 minutes apart');
   assert.deepEqual(stallTrigger([row(0, held(0.5)), row(MIN, held(15)), row(2 * MIN, held(15))]), { from: 0, last: 2 * MIN, why: 'repeated stalls: the event loop was held more than 10% of 5 min' });
+});
+
+test('a merged CI line names every branch it hit, in the timeline, the first-failed line and the most-repeated line', () => {
+  const at = (i: number) => T0 + i * MIN;
+  const run = (i: number, branch: string): CiRun => ({ ...clockRun(i, at(i)), branch });
+  const runs = [run(0, 'land/ticket/1356-a'), run(1, 'land/ticket/1368-b'), run(2, 'land/ticket/1356-a'), run(3, 'land/ticket/1356-a')];
+  const entries = ciEntries(runs);
+  const text = render({ from: at(0), last: at(3), why: ['a burst'] }, at(0), at(5), { entries, read: {} }, '/db');
+  const list = '(land/ticket/1356-a ×3, land/ticket/1368-b ×1)';
+  assert.match(text, new RegExp(`First failed CI run: .*failed at test › the runner's clock on DESKTOP-linux-2 ${list.replace(/[()]/g, '\\$&')} \\(×4`));
+  assert.match(text, new RegExp(`Most repeated: 4× CI: tests failed at test › the runner's clock ${list.replace(/[()]/g, '\\$&')}, `));
+  assert.match(text, new RegExp(`· CI · .*${list.replace(/[()]/g, '\\$&')} \\(×4, the last`));
+  assert.equal(text.slice(text.indexOf('## Timeline')).match(/· CI · /g)?.length, 1, 'still one line per failing step');
+  // One branch stays as it was, and a long list is capped.
+  const one = render({ from: at(0), last: at(1), why: ['x'] }, at(0), at(5), { entries: ciEntries([run(0, 'b1'), run(1, 'b1')]), read: {} }, '/db');
+  assert.match(one, /clock on DESKTOP-linux-2 \(b1\) \(×2/);
+  const many = render({ from: at(0), last: at(6), why: ['x'] }, at(0), at(9), { entries: ciEntries(['a', 'b', 'c', 'd', 'e', 'f'].map((b, i) => run(i, b))), read: {} }, '/db');
+  assert.match(many, /\(a ×1, b ×1, c ×1, d ×1, \+2 more\)/);
 });

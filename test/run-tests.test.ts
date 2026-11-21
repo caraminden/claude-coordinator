@@ -52,6 +52,15 @@ test('watch', async () => {
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
 `;
+// Fails in the full run; rerun alone, it keeps the reruns' counts (#1368) in seen-rerun and passes.
+FIXTURES['rerun-counts.test.mjs'] = `import test from 'node:test';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+test('rerun counts', () => {
+  if (!existsSync('ran-rerun-counts')) { writeFileSync('ran-rerun-counts', ''); throw new Error('first run fails'); }
+  const f = ['reruns.progress', 'land-test.progress'].find((p) => existsSync(p));
+  writeFileSync('seen-rerun', f ? f + ':' + readFileSync(f, 'utf8') : 'none');
+});
+`;
 // A long file: 3 s of work in the full run, then fails (first run only); alone it takes 3 s again, and passes or hangs.
 const slowOnce = (then: 'pass' | 'hang') => `import test from 'node:test';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -302,6 +311,23 @@ test("CI's rerun step reruns the failed files alone with its own fresh deadline:
   assert.equal(flakeLines(r2.retro).length, 1, r2.retro);
 });
 
+// #1368: the Releases page shows the reruns' progress too (tools/ci-progress.ts sends this file on in CI).
+test("the reruns keep counts of their own beside the log: done, of how many, the file rerunning, the full run's failed files, and rerun", async () => {
+  const want = 'reruns.progress:0\n2\ntest/rerun-counts.test.mjs\ntest/always.test.mjs\ttest/rerun-counts.test.mjs\nrerun\n';
+  const r = await run(['ok.test.mjs', 'always.test.mjs', 'rerun-counts.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
+  const order = readFileSync(join(r.dir, 'reruns'), 'utf8').split('\n').slice(1).filter(Boolean).map((l) => l.split('\t')[0]);
+  const at = order.indexOf('test/rerun-counts.test.mjs');
+  const r2 = await again(r.dir, { DEPLOY_RERUN_FROM: 'reruns' }, 'reruns.log');
+  assert.equal(r2.code, 1, r2.log);
+  assert.equal(readFileSync(join(r.dir, 'seen-rerun'), 'utf8'), want.replace('0\n', `${at}\n`).replace('test/always.test.mjs\ttest/rerun-counts.test.mjs', order.join('\t')));
+  assert.equal(existsSync(join(r.dir, 'reruns.progress')), false, 'gone once the reruns end');
+  // On perigee the full run and its reruns are one run-tests.sh: the same file, its full-run counts replaced.
+  const p = await run(['ok.test.mjs', 'rerun-counts.test.mjs']);
+  assert.equal(p.code, 1, p.log);
+  assert.equal(readFileSync(join(p.dir, 'seen-rerun'), 'utf8'), 'land-test.progress:0\n1\ntest/rerun-counts.test.mjs\ntest/rerun-counts.test.mjs\nrerun\n');
+  assert.equal(existsSync(join(p.dir, 'land-test.progress')), false);
+});
+
 test("CI's rerun step still counts a file that fails again alone as a real red", async () => {
   const r = await run(['always.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
   const r2 = await again(r.dir, { DEPLOY_RERUN_FROM: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(150) }, 'reruns.log');
@@ -364,7 +390,7 @@ test('CITADEL_TEST_CONCURRENCY caps how many test files run at once, and the def
 test("the full run's file counts sit beside its log while it runs (#545), and go when it ends", async () => {
   const r = await run(['ok.test.mjs', 'progress.test.mjs'], { CITADEL_TEST_CONCURRENCY: '1' });
   assert.equal(r.code, 0, r.log);
-  assert.equal(readFileSync(join(r.dir, 'seen-progress'), 'utf8'), `1\n2\ntest/progress.test.mjs\n`);
+  assert.equal(readFileSync(join(r.dir, 'seen-progress'), 'utf8'), `1\n2\ntest/progress.test.mjs\n\n`);
   assert.equal(existsSync(join(r.dir, 'land-test.progress')), false);
 });
 

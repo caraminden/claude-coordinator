@@ -37,7 +37,8 @@
 # weight (empty: no scope). Without a user systemd to ask (no bus, no such slice) it runs as before, unweighted.
 #
 # While the full run goes, <log without .log>.progress holds its file counts (#545: tools/suite-runner.ts and
-# tools/progress-reporter.ts), for the landing's wait in Citadel; it goes once the full run ends, before any rerun.
+# tools/progress-reporter.ts), for the landing's wait in Citadel, and while the reruns go, theirs (#1368); it goes
+# when run-tests.sh ends. In CI, tools/ci-progress.ts sends it on to the Releases page.
 #
 # In CI the reruns are a step of their own (#1374), so land.sh can see them start and wait for them: on Nov 20 the full
 # run under load ended past the deadline above, and every failed file went unrerun. DEPLOY_RERUN_LATER=<file>: a red
@@ -69,6 +70,14 @@ scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CP
 scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 say() { echo "run-tests: $*" >>"$log"; }
+progress=${log%.log}.progress
+# The reruns' counts, as tools/progress-reporter.ts writes the full run's, with a 5th line saying so (#1368): done,
+# total, the file rerunning, the full run's failed files (tab-separated), rerun. Best effort, as the reporter's.
+rerun_counts() {
+  { printf '%s\n%s\n%s\n' "$1" "${#files[@]}" "$2"; (IFS=$'\t'; printf '%s\n' "${files[*]}"); echo rerun; } >"$progress.tmp" 2>/dev/null &&
+    mv -f "$progress.tmp" "$progress" 2>/dev/null
+  return 0
+}
 # "<file><tab><seconds the file took in the full run>" lines (the reporter's, or DEPLOY_RERUN_FROM's) into files and took.
 parse_failed() {
   local l
@@ -99,8 +108,10 @@ rerun_alone() {
   fi
   SECONDS=0
   real=
+  trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
   for i in "${!files[@]}"; do
     f=${files[$i]}
+    rerun_counts "$i" "$f"
     left=$((budget - SECONDS)) due=
     [ -z "$deadline" ] || due=$((deadline - $(date +%s)))
     if [ -n "$due" ] && [ -n "$real" ]; then
@@ -140,6 +151,7 @@ rerun_alone() {
       *) real=1; say "$f: failed again alone: a real failure" ;;
     esac
   done
+  rerun_counts "${#files[@]}" ''
   say "the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run"
   exit "$rc"
 }
@@ -234,8 +246,7 @@ if [ -n "$unparsed" ]; then
   exit 1
 fi
 
-progress=${log%.log}.progress
-unset CITADEL_TEST_PROGRESS # the reruns below count nothing
+unset CITADEL_TEST_PROGRESS # the reruns below write their own counts (rerun_counts)
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
 started=$SECONDS

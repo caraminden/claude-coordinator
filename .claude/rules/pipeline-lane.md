@@ -15,6 +15,7 @@ paths:
   - "tools/boot-check.ts"
   - "tools/failed-files-reporter.ts"
   - "tools/progress-reporter.ts"
+  - "tools/ci-progress.ts"
   - "tools/citadel-node"
   - "tools/citadel-node.cjs"
   - "src/land.ts"

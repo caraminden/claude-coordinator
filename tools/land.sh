@@ -1995,6 +1995,8 @@ train_bisect() {
   queue_phase "finding the ship that turned the train red"
   while [ $((hi - lo)) -gt 1 ]; do
     mid=$(((lo + hi) / 2))
+    # The Releases page shows this step (#1368, src/land-news.ts): train_at "$mid" holds the leader and $mid riders.
+    say "bisect: testing the first $((mid + 1)) of $((${#train_n[@]} + 1)) ships"
     g=0
     [ "$mid" = 0 ] || guard_at "$(train_at "$mid")" || g=$?
     if [ "$g" = 1 ]; then

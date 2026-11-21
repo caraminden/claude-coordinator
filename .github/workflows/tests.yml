@@ -22,6 +22,7 @@ concurrency:
 # actions: read for the wait for the lands' runs (below).
 permissions:
   contents: read
+  id-token: write # the test steps' counts for the Releases page (tools/ci-progress.ts, #1368): the run's own token, no secret
   actions: read
   id-token: write # tools/ci-numbers.sh's run token (the citadel:ci-store skill)
 
@@ -192,11 +193,14 @@ jobs:
           # since the log was only printed once run-tests.sh ended. node prints files in order, so the hung file
           # is the first one with no results.
           : >"$RUNNER_TEMP/tests.log"
-          tail -n +1 -f "$RUNNER_TEMP/tests.log" &
+          tail -n +1 -f "$RUNNER_TEMP/tests.log" & tailer=$!
+          # The file counts and failed files so far, on to the Releases page (#1368); it never fails the step.
+          node tools/ci-progress.ts "$RUNNER_TEMP/tests.progress" & poster=$!
           started=$SECONDS
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           [ "$rc" != 0 ] || echo "$((SECONDS - started))" >"$RUNNER_TEMP/suite-secs" # a green run's wall time, for the numbers step
-          sleep 1; kill $! # tail prints what it has read: a second for the last lines
+          kill "$poster" 2>/dev/null
+          sleep 1; kill "$tailer" # tail prints what it has read: a second for the last lines
           [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
           exit "$rc"
       # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of
@@ -233,9 +237,11 @@ jobs:
           rc=0
           # Streamed as the full suite's is: a run cancelled mid-rerun still shows the labels so far.
           : >"$RUNNER_TEMP/reruns.log"
-          tail -n +1 -f "$RUNNER_TEMP/reruns.log" &
+          tail -n +1 -f "$RUNNER_TEMP/reruns.log" & tailer=$!
+          node tools/ci-progress.ts "$RUNNER_TEMP/reruns.progress" & poster=$! # the reruns' counts, as the full suite's
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_FROM="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/reruns.log" || rc=$?
-          sleep 1; kill $!
+          kill "$poster" 2>/dev/null
+          sleep 1; kill "$tailer"
           exit "$rc"
       # A cancelled step's processes live on until the job ends, so a hang still shows what it was waiting in:
       # the test file's node process and whatever it started.

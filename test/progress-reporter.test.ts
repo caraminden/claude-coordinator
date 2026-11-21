@@ -37,7 +37,7 @@ function run(dir: string, progress: string | undefined, args = ['--test', '--tes
   return { code: r.status, out: r.stdout.replace(/\(\d+(\.\d+)?ms\)|duration_ms [\d.]+/g, '') };
 }
 
-test('the counts follow the run: files done, of how many, and the one running; the exit status and output are the run\'s own', () => {
+test('the counts follow the run: files done, of how many, the one running and the ones failed; the exit status and output are the run\'s own', () => {
   const dir = suite({ 'a.test.mjs': ok, 'b.test.mjs': WATCHER, 'c.test.mjs': red });
   const progress = join(dir, 'progress');
   const r = run(dir, progress);
@@ -45,9 +45,9 @@ test('the counts follow the run: files done, of how many, and the one running; t
   assert.match(r.out, /✔ fine/);
   assert.match(r.out, /✖ red/);
   const seen = JSON.parse(readFileSync(join(dir, 'seen'), 'utf8'));
-  assert.equal(seen.counts, '1\n3\nt/b.test.mjs\n');
+  assert.equal(seen.counts, '1\n3\nt/b.test.mjs\n\n');
   assert.equal(seen.inherited, null, "a test's own node --test doesn't count");
-  assert.equal(readFileSync(progress, 'utf8'), '3\n3\n\n');
+  assert.equal(readFileSync(progress, 'utf8'), '3\n3\n\nt/c.test.mjs\n', 'the red file is named on the 4th line (#1368)');
   assert.equal(existsSync(`${progress}.tmp`), false, 'written by a rename');
   assert.deepEqual(run(dir, undefined), r, 'the same output and status without the counts');
 });
@@ -90,5 +90,5 @@ test('events it cannot make sense of are passed over, and it reads the stream to
     if (before === undefined) delete process.env.CITADEL_TEST_PROGRESS_TO; else process.env.CITADEL_TEST_PROGRESS_TO = before;
   }
   assert.equal(read, events.length);
-  assert.equal(readFileSync(join(dir, 'progress'), 'utf8'), '1\n1\n\n');
+  assert.equal(readFileSync(join(dir, 'progress'), 'utf8'), '1\n1\n\n\n');
 });

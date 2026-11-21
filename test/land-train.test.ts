@@ -88,6 +88,8 @@ test("a red train is bisected: the ship that turned it red is refused with its o
   assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the red ship is as it was');
   assert.match(done[1].stderr, /suspects: no ship on the train touched test\/real\.test\.ts or what it imports, so the bisect looks for the ship/, 'the real failure maps to no ship (#1346)');
   assert.match(done[1].stderr, /the bisect found ticket\/4-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
+  // Each step for the Releases page (#1368, src/land-news.ts): the leader and ticket/3-x, then ticket/4-x too.
+  assert.deepEqual([...done[1].stderr.matchAll(/^land: bisect: testing the first (\d+) of (\d+) ships$/gm)].map((m) => `${m[1]}/${m[2]}`), ['2/5', '3/5']);
   for (const i of [1, 2, 3, 5, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
   // The ships after the red one went back in line, and shipped as the next train.

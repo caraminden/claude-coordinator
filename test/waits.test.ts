@@ -205,6 +205,10 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
     kind: 'land', stage: 'test', chip: 'ship · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
+  // #1368: the reruns' counts (run-tests.sh's rerun_counts) say so, after the full run's failed files.
+  progress(join(state, 'land-test.progress'), '1\n2\ntest/b.test.ts\ntest/a.test.ts\ttest/b.test.ts\nrerun\n', 1);
+  waits.poll();
+  assert.equal(waits.wait(a.id)!.text, 'CI fell back: running the full suite on perigee: 1 of 2 failed files rerun alone · test/b.test.ts');
   // deploy.sh's own run logs to test.log, so its counts are in test.progress.
   ticket(1, a.branch, now / 1000 - 40, 'deploying: running the tests since 14:05', 10);
   progress(join(state, 'test.progress'), '212\n212\n\n', 1);

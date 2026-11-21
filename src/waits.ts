@@ -62,15 +62,16 @@ export function procAlive(pidStart: string): boolean {
 }
 
 /** A test run's files done, of how many, and the newest one running (tools/progress-reporter.ts). */
-/** `failed`: files failed so far; `rerun`: the counts are the failed files' reruns, each alone (POST /api/ci-tests only). */
+/** `failed`: files failed so far; `rerun`: the counts are the failed files' reruns, each alone. */
 export interface TestCounts { done: number; total: number; file: string; failed?: string[]; rerun?: boolean }
 
 /** The counts in a progress file written since `since` (ms): an older one is a run before this one. */
 export function readTestCounts(f: string, since: number): TestCounts | null {
   const at = mtime(f), text = read(f);
   if (at == null || at < since || text == null) return null;
-  const [done, total, file = ''] = text.split('\n');
-  return testCounts(done, total, file);
+  // The 4th line: files failed so far, tab-separated; the 5th: rerun while run-tests.sh reruns them alone (#1368).
+  const [done, total, file = '', failed = '', phase = ''] = text.split('\n');
+  return testCounts(done, total, file, failed.split('\t').filter(Boolean), phase || 'suite');
 }
 
 /** Counts as they came (a progress file's lines, or a CI job's POST /api/ci-tests): whole numbers, done of a total. */
@@ -86,7 +87,7 @@ export function testCounts(done: unknown, total: unknown, file: unknown = '', fa
   return c;
 }
 
-const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? ` · ${c.file}` : ''}`;
+const countsText = (c: TestCounts) => `${c.done} of ${c.total} ${c.rerun ? 'failed files rerun alone' : 'files'}${c.file ? ` · ${c.file}` : ''}`;
 
 /** `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't. */
 export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; orders?: boolean; tests?: TestCounts | null }

@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
 
 // People's note on a minion (#146): people read and write it; minions and the Taskmaster never see it,
 // not in any ticket JSON they can fetch nor in list_tickets or read_ticket.
-const root = mkdtempSync(join(tmpdir(), 'person-notes-'));
+const tmp = tempRoot('person-notes-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -30,7 +29,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 async function asAgent(id: number, path: string, body?: object, method = body ? 'POST' : 'GET') {
@@ -43,7 +42,7 @@ async function asAgent(id: number, path: string, body?: object, method = body ? 
 }
 
 async function tool(name: string, args: object): Promise<string> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(TM.id),
       COORDINATOR_PROJECT: String(P.id), COORDINATOR_TICKET: String(TM.id), COORDINATOR_ROLE: 'coordinator',

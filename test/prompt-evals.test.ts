@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { tempRoot } from './helpers.ts';
 import { answer } from '../tools/prompt-evals/stub.ts';
 import { briefProblems, events, failures, fell, holds, load, passes, problems, snapshot, type Brief, type Case } from '../tools/prompt-evals/run.ts';
 
@@ -70,11 +71,12 @@ test('the stub answers from the first matching fact, else a stock reply', () => 
 });
 
 test('the stub serves a tool list and answers calls over stdio', async () => {
-  const tools = join(process.env.TMPDIR ?? '/tmp', `stub-tools-${process.pid}.json`), facts = tools.replace('tools', 'facts');
-  const { writeFileSync, rmSync } = await import('node:fs');
+  const tmp = tempRoot('stub-tools-');
+  const tools = tmp.path('tools.json'), facts = tmp.path('facts.json');
+  const { writeFileSync } = await import('node:fs');
   writeFileSync(tools, JSON.stringify([{ name: 'host_check', inputSchema: { type: 'object' } }]));
   writeFileSync(facts, JSON.stringify([{ tool: 'host_check', result: 'rows' }]));
-  const p = spawn(process.execPath, [join(dir, 'stub.ts')], { env: { ...process.env, STUB_TOOLS: tools, STUB_FACTS: facts } });
+  const p = tmp.spawn(process.execPath, [join(dir, 'stub.ts')], { env: { ...process.env, STUB_TOOLS: tools, STUB_FACTS: facts } });
   try {
     const got: any[] = [];
     let buf = '';
@@ -91,8 +93,7 @@ test('the stub serves a tool list and answers calls over stdio', async () => {
     assert.equal(got[1].result.tools[0].name, 'host_check');
     assert.equal(got[2].result.content[0].text, 'rows');
   } finally {
-    p.kill();
-    rmSync(tools); rmSync(facts);
+    await tmp.teardown();
   }
 });
 

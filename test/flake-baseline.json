@@ -505,20 +505,8 @@
    "ok": 0
   }
  },
- "missing-args.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "mockkit-send-browser.test.ts": {
   "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "model-effort.test.ts": {
-  "rmTemp": {
    "n": 1,
    "ok": 0
   }
@@ -526,18 +514,6 @@
  "network-resume.test.ts": {
   "sleep": {
    "n": 6,
-   "ok": 0
-  }
- },
- "onboarding.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "openrouter.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -607,27 +583,9 @@
    "ok": 4
   }
  },
- "person-notes.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "person-switch-session.test.ts": {
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "personal-instructions.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "pin-artifacts.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },

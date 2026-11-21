@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
-import { createConnection, createServer, type AddressInfo, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createConnection, createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, test } from 'node:test';
 import { bridge, editorConnected, ensureEditor, idleCheck, idleVerdict, needsEditor, settings } from '../deploy/perigee-godot/godot-on-demand.mjs';
+import { tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 
 // deploy/perigee-godot/godot-on-demand.mjs (#505): the Godot editor starts on the first tool call and stops
 // after 30 minutes unused. Against a stub systemctl, a fake activity file and a fake clock.
-const root = mkdtempSync(join(tmpdir(), 'perigee-godot-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('perigee-godot-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const H = 3600_000;
 const NOW = Date.parse('2026-11-10T12:00:00Z');
 
@@ -67,10 +68,9 @@ test('idle-check run as the timer runs it holds the stop lock while it stops the
   const s = stub('locked', { ActiveState: 'active', since: Date.now() - 3 * H });
   s.used(Date.now() - 3 * H);
   const script = join(import.meta.dirname, '..', 'deploy', 'perigee-godot', 'godot-on-demand.mjs');
-  const run = spawn(process.execPath, [script, 'idle-check'], { stdio: 'ignore', env: { ...process.env, GODOT_SYSTEMCTL: s.cfg.systemctl, GODOT_ACTIVITY: s.cfg.activity, GODOT_STOP_LOCKED: '' } });
-  after(() => run.exitCode === null && run.kill());
+  const run = tmp.spawn(process.execPath, [script, 'idle-check'], { stdio: 'ignore', env: { ...process.env, GODOT_SYSTEMCTL: s.cfg.systemctl, GODOT_ACTIVITY: s.cfg.activity, GODOT_STOP_LOCKED: '' } });
   await until("existsSync(join(s.dir, 'stopping'))", () => existsSync(join(s.dir, 'stopping')));
-  const probe = spawn('flock', ['-n', '-s', join(s.dir, 'stop.lock'), 'true']);
+  const probe = tmp.spawn('flock', ['-n', '-s', join(s.dir, 'stop.lock'), 'true']);
   assert.equal(await new Promise((r) => probe.on('exit', r)), 1, 'a call would wait for this stop');
   assert.equal(await new Promise((r) => run.on('exit', r)), 0);
   assert.deepEqual(s.log().filter((l) => !l.startsWith('show')), ['stop perigee-godot.service']);
@@ -100,13 +100,11 @@ test('editorConnected: an established connection on the ws port, from /proc/net/
 
   // And the real thing: a server on a free port, then a client dialling in.
   const server = createServer();
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const port = (server.address() as AddressInfo).port;
+  const port = await tmp.serve(server);
   assert.equal(editorConnected(port), false);
   const client: Socket = await new Promise((r) => { const c = createConnection(port, '127.0.0.1', () => r(c)); });
   assert.equal(editorConnected(port), true);
   client.destroy();
-  await new Promise((r) => server.close(r));
 });
 
 /** A fake clock that moves on as ensureEditor sleeps. */
@@ -153,7 +151,7 @@ test('a call that lands while idle-check is stopping the editor waits for the st
   const held = join(s.dir, 'held');
   const stopped = join(s.dir, 'stopped');
   // Stands in for idle-check under its lock: it has decided, and the stop takes a moment.
-  const idle = spawn('flock', ['-x', join(s.dir, 'stop.lock'), 'sh', '-c', `touch '${held}'; sleep 0.3; printf 'ActiveState=inactive\\nFreezerState=running\\n' >'${s.dir}/show'; touch '${stopped}'`], { stdio: 'ignore' });
+  const idle = tmp.spawn('flock', ['-x', join(s.dir, 'stop.lock'), 'sh', '-c', `touch '${held}'; sleep 0.3; printf 'ActiveState=inactive\\nFreezerState=running\\n' >'${s.dir}/show'; touch '${stopped}'`], { stdio: 'ignore' });
   await until('the held file', async () => existsSync(held), 1000);
   assert.ok(existsSync(held));
   const c = clock(NOW);
@@ -197,9 +195,7 @@ function fakeBridge(s: ReturnType<typeof stub>, keepEveryMs = 20, stampGapMs = 5
   });
   let ready!: () => void;
   const editorUp = new Promise<void>((r) => (ready = r));
-  const child = bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs, stampGapMs });
-  // A failed assertion mustn't leave the fake running and the run hanging.
-  after(() => child.exitCode === null && child.kill());
+  const child = tmp.track(bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs, stampGapMs })); // a failed assertion mustn't leave the fake running
   const send = (m: object) => input.write(`${JSON.stringify(m)}\n`);
   const seen = (id: number) => replies.some((r) => r.id === id);
   const fresh = () => statSync(s.cfg.activity).mtimeMs > Date.now() - 10_000;

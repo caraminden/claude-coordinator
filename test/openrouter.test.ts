@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,15 +8,16 @@ import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, tempRoot } from './helpers.ts';
 import { imageEstimate, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt, speechEstimate, speechLimit } from '../src/openrouter.ts';
 import { decodePng, encodePng } from '../src/png-matte.ts';
 
 // OpenRouter (#717): each person's own key and monthly cap. Every call is booked at its worst case
 // before the request, so a call that could pass the cap never reaches OpenRouter, and the key never
 // leaves the server.
-const root = mkdtempSync(join(tmpdir(), 'openrouter-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('openrouter-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 const store = new Store(join(root, 'test.db'));
 const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
@@ -279,10 +279,9 @@ test('through the server: a person connects on their account page and their mini
     const r = await fake.fetch(`https://or.test${req.url}`, { method: req.method, headers: { authorization: req.headers.authorization ?? '' }, body: body || undefined });
     res.writeHead(r.status, { 'content-type': r.headers.get('content-type') ?? 'application/json' }).end(Buffer.from(await r.arrayBuffer()));
   });
-  await new Promise<void>((ok) => orServer.listen(0, '127.0.0.1', ok));
-  after(() => orServer.close());
+  const orPort = await tmp.serve(orServer);
 
-  const boot = mkdtempSync(join(tmpdir(), 'openrouter-boot-'));
+  const boot = tmp.path('boot');
   const data = join(boot, 'data');
   const wt = join(boot, 'wt');
   mkdirSync(data, { recursive: true });
@@ -295,9 +294,9 @@ test('through the server: a person connects on their account page and their mini
   s.updateTicket(minion.id, { person_id: owner.id });
   s.db.close();
 
-  const srv = await bootServer({ root: boot, env: { OPENROUTER_BASE_URL: `http://127.0.0.1:${(orServer.address() as { port: number }).port}/api/v1` } });
+  const srv = await bootServer({ root: boot, env: { OPENROUTER_BASE_URL: `http://127.0.0.1:${orPort}/api/v1` } });
   const mcp = async (media: boolean, method: string, params: object = {}) => {
-    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -9,17 +7,13 @@ import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/prompts.ts';
 import { projectSharedDir, surveyReports } from '../src/workspace.ts';
-import { bootServer, jsonLines, REPO, until, stopProcs, stopTurns, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, REPO, until, tempRoot, type Booted } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
 // setup runs, its plan card and catalogue, and the catalogue never handing out a file's body.
-const root = mkdtempSync(join(tmpdir(), 'onboarding-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('onboarding-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the children and the detached turns (#271) before the folder goes
 
 const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
@@ -44,7 +38,7 @@ before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookie = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
 });
 
 const project = (onboarding: Project['onboarding'], onboarding_mode: Project['onboarding_mode'] = 'first-run') => ({ name: 'Lanternfall', onboarding, onboarding_mode }) as Project;
@@ -198,7 +192,7 @@ test('Tune up turns onboarding back on in tune-up mode and messages the Taskmast
 });
 
 test('Taskmasters get propose_plan and list_catalogue, and set_project_settings takes onboarding', async () => {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
   const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   const tools = (await reply).result.tools;

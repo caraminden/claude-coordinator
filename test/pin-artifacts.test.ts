@@ -1,21 +1,20 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
 
 // list_artifacts through the real MCP server talking to a real server; the pin tools are retired (#1356).
-const root = mkdtempSync(join(tmpdir(), 'pin-artifacts-'));
+const tmp = tempRoot('pin-artifacts-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 after(async () => {
-  if (srv) await stopProcs([srv.proc]);
-  rmSync(root, { recursive: true, force: true });
+  await srv?.stop();
+  await tmp.teardown();
 });
 
 const store = new Store(join(data, 'coordinator.db'));
@@ -54,7 +53,7 @@ before(async () => {
 
 /** One tool call through a fresh mcp.ts acting as `ticket`. */
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id),
@@ -75,7 +74,7 @@ const pinnedBy = async (id: number) => (await srv.call(`/api/artifacts/${id}`)).
 
 test('both servers offer the artifact tools', async () => {
   for (const role of ['coordinator', 'thread']) {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role }, stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role }, stdio: ['pipe', 'pipe', 'inherit'] });
     const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     const names = (await reply).result.tools.map((t: any) => t.name);

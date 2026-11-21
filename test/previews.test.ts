@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,20 +7,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { copyData, Previews } from '../src/previews.ts';
-import { agentToken, listeningPort, PASSWORD, SECRET, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, listeningPort, PASSWORD, SECRET, tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
 // its database and proxies /preview/<id>/ to it, for signed-in people only.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'previews-test-'));
-const procs: ChildProcess[] = [];
+const tmp = tempRoot('previews-test-');
+const root = tmp.dir;
 after(async () => {
   // The server's last writes land before it is stopped and its folder deleted (#1437, CITADEL_TEST_SETTLED below).
   const busy: string[] = base ? await fetch(`${base}/api/test/settled`).then((r) => r.json()).then((r) => r.busy, () => []) : [];
-  await stopProcs(procs);
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown(); // children, then the turns they started (#271), then the folder
   assert.deepEqual(busy, [], 'the server was still busy when the test stopped it');
 });
 
@@ -64,7 +62,7 @@ before(async () => {
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  procs.push(server);
+  tmp.track(server);
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {

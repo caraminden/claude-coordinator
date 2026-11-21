@@ -1,22 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createInterface } from 'node:readline';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { turnSettings } from '../src/turn-launch.ts';
-import { bootServer, stopProcs, type Booted } from './helpers.ts';
+import { bootServer, tempRoot, type Booted } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'model-effort-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('model-effort-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 test('a new scheme defaults to high effort', () => {
   const store = new Store(join(root, 'store.db'));
@@ -47,7 +41,7 @@ before(async () => {
   srv = await bootServer({ root, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
 });
 
 test('a new minion takes a model and effort; the scheme default shows when it has none', async () => {
@@ -170,11 +164,11 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(req.method === 'GET' ? { tickets: [t] } : t));
     });
   });
-  await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-  const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
+  const apiPort = await tmp.serve(api);
+  const mcp = tmp.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
       // No COORDINATOR_MEMORY from a turn running the tests: create_ticket's duplicate check would call first.
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_MEMORY: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      ...process.env, MACHINES_URL: undefined, COORDINATOR_MEMORY: undefined, COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
       COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -206,7 +200,6 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     assert.deepEqual(bodies[4].body, { workflow: false, plugin_dirs: [] }, 'false and [] are sent, not dropped');
   } finally {
     mcp.kill();
-    api.close();
   }
 });
 
@@ -216,7 +209,7 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
 
   // The MCP server's own list, as a client sees it: every tool that takes a model offers exactly MODELS; only update_ticket
   // offers null (back to the default), and the creates require a model and effort (#698).
-  const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
+  const mcp = tmp.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

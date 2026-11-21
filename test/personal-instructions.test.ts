@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { systemPrompt } from '../src/prompts.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
 
 // Personal instructions (#688): each person's own text for everywhere and per scheme, loaded last in the
 // minions assigned to them and never in the Taskmaster's prompt, which reads them with a tool instead.
-const root = mkdtempSync(join(tmpdir(), 'personal-instructions-'));
+const tmp = tempRoot('personal-instructions-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -32,7 +31,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 test('each person and scope keeps its own text, every save a history row, and an unchanged save adds none', () => {
@@ -85,7 +84,7 @@ test('My instructions: GET and PUT your own text per scope, capped at 4,000 char
 
 /** One tools/call through the real MCP server, as Delve's Taskmaster. */
 async function mcpCall(name: string, args: object): Promise<any> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(DelveTM.id),
       COORDINATOR_PROJECT: String(Delve.id), COORDINATOR_TICKET: String(DelveTM.id), COORDINATOR_ROLE: 'coordinator',

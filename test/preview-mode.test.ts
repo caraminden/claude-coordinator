@@ -1,29 +1,25 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD, stopProcs, stopTurns, until } from './helpers.ts';
+import { listeningPort, PASSWORD, tempRoot, until } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'preview-mode-test-'));
-const procs: ChildProcess[] = [];
+const tmp = tempRoot('preview-mode-test-');
+const root = tmp.dir;
 let pushHits = 0;
 const pushServer = createHttpServer((req, res) => {
   pushHits++;
   res.writeHead(201).end();
 });
 after(async () => {
-  await stopProcs(procs);
-  pushServer.close();
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown(); // children, the push server, the turns they started (#271), then the folder
 });
 
 // Any turn would run this instead of claude, and leave the marker behind.
@@ -53,7 +49,7 @@ let cookie = '';
 const post = (path: string, body: object) => fetch(`${base}${path}`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 before(async () => {
-  await new Promise<void>((r) => pushServer.listen(0, '127.0.0.1', r));
+  await tmp.serve(pushServer);
   // Someone else's real subscription: a state change by Cara would push to it outside a preview.
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
@@ -68,7 +64,7 @@ before(async () => {
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  procs.push(server);
+  tmp.track(server);
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
@@ -118,7 +114,7 @@ test('a preview exits once the server that started it is gone', async () => {
   const dir = mkdtempSync(join(root, 'orphan-'));
   // A stand-in for the live server: it starts the preview, then dies without cleaning up.
   const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
-  procs.push(parent);
+  tmp.track(parent);
   // The preview's stdout is the stand-in's, so its listening line says where it is.
   const port = await listeningPort(parent);
   const up = () => fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.ok, () => false);
@@ -130,7 +126,7 @@ test('a preview exits once the server that started it is gone', async () => {
 test('a dev copy exits by itself once nobody has asked it anything for IDLE_EXIT_MS', async () => {
   const dir = mkdtempSync(join(root, 'idle-'));
   const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
-  procs.push(p);
+  tmp.track(p);
   const port = await listeningPort(p);
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).ok, true);
   const exited = new Promise<number | null>((done) => p.once('exit', (code) => done(code)));

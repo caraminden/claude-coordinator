@@ -1,24 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
-import { listeningPort, PASSWORD, SECRET, stopProcs, stopTurns } from './helpers.ts';
+import { listeningPort, PASSWORD, SECRET, tempRoot } from './helpers.ts';
 import { git } from './git.ts';
 
 // A build's preview (src/previews.ts, build branches): /preview/build/<n>/ serves the tip of build/<n>
 // in the scheme whose code this server runs, from a worktree the live server keeps of its own.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'preview-build-test-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('preview-build-test-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 
 // The scheme's repo: it holds the commit this server runs (so it is this server's own scheme), and build/7 at it.
@@ -52,7 +47,7 @@ before(async () => {
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  procs.push(server);
+  tmp.track(server);
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {

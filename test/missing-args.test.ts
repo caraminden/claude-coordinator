@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
 
 // #167: a missing or misnamed argument to a set_* / update_* tool must be refused with nothing
 // changed. It used to clear the scheme instructions.
-const root = mkdtempSync(join(tmpdir(), 'missing-args-'));
+const tmp = tempRoot('missing-args-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -32,11 +31,11 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 async function tool(ticket: { id: number }, role: 'coordinator' | 'thread', name: string, args: object, env: Record<string, string> = {}): Promise<{ isError?: boolean; text: string }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,
@@ -133,7 +132,7 @@ test('explicit empties still go through: replies [], note null', async () => {
 
 // #481: the wrong arguments models send most often are accepted, and every limit is in the schema.
 async function listTools(role: 'coordinator' | 'thread', ticket: { id: number }): Promise<any[]> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id), COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role, COORDINATOR_DEPLOYS: '1', COORDINATOR_APP_INSTRUCTIONS: '1' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

@@ -84,8 +84,8 @@ SMOKE_CMD=''
 SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
 # The early check (#1177): 1 runs CHECK_LIGHT in the smoke check too, on the branch rebased onto main, so a branch it
 # refuses never takes a place in line (Peek Auras, 15 to 19 November: 19 of 60 refused lands were a red light check
-# after the rebase, refused only at the front). It runs for a branch whose lane is light or full (CHECK_LIGHT is taken
-# as a part of CHECK), never with CHECK_LIGHT ''. When main hasn't moved by the time a light branch reaches the front,
+# after the rebase, refused only at the front). It runs for a branch whose lane's check is CHECK or CHECK_LIGHT
+# (CHECK_LIGHT is taken as a part of CHECK), never with CHECK_LIGHT ''. When main hasn't moved by the time a light branch reaches the front,
 # that checked commit lands as it is and the check doesn't run again; when it has, it runs again on the new main. 0
 # off: worth it when main moves under most landings, which then pay the light check twice for each land that passes.
 EARLY_CHECK=${LAND_EARLY_CHECK:-1}
@@ -1392,14 +1392,17 @@ leave() {
 }
 
 # The early check (EARLY_CHECK, the header's step 0): CHECK_LIGHT as early_cmd, or '' none: off, not a plain land, a
-# fast land, no CHECK_LIGHT, or a lane other than light and full (full with no CHECK). A merge into a build and a build
-# itself never run it.
+# fast land, no CHECK_LIGHT, or a lane whose check is neither CHECK nor CHECK_LIGHT (none, or a CHECK_<LANE> of its
+# own). A merge into a build and a build itself never run it.
 early_cmd='' early_on='' early_tree='' early_tip=''
 early_plan() {
-  local lane=full why
+  local lane=full why v chk=$CHECK
   [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] && [ -n "$CHECK_LIGHT" ] || return 0
-  [ -z "$LANES" ] || read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
-  case $lane in light) early_cmd=$CHECK_LIGHT ;; full) [ -z "$CHECK" ] || early_cmd=$CHECK_LIGHT ;; esac
+  if [ -n "$LANES" ]; then
+    read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
+    case $lane in light) chk=$CHECK_LIGHT ;; full) ;; *) v=CHECK_${lane^^} && chk=${!v-$CHECK} ;; esac
+  fi
+  if [ -n "$chk" ] && { [ "$chk" = "$CHECK" ] || [ "$chk" = "$CHECK_LIGHT" ]; }; then early_cmd=$CHECK_LIGHT; fi
 }
 
 # The worktree back on the branch after the early check, or with a commit, the branch moved to that commit (the rebased

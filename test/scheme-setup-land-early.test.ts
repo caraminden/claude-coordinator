@@ -110,7 +110,7 @@ test('an early red only on known reds goes on into the line and says so; a new f
   assert.match(nr.stderr, /^land: smoke: the check failed on the rebased branch/m);
 });
 
-test("with lanes, a light or full branch runs CHECK_LIGHT early and a lane of its own runs none", () => {
+test("with lanes, a branch whose lane runs CHECK or CHECK_LIGHT runs CHECK_LIGHT early, and a lane with a check of its own runs none", () => {
   const local = `LANES=tools/lanes\nCHECK_LIGHT='echo light >>"$COUNT"; test ! -e docs/red'\nCHECK_ART=''\n`;
   const r = setup('echo full >>"$COUNT"', { EARLY_CHECK: '1' }, local);
   r.commit(r.main, 'tools/lanes', 'light docs/*\nart art/*\n');
@@ -122,12 +122,15 @@ test("with lanes, a light or full branch runs CHECK_LIGHT early and a lane of it
   assert.match(res.stderr, /^land: smoke: the check failed on the rebased branch/m);
   assert.equal(readFileSync(join(r.dir, 'count'), 'utf8'), 'light\n');
 
-  const full = setup('echo full >>"$COUNT"', { EARLY_CHECK: '1' }, local);
-  full.commit(full.main, 'tools/lanes', 'light docs/*\nart art/*\n');
-  full.commit(full.wt, 'src.txt', 'a\n');
-  const fr = full.run({ COUNT: join(full.dir, 'count') });
-  assert.equal(fr.status, 0, fr.stderr);
-  assert.equal(readFileSync(join(full.dir, 'count'), 'utf8'), 'light\nfull\n', 'early light, then the full check in line');
+  // Full, and a lane with no CHECK_<LANE> (Peek's fast lane), whose check is CHECK.
+  for (const file of ['src.txt', 'core/a.rs']) {
+    const full = setup('echo full >>"$COUNT"', { EARLY_CHECK: '1' }, local);
+    full.commit(full.main, 'tools/lanes', 'light docs/*\nart art/*\nfast core/*\n');
+    full.commit(full.wt, file, 'a\n');
+    const fr = full.run({ COUNT: join(full.dir, 'count') });
+    assert.equal(fr.status, 0, fr.stderr);
+    assert.equal(readFileSync(join(full.dir, 'count'), 'utf8'), 'light\nfull\n', `${file}: early light, then the full check in line`);
+  }
 
   const art = setup('false', { EARLY_CHECK: '1' }, local);
   art.commit(art.main, 'tools/lanes', 'light docs/*\nart art/*\n');

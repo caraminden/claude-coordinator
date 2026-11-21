@@ -418,10 +418,12 @@ export class Schedules {
   /**
    * The minion a run made for this slot before a kill cut its start off, ahead of the slot's ran mark (C3, #1406): made
    * by Citadel (`by`) under the schedule's name since the slot came due. A run that got its ran mark moved next_run_at
-   * past its own minion's making, so an older run's minion never matches.
+   * past its own minion's making, so an older run's minion never matches. Two schedules sharing a name in one scheme
+   * can't tell their minions apart, so they never adopt one.
    */
   cutOff(s: Schedule, by: string): { id: number; number: number; status: string } | null {
     if (s.next_run_at == null) return null;
+    if ((this.db.prepare('SELECT COUNT(*) AS n FROM schedules WHERE project_id = ? AND name = ?').get(s.project_id, s.name) as { n: number }).n > 1) return null;
     return (this.db.prepare("SELECT id, number, status FROM tickets WHERE project_id = ? AND kind = 'ticket' AND title = ? AND created_by = ? AND created_at >= ? AND id IS NOT ? ORDER BY id LIMIT 1").get(s.project_id, s.name, by, s.next_run_at, s.last_ticket_id) as { id: number; number: number; status: string } | undefined) ?? null;
   }
 

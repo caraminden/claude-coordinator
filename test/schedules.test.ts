@@ -294,4 +294,8 @@ test("a slot whose minion was made before a kill finishes with that minion, not 
   // The next slot starts its own minion as usual.
   await new ScheduledRuns(deps).run(store.schedules.get(s.id)!, store.schedules.get(s.id)!.next_run_at!);
   assert.equal(made, 1, 'the next slot makes a fresh minion');
+  // A second schedule of the same name can't tell whose a minion is, so it adopts none.
+  const twin = store.schedules.create({ project_id: p.id, name: 'Nightly', cron: '* * * * *', brief: 'Other.', type: 'chore', created_by: 'Cara' }, Date.now() - 120_000);
+  store.createTicket({ project_id: p.id, title: 'Nightly', permission_mode: 'bypassPermissions', created_by: 'Citadel' });
+  assert.equal(store.schedules.cutOff(store.schedules.get(twin.id)!, 'Citadel'), null, 'same-named schedules never adopt');
 });

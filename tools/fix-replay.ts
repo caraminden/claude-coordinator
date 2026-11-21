@@ -2,7 +2,7 @@
 // source changes on today's tree (its tests stay as they are now), run the tests that guard it, and record whether
 // they notice the bug coming back.
 //
-//   node tools/fix-replay.ts plan [--since 2026-11-01] [--batch 25] [--out dir]   cheap git only; writes batch-NN.json
+//   node tools/fix-replay.ts plan [--since 2026-11-01] [--batch 25] [--out dir] [--spec heat-map.md]   cheap git only
 //   citadel-heavy node tools/fix-replay.ts run <batch.json>                         the undo and the tests: CI only
 //   node tools/fix-replay.ts tally <results.jsonl...>                               counts per outcome
 //
@@ -73,7 +73,8 @@ function plan(args: string[]) {
   const opt = (name: string, dflt: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
   const since = opt('--since', '2026-11-01'), size = Number(opt('--batch', '25')), out = resolve(opt('--out', 'fix-replay'));
   const spec = opt('--spec', join(process.env.HOME ?? '', '.local/share/claude-coordinator/projects/2/shared/project/specs/review-heat-map.md'));
-  if (!loadAreas(spec)) throw new Error(`no areas read from ${spec}`);
+  // Areas only rank the report; without the heat map every fix gets '(no area)'.
+  if (!existsSync(spec) || !loadAreas(spec)) console.error(`fix-replay: no areas read from ${spec}, so every fix is '(no area)'`);
   const repo = git('.', 'rev-parse', '--show-toplevel');
   const exists = new Set(git(repo, 'ls-files').split('\n'));
   // Every commit's files since a week before, for the sibling lookup.
@@ -219,8 +220,10 @@ function tally(files: string[]) {
   console.log(JSON.stringify({ total: rows.length, ...counts }));
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === 'plan') plan(rest);
-else if (cmd === 'run') run(rest);
-else if (cmd === 'tally') tally(rest);
-else if (cmd) { console.error('usage: fix-replay.ts plan|run|tally ...'); process.exit(2); }
+if (import.meta.main) {
+  const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd === 'plan') plan(rest);
+  else if (cmd === 'run') run(rest);
+  else if (cmd === 'tally') tally(rest);
+  else { console.error('usage: fix-replay.ts plan|run|tally ... (the header of tools/fix-replay.ts says more)'); process.exit(2); }
+}

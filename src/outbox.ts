@@ -44,8 +44,9 @@ export type Kind = {
   kind: string;
   /** A condition row's test against an event (and on boot and add, against current state). `at` rows need none. */
   ready?(row: Delivery, event: OutboxEvent): boolean;
-  /** Every row of this kind for one target that came due in one pass, in id order: one outcome per row. */
-  deliver(rows: Delivery[], ctx: DeliverCtx): Outcome[];
+  /** Every row of this kind for one target that came due in one pass, in id order: one outcome per row. Runs on the
+   * target's lane; a kind whose send awaits (a chain's catch-up) returns a promise, and the lane waits for it. */
+  deliver(rows: Delivery[], ctx: DeliverCtx): Outcome[] | Promise<Outcome[]>;
   /** A re-add with the same dedupe_key: the payload to keep. Without it the new payload replaces the old. */
   merge?(row: Delivery, incoming: NewDelivery): unknown;
   /** `deliver`: still sent to a dismissed minion (relays, as held mail). Default `hold`: the 3-day rule. */
@@ -66,6 +67,8 @@ export type OutboxRunner = {
 };
 
 const LIVE = ['waiting', 'held', 'sending'] as const;
+/** A held row's reason when its target is dismissed (the 3-day rule); any other reason is its kind's own hold. */
+export const HELD_CLOSED = 'target closed';
 /** A dismissed minion's row is dropped 3 days after it came due, or after the dismissal if it was already due (Cara, 2026-11-20, "Keep until 3 days past due"). */
 const holdUntil = (r: Delivery, now: number) => Math.max(now, r.when_kind === 'at' ? Number(r.when_arg) : now) + HOLD_MS;
 const target = (r: Delivery) => `${r.to_kind}:${r.to_id}`;
@@ -83,8 +86,8 @@ export class Outbox {
   private kinds = new Map<string, Kind>();
   /** Rows a killed server left `sending`, found again at each boot (the state is saved, so a second kill finds them too). */
   private leftover = new Set<number>();
-  /** Events whose turn started while deliverTarget was sending: on an idle minion runner.send starts the turn before it returns, so before the row has its event_id. */
-  private started: Set<number> | null = null;
+  /** Events whose turn started while a deliverTarget was sending, one set per run: on an idle minion runner.send starts the turn before it returns, so before the row has its event_id. */
+  private started = new Set<Set<number>>();
   /** Targets with a lane step queued or running: no second one, and the timer skips their rows until it ends. */
   private busy = new Set<string>();
   private inflight = new Set<Promise<unknown>>();
@@ -171,7 +174,7 @@ export class Outbox {
   turnStarted(ticketId: number, eventIds: number[]) {
     const now = this.now();
     const ids = new Set(eventIds);
-    for (const id of ids) this.started?.add(id);
+    for (const set of this.started) for (const id of ids) set.add(id);
     const rows = this.store.listDeliveries({ to: ticketId, states: ['sending', 'held'] });
     for (const r of rows) if (r.state === 'sending' && r.event_id != null && ids.has(r.event_id)) this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
     if (rows.some((r) => r.state === 'held')) void this.poke({ type: 'reopened', ticket: ticketId });
@@ -205,14 +208,17 @@ export class Outbox {
     const now = this.now();
     for (const r of this.live()) {
       const kind = this.kinds.get(r.kind)!;
-      if (r.state === 'held') {
+      if (r.state === 'held' && r.reason !== HELD_CLOSED) {
+        // Held by its kind (a chain whose leader was dismissed unshipped): only the kind lets it go, but a dismissed target still gets the 3-day rule.
+        if (this.closed(r) === true && kind.onDismiss !== 'deliver') this.store.updateDelivery(r.id, { due: holdUntil(r, now), reason: HELD_CLOSED }, ['held'], now);
+      } else if (r.state === 'held') {
         // Reconcile, not only listen: a reopen is seen by the target's state, whichever path reopened it.
         if (this.closed(r) === false) this.reopen(r, now);
         else if (r.due != null && r.due <= now) this.drop(r, 'minion dismissed', now);
       } else if (r.state === 'waiting') {
         const closed = this.closed(r);
         if (closed === true && kind.onDismiss !== 'deliver') {
-          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: 'target closed' }, ['waiting'], now);
+          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: HELD_CLOSED }, ['waiting'], now);
         } else if (r.met_at == null && r.due == null && kind.ready?.(r, event)) {
           this.store.updateDelivery(r.id, { met_at: now, due: now }, ['waiting'], now);
         }
@@ -259,7 +265,7 @@ export class Outbox {
 
   /** Inside the target's lane (so no turn of its is starting): check its handed rows, then send its due rows, kind by
    * kind, in id order. Re-reads the target; never claims for a closed one. */
-  private deliverTarget(toKind: string, toId: number) {
+  private deliverTarget(toKind: string, toId: number): void | Promise<void> {
     if (this.stopped) return;
     const now = this.now();
     const dueRows = (state: 'waiting' | 'sending') =>
@@ -288,7 +294,7 @@ export class Outbox {
       }
       if (t.status === 'closed') {
         for (const r of rows.filter((r) => this.kinds.get(r.kind)!.onDismiss !== 'deliver')) {
-          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: 'target closed' }, ['waiting'], now);
+          this.store.updateDelivery(r.id, { state: 'held', due: holdUntil(r, now), reason: HELD_CLOSED }, ['waiting'], now);
         }
         rows = rows.filter((r) => this.kinds.get(r.kind)!.onDismiss === 'deliver');
       }
@@ -300,21 +306,56 @@ export class Outbox {
     }
     const claimed = rows.filter((r) => this.store.updateDelivery(r.id, { state: 'sending', met_at: r.met_at ?? now }, ['waiting'], now));
     const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text, repeats.has(row.id)), repeat: (row) => repeats.has(row.id) };
-    this.started = new Set();
-    try {
-      for (const kindName of new Set(claimed.map((r) => r.kind))) {
-        const batch = claimed.filter((r) => r.kind === kindName).map((r) => this.store.getDelivery(r.id)!);
-        let outcomes: Outcome[];
+    const started = new Set<number>();
+    this.started.add(started);
+    const batches = [...new Set(claimed.map((r) => r.kind))].map((kindName) => [kindName, claimed.filter((r) => r.kind === kindName)] as const);
+    const failed = (batch: readonly Delivery[], err: unknown): Outcome[] => batch.map(() => ({ state: 'retry', reason: String((err as Error)?.message ?? err) }));
+    // Kind by kind, in order; synchronous unless a kind's deliver returns a promise, so the kinds that send at once still do.
+    const next = (i: number): void | Promise<void> => {
+      for (; i < batches.length; i++) {
+        const batch = batches[i][1].map((r) => this.store.getDelivery(r.id)!);
+        let outcomes: Outcome[] | Promise<Outcome[]>;
         try {
-          outcomes = this.kinds.get(kindName)!.deliver(batch, ctx);
+          outcomes = this.kinds.get(batches[i][0])!.deliver(batch, ctx);
         } catch (err) {
-          outcomes = batch.map(() => ({ state: 'retry', reason: String((err as Error)?.message ?? err) }));
+          outcomes = failed(batch, err);
         }
-        batch.forEach((r, i) => this.settle(r, outcomes[i] ?? { state: 'retry', reason: 'no outcome' }, now));
+        const settle = (o: Outcome[]) => batch.forEach((r, j) => this.settle(r, o[j] ?? { state: 'retry', reason: 'no outcome' }, started, this.now()));
+        if (outcomes instanceof Promise) {
+          const at = i;
+          return outcomes.then(settle, (err) => settle(failed(batch, err))).then(() => next(at + 1));
+        }
+        settle(outcomes);
       }
-    } finally {
-      this.started = null;
+    };
+    let out: void | Promise<void>;
+    try {
+      out = next(0);
+    } catch (err) {
+      this.started.delete(started);
+      throw err;
     }
+    if (!(out instanceof Promise)) return void this.started.delete(started);
+    return out.finally(() => this.started.delete(started));
+  }
+
+  /**
+   * Start now and Unpark (src/routes/tickets.ts): take a waiting or held row to send it outside a pass, as the outbox would
+   * (sending, so no pass claims it too, and a kill leaves it for boot to send again). False if it was not there to take.
+   */
+  take(id: number, payload: object = {}): boolean {
+    const r = this.store.getDelivery(id);
+    return !!r && this.store.updateDelivery(id, { state: 'sending', due: null, event_id: null, payload: { ...r.payload, ...payload } }, ['waiting', 'held'], this.now());
+  }
+
+  /** A taken row's send is over: handed as `event` (sent once its turn starts), or back to waiting when nothing was sent. */
+  finish(id: number, event: number | null) {
+    const r = this.store.getDelivery(id);
+    if (!r || r.state !== 'sending') return;
+    const now = this.now();
+    if (event == null) this.store.updateDelivery(id, { state: 'waiting', due: r.met_at != null ? now : null }, ['sending'], now);
+    else this.settle(r, { state: 'handed', event }, new Set(), now);
+    void this.poke({ type: 'finished', ticket: r.to_kind === 'minion' ? r.to_id : undefined });
   }
 
   private sendTo(row: Delivery, text: string, repeat: boolean): Outcome {
@@ -326,9 +367,11 @@ export class Outbox {
     }
   }
 
-  private settle(r: Delivery, o: Outcome, now: number) {
+  private settle(r: Delivery, o: Outcome, started: Set<number>, now: number) {
+    // A handed row whose turn already started: seen by the hook while sending, or (after an awaited send) by its saved init.
+    const begun = (event: number) => started.has(event) || (r.to_kind === 'minion' && !this.runner.holds(r.to_id, event) && this.store.turnSince(r.to_id, event));
     if (o.state === 'accepted') this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
-    else if (o.state === 'handed' && this.started?.has(o.event)) this.store.updateDelivery(r.id, { state: 'sent', event_id: o.event }, ['sending'], now);
+    else if (o.state === 'handed' && begun(o.event)) this.store.updateDelivery(r.id, { state: 'sent', event_id: o.event }, ['sending'], now);
     else if (o.state === 'handed') this.store.updateDelivery(r.id, { event_id: o.event, due: now + RECHECK_MS }, ['sending'], now);
     else if (o.state === 'drop') this.store.updateDelivery(r.id, { state: 'dropped', reason: o.reason }, ['sending'], now);
     else this.retry(r, o.reason, now);

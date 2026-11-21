@@ -3,7 +3,8 @@
 // reloads its front end (a front-end-only deploy, which doesn't restart).
 // Chained minions (create_ticket's start_after) use the same check: one is created parked, with its
 // brief held until the minion it follows has its work live (or merged); also checked when a minion
-// is dismissed.
+// is dismissed. With the server's outbox a chain is a `chain` row (ADR 0021, step 3, #1389): the check
+// meets it, and the outbox starts the minion on its lane (chainedStep).
 // In a scheme whose code this server doesn't run (Delve), nothing deploys here, so live means merged
 // on that scheme's main, for chains and commit waiters alike: checked whenever chains are.
 // Merged also counts a pull request merged on GitHub (#229): a squash or rebase merge leaves none of
@@ -18,7 +19,7 @@ import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
 import type { Delivery, DeliveryState, NewDelivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
-import { type Outbox, type Outcome, span } from './outbox.ts';
+import { HELD_CLOSED, type Outbox, type Outcome, span } from './outbox.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
@@ -93,6 +94,8 @@ export interface Chain {
   since?: number;
   /** People were told the followed minion was dismissed without shipping; kept, in case it ships after all. */
   held?: boolean;
+  /** Its outbox row (a `chain` delivery), once chains live there: a start of it finishes that row (LiveWaiters.done). */
+  id?: number;
 }
 
 /** A merged pull request: the commit it was opened at (its head) and the one main got (its merge commit). */
@@ -167,6 +170,10 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): Pr
 /** All waiters, in the settings table so they outlive the restart they wait for. */
 const KEY = 'wake-when-live';
 const CHAINS = 'chained-minions';
+/** A chain row's held reason: its leader was dismissed without its work shipping (people were told once). */
+const HELD_LEADER = 'leader dismissed unshipped';
+/** Why a chain row's start runs, when no check gave a reason: a Start now or Unpark a restart cut short. */
+const RESTARTED_WHY = 'Its start was cut short by a server restart';
 const RELAYS = 'relay-when-live';
 
 // Never execFileSync here (#526): a check runs dozens of these, and the server answered nobody until they ended.
@@ -237,6 +244,10 @@ export class LiveWaiters {
   private starting = new Set<number>();
   /** A chained minion's leader was dismissed without shipping: tell people, once. */
   hold: (c: Chain, why: string) => void = () => {};
+  /** With an outbox: start a chain row's minion, already on its lane (chainedStep, set by the server, which owns the runner). The brief's event, or null when the minion is gone. */
+  sendBrief: (c: Chain, why: string, repeat: boolean) => Promise<number | null> = async () => {
+    throw new Error('no runner to start chained minions');
+  };
   /** A relay is live: leave its text as held mail (set by the server, which owns the runner). */
   deliver: (r: Relay) => void = () => {};
   /** Relays just delivered together (one minion, same text and commit): the sender's Taskmaster hears of them in one note. */
@@ -273,6 +284,58 @@ export class LiveWaiters {
       describe: (r) => `relay to ${relayDests([this.relayOf(r)])}: ${String(r.payload.text).slice(0, 60)}`,
       deliver: (rows, ctx) => this.deliverRelays(rows, ctx.repeat),
     });
+    outbox?.register({
+      kind: 'chain',
+      migrate: () => this.migrateChains(),
+      describe: (r) => `start #${this.store.getTicket(r.to_id)?.number ?? r.to_id} with its brief once #${this.store.getTicket(r.when_arg?.after)?.number ?? r.when_arg?.after}'s work ${chainIs(r.when_kind as Chain['when'])}`,
+      deliver: (rows, ctx) => this.deliverChains(rows, ctx.repeat),
+    });
+  }
+
+  private chainOf = (r: Delivery): Chain => ({
+    ticket: r.to_id, after: r.when_arg.after, when: r.when_kind as Chain['when'], message: r.payload.message, from: r.payload.from, base: r.when_arg.base ?? null,
+    ...(r.when_arg.since != null ? { since: r.when_arg.since } : {}), ...(r.payload.told ? { held: true } : {}), id: r.id,
+  });
+
+  private chainRow(c: Chain, origin?: string): NewDelivery {
+    return {
+      project_id: this.store.getTicket(c.ticket)?.project_id ?? 0,
+      kind: 'chain',
+      to_kind: 'minion',
+      to_id: c.ticket,
+      when_kind: c.when,
+      when_arg: { after: c.after, base: c.base, since: c.since },
+      // `reason` is the readout's words (src/waits-readout.ts); `told` is the old held flag: people heard its leader was dismissed unshipped.
+      payload: { message: c.message, from: c.from, reason: this.chainWhat(c), ...(c.held ? { told: true } : {}) },
+      set_by: c.from,
+      dedupe_key: String(c.ticket),
+      ...(c.held ? { state: 'held' as const, reason: HELD_LEADER } : {}),
+      ...(origin ? { origin } : {}),
+    };
+  }
+
+  /** Move the old key's chains into the table, in one transaction that empties it, held flags kept. */
+  private migrateChains() {
+    const old = this.store.getSetting<Chain[]>(CHAINS);
+    if (!old?.length || !this.outbox) return;
+    // A follower the table already has (a dev seed wrote the key again) keeps its row; a deleted follower's chain goes, as the old check dropped it.
+    const live = new Set(this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).map((r) => r.to_id));
+    const move = [...new Map(old.map((c) => [c.ticket, c])).values()].filter((c) => !live.has(c.ticket) && this.store.getTicket(c.ticket));
+    this.store.importDeliveries(CHAINS, move.map((c) => this.chainRow(c, `${CHAINS}:${createHash('sha256').update(JSON.stringify(c)).digest('hex').slice(0, 16)}`)), this.outbox.clock());
+  }
+
+  /** The outbox's send of met chain rows, on the follower's lane: each start's brief event, or retry (a dismissed follower is then held by the outbox). */
+  private async deliverChains(rows: Delivery[], repeat: (r: Delivery) => boolean): Promise<Outcome[]> {
+    const out: Outcome[] = [];
+    for (const r of rows) {
+      try {
+        const event = await this.sendBrief(this.chainOf(r), r.payload.why ?? RESTARTED_WHY, repeat(r));
+        out.push(event == null ? { state: 'retry', reason: 'the minion was dismissed or deleted before its brief went' } : { state: 'handed', event });
+      } catch (err) {
+        out.push({ state: 'retry', reason: String((err as Error)?.message ?? err) });
+      }
+    }
+    return out;
   }
 
   private relayOf = (r: Delivery): Relay => ({ id: r.id, ticket: r.payload.ticket, to: r.payload.to, text: r.payload.text, commit: r.when_arg });
@@ -353,8 +416,15 @@ export class LiveWaiters {
     );
   }
 
+  /**
+   * Chains not yet started: the table's (waiting, held, or taken by a start that hasn't sent the brief yet) and any still in
+   * the old key (the dual read).
+   */
   chains(): Chain[] {
-    return this.store.getSetting<Chain[]>(CHAINS) ?? [];
+    const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
+    if (!this.outbox) return old;
+    const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf);
+    return [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
   }
 
   /** The repo of `ticket`'s scheme, when this server doesn't run its code: there live means merged. */
@@ -451,7 +521,8 @@ export class LiveWaiters {
 
   /** Hold a chained minion's brief (after follow said 'wait'). */
   chain(c: Chain): void {
-    this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
+    if (this.outbox) this.outbox.add(this.chainRow(c));
+    else this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
   }
 
   /**
@@ -467,8 +538,11 @@ export class LiveWaiters {
   /** What `ticket`, parked on start_after, waits for ("#3 Leader's work has landed"), or null when it isn't. */
   heldFor(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);
-    const leader = c && this.store.getTicket(c.after);
-    if (!c) return null;
+    return c ? this.chainWhat(c) : null;
+  }
+
+  private chainWhat(c: Chain): string {
+    const leader = this.store.getTicket(c.after);
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
     return c.held ? `${who}'s work ${chainIs(c.when, leader?.build)}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work ${chainIs(c.when, leader?.build)}`;
   }
@@ -483,6 +557,12 @@ export class LiveWaiters {
 
   /** `ticket`'s held brief, kept in the chain, for a start about to run (Start now); null when none, or one already runs. */
   claim(ticket: number): Chain | null {
+    if (this.outbox) {
+      // Taken (sending), so no check or pass starts it too; a kill before the brief goes leaves it for boot to send again.
+      this.migrateChains();
+      const [r] = this.store.listDeliveries({ kind: 'chain', to: ticket, states: ['waiting', 'held'] });
+      return r && this.outbox.take(r.id) ? this.chainOf(this.store.getDelivery(r.id)!) : null;
+    }
     const c = this.chains().find((o) => o.ticket === ticket) ?? null;
     if (!c || this.starting.has(ticket)) return null;
     this.starting.add(ticket);
@@ -492,6 +572,11 @@ export class LiveWaiters {
   /** A start of `ticket` is over, sent or not: the next check() may start it again if its chain is still stored. */
   end(ticket: number): void {
     this.starting.delete(ticket);
+  }
+
+  /** A start of a claimed chain row is over: its brief handed as `event`, or (null) back to waiting, unsent. */
+  done(c: Chain, event: number | null): void {
+    if (c.id != null) this.outbox?.finish(c.id, event);
   }
 
   /** Take `ticket`'s held brief out of the chain (its start sends it now), or null. */
@@ -504,6 +589,7 @@ export class LiveWaiters {
 
   /** Start each chained minion whose leader's work is in; tell people about leaders dismissed unshipped. */
   private async checkChains(): Promise<number> {
+    if (this.outbox) return this.checkChainRows(this.outbox);
     const states = new Map<number, 'go' | 'wait' | 'unshipped'>();
     for (const c of this.chains()) {
       const t = this.store.getTicket(c.ticket);
@@ -529,6 +615,38 @@ export class LiveWaiters {
     for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}`);
     for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work shipping`);
     return go.length;
+  }
+
+  /**
+   * The table's chains: meet each whose leader's work is in (the outbox starts it), and hold each whose leader was dismissed
+   * unshipped, telling people once. A row met already, taken by a start, or held for a dismissed follower is the outbox's.
+   */
+  private async checkChainRows(outbox: Outbox): Promise<number> {
+    this.migrateChains();
+    const open = (r: Delivery) => this.store.getTicket(r.to_id)?.status !== 'closed' && !!this.store.getTicket(r.to_id);
+    const ours = (r: Delivery) => (r.state === 'waiting' ? r.met_at == null : r.state === 'held' && r.reason !== HELD_CLOSED) && open(r);
+    const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held'] }).filter(ours);
+    const states = new Map<number, 'go' | 'wait' | 'unshipped'>();
+    for (const r of rows) states.set(r.id, await this.chainState(this.chainOf(r)));
+    const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
+    let met = 0;
+    for (const was of rows) {
+      // Read again: a start, cancel or dismissal while git and gh ran wins.
+      const r = this.store.getDelivery(was.id);
+      if (!r || r.state !== was.state || !ours(r)) continue;
+      const c = this.chainOf(r);
+      const now = outbox.clock();
+      if (states.get(r.id) === 'go') {
+        if (r.state === 'held' && !this.store.updateDelivery(r.id, { state: 'waiting', reason: null, due: null }, ['held'], now)) continue;
+        if (outbox.meet(r.id, { why: `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}` })) met++;
+      } else if (states.get(r.id) === 'unshipped' && r.state === 'waiting') {
+        // Held until the check finds its work in after all, or a person starts it; a follower reopened after a dismissal is held again quietly.
+        const held = { ...c, held: true };
+        if (!this.store.updateDelivery(r.id, { state: 'held', reason: HELD_LEADER, payload: { ...r.payload, told: true, reason: this.chainWhat(held) } }, ['waiting'], now)) continue;
+        if (!r.payload.told) this.hold(held, `${n(c.after)} was dismissed without its work shipping`);
+      }
+    }
+    return met;
   }
 
   /** Pending relays: the table's, and any still in the old key (the dual read). */
@@ -767,6 +885,25 @@ export class LiveWaiters {
  * or at once while a turn runs, so Start now doesn't wait that turn out.
  */
 export async function startChained(c: Chain, why: string, { store, runner, waiters }: { store: Store; runner: Pick<Runner, 'onLane' | 'isRunning' | 'emit' | 'send'>; waiters: LiveWaiters }): Promise<void> {
+  if (c.id != null) {
+    // A claimed outbox row (LiveWaiters.claim took it): done() hands it the brief's event, or puts it back unsent.
+    let failed: { err: unknown } | null = null;
+    const sent = runner.onLane(c.ticket, 'chained start', async () => {
+      let event: number | null = null;
+      try {
+        event = await chainedStep(c, why, { store, runner });
+      } catch (err) {
+        failed = { err };
+        throw err;
+      } finally {
+        waiters.done(c, event);
+      }
+    });
+    if (runner.isRunning(c.ticket)) return;
+    await sent;
+    if (failed) throw (failed as { err: unknown }).err;
+    return;
+  }
   const t = store.getTicket(c.ticket);
   if (!t) return waiters.end(c.ticket);
   const repo = store.getProject(t.project_id)?.repo_dir ?? null;
@@ -790,6 +927,21 @@ export async function startChained(c: Chain, why: string, { store, runner, waite
   if (runner.isRunning(c.ticket)) return; // it starts once the turn ends; a failure then is logged
   await sent;
   if (failed) throw (failed as { err: unknown }).err; // the lane only logs it: Start now's caller hears it
+}
+
+/**
+ * A chained start's work, already on the minion's lane (the outbox's delivery, or startChained): catch its branch up, then
+ * send its held brief, with the possible-repeat line when a killed server may have sent it already. The brief's event, or
+ * null when the minion is gone or dismissed.
+ */
+export async function chainedStep(c: Chain, why: string, { store, runner }: { store: Store; runner: Pick<Runner, 'emit' | 'send'> }, repeat = false): Promise<number | null> {
+  const t = store.getTicket(c.ticket);
+  if (!t || t.status === 'closed') return null;
+  await catchUpTicketDir(t.cwd, store.getProject(t.project_id)?.repo_dir ?? null, t.build).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
+  if (store.getTicket(c.ticket)?.status === 'closed') return null; // dismissed meanwhile
+  runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
+  const tail = repeat ? `\n\n(The server restarted while sending this, so it may repeat delivery #${c.id}.)` : '';
+  return runner.send(c.ticket, c.from, `${c.message}${tail}`, [], { brief: true }).event.id;
 }
 
 // wake_at (#722): a minion or Taskmaster asks to be messaged, in its own chat, at a time. The list is in the settings

@@ -48,7 +48,7 @@ export function waitsFor(store: Store, t: Ticket, legacy: LegacyWaits = () => []
   const q = t.kind === 'coordinator' ? { toKind: 'taskmaster', to: t.project_id } : { toKind: 'minion', to: t.id };
   const row = (r: Delivery): WaitRow => ({
     id: r.id, kind: r.kind, chip: chipOf(store, r, now), what: whatOf(r), set_by: r.set_by,
-    since: r.created_at, due: r.due, state: r.state as WaitRow['state'], reason: r.reason, cancellable: r.state === 'waiting' || r.state === 'held',
+    since: r.created_at, due: r.due, state: r.state as WaitRow['state'], reason: r.reason, cancellable: (r.state === 'waiting' || r.state === 'held') && r.kind !== 'chain', // a chain's row is its brief: Start now or dismiss, not drop
   });
   const live = store.listDeliveries({ ...q, states: ['waiting', 'held', 'sending'] }).map(row);
   const dropped = store.listDeliveries({ ...q, states: ['dropped', 'failed'] }).filter((r) => r.updated_at > now - DROPPED_SHOWN_MS).map(row);

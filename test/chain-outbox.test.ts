@@ -254,6 +254,7 @@ test('Start now takes the row: the brief goes once, a check meanwhile leaves it,
   await assert.rejects(s.start(c!, 'Cara started it before its leader\'s work was in'), /send failed/);
   assert.equal(rows(follower.id)[0].state, 'waiting', 'put back');
   assert.ok(s.waiters.heldFor(follower.id));
+  s.r.notes.length = 0; // the start note goes just before the send, as it did before the outbox: a send that throws leaves it
 
   s.r.fail = false;
   const again = s.waiters.claim(follower.id);

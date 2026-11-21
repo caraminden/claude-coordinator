@@ -49,7 +49,7 @@ import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { type Chain, chainedStep, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { Outbox } from './src/outbox.ts';
 import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
@@ -396,7 +396,7 @@ outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.p
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
 // A reopened minion's held waits go back to waiting (the outbox), and one whose deploy came live meanwhile is found now.
 runner.onTurnStart = (ticketId, eventIds) => {
-  const held = store.listDeliveries({ kind: 'wake_when_live', to: ticketId, states: ['held'] }).length > 0;
+  const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);
   if (held) void outbox.poke({ type: 'reopened', ticket: ticketId }).then(() => waiters.check()).catch((err) => console.error('Checking waiters after a reopen failed:', err));
 };
@@ -675,6 +675,8 @@ runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { ki
 // Chained minions (create_ticket's start_after): one starts with its held brief once its leader's work is in (src/wake.ts startChained).
 const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
 waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
+// A chain row's start (ADR 0021 step 3): the outbox runs it on the minion's lane and settles the row by the brief's event.
+waiters.sendBrief = (c, why, repeat) => chainedStep(c, why, { store, runner }, repeat);
 // relay_when_live: a note goes out as held mail once its commit is live; the sender's Taskmaster gets a one-line "went out".
 waiters.deliver = (r) => {
   const from = store.getTicket(r.ticket);
@@ -710,7 +712,7 @@ for (const fn of ['addDelivery', 'updateDelivery'] as const) {
   };
 }
 runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
-  ...waiters.chains().filter((c) => c.ticket === id && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
+  ...waiters.chains().filter((c) => c.ticket === id && c.id == null && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
   ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
   ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
 ]);

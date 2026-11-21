@@ -265,8 +265,11 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   assert.equal(unjudged.status, 400);
   assert.match((await unjudged.json()).error, /^Not handed off: this change matches Shots \(`shots`, 1 line in glade\/glow\.css\)/, "a person's go doesn't stand in for the critic's run");
   assert.equal((await call(`${url}/shots/runs`, { method: 'POST', body: { round: 1, verdict: 'fail' }, as: minion.id })).status, 201);
+  // An uncommitted edit stops the hand-off at the next check after the gate, so no landing starts behind the test.
+  writeFileSync(join(t.cwd, 'glade', 'glow.css'), '.glow{opacity:1}\n');
   const judged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }) });
-  assert.doesNotMatch((await judged.json()).error ?? '', /matches Shots/, 'an advisory critic with any verdict lets it through');
+  assert.equal(judged.status, 409);
+  assert.match((await judged.json()).error, /^Not handed off: your worktree has uncommitted changes/, 'an advisory critic with any verdict lets it through to the next check');
 
   // A person disagrees in chat; the minion records it, and the run turns amber.
   assert.equal((await call(`${url}/look/verdicts`, { method: 'POST', body: { person: 'Josh', words: 'x' } })).status, 403, 'no Add box for people (Q13)');

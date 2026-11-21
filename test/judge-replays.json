@@ -1,12 +1,12 @@
 {
   "ci-red": {
-    "hash": "fd0ff54db66b7dec",
+    "hash": "4768730a8a85dde2",
     "at": "2026-11-21",
     "days": 3,
     "inputs": "10 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 19,
-    "real": 25,
-    "summary": "18 as before, 1 new, 7 gone"
+    "hits": 21,
+    "real": 27,
+    "summary": "20 as before, 1 new, 7 gone"
   },
   "deploy-watch": {
     "hash": "13628e2c16779b4e",
@@ -18,12 +18,12 @@
     "summary": "23 as before, 1 new, 4 gone"
   },
   "flake-counter": {
-    "hash": "701f2325b05c198b",
+    "hash": "546148ea83c657a6",
     "at": "2026-11-21",
     "days": 3,
     "inputs": "288 passes over 12 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 26,
+    "hits": 25,
     "real": 46,
-    "summary": "24 as before, 2 new, 8 gone"
+    "summary": "23 as before, 2 new, 9 gone"
   }
 }

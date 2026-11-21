@@ -1,17 +1,14 @@
 // A server a test boots never reads the real box's signals (#1485): its CPU, memory and IO pressure, load, memory, CPU
-// counters and cgroups, or the real Pacific clock for a day or an hour. A busy box paused a test server's indexers
-// (#1301) and a test went red after midnight (#1421). src/host-signals.ts is the one place those are read, and
-// CITADEL_HOST_SIGNALS=fixed (bootServer sets it) pins them: fixed readings, no cgroup, and a zone on Pacific's date
-// where the server boots between 12:00 and 19:59, so no day boundary falls inside a test.
+// counters and cgroups. A busy box paused a test server's indexers (#1301). src/host-signals.ts is the one place those
+// are read, and CITADEL_HOST_SIGNALS=fixed (bootServer sets it) pins them: fixed readings and no cgroup.
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { dayZone } from '../src/host-signals.ts';
 import { bootServer, ok, REPO, tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 
-test('a booted server reads no host signal and runs its clock in a fixed zone, in the afternoon', async () => {
+test('a booted server reads no host signal', async () => {
   const tmp = tempRoot('host-signals-');
   const log = tmp.path('trap.log');
   try {
@@ -22,23 +19,12 @@ test('a booted server reads no host signal and runs its clock in a fixed zone, i
       ok(await srv.call('/api/host-load'));
       await srv.settled();
     } finally {
-      await srv.stop(); // the zone line is written as the server exits
+      await srv.stop();
     }
-    const lines = readFileSync(log, 'utf8').trim().split('\n');
-    assert.deepEqual(lines.filter((l) => !l.startsWith('zone ')), [], 'reads that reached the real box');
-    assert.match(lines.find((l) => l.startsWith('zone ')) ?? 'no zone line (the server did not exit cleanly)', /^zone Etc\/GMT([+-]\d+)? hour 1\d$/);
+    assert.deepEqual(existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [], [], 'reads that reached the real box');
   } finally {
     await tmp.teardown();
   }
-});
-
-test('the fixed zone keeps Pacific\'s date and an afternoon hour', () => {
-  const at = (iso: string) => { const ms = Date.parse(iso), zone = dayZone(ms); return [zone, new Date(ms).toLocaleString('en-CA', { timeZone: zone, hourCycle: 'h23' })]; };
-  assert.deepEqual(at('2026-11-21T08:30:00Z'), ['Etc/GMT-4', '2026-11-21, 12:30:00'], '00:30 PST');
-  assert.deepEqual(at('2026-11-21T20:00:00Z'), ['Etc/GMT+8', '2026-11-21, 12:00:00'], 'noon PST');
-  assert.deepEqual(at('2026-11-22T07:45:00Z'), ['Etc/GMT+12', '2026-11-21, 19:45:00'], '23:45 PST: still the 21st');
-  assert.deepEqual(at('2026-07-02T06:10:00Z'), ['Etc/GMT+12', '2026-07-01, 18:10:00'], '23:10 PDT');
-  assert.deepEqual(at('2026-07-01T19:00:00Z'), ['Etc/GMT+7', '2026-07-01, 12:00:00'], 'noon PDT');
 });
 
 // The booted check above only sees what runs at boot and on those two pages; this one sees every reader in the code.

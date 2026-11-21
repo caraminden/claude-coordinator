@@ -255,7 +255,7 @@ test('"Always allow" is a standing go for job hours; a changed digest asks again
   await hours(false);
   const waits = await queue({});
   assert.equal(waits.state, 'queued');
-  assert.match(waits.waits, /^outside job hours \(opens \d\d:\d\d GMT([+-]\d+)?\)$/); // a test server's clock runs in a fixed whole-hour zone (#1485)
+  assert.match(waits.waits, /^outside job hours \(opens \d\d:\d\d P[SD]T\)$/);
   await assert.rejects(queue({ when: 'now' }), /400 when "now" needs a reason/);
   const now = await queue({ when: 'now', reason: 'Cara wants chapter 4 tonight' });
   assert.equal(now.state, 'needs-go');

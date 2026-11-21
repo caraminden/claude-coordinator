@@ -29,9 +29,10 @@ dependency: offer it once, with the test you would write, and leave the call to 
   module means the seam is in the wrong place ([CODEBASE-DESIGN.md](../improve-codebase-architecture/CODEBASE-DESIGN.md)).
 - **It never reads the real box**: the clock's day or hour, the load, CPU or memory pressure.
   Those differ between the box you write on, a busy CI runner and a run after midnight, so the
-  test goes red on its own. Pass them in as a fixed value, or boot the server with the repo's
-  pinned host signals (Citadel: `bootServer` pins them through `src/host-signals.ts`; a test
-  that spawns the server itself sets `CITADEL_HOST_SIGNALS: 'fixed'`).
+  test goes red on its own. Pass them in as a fixed value: an injected `now`, a pressure file.
+  Pin the code under test and the test's own fixtures to the same value; pinning only one side
+  makes a new mismatch. (Citadel: `bootServer` pins pressure, load, memory and cgroups through
+  `src/host-signals.ts`; a test that spawns the server itself sets `CITADEL_HOST_SIGNALS: 'fixed'`.)
 - **Its expected value comes from somewhere else**: the rule, the spec, a worked literal. Never
   recompute it the way the code does.
 - **One behaviour per test, named for the behaviour** (`rejects a reply with no body`), not for

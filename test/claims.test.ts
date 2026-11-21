@@ -262,7 +262,7 @@ test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets s
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
   });
   assert.equal(await tool('list_claims'), 'No claims: every duty is free.');
-  assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, note: 'land retry' }), new RegExp(`^Claimed: pipeline-lane: #${m.number} .*since .* GMT([+-]\\d+)? \\(land retry\\)$`)); // a test server's clock runs in a fixed whole-hour zone (#1485)
+  assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, note: 'land retry' }), new RegExp(`^Claimed: pipeline-lane: #${m.number} .*since .* P[SD]T \\(land retry\\)$`));
   assert.match(await tool('claim', { name: 'pipeline-lane' }), /^Error: pipeline-lane is held by #/);
   assert.match(await tool('list_tickets'), new RegExp(`\\nClaims:\\npipeline-lane: #${m.number} `));
   assert.match(await tool('release', { name: 'pipeline-lane' }), /^Released: pipeline-lane/);

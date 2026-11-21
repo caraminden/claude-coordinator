@@ -1,8 +1,6 @@
 // Preloaded (node --import) into the server test/host-signals.test.ts boots (#1485). It writes one line to
 // $HOST_SIGNAL_TRAP for each kind of read that reaches the real box's signals: its CPU, memory and IO pressure, load,
-// memory, CPU counters and cgroups, or a time-of-day formatter in the real Pacific zone; and, when the server exits,
-// the zone its local clock ran in. A server whose host signals are pinned (CITADEL_HOST_SIGNALS=fixed) writes only
-// that last line.
+// memory, CPU counters and cgroups. A server whose host signals are pinned (CITADEL_HOST_SIGNALS=fixed) writes none.
 import fs, { appendFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
@@ -12,7 +10,6 @@ if (!LOG) throw new Error('host-signal-trap: set HOST_SIGNAL_TRAP to the log fil
 
 /** The real box's signal files: PSI, load, memory, CPU counters, and the cgroup tree (its own cgroup included). */
 export const HOST_FILE = /^\/proc\/(pressure(\/|$)|loadavg$|meminfo$|stat$|self\/cgroup$)|^\/sys\/fs\/cgroup(\/|$)/;
-const PACIFIC = 'America/Los_Angeles'; // pacific-ok: the real zone this trap catches a server reading the day from
 
 const seen = new Set<string>();
 const note = (line: string) => {
@@ -38,27 +35,3 @@ for (const n of ['loadavg', 'availableParallelism', 'cpus', 'freemem', 'totalmem
   (os as any)[n] = (...a: unknown[]) => (note(`os.${n}()`), real(...a));
 }
 syncBuiltinESMExports(); // `import { readFile } from 'node:fs/promises'` and the like see the wrapped functions
-
-// Time of day: a formatter asked for the real Pacific zone decides the day (or the hour) from the real clock.
-// src/host-signals.ts reads Pacific's date once, to pick the fixed zone on it: the one read allowed.
-const pacificAsked = (how: string, opts: unknown) => {
-  if ((opts as { timeZone?: unknown } | undefined)?.timeZone === PACIFIC && !/\/src\/host-signals\.ts:/.test(new Error().stack ?? '')) note(`${how} in ${PACIFIC}`);
-};
-const RealFormat = Intl.DateTimeFormat;
-Intl.DateTimeFormat = new Proxy(RealFormat, {
-  construct: (t, args, nt) => (pacificAsked('Intl.DateTimeFormat', args[1]), Reflect.construct(t, args, nt)),
-  apply: (t, self, args) => (pacificAsked('Intl.DateTimeFormat', args[1]), Reflect.apply(t, self, args)),
-});
-for (const m of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] as const) {
-  const real = Date.prototype[m] as (this: Date, ...a: unknown[]) => string;
-  Date.prototype[m] = function (this: Date, locales?: unknown, opts?: unknown) {
-    pacificAsked(`Date.${m}`, opts);
-    return real.call(this, locales, opts);
-  } as any;
-}
-
-// The zone the server's local clock (getHours, setHours, a formatter with no zone) ran in, and its hour then.
-process.on('exit', () => {
-  const zone = new RealFormat().resolvedOptions().timeZone;
-  appendFileSync(LOG, `zone ${zone} hour ${new Date().getHours()}\n`);
-});

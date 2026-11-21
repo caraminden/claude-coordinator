@@ -40,6 +40,7 @@
  "src/hook-run.ts": 1,
  "src/host-job.ts": 21,
  "src/host-load.ts": 3,
+ "src/host-signals.ts": 1,
  "src/host-tool-ship.ts": 1,
  "src/host-tools.ts": 3,
  "src/ideas.ts": 6,

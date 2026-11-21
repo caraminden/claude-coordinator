@@ -9,7 +9,7 @@ const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Minion 7 has three messages. Once the test sets window.newer, its catch-ups (events?after=) are counted and held
-// until release(), then bring a fourth.
+// until release(), then bring a fourth. window.es is the page's stream, for a live event.
 const STUB = `<script>
   window.ready = true;
   window.afters = 0;
@@ -42,7 +42,8 @@ const STUB = `<script>
     if (/inbox$/.test(path)) return reply(200, { items: [] });
     return reply(200, []);
   };
-  window.EventSource = class { close() {} };
+  window.said = said;
+  window.EventSource = class { constructor() { window.es = this; } close() {} };
 </script>`;
 
 let app: App;
@@ -66,11 +67,13 @@ test('reopening a cached chat keeps what it drew and appends what is new, with o
   await waitFor(page, 'the other chat', `!document.querySelector('#log [data-eid="3"]') && document.getElementById('ticket-head')?.textContent.includes('Minion 8')`);
   await page.eval(`window.newer = true; location.hash = '#/p/1/t/7'`);
   await waitFor(page, 'the chat again', `(window.first = document.querySelector('#log [data-eid="1"]'))`);
+  // A live event that arrives while the catch-up is out waits for it, so the one before it isn't skipped.
+  await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'event', event: said(5, 'Live') }) })`);
   await page.eval('release()');
-  await waitFor(page, 'the caught-up message', `document.querySelector('#log [data-eid="4"]')`);
+  await waitFor(page, 'the live message', `document.querySelector('#log [data-eid="5"]')`);
   await page.eval('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))');
   assert.equal(await page.eval<boolean>('window.first.isConnected'), true, 'the chat was drawn a second time after the catch-up');
-  assert.equal(await page.eval<number>('document.querySelectorAll(\'#log [data-eid]\').length'), 4);
+  assert.deepEqual(await page.eval<string[]>(`[...document.querySelectorAll('#log [data-eid]')].map((el) => el.dataset.eid)`), ['1', '2', '3', '4', '5']);
   assert.equal(await page.eval<number>('window.afters'), 1, 'the catch-up asked the server more than once');
 });
 

@@ -870,11 +870,19 @@ export function prefetchTopRows() {
 export async function catchUpEvents() {
   const v = view;
   if (!v?.id) return 0;
-  const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
-  if (view !== v) return 0; // another view (or chat) opened meanwhile: these aren't its events
-  let added = 0;
-  for (const ev of events) if (ev.id > view.lastEventId) { appendEvent(ev); added++; }
-  return added;
+  // Live events wait until this has what came before them, or the first would move the cursor past the rest (see resync).
+  const hold = held?.view === v ? held : { view: v, events: [], owed: 0 };
+  hold.owed++;
+  held = hold;
+  try {
+    const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
+    if (view !== v) return 0; // another view (or chat) opened meanwhile: these aren't its events
+    let added = 0;
+    for (const ev of events) if (ev.id > view.lastEventId) { appendEvent(ev); added++; }
+    return added;
+  } finally {
+    if (!--hold.owed) releaseHeld(hold);
+  }
 }
 
 export function onTicketUpdate(ticket) {

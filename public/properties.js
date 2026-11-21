@@ -92,8 +92,6 @@ function filterLinks(t, key, value) {
 export function closeOnClickAway(chip) {
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
-    // Read on opening: a header part that didn't change is kept, chip and all, while its minion's values may have (#1531).
-    const entries = Object.entries(t.properties ?? {});
     const away = (e) => {
       if (chip.contains(e.target)) return;
       chip.open = false;

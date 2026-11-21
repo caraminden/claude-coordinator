@@ -612,10 +612,17 @@ function headTicket(t) {
 function patchParts(parent, want, live, rows = true) {
   want = want.filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : document.createTextNode(String(c))));
   const sigOf = (n) => (n.nodeType === 1 ? n.outerHTML : n.nodeValue);
+  const sigs = want.map(sigOf);
   want.forEach((c, i) => {
-    const at = parent.childNodes[i];
+    let at = parent.childNodes[i];
     if (at === c) return;
-    const sig = sigOf(c);
+    const sig = sigs[i];
+    // A part gone from before this one: drop it, so this one and the rest line up again.
+    while (at && !live.has(at) && at.sig !== sig && at.nextSibling?.sig === sig && !sigs.includes(at.sig, i + 1)) {
+      const next = at.nextSibling;
+      at.remove();
+      at = next;
+    }
     // A row's parts are compared one by one next time, so they remember how they were drawn too.
     if (rows) for (const k of c.childNodes ?? []) k.sig = sigOf(k);
     if (live.has(c) || !at || live.has(at)) parent.insertBefore(c, at ?? null);
@@ -626,7 +633,8 @@ function patchParts(parent, want, live, rows = true) {
       for (const { name, value } of c.attributes) if (at.getAttribute(name) !== value) at.setAttribute(name, value);
       patchParts(at, [...c.childNodes], live, false);
       return void (at.sig = sig);
-    } else at.replaceWith(c);
+    } else if (sigs.includes(at.sig, i + 1)) parent.insertBefore(c, at); // a part added before one that's kept
+    else at.replaceWith(c);
     c.sig = sig;
   });
   while (parent.childNodes.length > want.length) parent.lastChild.remove();

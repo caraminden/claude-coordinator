@@ -1953,16 +1953,6 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
- "POST /api/projects/:p/properties/proposals": {
-  "anon": "401 Not logged in",
-  "person": "403 Taskmasters and people register keys and values directly; proposals are for minions",
-  "member": "403 Taskmasters and people register keys and values directly; proposals are for minions",
-  "outsider": "403 Taskmasters and people register keys and values directly; proposals are for minions",
-  "tmA": "403 Taskmasters and people register keys and values directly; proposals are for minions",
-  "tmB": "403 Taskmasters and people register keys and values directly; proposals are for minions",
-  "m1": "400 Say why in reason",
-  "m2": "400 Say why in reason"
- },
  "POST /api/projects/:p/properties/review": {
   "anon": "401 Not logged in",
   "person": "400 action must be approve, reject, archive, restore or merge",

@@ -1,6 +1,6 @@
 // The property registry: the keys and values minions and artifacts may carry. Global keys (every
 // scheme) belong to the Citadel scheme's Taskmaster; each scheme's Taskmaster registers its own.
-// Minions only propose. Writes are checked against the registry, aliases resolve to the canonical
+// Minions ask the Taskmaster. Writes are checked against the registry, aliases resolve to the canonical
 // value, and new keys and values are checked for near-duplicates first.
 import type { DatabaseSync } from 'node:sqlite';
 import { DELVE_SEED, GLOBAL_SEED, type SeedKey } from './property-seed.ts';
@@ -337,7 +337,7 @@ export class Registry {
     const near = active.filter((v) => [v.value, ...aliasesOf(v)].some((s) => nearDuplicate(s, raw))).map((v) => code(v.value));
     throw new PropertyError(
       `${code(raw.trim())} isn't one of the ${code(k.key)} values${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Values: ${active.map((v) => code(v.value)).join(', ')}.` +
-        ' If none fits, propose a new value instead of picking a near-duplicate.',
+        ' If none fits, ask the Taskmaster to add a value instead of picking a near-duplicate.',
     );
   }
 
@@ -461,13 +461,13 @@ export class Registry {
    * once, and so is one a Taskmaster's approved setup plan lists; any other Taskmaster key waits for a person. Near-duplicates come back as warnings and nothing is
    * registered unless `force` is set.
    */
-  registerKey(projectId: number, input: any, actor: Actor, proposal = false) {
+  registerKey(projectId: number, input: any, actor: Actor) {
     const name = typeof input?.key === 'string' ? input.key.trim() : '';
     if (!KEY_NAME.test(name)) throw new PropertyError('key must be camelCase letters and digits, 2 to 40 characters, e.g. playerClass');
-    const scope = input.global && !proposal ? null : projectId;
-    if (!proposal && !this.mayEdit(scope, actor)) {
+    const scope = input.global ? null : projectId;
+    if (!this.mayEdit(scope, actor)) {
       throw new PropertyError(
-        actor.kind === 'thread' ? 'Minions propose keys with propose_property' : scope === null ? "Only the Citadel scheme's Taskmaster or a person can add global keys" : 'Outside this scheme',
+        actor.kind === 'thread' ? 'Minions ask the Taskmaster to add keys' : scope === null ? "Only the Citadel scheme's Taskmaster or a person can add global keys" : 'Outside this scheme',
         403,
       );
     }
@@ -490,7 +490,7 @@ export class Registry {
       }
     }
     this.checkValues(values, []);
-    const status = !proposal && (actor.kind === 'person' || inSetupPlan(actor, name)) ? 'active' : 'proposed';
+    const status = (actor.kind === 'person' || inSetupPlan(actor, name)) ? 'active' : 'proposed';
     const now = Date.now();
     this.db.exec('BEGIN');
     try {
@@ -540,7 +540,7 @@ export class Registry {
   registerValues(projectId: number, keyName: unknown, values: unknown, actor: Actor, force = false) {
     const k = this.findKey(projectId, keyName);
     if (!this.mayEdit(k.scope, actor)) {
-      throw new PropertyError(actor.kind === 'thread' ? 'Minions propose values with propose_property' : `Only the Citadel scheme's Taskmaster or a person can change ${code(k.key)}`, 403);
+      throw new PropertyError(actor.kind === 'thread' ? 'Minions ask the Taskmaster to add values' : `Only the Citadel scheme's Taskmaster or a person can change ${code(k.key)}`, 403);
     }
     if (k.value_kind !== 'enum') throw new PropertyError(`${code(k.key)} takes any ${k.value_kind === 'integer' ? 'whole number' : k.value_kind}; it has no list of values`);
     if (!Array.isArray(values) || !values.length) throw new PropertyError('values must be a non-empty list of { value, label?, aliases? }');
@@ -578,30 +578,6 @@ export class Registry {
       throw err;
     }
     return { added, updated, unreviewed: actor.kind === 'person' ? [] : added.filter((v) => !inSetupPlan(actor, v)), warnings: [] as string[] };
-  }
-
-  /** A minion suggests a new scheme key, or a new value for a key; it waits as `proposed`. */
-  propose(projectId: number, input: any, actor: Actor) {
-    const reason = typeof input?.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
-    if (!reason) throw new PropertyError('Say why in reason');
-    if (input.value === undefined) {
-      const r = this.registerKey(projectId, { ...input, reason }, actor, true);
-      return { proposed: r.registered, warnings: r.warnings };
-    }
-    const k = this.findKey(projectId, input.key, { activeOnly: true });
-    if (k.value_kind !== 'enum') throw new PropertyError(`${code(k.key)} takes any ${k.value_kind === 'integer' ? 'whole number' : k.value_kind}; just set it`);
-    const value = this.checkValueName(input.value, 'Value');
-    const existing = this.valuesOf(k.id);
-    const same = existing.find((e) => [e.value, ...aliasesOf(e)].some((s) => norm(s) === norm(value)));
-    if (same) throw new PropertyError(`${code(value)} already ${norm(same.value) === norm(value) ? 'exists' : `means ${code(same.value)}`} (${same.status})`, 409);
-    const aliases = Array.isArray(input.aliases) ? input.aliases : [];
-    this.checkValues([{ value, aliases }], existing);
-    if (!input.force) {
-      const near = existing.filter((e) => e.status !== 'archived' && [e.value, ...aliasesOf(e)].some((s) => nearDuplicate(s, value)));
-      if (near.length) return { proposed: false, warnings: near.map((e) => `${code(value)} is close to ${code(`${k.key}: ${e.value}`)}. Use it, or propose again with force: true if it really is different.`) };
-    }
-    this.insertValue(k.id, { value, label: input.label, description: input.description || reason, aliases }, 'proposed', actor);
-    return { proposed: true, warnings: [] as string[] };
   }
 
   /**

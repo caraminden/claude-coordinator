@@ -1562,27 +1562,6 @@ const THREAD_TOOLS = () => ([
     },
   },
   {
-    name: 'propose_property',
-    description:
-      "Propose a new value for one of this scheme's keys, or (without value) a new key. It waits as proposed until the Taskmaster or a person approves it, and the Taskmaster is told. Only when nothing in list_properties fits: never a near-duplicate of an existing value.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        key: { type: 'string', description: 'The key; for a new key, its camelCase name' },
-        value: { type: 'string', description: 'The new value (kebab-case, or a proper name). Leave out to propose a new key.' },
-        aliases: { type: 'array', items: { type: 'string' } },
-        reason: { type: 'string', description: 'Why nothing existing fits' },
-        label: { type: 'string' },
-        description: { type: 'string' },
-        multi: { type: 'boolean', description: 'New key only: holds a list' },
-        value_kind: { type: 'string', enum: ['enum', 'integer', 'user', 'text'], description: 'New key only' },
-        values: { ...VALUES, description: 'New key only: its values' },
-        force: FORCE,
-      },
-      required: ['key', 'reason'],
-    },
-  },
-  {
     name: 'message_coordinator',
     description:
       "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + C().MSG.holdH + " hours), unless it is urgent. After " + C().MSG.loopLimit + " messages either way in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
@@ -1905,10 +1884,6 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'review_property': {
       const r = await call('POST', `/api/projects/${C().PROJECT}/properties/review`, args);
       return `Done: ${r.action} ${r.key}${r.value ? `: ${r.value}` : ''}.`;
-    }
-    case 'propose_property': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/proposals`, args);
-      return registryReply(r, 'Proposed. The Taskmaster has been told; it stays unusable until approved.');
     }
     case 'get_project_instructions': {
       const { project } = await call('GET', `/api/projects/${C().PROJECT}`);

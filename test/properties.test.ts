@@ -206,7 +206,7 @@ test('who may register what', () => {
   // Citadel's Taskmaster may.
   assert.deepEqual(s.props.registerValues(2, 'type', [{ value: 'music' }], tm(2)).added, ['music']);
   // Minions only propose.
-  assert.throws(() => s.props.registerValues(1, 'area', [{ value: 'sky' }], minion(1)), err(403, /propose/));
+  assert.throws(() => s.props.registerValues(1, 'area', [{ value: 'sky' }], minion(1)), err(403, /ask the Taskmaster/));
   // A Taskmaster's new key waits for a person; a person's is live.
   assert.equal(s.props.registerKey(1, { key: 'enemy', description: 'x' }, tm(1)).status, 'proposed');
   assert.throws(() => s.props.set('minion', ticket(s, 1), 1, { enemy: 'x' }, 'x'), err(400, /proposed/));
@@ -246,8 +246,7 @@ test('new values: near-duplicates warn, aliases may not collide, existing values
 
 test('proposals, review, archive and merge', () => {
   const s = freshStore();
-  const p = s.props.propose(1, { key: 'area', value: 'weather', reason: 'storms' }, minion(1));
-  assert.equal(p.proposed, true);
+  s.db.prepare("INSERT INTO property_values (key_id, value, status, reviewed, created_by, created_at) SELECT id, 'weather', 'proposed', 0, 'x', 0 FROM property_keys WHERE key = 'area'").run();
   const id = ticket(s, 1);
   assert.throws(() => s.props.set('minion', id, 1, { area: 'weather' }, 'x'), err(400, /proposed/));
   s.props.review(1, { key: 'area', value: 'weather', action: 'approve' }, tm(1));
@@ -261,9 +260,8 @@ test('proposals, review, archive and merge', () => {
   s.props.review(1, { key: 'area', value: 'dungeons', action: 'archive' }, cara);
   assert.deepEqual(s.props.forTarget('minion', id).area, ['dungeons']);
   assert.throws(() => s.props.set('minion', ticket(s, 1), 1, { area: 'dungeons' }, 'x'), err(400, /archived/));
-  // A minion's key proposal waits too.
-  assert.equal(s.props.propose(1, { key: 'enemy', reason: 'bosses' }, minion(1)).proposed, true);
-  assert.equal(s.props.list(1).find((k) => k.key === 'enemy')!.status, 'proposed');
+  // A Taskmaster's new key waits too.
+  assert.equal(s.props.registerKey(1, { key: 'foe', description: 'x' }, tm(1)).status, 'proposed');
 });
 
 test('an archived key can be restored, and an archived value under it too; it still can\'t be set while archived (#468 S05-5)', () => {
@@ -322,9 +320,6 @@ test('approving a proposed key approves every value under it, and a setup plan c
   assert.deepEqual(values('zone'), [['north', 'active', true], ['south', 'active', false]], '"south" is only part of "south-east"');
   assert.deepEqual(s.props.registerValues(1, 'zone', [{ value: 'south-east' }, { value: 'west' }], planned, true).unreviewed, ['west']);
   assert.equal(s.props.registerKey(1, { key: 'region', description: 'x' }, planned).status, 'proposed');
-  // A minion's proposal never counts, plan or not.
-  assert.equal(s.props.propose(1, { key: 'north', reason: 'x' }, { ...minion(1), setupPlan: 'north' } as Actor).proposed, true);
-  assert.equal(s.props.list(1).find((k) => k.key === 'north')!.status, 'proposed');
 });
 
 test('list groups (#253): moving to schema 21 types every minion and promotes Delve\'s balance work, once', () => {

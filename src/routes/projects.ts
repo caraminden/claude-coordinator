@@ -1517,23 +1517,6 @@ export const projectRoutes: Route[] = [
       return json(ctx.res, 200, r);
     },
   },
-  {
-    method: 'POST', path: '/api/projects/:project/properties/proposals', who: ['minion'],
-    refuse: 'Taskmasters and people register keys and values directly; proposals are for minions',
-    async handler(ctx) {
-      const { app, project } = ctx;
-      const body = await readJson(ctx.req);
-      const actor = actorFor(ctx);
-      const r = app.store.props.propose(project.id, body, actor);
-      if (r.proposed) {
-        app.registryChanged(project.id, false);
-        const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
-        const coordinator = await ensureCoordinatorFor(app, project, null); // the registry is the Overlord's (#919)
-        app.runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
-      }
-      return json(ctx.res, 200, r);
-    },
-  },
 
   // Saved views: each person's own named property filters above the minions list (#194).
   { method: 'GET', path: '/api/projects/:project/views', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.listViews(project.id, session.name)) },

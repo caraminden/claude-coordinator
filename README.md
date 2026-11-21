@@ -270,14 +270,19 @@ tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. Hand-made
 `backups/coordinator-before-<what>.db` copies go once they are 7 days old.
 Session state (`claude_state`, most of the bytes) lives in `state.db` beside
 `coordinator.db`, attached by the server; it gets its own `state-<day>.db`, 3
-dailies and no weeklies. Previews, boot-check and the pre-deploy copy copy only
-`coordinator.db`. Then `deploy/offbox.sh` refreshes `$DATA_DIR/offbox/`, the copy
+dailies and no weeklies. The chat log (the `events` table) lives in `events.db`
+beside it (#1169), attached as `chat`; it gets `events-<day>.db` and
+`events-weekly-<week>.db`, kept like the main ones. Previews copy all of it, the
+boot check only open minions' chats, and the pre-deploy copy only `coordinator.db`.
+Then `deploy/offbox.sh` refreshes `$DATA_DIR/offbox/`, the copy
 set Cara's Windows desktop pulls each morning over SSH (dailies and weeklies with
 linked-account secrets stripped, the newest `state-*`, and each contraption's
 newest 7 days of `~/.local/share/<app>/backups/<day>/`); setup is in
 `deploy/desktop/README.md`. To restore, stop the service and copy a backup over
-`coordinator.db` (and a `state-*` one over `state.db`), removing their
-`-wal`/`-shm`.
+`coordinator.db` (and a `state-*` one over `state.db`, an `events-*` one over
+`events.db`), removing their `-wal`/`-shm`. With the service stopped,
+`node tools/events-unsplit.ts <coordinator.db> --service-stopped` puts the chat log
+back in the main file, for a release older than the one that reads `events.db`.
 
 **Pruning.** `deploy/prune.sh` lists, and with `--apply` deletes, the session
 state (`claude_state`) of minions closed over 14 days ago. Worktrees are the

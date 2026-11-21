@@ -27,18 +27,25 @@ test("a ship's run takes either runner; any other run of tests.yml (the nightly,
 test("no workflow but a ship's run can take the first runner: every other self-hosted job asks for the side label", () => {
   const dir = join(root, '.github', 'workflows');
   const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
-  const shipsOnly = /fromJSON\('\["self-hosted", "citadel-ci-linux"\]'\)/g;
-  const landGuard = "startsWith(github.ref, 'refs/heads/land/') && ";
+  const side = '"self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"';
+  const landOnly = "startsWith(github.ref, 'refs/heads/land/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')";
   const bad: string[] = [];
   let sideJobs = 0;
   for (const f of files) {
-    for (const line of runsOn(read(`.github/workflows/${f}`)).split('\n').filter(Boolean)) {
-      if (!line.includes('self-hosted')) continue;
-      for (const m of line.matchAll(shipsOnly)) {
-        if (f !== 'tests.yml' || !line.slice(0, m.index).endsWith(landGuard)) bad.push(`${f}: ${line.trim()}`);
-      }
-      if (line.includes('"citadel-ci-linux-side"')) sideJobs++;
-    }
+    const lines = read(`.github/workflows/${f}`).split('\n');
+    lines.forEach((l, i) => {
+      const m = l.match(/^(\s+)runs-on:(.*)$/);
+      if (!m) return;
+      // A selector in any form: the line's own value plus a YAML list or mapping indented under it.
+      let sel = m[2];
+      for (let j = i + 1; j < lines.length && (lines[j].trim() === '' || lines[j].match(/^\s*/)![0].length > m[1].length); j++) sel += ' ' + lines[j];
+      sideJobs += sel.split(side).length - 1;
+      // What's left once the side label's form and (in tests.yml) the land-guarded ships' form are taken out must not
+      // name a self-hosted runner at all: a form this test can't read counts against it.
+      let rest = sel.split(side).join('');
+      if (f === 'tests.yml') rest = rest.split(landOnly).join('');
+      if (/self-hosted|citadel-ci-linux/.test(rest)) bad.push(`${f}:${i + 1}: ${sel.trim()}`);
+    });
   }
   assert.deepEqual(bad, [], "these jobs can take the ships' runner");
   assert.ok(sideJobs >= 4, `the heavy, desktop, proof and tests jobs ask for the side label (found ${sideJobs})`);

@@ -11,6 +11,7 @@
 //   runner starts one too or waits on a named timer (the usage-limit resume, the network probe, the cold-mail sweep).
 // - Held: every message sent before the cut and not yet handed to a turn is in the turn it starts or its one queue
 //   record (#1378, `minion-queue:<id>`: queued, held mail, a taken batch or a steer), unless a stop dropped it on purpose.
+// - Ended: a cut after the turn's good result line is saved is not resumed: its reply is in (2A1).
 // - Idle: with nothing started or waiting, no `running` status, nothing queued, no held mail that nothing will release,
 //   no taken batch or owed resume, and no turn: or saving: record left that nothing acts on.
 // A failure names the flow, the cut, its step and what the task before it wrote, so it can be found again by hand.
@@ -37,6 +38,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Outbox } from '../src/outbox.ts';
+import { RESUME_PROMPT } from '../src/prompts.ts';
 import { Runner } from '../src/runner.ts';
 import { chainedStep, LiveWaiters, TimedWakes } from '../src/wake.ts';
 import { releaseFake, stopTurns, testPins } from './helpers.ts';
@@ -609,7 +611,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     kinds(store, r, outbox);
   }
   const problems: string[] = [];
-  const saved = store.getSetting<{ keepalive?: true }>(`turn:${id}`);
+  const saved = store.getSetting<{ keepalive?: true; result?: { error: boolean } }>(`turn:${id}`);
   const owedBefore = !!r.queue.get(id).owed;
   try {
     r.recover();
@@ -633,6 +635,8 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     // (not a restart) lands there, and it leaves the turn's own state; checked where a turn record or owed resume holds it.
     const parkedNow = (r as any).parkedAs.get(id) ?? { state: t.state, note: t.note };
     if (parkedAs && (saved || owedBefore) && !isDeepStrictEqual(parkedNow, parkedAs)) problems.push(`it was parked as ${JSON.stringify(parkedAs)}, but is now ${JSON.stringify(parkedNow)} with nothing to put that back`);
+    // A cut after its result line (2A1): its reply is in, so it ends there and is not told to carry on.
+    if (saved?.result && !saved.result.error && started.some((b) => b[0]?.text === RESUME_PROMPT)) problems.push('its reply was in, but it was resumed');
     const limit = r.limitWait(id);
     const net = r.netWait(id);
     const q = r.queue.get(id);

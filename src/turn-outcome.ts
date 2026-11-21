@@ -178,12 +178,14 @@ export function outcome(end: TurnEnd): Outcome {
   return { kind: 'failed', ...failed };
 }
 
-/** A restart found the turn's process gone: resumed, under the restart cap, unless stopped or set to close. */
+/** A restart found the turn's process gone: resumed, under the restart cap, unless stopped, set to close or its reply in. */
 function cutOutcome(turn: EndedTurn | null, r: Retries, rerun: boolean): Outcome {
   const base = { reason: null, killed: null, authFailed: false };
   if (turn?.stopped) return { kind: 'stopped', followUps: [], ...base };
   if (rerun) return { kind: 'killed', followUps: ['rerun'], ...base };
-  if (turn?.closing !== undefined) return { kind: 'killed', followUps: [], ...base };
+  // Its reply is in (a kill after a good result line): ended as the watched path ends it, killed with no resume (2A1).
+  // An error result (a limit, say) left the work undone, so it still resumes.
+  if ((turn?.result && !turn.result.error) || turn?.closing !== undefined) return { kind: 'killed', followUps: [], ...base };
   return { kind: 'killed', followUps: [], ...base, ...retry(r, 'restart') };
 }
 

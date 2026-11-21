@@ -169,6 +169,38 @@ test('a stalled minion gets exactly one suggestion to its Taskmaster, with the e
   assert.equal(w.store.getSetting<StallState>(stallKey(w.t.id))?.sent.length, 2);
 });
 
+test('the same stall going on after a step-up signals again at the new tier: the same test red, or ships failing (2R2)', () => {
+  const red = (w: ReturnType<typeof world>) => { for (let i = 0; i < 3; i++) for (const e of [run('citadel-test test/land.test.ts'), result(RED, true)]) w.watch.observe(w.t.id, e); };
+  const w = world();
+  red(w);
+  assert.equal(w.told.length, 1);
+  w.store.updateTicket(w.t.id, { effort: 'high' });
+  red(w);
+  assert.equal(w.told.length, 2, 'the same test red three more times at Opus high');
+  assert.match(w.told[1], /test\/land\.test\.ts › keeps the queue red 3 times/);
+  assert.match(w.told[1], /Opus 5\.5 high is Fable 5\.2 medium/);
+  red(w);
+  assert.equal(w.told.length, 2, 'still one suggestion per tier');
+  // Red three more times at a tier already told, then stepped up: the new tier still hears after its own three.
+  const u = world();
+  red(u);
+  red(u);
+  assert.equal(u.told.length, 1);
+  u.store.updateTicket(u.t.id, { effort: 'high' });
+  red(u);
+  assert.equal(u.told.length, 2, 'reds at a told tier are not carried past the step-up');
+  const v = world();
+  v.watch.shipFailed(v.t.id, 'conflict');
+  v.watch.shipFailed(v.t.id, 'flake');
+  assert.equal(v.told.length, 1);
+  v.store.updateTicket(v.t.id, { effort: 'high' });
+  v.watch.shipFailed(v.t.id, 'own-test');
+  assert.equal(v.told.length, 1);
+  v.watch.shipFailed(v.t.id, 'own-test');
+  assert.equal(v.told.length, 2, 'two more failed ships at Opus high');
+  assert.match(v.told[1], /kinds: own-test, own-test/);
+});
+
 test('at the top with Fable off it names no step-up; Taskmasters and closed minions get none', () => {
   const w = world('off');
   const by = w.t.created_by;

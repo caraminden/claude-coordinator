@@ -31,6 +31,7 @@ function world() {
   const told: { ticket: number; text: string }[] = [];
   const tm: string[] = [];
   const greens: string[] = [];
+  const flakes: string[] = [];
   let clock = 1_000_000;
   const fm = new FastMode({
     schemes: () => [{ id: PEEK, repo }],
@@ -46,14 +47,14 @@ function world() {
     env: (_p, t) => ({ WHO: String(t) }),
     ticketOf: (_p, n) => n + 1000, numberOf: (t) => t * 10,
     tell: (ticket, text) => told.push({ ticket, text }), taskmaster: (_p, text) => tm.push(text),
-    green: (_p, sha) => greens.push(sha), now: () => clock,
+    green: (_p, sha) => greens.push(sha), flakes: (_p, sha) => flakes.push(sha), now: () => clock,
   });
   /** The running job ends with `output`, and the next tick reads it. */
   const finish = async (output: string, code = output.includes('verify: green') ? 0 : 1) => {
     answer = { output, code };
     await fm.tick();
   };
-  return { repo, commit, fm, runs, finish, told, tm, greens, kv, tick: () => fm.tick(), wait: (ms: number) => (clock += ms) };
+  return { repo, commit, fm, runs, finish, told, tm, greens, flakes, kv, tick: () => fm.tick(), wait: (ms: number) => (clock += ms) };
 }
 const red = (...ids: string[]) => `${ids.map((id) => `verify: failing ${id}`).join('\n')}\nverify: red\n`;
 const GREEN = 'verify: green\n';
@@ -363,6 +364,34 @@ test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, a
   assert.equal(w.runs[1].sha, c2);
   const list = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: w.repo, encoding: 'utf8' });
   assert.match(list, /locked/, 'locked, so a prune from elsewhere leaves it alone');
+});
+
+test("a pass that throws after reading a finished red run tells its culprit once and writes its flake rows once (2R3)", async () => {
+  const w = world();
+  w.commit('one');
+  await w.tick();
+  await w.finish(GREEN);
+  const c2 = w.commit('two');
+  w.fm.landed(PEEK, 7, c2);
+  await w.tick();
+  // A stale lock in the fast-mode worktree: the next run's checkout throws after the red is read.
+  const wt = join(w.repo + '-run', String(PEEK), 'wt');
+  const lock = join(execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: wt, encoding: 'utf8' }).trim(), 'index.lock');
+  writeFileSync(lock, '');
+  w.commit('three');
+  const said = console.error;
+  console.error = () => {};
+  try {
+    await w.finish(red('test/x.test.ts'));
+    await w.tick();
+  } finally {
+    console.error = said;
+  }
+  assert.equal(w.told.length, 1, 'the culprit is told once');
+  assert.equal(w.told[0].ticket, 7);
+  assert.equal(w.flakes.filter((sha) => sha === c2).length, 1, "the red run's flake rows are written once");
+  assert.equal(w.runs.length, 2, 'no run started on the locked worktree');
+  rmSync(lock);
 });
 
 test("a failure that repeats is said once, and said again when it changes or after it clears", async () => {

@@ -127,4 +127,12 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
   await until('the second turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 2 && !runner.isRunning(id));
   assert.equal(notes().length, 1);
   assert.equal(wakes.length, 1);
+
+  // Nor after a dismissal and a reopen (2R1): the marks outlive the close.
+  await runner.close(id, 'Dismissed.');
+  writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
+  runner.send(id, 'Josh', 'reopened');
+  await until('the reopened turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 3 && !runner.isRunning(id));
+  assert.equal(notes().length, 1);
+  assert.equal(wakes.length, 1);
 });

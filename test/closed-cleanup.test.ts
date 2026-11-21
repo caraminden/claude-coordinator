@@ -14,7 +14,7 @@ const root = mkdtempSync(join(tmpdir(), 'closed-cleanup-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
-const KEYS = (id: number) => [`context:${id}`, `ctxwin:${id}`, `commands:${id}`, `plan:${id}`, `keepalive:${id}`, `minion_budget:${id}`, `asker:${id}`];
+const KEYS = (id: number) => [`context:${id}`, `ctxwin:${id}`, `commands:${id}`, `plan:${id}`, `keepalive:${id}`, `asker:${id}`];
 const notes = (store: Store, id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 
 test('dismissing a minion names its held mail in the chat and deletes its queue and per-minion rows', async () => {
@@ -23,11 +23,14 @@ test('dismissing a minion names its held mail in the chat and deletes its queue 
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(t.id, { status: 'idle' });
   for (const k of KEYS(t.id)) store.setSetting(k, 1);
+  store.setSetting(`minion_budget:${t.id}`, { asked: 1, woke: 2 });
   const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
   runner.queue.hold(t.id, { author: 'Held mail from Taskmaster', text: 'build 3 merged', images: [] }, Date.now());
   await runner.close(t.id, 'Dismissed.');
   assert.equal(store.getSetting(`minion-queue:${t.id}`), null);
   for (const k of KEYS(t.id)) assert.equal(store.getSetting(k), null, k);
+  // Its budget marks stay (2R1): each is once ever, so a reopen past them isn't asked again.
+  assert.deepEqual(store.getSetting(`minion_budget:${t.id}`), { asked: 1, woke: 2 });
   assert.ok(notes(store, t.id).some((n) => n.startsWith('Dismissed before this message was read: Held mail from Taskmaster: build 3 merged')), notes(store, t.id).join('\n'));
   store.db.close();
 });

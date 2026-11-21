@@ -211,6 +211,8 @@ export class FastMode {
       if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
     }
     this.escalate(projectId, s);
+    // Saved before more git: a throw from here on mustn't leave the finished run in `running`, read (and told) again (2R3).
+    save();
     const next = s.pin ? s.pin.shas[s.pin.next] : await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);
     if (next && (s.pin || (next !== s.verified && next !== s.stuck))) await this.start(projectId, repo, s, next);
     save();

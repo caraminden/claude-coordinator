@@ -129,7 +129,8 @@ process.stdin.on('data', (d) => {
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '.', session_id: session, total_cost_usd: cost, duration_ms: 1000, usage }));
     process.exit(0);
   };
-  if (text.includes('Keepalive')) return end();
+  // A keepalive ends at once, unless a test holds it open (hold-keepalive): then it waits for its release file too.
+  if (text.includes('Keepalive') && !existsSync(${JSON.stringify(join(root, 'hold-keepalive'))})) return end();
   const wait = setInterval(() => {
     if (!existsSync('release')) return;
     clearInterval(wait);
@@ -163,6 +164,7 @@ const callCount = () => lines(calls).length;
 const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
 const series = (id: number) => store.getSetting<KeepaliveSeries>(keepaliveKey(id));
 const turnsOf = (id: number) => store.listTurns(id);
+const notesOf = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const idle = (id: number) => until('the lane to go idle', () => !runner.isRunning(id) && !(runner as any).lanes.busy(id));
 
 /** Run a real turn to its end, then move its end (and its series' start) to `end`, so a sweep's clock can be Pacific noon. */
@@ -272,6 +274,90 @@ test('a real wake that arrives while a keepalive waits goes first, and the keepa
   await idle(id);
   assert.equal(callCount(), before + 1, 'no keepalive behind it');
   assert.ok(!turnsOf(id).some((t) => t.keepalive));
+});
+
+// 2A2 (#1510): a keepalive sweep that lands between recover() and its staggered resumes leaves the owed resume alone,
+// whether the keepalive would have run (and taken the resume's place) or backed out (and held the cut turn's batch as mail).
+for (const [name, dirty] of [['would run', false], ['would back out on a changed prompt', true]] as const) {
+  test(`no keepalive on a minion with a restart's resume owed: one that ${name}`, async () => {
+    const id = minion();
+    const end = pst(15);
+    await realTurn(id, end);
+    if (dirty) writeFileSync(join(store.getTicket(id)!.cwd, 'CLAUDE.md'), '# new rules\n');
+    // A restart cut its next turn off after claude read its batch: the batch stays taken, and the resume is owed.
+    runner.queue.put(id, { author: 'Josh', text: 'the cut turn read this', images: [] });
+    runner.queue.take(id);
+    runner.queue.owe(id, { resumes: 1 });
+    try {
+      const before = callCount();
+      runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+      await idle(id);
+      assert.equal(callCount(), before, 'no keepalive ran');
+      assert.deepEqual(runner.queue.owed(id), { resumes: 1 }, 'the resume is still owed');
+      const q = runner.queue.get(id);
+      assert.deepEqual(q.taken?.map((m) => m.text), ['the cut turn read this'], 'its batch is still taken, for the resume');
+      assert.equal(q.held, undefined, 'not turned into held mail');
+      assert.equal(series(id)!.stopped, undefined);
+    } finally {
+      runner.queue.owe(id, null);
+      runner.queue.clear(id);
+    }
+  });
+}
+
+// 2A3 (#1510): a dismissal or a live deploy that comes while a hidden keepalive runs waits for it, as for any turn, and
+// the keepalive's end carries it out, leaving no mark behind for the next real turn's end.
+async function duringKeepalive(id: number, end: number, mid: () => void) {
+  writeFileSync(join(root, 'hold-keepalive'), '');
+  try {
+    const before = callCount();
+    const pings = turnsOf(id).filter((t) => t.keepalive).length;
+    runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+    await until('the keepalive to run', () => callCount() > before && runner.isRunning(id));
+    mid();
+    writeFileSync(join(store.getTicket(id)!.cwd, 'release'), 'ok');
+    // Its end, not the lane's: a message that came meanwhile runs next.
+    await until('the keepalive to end', () => turnsOf(id).filter((t) => t.keepalive).length > pings);
+    await until('its session save', () => !(runner as any).keepalives.has(id) && !store.getSetting(`saving:${id}`));
+  } finally {
+    rmSync(join(root, 'hold-keepalive'), { force: true });
+  }
+  assert.equal((runner as any).closing.has(id), false, 'no dismissal mark left');
+  assert.equal((runner as any).deployedMidTurn.has(id), false, 'no deploy mark left');
+}
+
+test('a fix minion whose red goes green during a keepalive is dismissed when it ends (2A3)', async () => {
+  const id = minion();
+  const end = pst(15);
+  await realTurn(id, end);
+  await duringKeepalive(id, end, () => runner.ciGreen(id, 'CI on main is green again, so it dismissed this fix minion.'));
+  await until('it is dismissed', () => store.getTicket(id)!.status === 'closed');
+  assert.ok(notesOf(id).includes('CI on main is green again, so it dismissed this fix minion.'));
+});
+
+test('a dismissal during a keepalive is not carried out past a message that came meanwhile (2A3)', async () => {
+  const id = minion();
+  const end = pst(15);
+  await realTurn(id, end);
+  await duringKeepalive(id, end, () => {
+    runner.ciGreen(id, 'CI on main is green again, so it dismissed this fix minion.');
+    runner.send(id, 'Cara', 'one more thing');
+  });
+  assert.ok(notesOf(id).includes('CI on main is green again. It stays open: a new message arrived.'));
+  writeFileSync(join(store.getTicket(id)!.cwd, 'release'), 'ok');
+  await idle(id);
+  assert.notEqual(store.getTicket(id)!.status, 'closed', "the message's turn ending well doesn't dismiss it with the old reason");
+});
+
+test('a deploy that goes live during a keepalive is handled when it ends (2A3)', async () => {
+  const id = minion();
+  const end = pst(15);
+  await realTurn(id, end);
+  // Waiting on its deploy, with a card open (the only way a keepalive runs in pending-deploy).
+  store.updateTicket(id, { state: 'pending-deploy' });
+  store.addEvent(id, 'question', { id: 'q1', questions: [] });
+  await duringKeepalive(id, end, () => assert.equal(runner.deployLive(id), false, 'it waits for the running turn'));
+  assert.ok(notesOf(id).includes('The deploy is live, but a question card is still open, so this minion stays open.'));
 });
 
 test('no keepalive outside the window or past the 8-hour cap', async () => {

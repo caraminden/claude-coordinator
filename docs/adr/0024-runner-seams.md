@@ -77,7 +77,8 @@ Decision: Cara, 2026-11-20, on #1310's card, picked "One queue per minion; One t
   turn's batch is never given back either, even when the stop came before its process ran.
 - Unpark sends its wake before clearing `parked`, so a crash between the two leaves the minion parked with its mail.
 - Closing a minion empties its queue, names whatever was still waiting in a chat note ("Dismissed before this message
-  was read: …"), and deletes its per-minion keys (context, window, commands, plan, keepalive, budget, asker). A boot
+  was read: …"), and deletes its per-minion keys (context, window, commands, plan, keepalive, asker). Its budget marks stay, one small
+  row per dismissed minion, so a reopen past them isn't asked again or its Taskmaster woken twice (#1510). A boot
   does the same for any closed minion whose queue holds more than held mail; held mail stays, since mail sent after a
   dismissal waits for a reopen (#783).
 - `test/restart-anywhere.test.ts` checks the one invariant, now including parked mail and a stop, and is green with

@@ -51,6 +51,9 @@ const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
   ['a restart cut it off before claude had its prompt', end({ cut: { rerun: true } }), { kind: 'killed', followUps: ['rerun'], retry: undefined }],
   ['a restart cut off a stopped turn', end({ turn: { stopped: true }, cut: { rerun: true } }), { kind: 'stopped' }],
   ['a restart cut off a turn set to close', end({ turn: { closing: 'done' }, cut: { rerun: false } }), { kind: 'killed', retry: undefined, spent: undefined }],
+  // 2A1: a kill after the result line, read by recover's reattach: ended as the watched path ends it, not resumed.
+  ['a restart cut it off after its result', end({ turn: { result: ok }, cut: { rerun: false } }), { kind: 'killed', followUps: [], retry: undefined, spent: undefined }],
+  ['a restart cut it off after an error result: still resumed', end({ turn: { result: { error: true, text: LIMIT } }, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 1 } } }],
 ];
 
 for (const [name, input, want] of rows) {

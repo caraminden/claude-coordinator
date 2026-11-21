@@ -58,7 +58,7 @@ export interface Signal { kind: SignalKind; what: string; evidence: string[] }
 
 /** One minion's counts, kept in settings between events (stallKey). shortcut: kept after the minion closes (under 1 KB each); sweep them if settings grow. */
 export interface StallState {
-  /** Test name → times red. shortcut: never reset by a later green (a run doesn't say which tests it ran); fine while thresholds are this low. */
+  /** Test name → times red, since the last suggestion sent. shortcut: not reset by a later green (a run doesn't say which tests it ran); fine while thresholds are this low. */
   reds: Record<string, number>;
   /** Bash tool_use id → its command, while it waits for its result. */
   pending: Record<string, string>;
@@ -67,7 +67,7 @@ export interface StallState {
   rounds: Record<string, number>;
   /** Files edited since the newest failed check. */
   touched: string[];
-  /** The failed ships' kinds, oldest first. */
+  /** The failed ships' kinds since the last suggestion sent, oldest first. */
   ships: string[];
   /** Tiers (`model effort`) already suggested a step-up from. */
   sent: string[];
@@ -178,7 +178,10 @@ export class StallWatch {
     if (!t || t.kind === 'coordinator' || t.status === 'closed') return;
     const [model, effort] = [t.model ?? t.last_model, t.effort ?? t.last_effort];
     const tier = `${model ?? 'none'} ${effort ?? 'none'}`;
-    if (s.sent.includes(tier)) return;
+    // Counted afresh once told (here or below), so the same stall going on at the next tier reaches its threshold again (2R2).
+    const afresh = () => Object.assign(s, { reds: {}, rounds: {}, ships: [] });
+    // Its Taskmaster already has this tier's suggestion: these counts are covered by it.
+    if (s.sent.includes(tier)) return void this.d.store.setSetting(stallKey(ticketId), afresh());
     const fable = this.d.store.getProject(t.project_id)?.fable_ok !== 'off';
     const next = nextStep(model, effort, fable);
     const now = tierLabel(model, effort);
@@ -191,6 +194,7 @@ export class StallWatch {
     const text = `Stall signal on #${t.number} ${t.title}:\n${lines.join('\n')}\n${step} A suggestion only: nothing was changed. Skip it when the cause isn't the model (a flake, CI or a runner, a merge conflict, a person's answer it waits on), and say which you did in one line.`;
     // No Taskmaster to tell (a scheme without one yet): nothing is recorded, so the minion's next tier isn't spent.
     if (!this.d.tell(t, text)) return;
+    afresh();
     s.sent.push(tier);
     this.d.store.setSetting(stallKey(ticketId), s);
     this.d.note(ticketId, `Stall signal: ${signals.map((g) => g.what).join('; ')}. Suggested ${next ? tierLabel(next.model, next.effort) : 'a look'} to the Taskmaster; nothing changed.`);

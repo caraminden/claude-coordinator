@@ -242,3 +242,27 @@ test("a turn that vanished while the server was down keeps the text it wrote mea
   await until('after.isRunning(id)', () => after.isRunning(id));
   await finish(after, id);
 });
+
+// 2A1 (#1510): a turn killed outright after its result line, while no server watched, is not resumed: recover's
+// reattach reads the result from its stream, and the turn ends as the watched path ends it (killed, no retry).
+test('a turn whose reply came in while the server was down is not resumed after the restart (2A1)', async () => {
+  const id = newTicket();
+  const before = server();
+  before.send(id, 'Cara', 'answer me');
+  const dir: string = (before as any).turns.get(id).dir;
+  await crash(before, id);
+  writeFileSync(prompts, '');
+  const words = 'The whole answer, written while the server was down.';
+  appendFileSync(join(dir, 'stream.jsonl'), `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: words }] } })}\n${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: words })}\n`);
+  const after = server();
+  after.recover();
+  await settle();
+  const events = store.listEvents(id);
+  assert.ok(events.some((e) => e.data.includes(words)), 'its reply reached the chat');
+  assert.ok(events.some((e) => e.kind === 'note' && e.data.includes('Its reply was already in, so it was not resumed.')), 'the note says why it was not resumed');
+  assert.ok(!events.some((e) => e.kind === 'note' && /Resumed after a server restart/.test(e.data)), 'no resume');
+  assert.equal(after.isRunning(id), false);
+  assert.equal(readFileSync(prompts, 'utf8'), '', 'no turn was told to carry on');
+  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'no resume is owed');
+  after.detachAll();
+});

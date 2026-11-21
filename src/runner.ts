@@ -1133,7 +1133,8 @@ export class Runner {
   }
 
   private closedRows(ticketId: number) {
-    for (const key of [contextKey(ticketId), windowKey(ticketId), commandsKey(ticketId), planKey(ticketId), pagePlanKey(ticketId), keepaliveKey(ticketId), budgetKey(ticketId), askerKey(ticketId)]) this.store.deleteSetting(key);
+    // Not its budget marks: each is once ever per minion, so a reopen isn't asked and its Taskmaster woken again (2R1).
+    for (const key of [contextKey(ticketId), windowKey(ticketId), commandsKey(ticketId), planKey(ticketId), pagePlanKey(ticketId), keepaliveKey(ticketId), askerKey(ticketId)]) this.store.deleteSetting(key);
   }
 
   /**
@@ -1577,7 +1578,7 @@ export class Runner {
           later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
         }
         if (cut) {
-          const turn = this.store.getSetting<TurnState>(turnKey(t.id));
+          let turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // What the turn set and reads later (#1452): kept for a re-attached turn's end, or the resume that carries it on.
           if (turn?.from) this.turnFrom.set(t.id, turn.from);
           if (turn?.parkedAs) this.parkedAs.set(t.id, turn.parkedAs);
@@ -1590,8 +1591,10 @@ export class Runner {
           }
           // Its turn is gone, so nobody's click can count for them now.
           this.approvals.endTurn(t.id, 'The server restarted while this waited.');
-          // Its trailer, as last saved (a vanished turn's result, read by reattach, applied it): only its resume's end applies it.
-          const status = this.store.getSetting<TurnState>(turnKey(t.id))?.status;
+          // Read again: a vanished turn's stream, read by reattach, may have saved its result and trailer (2A1).
+          turn = this.store.getSetting<TurnState>(turnKey(t.id)) ?? turn;
+          // Its trailer, as last saved: only its resume's end applies it.
+          const status = turn?.status;
           this.statuses.delete(t.id);
           // With its record gone (a crash after the resume was owed), the owed resume's carry stands.
           const carry = turn ? { ...(turn.from ? { from: turn.from } : {}), ...(turn.parkedAs ? { parkedAs: turn.parkedAs } : {}), ...(status ? { status } : {}) } : this.queue.owed(t.id)?.carry ?? {};
@@ -1629,7 +1632,7 @@ export class Runner {
             continue;
           }
           if (!resumed) {
-            const skipped = out.spent ? `It was not resumed: it had already been resumed ${out.spent.tries} times in a row.` : 'It was set to be dismissed, so it was not resumed.';
+            const skipped = out.spent ? `It was not resumed: it had already been resumed ${out.spent.tries} times in a row.` : turn?.result && !turn.result.error ? 'Its reply was already in, so it was not resumed.' : 'It was set to be dismissed, so it was not resumed.';
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
             this.queue.done(t.id);
             if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
@@ -2609,6 +2612,8 @@ export class Runner {
     if (t.kind === 'coordinator') return 'taskmaster';
     if (!t.session_id || !t.cwd) return 'no session';
     if (t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id)) return 'busy';
+    // A restart's resume still to start (2A2): a keepalive would take its place, or back out and hold its batch as mail.
+    if (this.queue.owed(t.id)) return 'resume owed';
     if (this.limitWait(t.id)) return 'limit wait';
     if (this.netWait(t.id)) return 'net wait';
     if (this.killWait(t.id)) return 'kill wait';
@@ -3570,6 +3575,11 @@ export class Runner {
   /** A keepalive's end (#862): nothing in the chat or the minion's row; a failure stops its series. Its session is saved as any turn's. */
   private wrapUpKeepalive(ticketId: number, live: LiveTurn, turn: TurnState | null, exit: { code: number | null; signal: string | null; error?: string } | null) {
     this.statuses.delete(ticketId);
+    // A dismissal (ciGreen, a land) or a live deploy that came while it ran waited for it, as for any turn (2A3): handed on below.
+    const closing = this.closing.has(ticketId);
+    const closeReason = this.closing.get(ticketId) ?? null;
+    this.closing.delete(ticketId);
+    const deployed = this.deployedMidTurn.delete(ticketId);
     if (turn?.stopped || !exit || exit.signal || exit.code !== 0 || !turn?.result || turn.result.error) {
       console.log(`[keepalive] minion ${ticketId}: its keepalive failed (${exit?.error ?? turn?.result?.text ?? `exit ${exit?.code ?? exit?.signal ?? 'unknown'}`}), so its series stops`);
       this.stopSeries(ticketId, 'failed');
@@ -3579,6 +3589,14 @@ export class Runner {
       this.store.deleteSetting(savingKey(ticketId));
       return live.end();
     }
+    // Not running now, so each acts as it would have on the idle minion; a message that came in meanwhile keeps it open.
+    // Even after a failed keepalive: unlike a real turn's, its failure is hidden upkeep and says nothing about the dismissal.
+    if (closing) {
+      const keep = this.queue.msgs(ticketId).some((m) => !m.fyi) ? 'a new message arrived' : this.keptOpen(ticketId);
+      if (keep) this.emit(ticketId, 'note', { text: `${(closeReason ?? 'It was set to be dismissed.').replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open: ${keep}.` });
+      else void this.close(ticketId, closeReason ?? 'Claude dismissed this minion.');
+    }
+    if (deployed) this.deployLive(ticketId);
     // A message that came in meanwhile waits behind it in the queue, as behind any turn.
     this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
   }

@@ -8,13 +8,16 @@ import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
 import { AppServices, folderHolds, manifestOn, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
-import { fakeSystemd } from './helpers.ts';
+import { fakeSystemd, settled } from './helpers.ts';
 import { until } from './wait.ts';
 
 // Citadel writes and runs contraptions' user services (#266). Everything here runs against a stand-in
 // systemctl and a temp unit folder: never the real ones.
 const root = mkdtempSync(join(tmpdir(), 'app-services-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await settled(); // a deploy or install check still going writes into root's logs (#1437)
+  rmSync(root, { recursive: true, force: true });
+});
 // Build steps take a slot from the real tools/citadel-heavy (#847), in a lock folder of the test's own.
 const heavyDir = join(root, 'heavy');
 process.env.CITADEL_HEAVY_DIR = heavyDir;
@@ -827,11 +830,12 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     const hooks = { setIcon: (i: string) => (icons.push(i), true), todo: (t: string[]) => todos.push(t), unchecked: (l: string) => notes.push(l) };
     // Both tries fail: one plain line, no to-do, no rail icon complaint.
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
-    const d = await done(name);
+    // The deploy and its install check's retry are both tracked (#1437): settled once the retry has said its line.
+    await settled();
+    const d = (await services.lastDeploy(name))!;
     assert.equal(d.state, 'deployed');
     assert.deepEqual([d.todo, todos], [[], []]);
     assert.ok(!d.said.some((l) => /^To do|rail icon/.test(l)), d.said.join('\n'));
-    await until('the unchecked line', () => notes.length > 0, 5000);
     assert.deepEqual(notes, [`Couldn't check how ${name} installs: ${home} answered 503. Nothing to do unless it repeats.`]);
     // The retry gets through: the icon is filled from the manifest and nothing is said about lacking.
     notes.length = 0;
@@ -841,10 +845,7 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     svc.removeAllListeners('request');
     svc.on('request', (q, s) => { if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x'); orig(q, s); });
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
-    await done(name);
-    // The to-do hook is the last thing the retry does (after the icon and a log line), so wait for it, not the icon:
-    // a poll between the two saw todos still empty under load.
-    await until('the retry to finish', () => todos.length > 0, 5000);
+    await settled();
     assert.deepEqual([icons, notes, todos], [['/icon-192.png'], [], [[]]]);
   } finally {
     svc.close();

@@ -18,6 +18,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
+import { track } from './settled.ts';
 import { listSnapshots, restoreSnapshot, snapshotsDir, takeSnapshot, type Snapshot } from './app-snapshots.ts';
 
 /** The manifest's file name, in the app's folder. */
@@ -812,7 +813,7 @@ export class AppServices {
     const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
     const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], todo: [], log, stages: { build: started } };
     this.deploys.set(row.name, view);
-    void this.deployNow(row, view, all, identity, hooks)
+    void track('app deploys', this.deployNow(row, view, all, identity, hooks)
       .catch((err) => {
         view.said.push(`Failed: ${err.message}`);
         view.state = 'failed';
@@ -825,7 +826,7 @@ export class AppServices {
         view.finished_at = Date.now();
         this.safely(view);
         await this.pruneLogs(row.name).catch(() => {});
-      });
+      }));
     return view;
   }
 
@@ -1122,18 +1123,21 @@ export class AppServices {
     const first = await check(5000);
     if (!first.unchecked) return finish(first);
     await say(`Couldn't check how it installs: ${first.unchecked}. Trying again shortly.`);
-    const timer = setTimeout(async () => {
-      try {
-        const again = await check(20_000);
-        if (!again.unchecked) return await finish(again);
-        const line = `Couldn't check how ${row.name} installs: ${again.unchecked}. Nothing to do unless it repeats.`;
-        await say(line);
-        hooks.unchecked?.(line);
-      } catch (err) {
-        console.error(`${row.name}'s install check retry failed:`, err);
-      }
-    }, this.opts.installRetryMs);
-    timer.unref();
+    void track('install check retries', new Promise<void>((done) => {
+      setTimeout(async () => {
+        try {
+          const again = await check(20_000);
+          if (!again.unchecked) return await finish(again);
+          const line = `Couldn't check how ${row.name} installs: ${again.unchecked}. Nothing to do unless it repeats.`;
+          await say(line);
+          hooks.unchecked?.(line);
+        } catch (err) {
+          console.error(`${row.name}'s install check retry failed:`, err);
+        } finally {
+          done();
+        }
+      }, this.opts.installRetryMs).unref();
+    }));
   }
 
   /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */

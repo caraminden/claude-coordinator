@@ -1049,7 +1049,7 @@ const ORDER_SHIP_LINE = {
 /** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
 const PUBLISH_DESKTOP = {
   name: 'publish_desktop',
-  description: `Publish a Windows desktop app's build to its update feed on the ${APP_NAME} server, for apps run by the kit's desktop launcher (the citadel:desktop-app skill). Give the build as path (a .zip, .tar.gz or .tgz of the app's folder that you made) or ci_file (a file id in this scheme's CI store; ci_files lists them). It gets the next build number; PCs running the app download it in the background, check its SHA-256 and switch on their next start, keeping the old build if the new one doesn't start. A ci target with "desktop" in citadel-app.json publishes its green runs by itself; this is for builds made elsewhere and for a first build. The reply has the feed's URL and the first-install zip's.`,
+  description: `Publish a Windows desktop app's build to its update feed on the ${APP_NAME} server, for apps run by the kit's desktop launcher (the citadel:desktop-app skill). Give the build as path (a .zip, .tar.gz or .tgz of the app's folder that you made) or ci_file (a file id in this scheme's CI store; ci_files lists them). It gets the next build number; PCs running the app download it in the background, check its SHA-256 and switch on the start after next, keeping the old build if the new one doesn't start. A ci target with "desktop" in citadel-app.json publishes its green runs by itself; this is for builds made elsewhere and for a first build. The reply has the feed's URL and the first-install zip's.`,
   inputSchema: {
     type: 'object',
     properties: {

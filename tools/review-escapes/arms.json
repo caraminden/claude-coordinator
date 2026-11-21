@@ -1,0 +1,9 @@
+{
+  "about": "Reviewer arms for tools/review-escapes (#1505). Each runs the kit's citadel:reviewer agent with the brief citadel:self-review gives it; lens adds one lens to that brief.",
+  "arms": [
+    { "name": "sonnet", "model": "sonnet", "effort": "medium", "about": "the reviewer as it ships: its pinned Sonnet at medium" },
+    { "name": "opus", "model": "opus", "effort": "high", "about": "the same reviewer on Opus high, as self-review runs it on a high-risk change" },
+    { "name": "lens", "model": "sonnet", "effort": "medium", "about": "Sonnet medium with one more lens: the inputs, states and orders the change never exercised",
+      "lens": "Lenses: by the diff, plus this one, run as if it were an Always lens.\n\n**Never exercised.** For each new or changed branch of logic, list the inputs, states and orders it will meet in real use that neither its tests nor the author's own path exercise: an empty, missing or malformed value; the first run, a restart, or data left from before the change; two callers at once, the same event twice, or events in the other order; a timeout or failure halfway; another scheme, person, platform or time zone than the one the change was built for. Trace the two or three likeliest through the code. A finding names the input or state, the line it reaches and the wrong result it gives; a case the code already handles is not a finding. In the audit, list the cases you traced." }
+  ]
+}

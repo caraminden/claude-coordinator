@@ -1,0 +1,919 @@
+{
+ "about": "Escape set for the pre-ship reviewer (#1505). escape: a change a later minion had to fix, with that defect; clean: a same-size change nobody had to fix (the pairs table of #1493 names no fix for it). base/head: the shipped branch as main's commits; picks: its commits when other work landed between them.",
+ "cases": [
+  {
+   "id": "escape-266",
+   "kind": "escape",
+   "origin": 266,
+   "title": "Citadel writes and runs contraptions' user services: citadel-app-<name>.service (and -<job> timers) from the registry an",
+   "lines": 1434,
+   "base": "9831ad442a6cc35fc77ab3c1ce449e52f3bdd0d3",
+   "picks": [
+    "93a0515ff9ef6c81f52c3888c95b4741737c047b",
+    "1bab01b8c0c865f998e1a4ab2878ea685b8d2ac4"
+   ],
+   "defects": [
+    {
+     "fix": 801,
+     "title": "Contraption deploys: build before swap",
+     "why": "Peek report: #266's deploy_contraption pulls files into the live folder then builds, so the running app reads half-updated files.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "6e6b89f7664d96d52bb1b18981bf12c8f56f53f5",
+      "ffe9f638dd0e829970e3491627d1748619f7b39f",
+      "982c4e67df6c846756b0557bdfb619bd06810eae",
+      "f670d5b84ae487b2d5974bcc1205fe13c7402f1d",
+      "edebbe98e1e7472661cf2f1d2ec80af3caf2b496"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-331",
+   "kind": "escape",
+   "origin": 331,
+   "title": "Semantic memory, phase 1 (#331): memory_chunks table, background indexer for one scheme, /api/projects/:project/memory a",
+   "lines": 664,
+   "base": "f450be4507ac48f3839643af06eb3019556bc515",
+   "head": "071eae9a6dce50a20a5497367652696cec38d725",
+   "defects": [
+    {
+     "fix": 1453,
+     "title": "Semantic memory surrogates and boot load",
+     "why": "#331's semantic memory chunker split a surrogate pair (emoji) and the embedder halted indexing; found by #1448 report",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "dc89ca351d5fc6e9a1b3217b2b98c8f90ae451d7"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-368",
+   "kind": "escape",
+   "origin": 368,
+   "title": "CI health rules and poller (#368), Mandate call split out",
+   "lines": 730,
+   "base": "52c86af08a5dc5b4c79e022aec900c4ad5c72f3e",
+   "head": "43608ad9e262aafccf79ccdf3044c2f087214528",
+   "defects": [
+    {
+     "fix": 509,
+     "title": "CI-health alert re-sent at midnight",
+     "why": "#368's alert title dropped the date and changed across midnight, re-sending; test used Date.now().",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "5ed16c70872ecba1b5ddfdb1abbad05add9a81cb"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-389",
+   "kind": "escape",
+   "origin": 389,
+   "title": "Clicks never freeze Citadel's UI, batch one (#389): optimistic() for dismiss/reopen, pin, the person note, the model/eff",
+   "lines": 438,
+   "base": "8d9311a8a5c8cf4aa4da5579c10ff321384f8c07",
+   "head": "b6342329c251ddede5296d3bce62ecfc5110af0e",
+   "defects": [
+    {
+     "fix": 399,
+     "title": "Optimistic undo restores stale state",
+     "why": "Brief: #389's undo guards leave the screen wrong after two failed clicks; found by #393's critic trial.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "f66ea70bc371aef073cc28097f566f18ffc9d45a",
+      "79aec10f3a5c98e09829ad3d8b57c41e5fd12064"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-417",
+   "kind": "escape",
+   "origin": 417,
+   "title": "Mock pages send answers directly (#417): a page's Send posts as the person to the minion that showed it (POST /api/artif",
+   "lines": 448,
+   "base": "d42f611841269cf67ff17b5502daa23f5bcd58d7",
+   "head": "155e20f550d32c26c813051036f2c494ed0a459b",
+   "defects": [
+    {
+     "fix": 420,
+     "title": "Mock Send posts repeats",
+     "why": "Brief: #417's Send only dropped repeats while in flight, so unchanged picks posted again; found by #419.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "80d0ee381318c968643c85e3aa7af883a62ebf1a"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-531",
+   "kind": "escape",
+   "origin": 531,
+   "title": "The link check sends back once a reply that links an answered, settled or dismissed card as if it still waited, naming w",
+   "lines": 236,
+   "base": "1e72af99d957b17e4177eae7eef116cf8722e3de",
+   "head": "996155e37ee2829b06fd1548f3fbcb10e39846ca",
+   "defects": [
+    {
+     "fix": 610,
+     "title": "Mail no longer answers cards",
+     "why": "Peek's Taskmaster: held mail from another Taskmaster counted as a card's answer in #531's openCards/recentCards logic.",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "6b2fc87b3da1b80929d375af279f71ea26b65cbe"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-537",
+   "kind": "escape",
+   "origin": 537,
+   "title": "WIP: land.sh template with an optional CI gate and a stacked line (#537)",
+   "lines": 1095,
+   "base": "41ec47a9bdf108a0b2da856220e3aad39e7b72cd",
+   "head": "7cc20607338634eca9de7878a1b221ee20a5757e",
+   "defects": [
+    {
+     "fix": 560,
+     "title": "Desktop CI suite hangs silently",
+     "why": "Brief and commit: #537's stacked landing in the land template threw its build away and polled forever, causing the CI hangs.",
+     "cause": "untested-case",
+     "foundBy": "monitor",
+     "fixCommits": [
+      "5827704fdfe6313be45bf07d847fc8c07d35988e",
+      "4d9eedeeaf22b8abff8504e9e0e4392170b9cd81"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-553",
+   "kind": "escape",
+   "origin": 553,
+   "title": "Drill batch 1, tests first (#553): a bad commit can't stay on main",
+   "lines": 1091,
+   "base": "eb29c06bc9418e5e4ae5fb6b3dddc930d9b164f4",
+   "picks": [
+    "96c445a7e03792bee125cf5306ee7eb63235a660",
+    "e5fc719d90e0ecf5dd17801e7637598585eae268",
+    "e7cbcf8195b7b8934d2ee59db6589c5fa252a7b3",
+    "a19038bbcdeed244373ca8f35e42bf0ed63c9c9a",
+    "6f22f61b259c5c0dc10dae4aaf93224fb9c77b93",
+    "8e56af69bc977cacf9a4b02eb34d8350f665c3fd",
+    "6f878e9c98dbe6d1748f843d44ef3fef8e5aec29",
+    "f250b9f8e8f141eccd40343d47ffe801b6457c62",
+    "64aab0f94e79297cb3f54a8ee3c7f07c6572d51e",
+    "19245c6ea54dd67fdb240f0814a9c553f204b5af",
+    "f0818f333570044ff8d293a94fe3308d3d5def3a"
+   ],
+   "defects": [
+    {
+     "fix": 585,
+     "title": "Frozen waiters seen as stopped",
+     "why": "#553's stopped-waiter handling missed cgroup-frozen waiters (state S); found by #577's drill.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "5f3d19718b0518f40431c9035571957de1a4209d"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-627",
+   "kind": "escape",
+   "origin": 627,
+   "title": "#627: release targets found from each scheme's contraptions and workflows, and the contraption reader with its deploy hi",
+   "lines": 1981,
+   "base": "9544b2227c9e2a680c399613fea06f9e5f5d2d66",
+   "picks": [
+    "3d781580869f9fc43ec1d32636a6cc2f0b297ca6",
+    "0dd43f5fef6cce59eff99e316105f63a02ac01ec",
+    "b47041a77fc13bcd33e4e6701891e7f5318a6fb3",
+    "5aec20f119b85c6e356271ad3c69cb840249c1c5",
+    "2f4c02933923dbd1575d85142d9f8b64625b0564",
+    "d54d20d6f96de6af84fda4994149b9cf0b0fc52d",
+    "4b29af1b4cace7c3aa711935b42c6825914b6590",
+    "2b5f6e823934062a0ffbe16dd26187912c30c0cf"
+   ],
+   "defects": [
+    {
+     "fix": 655,
+     "title": "Releases miss PRs in other schemes",
+     "why": "Josh: landing PR missing from Releases; #627 gave Main (the only PR reader) only to schemes with no other target.",
+     "cause": "incomplete",
+     "foundBy": "person",
+     "fixCommits": [
+      "75d6af2cef899e4e97e3ecbb7081ebdb929cb2c7"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-630",
+   "kind": "escape",
+   "origin": 630,
+   "title": "#630: the readout names its times: the step's against its guess and the whole plan's under the bar (Cara's pick 1); the ",
+   "lines": 393,
+   "base": "1f1dc1d752494b07087f2574a24731a48a6d0378",
+   "picks": [
+    "6e2343ea2860070572409e40f6f3811cccb36b52",
+    "3c6df9fbb79b878f9e0bffb115d21f3709ca9a9f",
+    "cc939e640f8096ffeebd7600195b9c04222257a1",
+    "60ae091c246c40863f2aad52607b1ec9d99ab55b",
+    "30c36c6ba645f39d05b39894175f355a61f4fb46",
+    "e9f91cc4f7b0b288c3fcab8589b41ec80b373caf",
+    "715802ed8070b41c0f80c5ada2f455c952674d08",
+    "561130459251bbd424fb731fff8fd133a0d6adaa",
+    "5ec4d2dfadb67d122129834029ce949e1c6e7722",
+    "b2022b13593a6ce0d6d9149431cf292c6ef38ee9"
+   ],
+   "defects": [
+    {
+     "fix": 746,
+     "title": "One fill per wait on the step track",
+     "why": "Cara: two underway steps both filled from one job's timer; #630's progressPieces shared the wait clock with every 'i' step.",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "3d49b50c0812fc91907bdbf545ba0a5a4b4502ea"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-658",
+   "kind": "escape",
+   "origin": 658,
+   "title": "#658: Citadel's own CI store on perigee (Josh: \"can we just store artifacts ourselves? either way we should definitely h",
+   "lines": 1231,
+   "base": "1d155d7f50d7e138967b9120ec65362c67cf631d",
+   "head": "dbe1557a9011436fbfacc075287e59974b883402",
+   "defects": [
+    {
+     "fix": 846,
+     "title": "CI store refused a valid run token",
+     "why": "CI store from #658 refused a real run token after restart emptied key map; journal showed first key read timed out",
+     "cause": "live-only",
+     "foundBy": "monitor",
+     "fixCommits": [
+      "483ccc75c0463effbd6c398302fb566de455eba6"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-687",
+   "kind": "escape",
+   "origin": 687,
+   "title": "#687: cards addressed to one person (to, urgent, notice): their Needs-you list and devices only, across their schemes; t",
+   "lines": 511,
+   "base": "a8ecd083a7812a9104fa75253de82f91bf956d2b",
+   "head": "8d3bee0d64b1fbd3bf70e5ed5622d1e14a2f0c98",
+   "defects": [
+    {
+     "fix": 812,
+     "title": "Unrelated message counts as card answer",
+     "why": "Cara got a duplicate card because settledHow treated any later typed message as the card's answer; recentCards lines blame to #687.",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "f721c07af9ce65cc08224c8f0e0fe059a4a32f70",
+      "28c670acbeee1a7ee1bc78cbb752ba14068a9326"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-724",
+   "kind": "escape",
+   "origin": 724,
+   "title": "WIP #724: post-deploy watch, beacon and /api/client-errors",
+   "lines": 751,
+   "base": "8998cdd1dd8798ddea7cadec82a5666f10e3eed4",
+   "head": "ff24306a589d0a9e602011540cb62a684291b293",
+   "defects": [
+    {
+     "fix": 814,
+     "title": "Deploy watch counts usage limits",
+     "why": "deploy watch from #724 counted usage-limit stops as failed turns; brief: false alarm woke #805",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "e92bb50d462618522e06dd0bc0499ba920e534b9",
+      "6602690e209c45da36c4de4713a6c20d880461a1"
+     ]
+    },
+    {
+     "fix": 1481,
+     "title": "Login failures don't blame deploys",
+     "why": "#724's deploy watch counted 'Not logged in' turns as failures caused by deploy; only usage limits excluded",
+     "cause": "untested-case",
+     "foundBy": "monitor",
+     "fixCommits": [
+      "1ca8ffb0d934635bf843f86d0185b04ec75c3ea7",
+      "d544cbeda1eea36b2ed90e28a81c5c381a97be6e"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-764",
+   "kind": "escape",
+   "origin": 764,
+   "title": "#764: targets own folders (a contraption's workdir, an APK's top folder, a CI job's push paths, an override's paths) and",
+   "lines": 777,
+   "base": "ca1a600719c068674c3c12d990f26f1bbb1cb5fa",
+   "head": "3d0d69971b9dd19afa86dc19aa1b1c116405473a",
+   "defects": [
+    {
+     "fix": 776,
+     "title": "Landed-and-deploying minions go in Deploying",
+     "why": "Cara: landed minion not in Deploying; #764's isDeploying excludes threads with server_work, which is set while apps deploy.",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "e3534e104884bbcdbcd3c30356dec5913661a515"
+     ]
+    },
+    {
+     "fix": 991,
+     "title": "Stale \"deploying\" on dismissed minion",
+     "why": "Minion rows labelled 'deploying' for a change merely waiting on an APK version bump; release readers from #764 mis-counted it.",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "51e7472b813efca395081af0b531db1c2ba659fb"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-770",
+   "kind": "escape",
+   "origin": 770,
+   "title": "#770 wip: early conflict check in Citadel's land.sh, the line and hand_off_land",
+   "lines": 339,
+   "base": "750bd43725ae9c30698a8485fa8b832266caf6f1",
+   "head": "d7a787b3d4de4aefb94f6d9c0403302c69e70ee6",
+   "defects": [
+    {
+     "fix": 777,
+     "title": "Conflict check: read main's gitattributes",
+     "why": "Brief: #770's early conflict check ran merge-tree reading .gitattributes from the worktree, failing Mandate's union-merge file though the real rebase was clean.",
+     "cause": "live-only",
+     "foundBy": "minion",
+     "fixCommits": [
+      "d668426e38ce1f00a7a19535cc3cbdf8d97d2f28"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-779",
+   "kind": "escape",
+   "origin": 779,
+   "title": "#779: up to 3 Claude accounts per person; a turn that hits a limit resumes on the next ready account",
+   "lines": 892,
+   "base": "d668426e38ce1f00a7a19535cc3cbdf8d97d2f28",
+   "head": "e27dbc408883136486118a9f14b44e1681b0335d",
+   "defects": [
+    {
+     "fix": 819,
+     "title": "Limit notes mix up weekly and 5-hour",
+     "why": "Cara saw weekly limit paired with another account's 5-hour reset; brief points at #779's allLimited logic",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "e4ab6d285255bb356cdd591b7ae12fa2b6150a26",
+      "75ee48919edd9bdc749c04e47fdc3bb3ddb4b859"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-795",
+   "kind": "escape",
+   "origin": 795,
+   "title": "#795 WIP: void DB writes on a writer worker",
+   "lines": 638,
+   "base": "5aebe50cf152a70d866f847a871646cd46d50858",
+   "head": "834c05d2cc9e5f07ce4c0a364ba658e596d22a3b",
+   "defects": [
+    {
+     "fix": 1244,
+     "title": "Requests read back their own writes",
+     "why": "found by #1239: with writes on #795's worker, a request reads back its own write stale under lag",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "ba1627834b787270774b954e4e5ede2e9a5fa0d8",
+      "a180f220d5abdfb8594d6decbef3e4e1eefc40b4"
+     ]
+    },
+    {
+     "fix": 1285,
+     "title": "Database writer lists fix",
+     "why": "code review R3: Store writes missing from the writer's lists, plus a mention/strike race; worker from #795",
+     "cause": "incomplete",
+     "foundBy": "minion",
+     "fixCommits": [
+      "7a3de858df15caead17c06e7506287ea910e033b",
+      "a0456be757b9c99ce9e60058a157562040d61343"
+     ]
+    }
+   ],
+   "taught": "kit/skills/self-review/references/lenses.md uses #795's writer lists as the twins lens example (added after #1285)"
+  },
+  {
+   "id": "escape-798",
+   "kind": "escape",
+   "origin": 798,
+   "title": "WIP #798: base-check helper and test-first reminder hook",
+   "lines": 746,
+   "base": "834c05d2cc9e5f07ce4c0a364ba658e596d22a3b",
+   "head": "2598b10ee5fc5bfe1a6222d2f4084fdd9903d3a2",
+   "defects": [
+    {
+     "fix": 1032,
+     "title": "Fix self-review base-check misfires",
+     "why": "base-check.ts from #798 misfired in four schemes: self-test.ts as test, shell tests, python venv leak, --cmd cwd; digest finding.",
+     "cause": "untested-case",
+     "foundBy": "monitor",
+     "fixCommits": [
+      "d22725f77565fdcdfcbfc7d53806b63270d46d27",
+      "6034e9d21f813105b688a8461509ac9d5d016ef3",
+      "8be7d6d7c3b030a0dc1284e7c0808274836f1568",
+      "ae10c9e7320e3fce2b1781edaf75a85ffdaf68e0"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-810",
+   "kind": "escape",
+   "origin": 810,
+   "title": "#810: a scheme with no repo icon shows its home contraption's icon, versioned by its last deploy",
+   "lines": 205,
+   "base": "2e7973a17c40fba39eed31460043e409c3971876",
+   "head": "6f40175ca677854f7decec8d66b9d3c60fbdfbf1",
+   "defects": [
+    {
+     "fix": 923,
+     "title": "Scheme-icon fallback gets 401",
+     "why": "brief: #810's icon fallback fetched without identity, gated app answers 401",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "a1d221bf4da1e930f5d09dbccded8546d7bddedc"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-832",
+   "kind": "escape",
+   "origin": 832,
+   "title": "#832: ui/upload.js (drop zone, folders, progress, pause and resume, left-out line); Files uploads in chunks with no cap;",
+   "lines": 1401,
+   "base": "1a08952377e3447a4c6368b8da345df0fc37ec3e",
+   "head": "c6eda8035045f6d0d49fc2ed75de3ee26b53a458",
+   "defects": [
+    {
+     "fix": 902,
+     "title": "Upload and media widget bugs",
+     "why": "upload and media widget bugs in code from #832 (cancelled rows, Resume, frame strip) found by code-health research",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "84d75575c46f03127dfff22c68b41197757dffa6"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-837",
+   "kind": "escape",
+   "origin": 837,
+   "title": "#837: review fixes: copy a gitignored webDir from the live slot (any commit rebuilds); the failed-at commit outlasts a r",
+   "lines": 1505,
+   "base": "0bf4d147c29f425ae9de0ebf9da10d30ae895dba",
+   "head": "48a76e27c0abdcc80c8073de8b61a558da0f679e",
+   "defects": [
+    {
+     "fix": 887,
+     "title": "Missing release key: tell once",
+     "why": "brief: #837's missing-key notice told once per commit, woke TWIReader's Taskmaster ten times",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "563b77fc055bc5fd302c5f60a6fe032276fb64da"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-838",
+   "kind": "escape",
+   "origin": 838,
+   "title": "#838: failing test first: a saved secret never reaches the chat, events, files or prompt",
+   "lines": 995,
+   "base": "483ccc75c0463effbd6c398302fb566de455eba6",
+   "head": "7eba67df8177fbd53ca2f022ad1b61b88358c0e0",
+   "defects": [
+    {
+     "fix": 926,
+     "title": "Secret cards get lost",
+     "why": "Cara: secret cards not pinned or listed as waiting; #838's secret card left out of card-waiting lists",
+     "cause": "incomplete",
+     "foundBy": "person",
+     "fixCommits": [
+      "137bc1f74523683340668b68f7746ee700c1043e",
+      "8c235c8a8ede77355567c047cb206a929003fa01"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-890",
+   "kind": "escape",
+   "origin": 890,
+   "title": "#890: the installed app's window controls sit on the page colour from a fresh install: the theme-color metas live in ind",
+   "lines": 208,
+   "base": "07177560fe405bad9ae121d8714e4df6ae0eb664",
+   "picks": [
+    "5adb3790e7353f2c440877dec1e7b16e40e82240",
+    "60fb5ad5f4e01f94017670523622e1fa7c583169",
+    "8506a8a15cce238d4199bd43acd3e74e46370d7d",
+    "c8e46eb714166bf0cab3bf3c47f222da1d223159",
+    "e85ab1082e4cdb0feeb9149a473c1fdf2cee59f7",
+    "12719a14983b2caa3fded03caad761f7368eb3b4"
+   ],
+   "defects": [
+    {
+     "fix": 896,
+     "title": "Title bar note: installed desktop only",
+     "why": "Cara: title bar note should show only on installed desktop; #890's gate leaked to phone/tablet",
+     "cause": "untested-case",
+     "foundBy": "person",
+     "fixCommits": [
+      "5b9841a10f8ae0923927375314409d11b873e8f1"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-921",
+   "kind": "escape",
+   "origin": 921,
+   "title": "#921: claims (pipeline lane) as rows: claim, release, list_claims, freed on the holder's dismissal",
+   "lines": 801,
+   "base": "4c9e43b8569880e501e87392a7d9439e082327cc",
+   "picks": [
+    "7a65a6efefb0523f7c25b8599a5947facd0e7219",
+    "4768b9ae0490cfcda021d797415bdd47a1a73fce",
+    "77a1113c83fc12bbb61a81664874d3d4b99d1466",
+    "683a4d20b744deec333eed7327e4baba7283268b",
+    "21abec11bdb4eff6f18018d90035a2b0c1ebb28d",
+    "d7a9808a91c0b6c53ded54323a69ab42e03ca633",
+    "3ed8bc562932b713a71777b5be67837891ed1450",
+    "21352a6030619439031adcdf53b189ab63bab9d7",
+    "c6b4c7eab1ffc0dc2c02b082e105866f6e8028b0",
+    "3a2a8b3c494e2a387ab6d88217b30ac2e0086ddb"
+   ],
+   "defects": [
+    {
+     "fix": 969,
+     "title": "Overlord smoke-check bug fixes",
+     "why": "Smoke check of #921's Overlord found later members titled Overlord, per-person notes leaking to everyone, tracking mail to itself.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "d1219d15b6518e5994647fca0f0b94661bfc1712",
+      "db3bbef72a3566f34fcff8fba32a4d612c97c596",
+      "e0dcb049141e18a8a035a1c49ff243e7d43f40e6"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1016",
+   "kind": "escape",
+   "origin": 1016,
+   "title": "WIP #1016: last green per scheme from CI health's runs, pins, ADR 0010",
+   "lines": 1006,
+   "base": "0b74c9b449f86c229d7c5403e7c9261084066f4b",
+   "head": "24a22fe6ee08704e33f6f1951c6d442a91beaa15",
+   "defects": [
+    {
+     "fix": 1271,
+     "title": "Roll back race (E1, E2)",
+     "why": "roll back's restart released locks and stopped watching early (E1, E2); code from #1016 roll back button",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "9311665addb9a7abcaaea24cc567b09d5bef66db"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1017",
+   "kind": "escape",
+   "origin": 1017,
+   "title": "WIP #1017: fast mode in the kit's land.sh: LAND_FAST lands on the smoke check, known reds, --verify",
+   "lines": 1375,
+   "base": "24a22fe6ee08704e33f6f1951c6d442a91beaa15",
+   "head": "d7bac2cc18c3a8ffc69a16864e2c390d66f5e5fe",
+   "defects": [
+    {
+     "fix": 1182,
+     "title": "Fast mode broken for Peek Auras",
+     "why": "Fast mode (#1017) failed every 30 s for Peek once its worktree lost its git link; no recovery and endless repeat logging.",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "bc4efae223c8f8367cd4e2c4a8c8ad3ae2173dd8",
+      "aea18a877ab21069c1d5a563ec16d0e43da1d40c"
+     ]
+    },
+    {
+     "fix": 1316,
+     "title": "Fast mode: no-verdict pins, reset race, feeder recovery",
+     "why": "code review R1-R3: fast mode pin with no verdict, reset race, feeder recovery; fast mode from #1017",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "34a35a0c323ff1285e444a2914af3c168e127f42",
+      "730d66345ca36873b13b377fd9b5812bfff0fe3c"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1021",
+   "kind": "escape",
+   "origin": 1021,
+   "title": "WIP #1021: say land for main everywhere people read; merge only for build branches; fold retired",
+   "lines": 1357,
+   "base": "d7bac2cc18c3a8ffc69a16864e2c390d66f5e5fe",
+   "picks": [
+    "f638c46772bf125250cdd3922b5ef8ca9b6795c4",
+    "f4246def175458f7d9040e9664c7d9158827e2f3",
+    "76c1d48879a4963b0e66eb4287a22fb91e22ddb8",
+    "ed62a5b1fe0554ec8f376d866ca0e9bb00bb6ca4",
+    "d3b28aaa91d69da889f555a49cc13d4d08317cf8",
+    "49949c342f8254227074decaf432533ac98cc79d",
+    "0cdd402d5047428c44179e6de6d01e06c877ecde",
+    "dc73482a1ac90b36795985824f4e069b456d0c2f"
+   ],
+   "defects": [
+    {
+     "fix": 1179,
+     "title": "Build feeder go cards say Merge",
+     "why": "Josh saw a feeder's go card say Ship It; ask_question chip, CARD_WORDS and the self-review skill missed the feeder case after #1021's rename.",
+     "cause": "incomplete",
+     "foundBy": "person",
+     "fixCommits": [
+      "5f81a7c38f7900acd99802e80b754e80f1cebd89"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1120",
+   "kind": "escape",
+   "origin": 1120,
+   "title": "#1120: a flake fix has to prove it held: retro-log sightings counted, third sighting starts a minion, 50-run desktop pro",
+   "lines": 500,
+   "base": "93f1ab3563eb4b740e6f69b75b7c24103f37f334",
+   "picks": [
+    "83081c588c0b1d3d90ea1d050cbfb153c4e6f563",
+    "283e8e203376267da6a5510f39f8a05b5f2dfe77"
+   ],
+   "defects": [
+    {
+     "fix": 1219,
+     "title": "Flake counter skips fixed sightings",
+     "why": "Brief: #1120's counter counted sightings from before a fix shipped, starting false-start minions (#1189 and three more).",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "5125aebd66b163e3927809e04f6df75ce5be9738",
+      "3800b6d3aaeebe90b3b523431907c8b14e995fda"
+     ]
+    },
+    {
+     "fix": 1402,
+     "title": "Flake starter skips files already owned",
+     "why": "flake starter started a second minion on a file already being fixed, duplicating #1349; title-only match from #1120",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "a3e52aebf6f4b6965545c4866491780e84bf0bdf",
+      "e5d472722bb71183b2bcc6632be105acd5eb7f11"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1145",
+   "kind": "escape",
+   "origin": 1145,
+   "title": "#1145: incident timelines: triggers, one incident per window, a read-only gatherer and the timeline file; tests",
+   "lines": 783,
+   "base": "342dfce587cd7f087a5d4f70d7a2488a8d4b1f1d",
+   "picks": [
+    "a10cc61aeb6df2ef3791da1d134d0386af995cb9",
+    "7ca1b2ac0e3d447184072b6053c2b17195b7b8c3",
+    "439e016fa1bb179fda60fea32a6af027b79e2244",
+    "e879c643cfca75ffff380cbddc4028615cd20d3d"
+   ],
+   "defects": [
+    {
+     "fix": 1460,
+     "title": "Stall readout tells the truth",
+     "why": "incident readout from #1145/#1295 mislabeled grouped lines and stall time and showed unclear for disk waits",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "0917555a0524d5952e3695931c851aef4f1896c2",
+      "ae7065c5ea5364c69c34562ad372a3b8ab9eb7a6"
+     ]
+    },
+    {
+     "fix": 1404,
+     "title": "Incident CI lines name every branch",
+     "why": "incident timeline's merged CI line showed only the first run's branch, a false lead; #1145 wrote it",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "e82342ee2bfb60c52ed0c7846d3e85114c91dc4d"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "escape-1371",
+   "kind": "escape",
+   "origin": 1371,
+   "title": "#1371: handoffs move to handoffs/shipped/ when their minion closes; one-time sweep tool",
+   "lines": 295,
+   "base": "f21ae4e91d5dc335612e835b48cd1a9ab1cd4348",
+   "head": "1952a1df4152cb65cf3693c024cbc33d1a440e44",
+   "defects": [
+    {
+     "fix": 1432,
+     "title": "Moved handoffs make duplicate ideas",
+     "why": "#1371's relocate threw UNIQUE on moved handoffs with a second ideas row; 15 duplicate rows",
+     "cause": "untested-case",
+     "foundBy": "minion",
+     "fixCommits": [
+      "4896624b4266caa82559f0b27aa7579e238c0bea",
+      "318a2639b4e98b2c23ae4fe9f079ba4d3c77728d",
+      "10b5a60952ffbfe8ba2363cf1ec21cfc56082287"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "clean-834",
+   "kind": "clean",
+   "origin": 834,
+   "title": "#834: images on contraption turns: paths in the app's DATA_DIR, downscaled to 1568 px JPEG, attached to the first messag",
+   "lines": 246,
+   "base": "91b2d4f3a8ab19a849316ec3cd6cc3c658f51ad1",
+   "head": "e59ee5ee5652109c1685ea6d68628e59dc3b6f9f"
+  },
+  {
+   "id": "clean-539",
+   "kind": "clean",
+   "origin": 539,
+   "title": "Scheme pill turns violet only when something new waits since you last opened the scheme, item by item, not when the coun",
+   "lines": 242,
+   "base": "12e53c270768464c2424a1dcbc0f9d96ced2ff61",
+   "head": "150803d2b10b6c7b26deb6f185121a9a15b527d2"
+  },
+  {
+   "id": "clean-852",
+   "kind": "clean",
+   "origin": 852,
+   "title": "#852: relay_when_live: a note queued for a Taskmaster or minion goes out as held mail once its commit is live; the sende",
+   "lines": 379,
+   "base": "8bc486222fed1ead8f3d3f8f135740dbcf55a8bd",
+   "head": "d5caca07248143de05528819d0aaa0bb2eb6252c"
+  },
+  {
+   "id": "clean-843",
+   "kind": "clean",
+   "origin": 843,
+   "title": "#843: synthetic mic on the shared emulator: citadel-android tone, mic and mic-check over the emulator's gRPC injectAudio",
+   "lines": 579,
+   "base": "2d4dcfdb446bf389835d9569c2c303f393857d1b",
+   "picks": [
+    "a4b7f2cb38776d6cdd1c00363b094af599aa3b9a",
+    "62b6928e8893e3f6888fd6899b113d8914ce1395",
+    "7f5d6b49e988151fdefbd47f4752e5d2cc209b0d"
+   ]
+  },
+  {
+   "id": "clean-688",
+   "kind": "clean",
+   "origin": 688,
+   "title": "#688: personal instructions: storage, routes, the owner's layer last in minion prompts, and read_person_instructions for",
+   "lines": 485,
+   "base": "ec7257ca1efa56160badeee2de345c9e88b7cad3",
+   "head": "dc9e120849d780e700888400d5febe0ea2ee4933"
+  },
+  {
+   "id": "clean-793",
+   "kind": "clean",
+   "origin": 793,
+   "title": "#793 WIP: pure account pick",
+   "lines": 627,
+   "base": "8a765b30d7c4b5c1ecdcae1df873964f479d3582",
+   "head": "6aefaa7e41cb16023df76ac434b14eef3aa5c111"
+  },
+  {
+   "id": "clean-628",
+   "kind": "clean",
+   "origin": 628,
+   "title": "#628: releases are numbered (Release 14) and link to the release itself, contraptions say Contraption, the card's scheme",
+   "lines": 962,
+   "base": "6d90a25460f463b5947c454f37d4fe2197080d1e",
+   "picks": [
+    "716757091077024f07d4903d5133bda02cdc90aa",
+    "da06a86da7005fabbefa967ab878d14ca118a8ae",
+    "1e406d5ae31435f26d90caec9127c6e52a31a3e5",
+    "02091907de92113d802ad0ebfac4bbd54002b392",
+    "1f1dc1d752494b07087f2574a24731a48a6d0378",
+    "12c007e44c2c276bb92c069e24c8f34c6cefd0d7",
+    "60dd846290107746944dfcd31f895d148f1c8081",
+    "1d27e0ca5c89a260a62de0d46239d27bd7609df8",
+    "a972a3d1b75afb3a171ea8c1a079f9b3e656fb39",
+    "427b8185250fdeaad9e0899ad76a23c7159061a3",
+    "39076999079ddb11a2d3eaed1b86ebfef25c0613",
+    "e0db4acf62ac350a6ff66746a014639f67b5ac51",
+    "be13338c4371c37552b237039ee77d8855ab7534"
+   ]
+  },
+  {
+   "id": "clean-844",
+   "kind": "clean",
+   "origin": 844,
+   "title": "#844: contraption turn audit: Settings → App turns, and the app's verdict call",
+   "lines": 896,
+   "base": "13f0ff22a7912fc38a8024fccdd6ea6aff1a1de4",
+   "picks": [
+    "78bea472bee5cd5dc8cc49b6485f025343f54a44",
+    "0bf4d147c29f425ae9de0ebf9da10d30ae895dba",
+    "ac897be649b961ef2053df7357999274b35c849b",
+    "78ebfe1190e554b7c98e4615c923be871d79effd",
+    "7dff00f9fb59af794f75114c3b54d827d949644e",
+    "36a39c94427b12370b46ee3a53e819490b13e2ab",
+    "4e38470f9a0d73f8afc50042cd641e99953b3dfc"
+   ]
+  },
+  {
+   "id": "clean-932",
+   "kind": "clean",
+   "origin": 932,
+   "title": "#932: the side question's read-only guard hook, with its tests",
+   "lines": 1210,
+   "base": "5013c62452b97d2729fd67124f3c0117ef03b4aa",
+   "picks": [
+    "0b1a3ace85f2518fd2c406e9689418dac6c4003e",
+    "d4592b263c75f3bcf44369c50d5b4f2e2a4a35ba",
+    "30607beebc2671a1d4dd5c5d7abecf5af7896f93",
+    "6b9e9e983742e52be16b52a2882ebfd6d889f133",
+    "fb1a27af3f586172b19c6a0ba4414868e3653316",
+    "79d6c590f325bf16a611d25589d0d8cf3db822bb",
+    "49e1c16aa2dceb24cf85c36c72345fe0b2a5232c",
+    "e214a5637180443ea875b5149672ba3afecfc63d",
+    "1c4c3dc385681c49ba6a79283c993277c82c6de1",
+    "5553da39e78644f7d5a4b919644d9dbb5da8617a",
+    "2a0d0c76b6f2d53a3e387507b73e9a286d0eb8d2"
+   ]
+  },
+  {
+   "id": "clean-836",
+   "kind": "clean",
+   "origin": 836,
+   "title": "#836: replay real app chats against a prompt change",
+   "lines": 1111,
+   "base": "b75045c50c4777e3688d8721771e84b144de3934",
+   "head": "7476e896c0cfd84549a2a5f1023b6f84ce691325"
+  }
+ ]
+}

@@ -7,7 +7,8 @@
 // after changing a judge's pinned code, and read the hits first. Exit 0, or 2 on a bad argument.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JUDGES, judge, judgeHash, type ReplayRecord } from '../src/judges.ts';
+import { JUDGES, judge, type ReplayRecord } from '../src/judges.ts';
+import { judgeHash } from './judge-replays/pins.ts';
 import { pacific } from '../src/pacific.ts';
 import { LIVE_DB } from './judge-replays/store.ts';
 import type { Act, ReplayCtx, ReplayResult } from './judge-replays/types.ts';

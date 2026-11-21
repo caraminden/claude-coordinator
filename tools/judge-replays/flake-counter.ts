@@ -83,7 +83,7 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       .map((r) => { const text = String(JSON.parse(r.data).text); return { at: r.at, key: `alarm:${flakeKey(/^Same-flake alarm: (\S+)/.exec(text)?.[1] ?? '?')}`, text: text.slice(0, 200) }; }),
   ].sort((a, b) => a.at - b.at);
   return {
-    inputs: `${Math.round((ctx.now - start) / PASS_MS)} passes over ${projects.map((p: Project) => p.name).join(', ')}: their retro logs, land-recorded flakes and minions`,
+    inputs: `${Math.round((ctx.now - start) / PASS_MS)} passes over ${projects.length} schemes: their retro logs, land-recorded flakes and minions`,
     hits, real,
     limits: [
       "a fix's proof runs (GitHub's flake-proof results) aren't replayed, so a fix that went held inside the window stays open in the replay",

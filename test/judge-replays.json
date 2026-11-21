@@ -1,0 +1,29 @@
+{
+  "ci-red": {
+    "hash": "fd0ff54db66b7dec",
+    "at": "2026-11-21",
+    "days": 3,
+    "inputs": "10 schemes' runs on main (gh, read-only) and their minions' chats",
+    "hits": 19,
+    "real": 25,
+    "summary": "18 as before, 1 new, 7 gone"
+  },
+  "deploy-watch": {
+    "hash": "13628e2c16779b4e",
+    "at": "2026-11-21",
+    "days": 3,
+    "inputs": "338 deploys of the Citadel server, health_events and turns from the database",
+    "hits": 24,
+    "real": 27,
+    "summary": "23 as before, 1 new, 4 gone"
+  },
+  "flake-counter": {
+    "hash": "701f2325b05c198b",
+    "at": "2026-11-21",
+    "days": 3,
+    "inputs": "288 passes over 12 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 14,
+    "real": 46,
+    "summary": "12 as before, 2 new, 30 gone"
+  }
+}

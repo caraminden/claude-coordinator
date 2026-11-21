@@ -165,12 +165,6 @@
    "ok": 0
   }
  },
- "citadel-app-heavy.test.ts": {
-  "elapsed": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "citadel-heavy.test.ts": {
   "sleep": {
    "n": 3,
@@ -194,13 +188,9 @@
   }
  },
  "claude-container.test.ts": {
-  "elapsed": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
-   "n": 2,
-   "ok": 0
+   "n": 1,
+   "ok": 1
   }
  },
  "claude-link.test.ts": {
@@ -216,18 +206,8 @@
   }
  },
  "codex-lock.test.ts": {
-  "elapsed": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
-   "n": 3,
-   "ok": 0
-  }
- },
- "codex.test.ts": {
-  "sleep": {
-   "n": 1,
+   "n": 2,
    "ok": 0
   }
  },
@@ -282,10 +262,6 @@
    "n": 3,
    "ok": 0
   },
-  "elapsed": {
-   "n": 2,
-   "ok": 0
-  },
   "sleep": {
    "n": 1,
    "ok": 0
@@ -304,10 +280,6 @@
   }
  },
  "db-writer.test.ts": {
-  "elapsed": {
-   "n": 2,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
@@ -373,10 +345,6 @@
   "rmTemp": {
    "n": 1,
    "ok": 0
-  },
-  "elapsed": {
-   "n": 1,
-   "ok": 0
   }
  },
  "history.test.ts": {
@@ -427,12 +395,12 @@
  },
  "kill-resume.test.ts": {
   "shortUntil": {
-   "n": 14,
+   "n": 13,
    "ok": 0
   },
   "sleep": {
-   "n": 5,
-   "ok": 0
+   "n": 0,
+   "ok": 4
   }
  },
  "kit-sync.test.ts": {
@@ -567,12 +535,6 @@
    "ok": 0
   }
  },
- "machine-workspace.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "machines-tailnet.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -620,13 +582,9 @@
   }
  },
  "mcp-pool.test.ts": {
-  "elapsed": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
-   "n": 1,
-   "ok": 0
+   "n": 0,
+   "ok": 1
   },
   "shortUntil": {
    "n": 4,
@@ -727,11 +685,7 @@
  },
  "outside-kill.test.ts": {
   "shortUntil": {
-   "n": 5,
-   "ok": 0
-  },
-  "elapsed": {
-   "n": 1,
+   "n": 4,
    "ok": 0
   }
  },
@@ -785,8 +739,8 @@
    "ok": 0
   },
   "sleep": {
-   "n": 6,
-   "ok": 0
+   "n": 0,
+   "ok": 4
   }
  },
  "person-notes.test.ts": {
@@ -875,12 +829,6 @@
  },
  "question-merge.test.ts": {
   "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "quiet.test.ts": {
-  "elapsed": {
    "n": 1,
    "ok": 0
   }
@@ -991,12 +939,8 @@
    "ok": 0
   },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  },
-  "elapsed": {
-   "n": 2,
-   "ok": 0
+   "n": 0,
+   "ok": 1
   }
  },
  "restart-hold.test.ts": {
@@ -1009,12 +953,8 @@
    "ok": 0
   },
   "sleep": {
-   "n": 7,
-   "ok": 0
-  },
-  "elapsed": {
-   "n": 6,
-   "ok": 0
+   "n": 0,
+   "ok": 2
   }
  },
  "review-set-api.test.ts": {
@@ -1106,10 +1046,6 @@
   }
  },
  "sd-watchdog.test.ts": {
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 1,
    "ok": 0
@@ -1181,15 +1117,7 @@
  },
  "stop-sigint.test.ts": {
   "shortUntil": {
-   "n": 4,
-   "ok": 0
-  },
-  "elapsed": {
    "n": 2,
-   "ok": 0
-  },
-  "sleep": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -1264,18 +1192,6 @@
   },
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "wake.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "worktree-base.test.ts": {
-  "elapsed": {
-   "n": 1,
    "ok": 0
   }
  }

@@ -14,6 +14,8 @@ export const HOLD_MS = 3 * DAY;
 const SENT_KEEP_MS = DAY;
 const ENDED_KEEP_MS = 7 * DAY;
 const PRUNE_EVERY_MS = 60 * MINUTE;
+/** How often a handed row asks the runner whether it still holds it (a usage-limit wait can hold it for days). */
+const RECHECK_MS = 5 * MINUTE;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** What pokes the outbox: `boot`, `tick` (the timer), `added`, `closed`, `reopened`, and the condition events later kinds read. */
@@ -21,8 +23,10 @@ export type OutboxEvent = { type: string; ticket?: number; [k: string]: unknown 
 
 /**
  * What `deliver` says happened to one row. `accepted`: the receiver made it durable (held mail, a saved card). `handed`:
- * given to the runner as event `event`, accepted once the turn carrying it starts (runner.queues is in memory until
- * then). `retry` and `drop` carry a reason; a throw counts as retry.
+ * given to the runner as event `event` (saved on the row), sent once a turn carrying it starts; until then it is
+ * re-checked: still held by the runner (its queue, a usage-limit or network wait) it waits on, dropped by it (the turn was
+ * refused when it came to run) it is retried, and left by a killed server it is sent again, marked as a possible repeat.
+ * `retry` and `drop` carry a reason; a throw counts as retry.
  */
 export type Outcome = { state: 'accepted' } | { state: 'handed'; event: number } | { state: 'retry'; reason: string } | { state: 'drop'; reason: string };
 
@@ -30,7 +34,7 @@ export type DeliverCtx = {
   now: number;
   /** When this server started: a time row due before it was missed while the server was down. */
   bootAt: number;
-  /** Send `text` to the row's minion, with its delivery id, and the possible-repeat line on a row resent at boot. */
+  /** Send `text` to the row's minion, with its delivery id, and the possible-repeat line on a row a killed server left sending. */
   send(row: Delivery, text: string): Outcome;
 };
 
@@ -51,7 +55,9 @@ export type Kind = {
 };
 
 export type OutboxRunner = {
-  send(ticketId: number, author: string, text: string): { event: { id: number }; parked?: true };
+  send(ticketId: number, author: string, text: string): { event: { id: number } };
+  /** Whether the minion's next turn still carries this event (Runner.holds). */
+  holds(ticketId: number, eventId: number): boolean;
   onLane(ticketId: number, what: string, step: () => unknown): Promise<unknown>;
   refuseTurn?: (ticket: Ticket, author: string) => string | null;
   leaveMail(to: number, author: string, text: string): void;
@@ -71,11 +77,8 @@ export function span(ms: number): string {
 
 export class Outbox {
   private kinds = new Map<string, Kind>();
-  /** Rows found `sending` at boot: what they send says it may repeat. */
-  private repeats = new Set<number>();
-  /** Runner event id → the row it carries, until that turn starts. shortcut: in memory, so a row whose turn never starts
-   * (refused when it came to run) stays `sending` until the next boot resends it, marked; seam 1's queue (step 8) ends that. */
-  private handed = new Map<number, number>();
+  /** Rows a killed server left `sending`, found again at each boot (the state is saved, so a second kill finds them too). */
+  private leftover = new Set<number>();
   /** Targets with a lane step queued or running: no second one, and the timer skips their rows until it ends. */
   private busy = new Set<string>();
   private inflight = new Set<Promise<unknown>>();
@@ -138,27 +141,24 @@ export class Outbox {
     );
   }
 
-  /** Once, after runner.recover(): rows a killed server left `sending` go again, marked; missed time rows go late. */
+  /** Once, after runner.recover() restored its queues: rows a killed server left `sending` are checked at once (sent
+   * again, marked, unless the runner still holds them); missed time rows go late. */
   boot(): Promise<void> {
     this.bootAt = this.now();
     for (const r of this.store.listDeliveries({ states: ['sending'] })) {
-      this.repeats.add(r.id);
-      this.store.updateDelivery(r.id, { state: 'waiting', due: this.bootAt }, ['sending'], this.bootAt);
+      this.leftover.add(r.id);
+      this.store.updateDelivery(r.id, { due: this.bootAt }, ['sending'], this.bootAt);
     }
     return this.poke({ type: 'boot' });
   }
 
-  /** The runner started a turn carrying these events: the rows handed in them are sent; a reopened minion's held rows go back. */
+  /** The runner started a turn carrying these events: the rows handed as them are sent; a reopened minion's held rows go back. */
   turnStarted(ticketId: number, eventIds: number[]) {
     const now = this.now();
-    for (const e of eventIds) {
-      const id = this.handed.get(e);
-      if (id == null) continue;
-      this.handed.delete(e);
-      this.repeats.delete(id);
-      this.store.updateDelivery(id, { state: 'sent' }, ['sending'], now);
-    }
-    if (this.store.listDeliveries({ to: ticketId, states: ['held'] }).length) void this.poke({ type: 'reopened', ticket: ticketId });
+    const ids = new Set(eventIds);
+    const rows = this.store.listDeliveries({ to: ticketId, states: ['sending', 'held'] });
+    for (const r of rows) if (r.state === 'sending' && r.event_id != null && ids.has(r.event_id)) this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
+    if (rows.some((r) => r.state === 'held')) void this.poke({ type: 'reopened', ticket: ticketId });
   }
 
   stop() {
@@ -179,7 +179,13 @@ export class Outbox {
 
   private pass(event: OutboxEvent): void {
     if (this.stopped || !this.bootAt) return; // nothing is sent before boot (a boot check never boots it)
-    for (const k of this.kinds.values()) k.migrate?.();
+    for (const k of this.kinds.values()) {
+      try {
+        k.migrate?.();
+      } catch (err) {
+        this.opts.log?.(`outbox: moving ${k.kind}'s old rows failed, tried again next pass: ${(err as Error)?.stack ?? err}`); // the rows already in the table still go
+      }
+    }
     const now = this.now();
     for (const r of this.live()) {
       const kind = this.kinds.get(r.kind)!;
@@ -201,7 +207,7 @@ export class Outbox {
       this.store.pruneDeliveries(now - SENT_KEEP_MS, now - ENDED_KEEP_MS);
     }
     const due = new Map<string, Delivery>();
-    for (const r of this.live()) if (r.state === 'waiting' && r.due != null && r.due <= now && !this.busy.has(target(r)) && !due.has(target(r))) due.set(target(r), r);
+    for (const r of this.live()) if (r.state !== 'held' && r.due != null && r.due <= now && !this.busy.has(target(r)) && !due.has(target(r))) due.set(target(r), r);
     for (const [key, r] of due) {
       this.busy.add(key);
       const step = () => this.deliverTarget(r.to_kind, r.to_id);
@@ -221,11 +227,13 @@ export class Outbox {
 
   private reopen(r: Delivery, now: number) {
     const due = r.when_kind === 'at' ? Number(r.when_arg) : r.met_at != null ? now : null;
-    this.store.updateDelivery(r.id, { state: 'waiting', due }, ['held'], now);
+    // Only a row whose time came while the minion was dismissed keeps saying so.
+    const reason = due != null && due <= now ? r.reason : null;
+    this.store.updateDelivery(r.id, { state: 'waiting', due, reason }, ['held'], now);
   }
 
   private drop(r: Delivery, reason: string, now: number) {
-    if (!this.store.updateDelivery(r.id, { state: 'dropped', reason }, ['held', 'waiting'], now)) return;
+    if (!this.store.updateDelivery(r.id, { state: 'dropped', reason }, ['held', 'waiting', 'sending'], now)) return;
     const setter = /^minion:(\d+)$/.exec(r.set_by);
     if (setter && !(r.to_kind === 'minion' && Number(setter[1]) === r.to_id)) {
       const what = this.kinds.get(r.kind)?.describe?.(r) ?? r.kind;
@@ -233,13 +241,24 @@ export class Outbox {
     }
   }
 
-  /** Inside the target's lane: send its due rows, kind by kind, in id order. Re-reads the target; never claims for a closed one. */
+  /** Inside the target's lane (so no turn of its is starting): check its handed rows, then send its due rows, kind by
+   * kind, in id order. Re-reads the target; never claims for a closed one. */
   private deliverTarget(toKind: string, toId: number) {
     if (this.stopped) return;
     const now = this.now();
-    let rows = this.store
-      .listDeliveries({ to: toId, toKind, states: ['waiting'] })
-      .filter((r) => this.kinds.has(r.kind) && r.due != null && r.due <= now);
+    const dueRows = (state: 'waiting' | 'sending') =>
+      this.store.listDeliveries({ to: toId, toKind, states: [state] }).filter((r) => this.kinds.has(r.kind) && r.due != null && r.due <= now);
+    const repeats = new Set<number>();
+    for (const r of dueRows('sending')) {
+      const left = this.leftover.delete(r.id);
+      if (r.event_id != null && toKind === 'minion' && this.runner.holds(toId, r.event_id)) {
+        this.store.updateDelivery(r.id, { due: now + RECHECK_MS }, ['sending'], now);
+      } else if (left) {
+        // A killed server left it: its turn may have started before the kill, so the copy sent now says it may repeat.
+        if (this.store.updateDelivery(r.id, { state: 'waiting', due: now }, ['sending'], now)) repeats.add(r.id);
+      } else this.retry(r, 'the runner dropped it before its turn started', now);
+    }
+    let rows = dueRows('waiting');
     if (!rows.length) return;
     if (toKind === 'minion') {
       const t = this.store.getTicket(toId);
@@ -260,7 +279,7 @@ export class Outbox {
       }
     }
     const claimed = rows.filter((r) => this.store.updateDelivery(r.id, { state: 'sending', met_at: r.met_at ?? now }, ['waiting'], now));
-    const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text) };
+    const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text, repeats.has(row.id)) };
     for (const kindName of new Set(claimed.map((r) => r.kind))) {
       const batch = claimed.filter((r) => r.kind === kindName).map((r) => this.store.getDelivery(r.id)!);
       let outcomes: Outcome[];
@@ -273,17 +292,18 @@ export class Outbox {
     }
   }
 
-  private sendTo(row: Delivery, text: string): Outcome {
-    const tail = this.repeats.has(row.id) ? `(The server restarted while sending this, so it may repeat delivery #${row.id}.)` : `(delivery #${row.id})`;
-    const sent = this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`);
-    return sent.parked ? { state: 'accepted' } : { state: 'handed', event: sent.event.id };
+  private sendTo(row: Delivery, text: string, repeat: boolean): Outcome {
+    const tail = repeat ? `(The server restarted while sending this, so it may repeat delivery #${row.id}.)` : `(delivery #${row.id})`;
+    try {
+      return { state: 'handed', event: this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`).event.id };
+    } catch (err) {
+      return { state: 'retry', reason: String((err as Error)?.message ?? err) }; // this row only: the others in its batch were sent
+    }
   }
 
   private settle(r: Delivery, o: Outcome, now: number) {
-    if (o.state === 'accepted') {
-      this.repeats.delete(r.id);
-      this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
-    } else if (o.state === 'handed') this.handed.set(o.event, r.id);
+    if (o.state === 'accepted') this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
+    else if (o.state === 'handed') this.store.updateDelivery(r.id, { event_id: o.event, due: now + RECHECK_MS }, ['sending'], now);
     else if (o.state === 'drop') this.store.updateDelivery(r.id, { state: 'dropped', reason: o.reason }, ['sending'], now);
     else this.retry(r, o.reason, now);
   }
@@ -310,7 +330,7 @@ export class Outbox {
     if (this.stopped) return;
     let next = Infinity;
     for (const r of this.live()) {
-      if (r.due == null || r.state === 'sending' || (r.state === 'waiting' && this.busy.has(target(r)))) continue;
+      if (r.due == null || (r.state !== 'held' && this.busy.has(target(r)))) continue;
       next = Math.min(next, r.due);
     }
     if (next === Infinity) return;

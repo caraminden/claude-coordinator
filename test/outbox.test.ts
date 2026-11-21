@@ -38,20 +38,26 @@ const minion = () => {
 };
 
 type Sent = { id: number; text: string; event: number };
-/** A runner that records each send and hands back an event id; `parked` makes the next sends land as held mail. */
-function fakeRunner() {
-  let events = 0;
+/** A runner that records each send and hands back an event id. `holding`: the events its queues still hold (a restored
+ * queue, a usage-limit wait); `stall` keeps lane steps from running (a minion's turn holds its lane); `failOn` throws on
+ * a send whose text matches. */
+function fakeRunner(firstEvent = 0) {
+  let events = firstEvent;
   const r = {
     sent: [] as Sent[],
-    parked: false,
+    holding: new Set<number>(),
+    stall: false,
+    failOn: null as RegExp | null,
     refuse: null as string | null,
     send(ticketId: number, _author: string, text: string) {
+      if (r.failOn?.test(text)) throw new Error('send failed');
       const event = { id: ++events };
       r.sent.push({ id: ticketId, text, event: event.id });
-      return r.parked ? { event, parked: true as const } : { event };
+      return { event };
     },
+    holds: (_ticketId: number, eventId: number) => r.holding.has(eventId),
     onLane(_id: number, _what: string, step: () => unknown) {
-      return Promise.resolve().then(step);
+      return r.stall ? new Promise(() => {}) : Promise.resolve().then(step);
     },
     refuseTurn: () => r.refuse,
   };
@@ -82,7 +88,16 @@ test('a server killed between sending and sent sends the wake again once, marked
   assert.equal(rows(id)[0].state, 'sending');
   a.outbox.stop(); // killed here
 
-  const second = fakeRunner();
+  // Killed again at once, before the minion's lane let the resend through: still sending, so the next boot marks it too.
+  const stalled = fakeRunner();
+  stalled.stall = true;
+  const s = server(stalled, now);
+  void s.outbox.boot();
+  await new Promise((done) => setImmediate(done));
+  assert.equal(stalled.sent.length, 0);
+  s.outbox.stop();
+
+  const second = fakeRunner(100);
   const b = server(second, now);
   await b.outbox.boot();
   assert.equal(second.sent.length, 1, 'sent again at boot');
@@ -148,6 +163,18 @@ test('a dismissed minion\'s wake is held: delivered on a reopen on day 2, droppe
   store.updateTicket(lost, { status: 'idle' });
   await outbox.poke({ type: 'reopened', ticket: lost });
   assert.equal(r.sent.length, 1, 'a dropped wake stays dropped');
+
+  // Dismissed and reopened before its time: it says nothing about a dismissal when it comes due.
+  const back = minion();
+  wakes.add(back, now.t + DAY, 'after a short dismissal', `minion:${back}`);
+  store.updateTicket(back, { status: 'closed' });
+  await outbox.poke({ type: 'closed', ticket: back });
+  store.updateTicket(back, { status: 'idle' });
+  await outbox.poke({ type: 'reopened', ticket: back });
+  now.t += DAY;
+  await outbox.poke({ type: 'tick' });
+  assert.equal(r.sent.at(-1)!.id, back);
+  assert.doesNotMatch(r.sent.at(-1)!.text, /dismissed/);
 });
 
 test('a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails and wakes the setter\'s Taskmaster', async () => {
@@ -177,17 +204,68 @@ test('a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails 
   assert.match(r.sent[0].text, /retry me/);
 });
 
-test('a parked minion\'s wake is accepted at once (held mail is saved); a running turn\'s start accepts the rest', async () => {
+test('a handed wake the runner still holds (a usage-limit wait) is never sent twice, across restarts; one it dropped is retried, unmarked', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const a = fakeRunner();
+  const first = server(a, now);
+  await first.outbox.boot();
+  first.wakes.add(id, T0 + HOUR, 'held by the limit', `minion:${id}`);
+  now.t += HOUR;
+  await first.outbox.poke({ type: 'tick' });
+  const event = a.sent[0].event;
+  a.holding.add(event); // saved in limit-resumes until the limit resets
+  assert.equal(rows(id)[0].event_id, event, 'the event is saved on the row');
+  for (let i = 0; i < 3; i++) {
+    now.t += 10 * 60_000;
+    await first.outbox.poke({ type: 'tick' });
+  }
+  assert.equal(a.sent.length, 1, 'rechecked, not resent');
+  first.outbox.stop();
+  for (let boot = 0; boot < 3; boot++) {
+    const r = fakeRunner(100);
+    r.holding.add(event); // recover() restored it
+    await server(r, now).outbox.boot();
+    assert.equal(r.sent.length, 0, `restart ${boot + 1}: the runner still holds it`);
+    now.t += HOUR;
+  }
+  const last = fakeRunner(100);
+  last.holding.add(event);
+  const c = server(last, now);
+  await c.outbox.boot();
+  c.outbox.turnStarted(id, [event]); // the limit reset and its turn started
+  assert.equal(rows(id)[0].state, 'sent');
+
+  // The runner dropped one (its turn was refused when it came to run): retried after the check, without a repeat line.
+  c.wakes.add(id, now.t + HOUR, 'dropped by the runner', `minion:${id}`);
+  now.t += HOUR;
+  await c.outbox.poke({ type: 'tick' });
+  assert.equal(last.sent.length, 1);
+  now.t += 5 * 60_000;
+  await c.outbox.poke({ type: 'tick' });
+  const [, row] = rows(id);
+  assert.equal(row.state, 'waiting');
+  assert.equal(row.attempts, 1);
+  now.t = row.due!;
+  await c.outbox.poke({ type: 'tick' });
+  assert.equal(last.sent.length, 2);
+  assert.match(last.sent[1].text, new RegExp(`\\(delivery #${row.id}\\)$`));
+});
+
+test('a send that throws retries only its own row; the others in the batch stay handed', async () => {
   const id = minion();
   const now = { t: T0 };
   const r = fakeRunner();
   const { outbox, wakes } = server(r, now);
   await outbox.boot();
-  r.parked = true;
-  wakes.add(id, T0 + HOUR, 'parked', `minion:${id}`);
+  wakes.add(id, T0 + HOUR, 'goes', `minion:${id}`);
+  wakes.add(id, T0 + HOUR, 'throws', `minion:${id}`);
+  r.failOn = /throws/;
   now.t += HOUR;
   await outbox.poke({ type: 'tick' });
-  assert.equal(rows(id)[0].state, 'sent');
+  const [ok, bad] = rows(id);
+  assert.deepEqual([ok.state, ok.event_id], ['sending', r.sent[0].event]);
+  assert.deepEqual([bad.state, bad.attempts, bad.last_error], ['waiting', 1, 'send failed']);
 });
 
 test('the old timed-wakes key moves into the table on boot in one go, keeping ids; one turning up later moves too', async () => {
@@ -235,10 +313,10 @@ test('limits still hold, cancel works only in its own chat, and sent rows are pr
   assert.equal(wakes.cancel(b, w.id), true);
   assert.equal(wakes.cancel(b, w.id), false);
   assert.equal(wakes.list(b).length, 0);
-  r.parked = true;
   now.t += 10_000;
   await outbox.poke({ type: 'tick' });
   assert.equal(r.sent.length, 20);
+  outbox.turnStarted(a, r.sent.map((m) => m.event));
   assert.equal(wakes.list(a).length, 0);
   now.t += DAY + 1;
   await outbox.poke({ type: 'tick' });

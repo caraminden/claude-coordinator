@@ -519,7 +519,7 @@ export class CitadelServer implements Reader {
           const refs = Object.fromEntries((n.text.match(/#\d+/g) ?? []).flatMap((r) => (ids.has(r) ? [[r, ids.get(r)!]] : [])));
           if (Object.keys(refs).length) n.refs = refs;
         }
-        if (news.length) next.news = news;
+        if (news.length) next.news = news.slice(-6); // land-news's SHOWN, with the live line counted (a value import would loop back here)
       }
     }
     return [{ target: { id: CITADEL_TARGET, projectId: p.id, name: 'Server', kind: CITADEL_TARGET, link: null }, current, next, line, recent }];

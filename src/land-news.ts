@@ -92,11 +92,13 @@ export function landNews(output: string, name: (branch: string) => string): News
       done();
       news.push({ tone: 'bad', text: `${name(m[1])} itself red${backInLine(riders)}` });
     } else if ((m = s.match(/^the ship train goes back in line, since CI gave no answer \((.*)\): (\S+) goes on alone/))) {
+      done(); // a no-answer mid-bisect ends it too
       news.push({ tone: 'warn', text: `CI gave no answer (${m[1]}): ${name(m[2])} goes on alone${backInLine(riders)}` });
     } else if ((m = s.match(/^ship train: (\S+) left the line while the train was tested/))) {
       const at = riders.indexOf(m[1]);
       news.push({ tone: 'info', text: `${name(m[1])} left the line during the test${backInLine(at < 0 ? [] : riders.slice(at + 1))}` });
     } else if ((m = s.match(/^CI FALLBACK: (.*?)\. Running the full suite on perigee instead\./))) {
+      slow = null; // it stopped waiting on CI
       news.push({ tone: 'warn', text: `CI fallback: the full suite runs on perigee (${m[1]})` });
     }
   }

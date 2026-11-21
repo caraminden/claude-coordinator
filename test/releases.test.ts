@@ -29,9 +29,11 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   const ship = (id: number): Ship | null => (ships.has(id) ? { stage: ships.get(id)!, text: `ship ${ships.get(id)}`, commit: 'abc1234' } : null);
   const waits = new Waits({ store, deployState: state, heavyDir: heavy, interruptible: () => turns, changed: () => {}, now: () => now, ship, alive: () => true, held: () => true });
   let head: string | null = 'live1';
+  const failed = new Map<number, string[]>(); // CI's files failed so far, as POST /api/ci-tests puts them on the wait
   const server = new CitadelServer({
     store, scheme: () => store.getProject(citadel.id) ?? null, head: () => head, line: () => waits.line, ticketFor: (l) => waits.ticketFor(l),
-    wait: waits.wait, ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now, news,
+    wait: (id) => { const x = waits.wait(id); return x && failed.has(id) ? { ...x, failed: failed.get(id) } : x; },
+    ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now, news,
   });
   const minion = (title = 'T') => {
     const t = store.createTicket({ project_id: citadel.id, title, permission_mode: 'default', created_by: 'Cara' });
@@ -46,7 +48,7 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   };
   const clearLine = () => rmSync(join(state, 'queue'), { recursive: true, force: true }) ?? mkdirSync(join(state, 'queue'));
   return {
-    store, citadel, waits, server, ships, queued, minion, land, clearLine,
+    store, citadel, waits, server, ships, queued, failed, minion, land, clearLine,
     setTurns: (n: number) => (turns = n), setHead: (h: string | null) => (head = h),
   };
 }
@@ -184,6 +186,8 @@ test('the next release carries the holder\'s news, with its minions linked, and 
   const n = w.server.read()[0].next!;
   assert.deepEqual(asked, [holder.id], 'only the holder\'s log is read');
   assert.deepEqual(n.news, [{ tone: 'bad', text: `#${rider.number} dropped: it turned the train red; back in line: 9999-gone`, refs: { [`#${rider.number}`]: rider.id } }]);
+  w.failed.set(holder.id, ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts', 'test/d.test.ts']);
+  assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far in CI: a.test.ts, b.test.ts, c.test.ts +1 more' }, 'CI\'s failures so far, live, last');
   w.clearLine();
   w.waits.poll();
   assert.equal(w.server.read()[0].next?.news, undefined, 'nobody holds the line: no news');

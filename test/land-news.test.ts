@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 import { landNews, readTail } from '../src/land-news.ts';
 
 // src/land-news.ts (#1368): the ship under way's news on Releases, read from its land.sh output. The lines are land.sh's
-// own words, as a real train's log has them (landing 2832, 2026-11-20).
+// own words, as a real train's log has them (landing 2832, 2026-11-20); "bisect: testing the first K of N ships" is the line
+// land.sh gets in #1368's pipeline ship.
 const root = mkdtempSync(join(tmpdir(), 'land-news-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -67,6 +68,9 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
     ['#1311 itself red; back in line: #1348, #1331, #1351, #1350']);
   assert.deepEqual(at('land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone'),
     [{ tone: 'warn', text: 'CI gave no answer (a timeout): #1311 goes on alone; back in line: #1348, #1331, #1351, #1350' }]);
+  assert.deepEqual(at(...red, 'land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone',
+    "land: waiting for CI on 0123abcd: the full suite on Cara's desktop").map((x) => x.text).slice(1),
+  ['CI gave no answer (a timeout): #1311 goes on alone; back in line: #1348, #1331, #1351, #1350'], 'a no-answer mid-bisect ends the bisect line');
   assert.deepEqual(at('land: ship train: ticket/1351-f left the line while the train was tested, so it ships without it and the ships after it go back in line'),
     [{ tone: 'info', text: '#1351 left the line during the test; back in line: #1350' }]);
   assert.equal(at('land: only flakes failed (test/a.test.ts), but deleting land/x on GitHub to start a fresh run failed, so this stays red')[0].tone, 'bad');
@@ -75,6 +79,8 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
   const slow = "land: waiting for CI or a quiet perigee: CI: CI didn't finish within 360s, but perigee is busy";
   assert.equal(at(slow).at(-1)!.text, 'CI is past its time limit: waiting on CI, or on a quiet perigee to run the suite here');
   assert.deepEqual(at(slow, `land: CI passed on a49185c7 in 395s (${url}/4)`), [], 'gone once CI answers');
+  assert.deepEqual(at(slow, 'land: CI FALLBACK: perigee went quiet. Running the full suite on perigee instead.').map((x) => x.text),
+    ['CI fallback: the full suite runs on perigee (perigee went quiet)'], 'or once the suite runs here');
 });
 
 test('at most six lines, the newest kept; nothing to say, nothing shown', () => {

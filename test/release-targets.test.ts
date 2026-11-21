@@ -443,6 +443,14 @@ test('the CI package reader: a desktop target\'s run is live, with its install l
   assert.deepEqual([v.current?.version, v.current?.link, v.next], ['sha3', install, null]);
   assert.deepEqual(v.recent.map((r) => [r.version, r.outcome]), [['sha2', 'live']]);
   assert.equal(store.countReleases(p.id, t.id), 2);
+
+  // A server with no publisher (a dev copy, a preview) puts nothing on the feed: CI's release is what's live there.
+  const store2 = new Store(join(root, `c-${++n}.db`));
+  const bare = new CiPackageReader({ store: store2, finder: finderOf([{ ...t, projectId: store2.createProject('Peek Auras', 'https://github.com/o/r').id }]), actions: fakeActions(runs, jobs).actions, now: () => now, feeds });
+  feed = [];
+  await bare.refresh();
+  [v] = bare.read();
+  assert.deepEqual([v.current?.version, v.next], ['sha3', null], 'no publisher: no feed gate, no publish stage');
 });
 
 test('the CI package reader: a run waiting for a runner waits, with no estimate', async () => {

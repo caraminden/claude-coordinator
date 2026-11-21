@@ -167,7 +167,7 @@ export class DesktopFeeds {
       const next = { ...index, current: seen.build, ...(ask.follow ? { ci: ask.source } : {}) };
       if (index.current !== next.current || index.ci !== next.ci || index.title !== was) await writeIndex(dir, next);
       // The build's zip is already made, so its own settings stay; the reply names any asked to change (#1522).
-      const asked = { exe: ask.exe, started: ask.started, version: ask.version && String(ask.version).slice(0, 40) };
+      const asked = { exe: ask.exe, started: ask.started, version: ask.version ? String(ask.version).slice(0, 40) : undefined };
       const ignored = (Object.keys(asked) as (keyof typeof asked)[]).filter((k) => asked[k] !== undefined && asked[k] !== seen[k]);
       return { build: seen, already: true, ...(ignored.length ? { ignored } : {}), ...paths };
     }

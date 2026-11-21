@@ -1,0 +1,58 @@
+test	the full suite	2026-11-21T08:20:25.6039250Z run-tests: tier all (pipeline test files included): 
+test	the full suite	2026-11-21T08:20:51.9806949Z The event loop was held for 1.9 s: the server answered nobody meanwhile. Cause: waited for CPU (0.2 s on CPU of 2.0 s; waited 1.4 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 438 voluntary and 119 involuntary switches; 0 writes queued on the write worker). Running: 69% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:47) < templateHistory (src/kit-sync.ts:66); 14% spawn < git (src/kit-sync.ts:34) < (anonymous) (src/kit-sync.ts:306); 9% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:47) < blobAt (src/kit-sync.ts:56) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:20:55.1463700Z The event loop was held for 0.5 s: the server answered nobody meanwhile. Cause: waited for CPU (0.4 s on CPU of 0.6 s; waited 0.3 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 167 voluntary and 118 involuntary switches; 0 writes queued on the write worker). Running: 38% runs (src/rule-overlap.ts:71) < (anonymous) (src/rule-overlap.ts:128) < overlapsFor (src/rule-overlap.ts:124) < settingsOverlaps (src/instructions-save.ts:49); 27% runs (src/rule-overlap.ts:71) < sharedRun (src/rule-overlap.ts:79) < overlapsFor (src/rule-overlap.ts:124) < settingsOverlaps (src/instructions-save.ts:49); 11% (garbage collector) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:20:55.1467347Z The event loop was held for 1.0 s: the server answered nobody meanwhile. Cause: waited for CPU (0.5 s on CPU of 1.1 s; waited 0.6 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 233 voluntary and 217 involuntary switches; 0 writes queued on the write worker). Running: 37% runs (src/rule-overlap.ts:71) < sharedRun (src/rule-overlap.ts:79) < overlapsFor (src/rule-overlap.ts:124) < settingsOverlaps (src/instructions-save.ts:49); 24% runs (src/rule-overlap.ts:71) < (anonymous) (src/rule-overlap.ts:128) < overlapsFor (src/rule-overlap.ts:124) < settingsOverlaps (src/instructions-save.ts:49); 13% (garbage collector) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:25:30.0588908Z ✖ Investigate (#1273): an app tile goes to its home scheme, and the minion quoting its tag is the one on it (384.221836ms)
+test	the full suite	2026-11-21T08:25:30.0887097Z ✖ failing tests:
+test	the full suite	2026-11-21T08:25:30.0887102Z 
+test	the full suite	2026-11-21T08:25:30.0887193Z test at test/status-page.test.ts:371:1
+test	the full suite	2026-11-21T08:25:30.0887454Z ✖ Investigate (#1273): an app tile goes to its home scheme, and the minion quoting its tag is the one on it (384.221836ms)
+test	the full suite	2026-11-21T08:25:30.0887599Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+test	the full suite	2026-11-21T08:25:30.0887662Z   + actual - expected
+test	the full suite	2026-11-21T08:25:30.0887712Z   
+test	the full suite	2026-11-21T08:25:30.0887759Z   + null
+test	the full suite	2026-11-21T08:25:30.0887800Z   - {
+test	the full suite	2026-11-21T08:25:30.0887925Z   -   closed: false,
+test	the full suite	2026-11-21T08:25:30.0887973Z   -   number: 1,
+test	the full suite	2026-11-21T08:25:30.0888021Z   -   project: 3,
+test	the full suite	2026-11-21T08:25:30.0888081Z   -   title: 'Fix the 5xx'
+test	the full suite	2026-11-21T08:25:30.0888130Z   - }
+test	the full suite	2026-11-21T08:25:30.0888167Z   
+test	the full suite	2026-11-21T08:25:30.0888464Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/status-page.test.ts:395:10)
+test	the full suite	2026-11-21T08:25:30.0888561Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	the full suite	2026-11-21T08:25:30.0888702Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	the full suite	2026-11-21T08:25:30.0888761Z     generatedMessage: true,
+test	the full suite	2026-11-21T08:25:30.0888895Z     code: 'ERR_ASSERTION',
+test	the full suite	2026-11-21T08:25:30.0888943Z     actual: null,
+test	the full suite	2026-11-21T08:25:30.0889068Z     expected: { project: 3, number: 1, title: 'Fix the 5xx', closed: false },
+test	the full suite	2026-11-21T08:25:30.0889132Z     operator: 'deepStrictEqual',
+test	the full suite	2026-11-21T08:25:30.0889185Z     diff: 'simple'
+test	the full suite	2026-11-21T08:25:30.0889234Z   }
+test	the full suite	2026-11-21T08:25:30.0889451Z run-tests: 1 test file(s) failed; CI reruns each alone in its next step, with a deadline of its own
+test	the full suite	2026-11-21T08:25:31.0778138Z ##[error]Process completed with exit code 1.
+test	rerun failed files alone	﻿2026-11-21T08:25:31.0824431Z ##[group]Run [ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }
+test	rerun failed files alone	2026-11-21T08:25:31.0824853Z ^[[36;1m[ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0825071Z ^[[36;1mif [ -n "$LAND_REF" ]; then^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0825261Z ^[[36;1m  export DEPLOY_RERUN_DEADLINE=$(($(date +%s) + RERUN_WINDOW - 30))^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0825547Z ^[[36;1m  echo "reruns alone end by $(date -u -d "@$DEPLOY_RERUN_DEADLINE" +%T) UTC, before land.sh stops waiting"^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0825762Z ^[[36;1mfi^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0825861Z ^[[36;1mrc=0^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0826044Z ^[[36;1m# Streamed as the full suite's is: a run cancelled mid-rerun still shows the labels so far.^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0826260Z ^[[36;1m: >"$RUNNER_TEMP/reruns.log"^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0826414Z ^[[36;1mtail -n +1 -f "$RUNNER_TEMP/reruns.log" &^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0826807Z ^[[36;1mDEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_FROM="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/reruns.log" || rc=$?^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0827131Z ^[[36;1msleep 1; kill $!^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0827250Z ^[[36;1mexit "$rc"^[[0m
+test	rerun failed files alone	2026-11-21T08:25:31.0837045Z shell: /usr/bin/bash -e {0}
+test	rerun failed files alone	2026-11-21T08:25:31.0837168Z env:
+test	rerun failed files alone	2026-11-21T08:25:31.0837275Z   XDG_RUNTIME_DIR: /run/user/997
+test	rerun failed files alone	2026-11-21T08:25:31.0837423Z   DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/997/bus
+test	rerun failed files alone	2026-11-21T08:25:31.0837583Z   NICENESS: 0
+test	rerun failed files alone	2026-11-21T08:25:31.0837678Z   LAND_REF: 1
+test	rerun failed files alone	2026-11-21T08:25:31.0837776Z   RERUN_WINDOW: 180
+test	rerun failed files alone	2026-11-21T08:25:31.0837880Z ##[endgroup]
+test	rerun failed files alone	2026-11-21T08:25:31.0908816Z reruns alone end by 08:28:01 UTC, before land.sh stops waiting
+test	rerun failed files alone	2026-11-21T08:25:31.1095959Z run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/reruns-rerun.log)
+test	rerun failed files alone	2026-11-21T08:25:33.4261670Z run-tests: test/status-page.test.ts: failed again alone: a real failure
+test	rerun failed files alone	2026-11-21T08:25:33.4262268Z run-tests: the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run
+test	rerun failed files alone	2026-11-21T08:25:34.4285551Z ##[error]Process completed with exit code 1.

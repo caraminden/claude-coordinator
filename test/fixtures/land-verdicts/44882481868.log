@@ -1,0 +1,51 @@
+test	the full suite	2026-11-21T07:55:56.8046184Z run-tests: tier all (pipeline test files included): src/land.ts is a pipeline file
+test	the full suite	2026-11-21T07:56:02.1369553Z The event loop was held for 0.6 s: the server answered nobody meanwhile. Cause: own work (0.6 s on CPU of 0.7 s; waited 0.3 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 754 voluntary and 602 involuntary switches; 0 writes queued on the write worker). Running: 40% writeOffThread (src/db-writer.ts:77) < (anonymous) (server.ts:0); 5% waitFor (src/db-writer.ts:105) < beforeRead (src/db-writer.ts:114) < db.prepare.rest.<computed> (src/db-writer.ts:158) < getSetting (src/db.ts:3786); 5% exec < (anonymous) (src/db-writer.ts:166) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T07:56:15.0263781Z The event loop was held for 1.0 s: the server answered nobody meanwhile. Cause: own work (1.1 s on CPU of 1.1 s; waited 0.5 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 157 voluntary and 135 involuntary switches; 1 writes queued on the write worker). Running: 52% (anonymous) (src/decisions.ts:99) < parseDecisions (src/decisions.ts:86) < (anonymous) (src/decisions.ts:329) < parsed (src/decisions.ts:222); 32% parseDecisions (src/decisions.ts:86) < (anonymous) (src/decisions.ts:329) < parsed (src/decisions.ts:222) < replay (src/decisions.ts:219); 9% parseDecisions (src/decisions.ts:86) < assemble (src/decisions.ts:303) < loadDecisions (src/decisions-load.ts:50) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T07:56:15.4437123Z The event loop was held for 0.8 s: the server answered nobody meanwhile. Cause: waited for CPU (0.5 s on CPU of 0.9 s; waited 0.4 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 27 voluntary and 72 involuntary switches; 0 writes queued on the write worker). Running: 40% namedStacks (src/loop-lag.ts:33) < (anonymous) (src/loop-lag.ts:260); 20% post (node:inspector) < (anonymous) (src/loop-lag.ts:207); 20% runMicrotasks Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T07:57:49.2588303Z ✖ up starts the far emulator through the starter and points the adb server here at its port (921.984527ms)
+test	the full suite	2026-11-21T08:01:08.3061295Z ✖ failing tests:
+test	the full suite	2026-11-21T08:01:08.3061301Z 
+test	the full suite	2026-11-21T08:01:08.3061402Z test at test/citadel-android.test.ts:327:1
+test	the full suite	2026-11-21T08:01:08.3061676Z ✖ up starts the far emulator through the starter and points the adb server here at its port (921.984527ms)
+test	the full suite	2026-11-21T08:01:08.3061891Z   AssertionError [ERR_ASSERTION]: The input did not match the regular expression /0012host:emulator:5555/. Input:
+test	the full suite	2026-11-21T08:01:08.3061947Z   
+test	the full suite	2026-11-21T08:01:08.3061999Z   ''
+test	the full suite	2026-11-21T08:01:08.3062052Z   
+test	the full suite	2026-11-21T08:01:08.3062356Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/citadel-android.test.ts:348:12)
+test	the full suite	2026-11-21T08:01:08.3062469Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	the full suite	2026-11-21T08:01:08.3062625Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	the full suite	2026-11-21T08:01:08.3062688Z     generatedMessage: true,
+test	the full suite	2026-11-21T08:01:08.3062756Z     code: 'ERR_ASSERTION',
+test	the full suite	2026-11-21T08:01:08.3062817Z     actual: '',
+test	the full suite	2026-11-21T08:01:08.3062890Z     expected: /0012host:emulator:5555/,
+test	the full suite	2026-11-21T08:01:08.3062957Z     operator: 'match',
+test	the full suite	2026-11-21T08:01:08.3063010Z     diff: 'simple'
+test	the full suite	2026-11-21T08:01:08.3063066Z   }
+test	the full suite	2026-11-21T08:01:08.3063618Z run-tests: 1 test file(s) failed; CI reruns each alone in its next step, with a deadline of its own
+test	the full suite	2026-11-21T08:01:09.3032438Z ##[error]Process completed with exit code 1.
+test	rerun failed files alone	﻿2026-11-21T08:01:09.3084009Z ##[group]Run [ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }
+test	rerun failed files alone	2026-11-21T08:01:09.3084436Z ^[[36;1m[ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3084827Z ^[[36;1mif [ -n "$LAND_REF" ]; then^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3085076Z ^[[36;1m  export DEPLOY_RERUN_DEADLINE=$(($(date +%s) + RERUN_WINDOW - 30))^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3085395Z ^[[36;1m  echo "reruns alone end by $(date -u -d "@$DEPLOY_RERUN_DEADLINE" +%T) UTC, before land.sh stops waiting"^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3085666Z ^[[36;1mfi^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3085797Z ^[[36;1mrc=0^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3086032Z ^[[36;1m# Streamed as the full suite's is: a run cancelled mid-rerun still shows the labels so far.^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3086308Z ^[[36;1m: >"$RUNNER_TEMP/reruns.log"^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3086507Z ^[[36;1mtail -n +1 -f "$RUNNER_TEMP/reruns.log" &^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3086855Z ^[[36;1mDEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_FROM="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/reruns.log" || rc=$?^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3087247Z ^[[36;1msleep 1; kill $!^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3087413Z ^[[36;1mexit "$rc"^[[0m
+test	rerun failed files alone	2026-11-21T08:01:09.3099988Z shell: /usr/bin/bash -e {0}
+test	rerun failed files alone	2026-11-21T08:01:09.3100203Z env:
+test	rerun failed files alone	2026-11-21T08:01:09.3100389Z   XDG_RUNTIME_DIR: /run/user/997
+test	rerun failed files alone	2026-11-21T08:01:09.3100647Z   DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/997/bus
+test	rerun failed files alone	2026-11-21T08:01:09.3100898Z   NICENESS: 0
+test	rerun failed files alone	2026-11-21T08:01:09.3101055Z   LAND_REF: 1
+test	rerun failed files alone	2026-11-21T08:01:09.3101215Z   RERUN_WINDOW: 180
+test	rerun failed files alone	2026-11-21T08:01:09.3101391Z ##[endgroup]
+test	rerun failed files alone	2026-11-21T08:01:09.3166796Z reruns alone end by 08:03:39 UTC, before land.sh stops waiting
+test	rerun failed files alone	2026-11-21T08:01:09.3414420Z run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/reruns-rerun.log)
+test	rerun failed files alone	2026-11-21T08:01:42.2600126Z run-tests: test/citadel-android.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 13.90)
+test	rerun failed files alone	2026-11-21T08:01:42.2606651Z run-tests: the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run
+test	rerun failed files alone	2026-11-21T08:01:43.2644993Z ##[error]Process completed with exit code 1.

@@ -53,7 +53,7 @@ src/previews.ts: test/relative-urls.test.ts
 tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts
 .github/workflows/tests.yml: test/ci-runner-choice.test.ts
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
-tools/land.sh: test/ci-runner-choice.test.ts test/land-burn-in.test.ts
+tools/land.sh: test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts
 tools/burn-in.sh: test/burn-in.test.ts test/flake-proof-yields.test.ts test/ci-runner-choice.test.ts
 tools/flake-proof.sh: test/flake-proof-yields.test.ts
 tools/win-test-box/**: test/ps1-lint.test.ts

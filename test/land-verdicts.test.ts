@@ -1,0 +1,226 @@
+// The ship verdicts' test bench (#1484, from the Nov 20 to 21 retro, takeaway 1): every rule in tools/land.sh that
+// decides whose ship a CI red belongs to, run on the real reds of those two nights. It loads the very functions land.sh
+// runs, cut from tools/land.sh at test time, so a change to one runs here (tools/affected-map.txt maps land.sh to this
+// file), and the guard at the end fails when a new function reads CI's log ($failed) without being benched.
+//
+// Each case is one real run: its log, trimmed (test/fixtures/land-verdicts/README.md), the real ships' commits on main
+// for what each changed, and the incident report that says who was really at fault. Only what reaches outside is faked:
+// scratch worktrees are folders, and a fake citadel-node fails a test file at the commits the case says it failed at
+// (FAILS_AT); everything else (git history, imports, test text, tools/known-flakes.ts) is real. The reports are in the
+// shared folder's reports/: incident-2026-11-20-1840-cause.md (1840), incident-2026-11-20-2106-cause.md (2106),
+// incident-2026-11-21-0019-cause.md (0019).
+//
+// New rules run in shadow first (LAND_RULES in land.sh, ADR 0020): each case checks the verdict with the rules as
+// shipped, and the rule's own verdict with it switched live.
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { after, test } from 'node:test';
+import { tempRoot } from './helpers.ts';
+
+const root = resolve(import.meta.dirname, '..');
+const land = readFileSync(join(root, 'tools/land.sh'), 'utf8');
+const fixtures = join(root, 'test/fixtures/land-verdicts');
+const tmp = tempRoot('land-verdicts-');
+after(() => tmp.teardown());
+
+// The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
+const BENCHED = [
+  'cut_off', 'flake_only', 'burn_lines', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on',
+  'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes',
+  'train_pin', 'train_alone',
+];
+// Functions that read $failed but decide nobody's fault themselves: each says why.
+const NOT_VERDICTS: Record<string, string> = {
+  ci_failed: 'fetches the log and writes its flake lines',
+  ci_gate: 'waits for the run and fetches its log',
+  gate: 'calls cut_off, flake_only and known_flakes, benched here',
+  smoke: 'the smoke check before the line: one ship alone, its own red',
+  train_build: 'builds the train; keeps the last log for a rider it drops',
+  train_bisect: 'bisects with CI runs: no guess, each run decides',
+  train_suspects: 'calls train_real, train_pin and train_suspects_of, benched here, then holds or refuses what they name',
+  flake_keep: 'calls flake_only and train_suspects_of, benched here',
+};
+
+function fn(name: string): string {
+  const lines = land.split('\n');
+  const i = lines.findIndex((l) => l.startsWith(`${name}() {`) || l.startsWith(`${name}() (`));
+  assert.ok(i >= 0, `tools/land.sh has no ${name}(): rename it in test/land-verdicts.test.ts's BENCHED too`);
+  if (/\}\s*(#.*)?$/.test(lines[i])) return lines[i];
+  const end = lines.findIndex((l, j) => j > i && /^[})]$/.test(l));
+  return lines.slice(i, end + 1).join('\n');
+}
+// The rules as shipped: land.sh's own LAND_RULES default.
+const shipped = /^LAND_RULES=\$\{LAND_RULES:-([^}]*)\}$/m.exec(land)?.[1];
+
+const tools = tmp.path('tools');
+mkdirSync(tools);
+symlinkSync(join(root, 'tools/known-flakes.ts'), join(tools, 'known-flakes.ts'));
+// The fake citadel-node: a test file run alone fails at the commits in FAILS_AT (the scratch worktree's .at says which).
+writeFileSync(join(tools, 'citadel-node'), `#!/usr/bin/env bash
+case " $* " in *known-flakes.ts*) exec "$NODE_BIN" "$@" ;; esac
+at=$(cat .at)
+for c in $FAILS_AT; do [ "$c" != "$at" ] || { echo "✖ fails at $at"; exit 1; }; done
+echo "✔ passes at $at"
+`);
+chmodSync(join(tools, 'citadel-node'), 0o755);
+
+const preamble = `set -euo pipefail
+say() { printf 'say: %s\\n' "$*" >>"$OUT/log"; }
+retro_log() { printf 'retro: %s\\n' "$1" >>"$OUT/log"; }
+train_drop() { echo 'drop: the riders go back in line' >>"$OUT/log"; }
+train_tell() { :; }
+# chg from the real ships: SHIPS[m] is member m's commits on main (0: the front).
+train_chg() { local m c; chg=(); for ((m = 0; m <= \${#train_n[@]}; m++)); do chg[m]=$(for c in \${SHIPS[m]:-}; do command git show --name-only --format= "$c"; done | sort -u | grep . || true); done; }
+# Scratch worktrees are folders holding the case's red files and the commit in .at, for the fake citadel-node.
+seed() { local f; printf '%s\\n' "$2" >"$1/.at"; for f in $RED; do mkdir -p "$1/$(dirname "$f")"; : >"$1/$f"; done; }
+git() {
+  if [ "$1" = worktree ] && [ "$2" = add ]; then mkdir -p "\${@: -2:1}"; seed "\${@: -2:1}" "\${@: -1}"; return 0; fi
+  if [ "$1" = worktree ] && [ "$2" = remove ]; then return 0; fi
+  if [ "$1" = -C ] && [ "$3" = checkout ]; then seed "$2" "\${@: -1}"; return 0; fi
+  command git "$@"
+}
+tools=$TOOLS state=$OUT burn_red='' branch=front label=front ci_url=https://example.invalid/run train_n=() train_br=() train_tip=() train_was=()
+main_red='' main_red_other='' main_red_mine='' main_red_riders=0
+${BENCHED.map(fn).join('\n')}
+`;
+
+type Case = { script: string; red?: string; failsAt?: string; rules?: string; shared?: string };
+let n = 0;
+function run(c: Case): { out: string; log: string } {
+  const out = tmp.path(`run${++n}`);
+  mkdirSync(out);
+  writeFileSync(join(out, 'log'), '');
+  const r = spawnSync('bash', ['-c', `${preamble}\n${c.script}`], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: out, OUT: out, TOOLS: tools, FIX: fixtures, NODE_BIN: process.execPath,
+      RED: c.red ?? '', FAILS_AT: c.failsAt ?? '', LAND_RULES: c.rules ?? shipped ?? '', COORDINATOR_SHARED_DIR: c.shared ?? '',
+      DEPLOY_DB: join(out, 'none.db'),
+    },
+  });
+  assert.equal(r.status, 0, `the bench's bash failed:\n${r.stderr}\n${r.stdout}`);
+  return { out: r.stdout, log: readFileSync(join(out, 'log'), 'utf8') };
+}
+const log = (run: string) => `failed=$(cat "$FIX/${run}.log")`;
+// Each ship's commits on main, as each train had them.
+const S = {
+  1356: 'caa15be4', 1384: 'b5ee0201', 1358: 'd327b6ff 932efac3 d862b703', 1394: '642e3fa9', 1369: 'b063dd7a', 1383: '48c03a82',
+  1382: '0c3a233c', 1355: '3e5aa0fd', 1365: 'e3f0f41d', 1385: 'ff09fd26 7db26285 96ad1f03',
+  1415: 'cbf4d366 e6c5dbc3 982f0b50', 1366: '13f0f719 143a160c e3bbb05b',
+};
+// <front> <riders...>: the train's globals, with each member's commits for train_chg.
+function train(tip: string, old: string, ...ships: (keyof typeof S)[]): string {
+  const [front, ...riders] = ships;
+  return [
+    `tip=${tip} old=${old} own=own${front} branch=ticket/${front}-x label=ticket/${front}-x`,
+    `train_n=(${riders.map((_, i) => i + 2).join(' ')}) train_br=(${riders.map((r) => `ticket/${r}-x`).join(' ')})`,
+    `train_tip=(${riders.map((r) => `tip${r}`).join(' ')}) train_was=(${riders.map((r) => `was${r}`).join(' ')})`,
+    `SHIPS=(${ships.map((s) => `'${S[s]}'`).join(' ')})`,
+  ].join('\n');
+}
+
+test('the bench has every commit its cases name (CI checks out with fetch-depth 0)', () => {
+  const all = [...Object.values(S).join(' ').split(' '), '4730e151', '3147c858', '3db73c29'];
+  const missing = all.filter((c) => spawnSync('git', ['cat-file', '-e', `${c}^{commit}`], { cwd: root }).status !== 0);
+  assert.deepEqual(missing, [], 'these commits are missing here: a shallow clone? fetch the history');
+});
+
+// A: run 44859457680 (Nov 20 19:07 PST, report 1840): killed at 55 s from outside, "Interrupted while running:", no test
+// failed. Before #1377 the bisect counted it red and refused #1290's train. Verdict: none, one fresh run.
+test('A: a run killed with no failing test is no verdict', () => {
+  const r = run({ script: `${log('44859457680')}\ncut_off && echo cut-off\ntrain_real || echo 'no real failure'` });
+  assert.equal(r.out, 'cut-off\nno real failure\n');
+  // And a real red is no cut-off: run 44869832060 (report 2106), db-writer failed again alone.
+  assert.equal(run({ script: `${log('44869832060')}\ncut_off || echo red` }).out, 'red\n');
+});
+
+// B: runs 44884401354 and 44884849606 (Nov 21 00:25 and 00:32 PST, report 0019): status-page red on main's own clock
+// (3147c858), and #1414's train of 6 behind it. Before #1430 the suspects refused #1356 and #1378 for it. Verdict: main
+// red, nobody refused, the riders go back in line.
+for (const ci of ['44884401354', '44884849606']) {
+  test(`B: a red main's tip also fails refuses nobody (run ${ci})`, () => {
+    const t = `${log(ci)}\ntip=3147c858 old=3147c858 own=own1414 branch=ticket/1414-x label=ticket/1414-x train_n=(2 3 4 5 6 7) SHIPS=()\ntrain_real`;
+    assert.equal(run({ script: t }).out, 'test/status-page.test.ts\n', 'wake-when-live, "not rerun", is no real failure');
+    const r = run({ script: `${t} >/dev/null\ntrain_main_red && echo "main red: $main_red, mine: \${main_red_mine:-none}"`, red: 'test/status-page.test.ts', failsAt: '3147c858' });
+    assert.equal(r.out, 'main red: test/status-page.test.ts, mine: none\n');
+    assert.match(r.log, /drop: the riders go back in line/);
+    assert.match(r.log, /retro: red on main too: not this train's/);
+    // Green on main: not main's red, so the suspects judge it.
+    const g = run({ script: `${t} >/dev/null\ntrain_main_red || echo 'not main'`, red: 'test/status-page.test.ts' });
+    assert.equal(g.out, 'not main\n');
+  });
+}
+
+// C: run 44886957865 (Nov 21 00:53 PST, report 0019): #1385's train with #1415; one-pacific failed again alone, and its
+// message names src/standing-checks.ts:314, the file #1415 added; auto-resume passed alone (load). It was #1415's.
+// Today's guess gets it: one-pacific's text names server.ts, which #1415 changed (and #1385 didn't).
+const C = `${log('44886957865')}\n${train('96ad1f03', '3db73c29', 1385, 1415)}\ntrain_chg\nrules_say=1`;
+test('C: a red only on files a rider changed: that rider', () => {
+  assert.equal(run({ script: `${C}\ntrain_real` }).out, 'test/one-pacific.test.ts\n');
+  const r = run({ script: `${C}\ntrain_suspects_of test/one-pacific.test.ts` });
+  assert.equal(r.out, '1\n');
+  assert.doesNotMatch(r.log, /would/, 'one-pacific imports no hub: the hub rule agrees');
+  assert.equal(run({ script: `${C}\ntrain_suspects_of test/one-pacific.test.ts`, rules: 'hub=live' }).out, '1\n');
+});
+
+// D: run 44869832060 (Nov 20 21:13 PST, report 2106): front #1356, riders #1384, #1358, #1394, #1369, #1383, #1382;
+// db-writer failed again alone on 'props.propose', which #1356's O2 removed. db-writer imports src/db.ts (a hub: 210
+// test files), src/db-writer.ts and src/http.ts; #1369 changed all three, #1356 only src/properties.ts, which src/db.ts
+// imports (level 2). The guess held #1369: wrong. Verdict: no suspects from the files, the bisect.
+const D = `${log('44869832060')}\n${train('4730e151', '4730e151', 1356, 1384, 1358, 1394, 1369, 1383, 1382)}\ntrain_chg\nrules_say=1`;
+test('D: a red reached through a hub file names no suspects: the bisect', () => {
+  assert.equal(run({ script: `${D}\ntrain_real` }).out, 'test/db-writer.test.ts\n');
+  const r = run({ script: `${D}\ntrain_suspects_of test/db-writer.test.ts | paste -sd' '` });
+  assert.equal(r.out, '4\n', "today's rules guess #1369 (member 4), the wrong ship");
+  assert.match(r.log, /retro: would spare #1369 \(hub\): no suspects, so the bisect · test\/db-writer\.test\.ts/);
+  assert.equal(run({ script: `${D}\ntrain_suspects_of test/db-writer.test.ts`, rules: 'hub=live' }).out, '');
+  // It reproduces alone, so before any guess the pin finds the front, #1356 (#1403): from 21:01 every train had it.
+  const pin = run({ script: `${D}\ntip=tip1382\ntrain_pin test/db-writer.test.ts`, red: 'test/db-writer.test.ts', failsAt: 'own1356 tip1384 tip1358 tip1394 tip1369 tip1383 tip1382' });
+  assert.equal(pin.out, '0\n');
+});
+// D2: run 44869305694 (Nov 20 21:06 PST, report 2106): front #1355, riders #1356, #1384, #1365, #1358, #1394; db-writer
+// real (#1356's), codex-lock a load flake. Today's guess names #1355 and #1365, both innocent: more than one ship, so
+// the bisect already. With hub: no suspects, the bisect too.
+test('D2: the same red with two wrong guesses goes to the bisect either way', () => {
+  const t = `${log('44869305694')}\n${train('4730e151', '4730e151', 1355, 1356, 1384, 1365, 1358, 1394)}\ntrain_chg\nrules_say=1`;
+  assert.equal(run({ script: `${t}\ntrain_real` }).out, 'test/db-writer.test.ts\n', 'codex-lock passed alone');
+  assert.equal(run({ script: `${t}\ntrain_suspects_of test/db-writer.test.ts | paste -sd' '` }).out, '0 3\n');
+  assert.equal(run({ script: `${t}\ntrain_suspects_of test/db-writer.test.ts`, rules: 'hub=live' }).out, '');
+});
+
+// E: #1366 alone, runs 44882481868 (Nov 21 00:01 PST, citadel-android) and 44888201563 (01:17 PST, auto-resume), report
+// 0019; and 44858022381 (Nov 20 18:50 PST, citadel-heavy, #1367's known flake), report 1840. Each failed file passed
+// alone, and each had flaked on other ships. Verdict: ship (known flakes, #1419), unless only its own branch saw it.
+for (const [ci, file] of [['44882481868', 'test/citadel-android.test.ts'], ['44888201563', 'test/auto-resume.test.ts'], ['44858022381', 'test/citadel-heavy.test.ts']]) {
+  test(`E: a flake-only red on known flakes ships (run ${ci})`, () => {
+    const shared = tmp.path(`shared-${ci}`);
+    const day = new Date().toISOString().slice(0, 10);
+    mkdirSync(join(shared, 'retro-log', day), { recursive: true });
+    const sighting = (branch: string) => writeFileSync(join(shared, 'retro-log', day, 'land.md'), `# Retro log: land.sh\n\n- 01:00:00Z · flake · ${file} · load 12.0 · ${branch} · in CI\n`);
+    const t = `${log(ci)}\ntip=3147c858 old=3147c858 own=3147c858 branch=ticket/1366-x label=ticket/1366-x SHIPS=('${S[1366]}')`;
+    assert.equal(run({ script: `${t}\nflake_only` }).out, `${file}\n`);
+    sighting('ticket/1300-elsewhere');
+    const r = run({ script: `${t}\nknown_flakes "$(flake_only)" && echo "ship: $known_why"`, shared });
+    assert.match(r.out, new RegExp(`^ship: ${file.replace(/\./g, '\\.')} \\(`));
+    // Seen only on its own branch: not known, so the one fresh run.
+    sighting('ticket/1366-x');
+    assert.equal(run({ script: `${t}\nknown_flakes "$(flake_only)" || echo 'fresh run'`, shared }).out, 'fresh run\n');
+  });
+}
+
+// The guard: a function that reads CI's log decides something about the red, so it is benched or says why not.
+test('every function that reads $failed is benched here or says why it decides nobody', () => {
+  const names: string[] = [];
+  let cur = '';
+  for (const l of land.split('\n')) {
+    const m = /^([a-z_]+)\(\) [{(]/.exec(l);
+    if (m) cur = m[1];
+    if (cur && /\$failed\b|\$\{failed/.test(l) && !names.includes(cur)) names.push(cur);
+  }
+  const loose = names.filter((f) => !BENCHED.includes(f) && !(f in NOT_VERDICTS));
+  assert.deepEqual(loose, [], 'bench these in test/land-verdicts.test.ts with a real run, or list them in NOT_VERDICTS with why');
+  assert.ok(shipped, "land.sh's LAND_RULES default line is gone: the bench reads the shipped modes from it");
+});

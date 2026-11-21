@@ -1,0 +1,39 @@
+test	the full suite	2026-11-21T02:50:28.9604147Z run-tests: tier all (pipeline test files included): 
+test	the full suite	2026-11-21T02:50:37.3047494Z The event loop was held for 0.8 s: the server answered nobody meanwhile. Cause: own work (0.8 s on CPU of 0.9 s; waited 0.4 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 720 voluntary and 470 involuntary switches; 0 writes queued on the write worker). Running: 52% writeOffThread (src/db-writer.ts:74) < (anonymous) (server.ts:0); 3% toString (node:buffer) < loadAssets (server.ts:164); 3% exec < attachState (src/db.ts:1761) < Store (src/db.ts:1691) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T02:50:57.9891682Z The event loop was held for 0.8 s: the server answered nobody meanwhile. Cause: unclear (0.2 s on CPU of 0.9 s; waited 0.2 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 306 voluntary and 62 involuntary switches; 0 writes queued on the write worker). Running: 63% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:47) < templateHistory (src/kit-sync.ts:66); 14% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:47) < blobAt (src/kit-sync.ts:56); 6% spawn < git (src/kit-sync.ts:34) < (anonymous) (src/kit-sync.ts:306) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T02:51:12.0423793Z The event loop was held for 1.2 s: the server answered nobody meanwhile. Cause: waited for CPU (0.7 s on CPU of 1.3 s; waited 0.5 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 643 voluntary and 397 involuntary switches; 0 writes queued on the write worker). Running: 25% writeOffThread (src/db-writer.ts:74) < (anonymous) (server.ts:0); 21% exec < Store (src/db.ts:1691) < (anonymous) (server.ts:0); 13% exec < attachState (src/db.ts:1761) < Store (src/db.ts:1691) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T02:52:06.1236679Z ✖ a job that ran appends one line: start, who, what, on what it waited, wait s, run s, status, pressure (1281.553744ms)
+test	the full suite	2026-11-21T02:55:27.9454307Z ✖ failing tests:
+test	the full suite	2026-11-21T02:55:27.9454313Z 
+test	the full suite	2026-11-21T02:55:27.9454410Z test at test/citadel-heavy.test.ts:322:1
+test	the full suite	2026-11-21T02:55:27.9454766Z ✖ a job that ran appends one line: start, who, what, on what it waited, wait s, run s, status, pressure (1281.553744ms)
+test	the full suite	2026-11-21T02:55:27.9455229Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+test	the full suite	2026-11-21T02:55:27.9455369Z   + actual - expected
+test	the full suite	2026-11-21T02:55:27.9455483Z   
+test	the full suite	2026-11-21T02:55:27.9455568Z     [
+test	the full suite	2026-11-21T02:55:27.9455679Z       'none',
+test	the full suite	2026-11-21T02:55:27.9455726Z   +   '1',
+test	the full suite	2026-11-21T02:55:27.9455776Z   -   '0',
+test	the full suite	2026-11-21T02:55:27.9455824Z       '3',
+test	the full suite	2026-11-21T02:55:27.9455872Z       '7'
+test	the full suite	2026-11-21T02:55:27.9455924Z     ]
+test	the full suite	2026-11-21T02:55:27.9455964Z   
+test	the full suite	2026-11-21T02:55:27.9456270Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/citadel-heavy.test.ts:332:10)
+test	the full suite	2026-11-21T02:55:27.9456371Z       at Test.runInAsyncScope (node:async_hooks:226:14)
+test	the full suite	2026-11-21T02:55:27.9456456Z       at Test.run (node:internal/test_runner/test:1402:25)
+test	the full suite	2026-11-21T02:55:27.9456739Z       at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+test	the full suite	2026-11-21T02:55:27.9456883Z       at Test.postRun (node:internal/test_runner/test:1542:19)
+test	the full suite	2026-11-21T02:55:27.9456972Z       at Test.run (node:internal/test_runner/test:1467:12)
+test	the full suite	2026-11-21T02:55:27.9457114Z       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+test	the full suite	2026-11-21T02:55:27.9457247Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	the full suite	2026-11-21T02:55:27.9457304Z     generatedMessage: true,
+test	the full suite	2026-11-21T02:55:27.9457360Z     code: 'ERR_ASSERTION',
+test	the full suite	2026-11-21T02:55:27.9457430Z     actual: [ 'none', '1', '3', '7' ],
+test	the full suite	2026-11-21T02:55:27.9457494Z     expected: [ 'none', '0', '3', '7' ],
+test	the full suite	2026-11-21T02:55:27.9457567Z     operator: 'deepStrictEqual',
+test	the full suite	2026-11-21T02:55:27.9457617Z     diff: 'simple'
+test	the full suite	2026-11-21T02:55:27.9457657Z   }
+test	the full suite	2026-11-21T02:55:27.9458052Z run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/tests-rerun.log)
+test	the full suite	2026-11-21T02:55:44.7545839Z run-tests: test/citadel-heavy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 18.55)
+test	the full suite	2026-11-21T02:55:44.7556084Z run-tests: the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run
+test	the full suite	2026-11-21T02:55:45.7617111Z ##[error]Process completed with exit code 1.

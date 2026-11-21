@@ -1,0 +1,73 @@
+test	the full suite	2026-11-21T08:53:22.2191729Z run-tests: tier all (pipeline test files included): 
+test	the full suite	2026-11-21T08:53:37.9361562Z The event loop was held for 0.5 s: the server answered nobody meanwhile. Cause: own work (0.4 s on CPU of 0.6 s; waited 0.3 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 742 voluntary and 527 involuntary switches; 0 writes queued on the write worker). Running: 33% writeOffThread (src/db-writer.ts:77) < (anonymous) (server.ts:0); 14% exec < Store (src/db.ts:1811) < (anonymous) (server.ts:0); 10% exec < attachState (src/db.ts:1883) < Store (src/db.ts:1811) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:54:32.9275836Z The event loop was held for 0.6 s: the server answered nobody meanwhile. Cause: waited for CPU (0.4 s on CPU of 0.7 s; waited 0.4 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 767 voluntary and 586 involuntary switches; 0 writes queued on the write worker). Running: 40% writeOffThread (src/db-writer.ts:77) < (anonymous) (server.ts:0); 12% exec < Store (src/db.ts:1811) < (anonymous) (server.ts:0); 9% exec < attachState (src/db.ts:1883) < Store (src/db.ts:1811) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:54:32.9402470Z ✖ a stopped turn is not resumed, even if the server restarts before it ends (397.437233ms)
+test	the full suite	2026-11-21T08:54:32.9788663Z The event loop was held for 0.6 s: the server answered nobody meanwhile. Cause: waited for CPU (0.4 s on CPU of 0.7 s; waited 0.4 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 796 voluntary and 594 involuntary switches; 0 writes queued on the write worker). Running: 26% writeOffThread (src/db-writer.ts:77) < (anonymous) (server.ts:0); 16% exec < attachState (src/db.ts:1883) < Store (src/db.ts:1811) < (anonymous) (server.ts:0); 14% exec < Store (src/db.ts:1811) < (anonymous) (server.ts:0) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-21T08:57:11.6714550Z ✖ no source file spells out America/Los_Angeles outside the two homes (34.250288ms)
+test	the full suite	2026-11-21T08:57:11.7491468Z ✖ failing tests:
+test	the full suite	2026-11-21T08:57:11.7491473Z 
+test	the full suite	2026-11-21T08:57:11.7491562Z test at test/auto-resume.test.ts:131:1
+test	the full suite	2026-11-21T08:57:11.7491852Z ✖ a stopped turn is not resumed, even if the server restarts before it ends (397.437233ms)
+test	the full suite	2026-11-21T08:57:11.7492036Z   Error: ENOENT: no such file or directory, open '/tmp/auto-resume-KZZmXA/run/turns/3-1795251206555/pid.json'
+test	the full suite	2026-11-21T08:57:11.7492103Z       at readFileSync (node:fs:624:20)
+test	the full suite	2026-11-21T08:57:11.7492341Z       at crash (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/auto-resume.test.ts:66:42)
+test	the full suite	2026-11-21T08:57:11.7492608Z       at async TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/auto-resume.test.ts:140:3)
+test	the full suite	2026-11-21T08:57:11.7492711Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	the full suite	2026-11-21T08:57:11.7492843Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	the full suite	2026-11-21T08:57:11.7492894Z     errno: -2,
+test	the full suite	2026-11-21T08:57:11.7492938Z     code: 'ENOENT',
+test	the full suite	2026-11-21T08:57:11.7493026Z     syscall: 'open',
+test	the full suite	2026-11-21T08:57:11.7493158Z     path: '/tmp/auto-resume-KZZmXA/run/turns/3-1795251206555/pid.json'
+test	the full suite	2026-11-21T08:57:11.7493197Z   }
+test	the full suite	2026-11-21T08:57:11.7493202Z 
+test	the full suite	2026-11-21T08:57:11.7493283Z test at test/one-pacific.test.ts:22:1
+test	the full suite	2026-11-21T08:57:11.7493747Z ✖ no source file spells out America/Los_Angeles outside the two homes (34.250288ms)
+test	the full suite	2026-11-21T08:57:11.7494130Z   AssertionError [ERR_ASSERTION]: src/standing-checks.ts:314: Pacific formats live in src/pacific.ts (server) and public/base.js (front end). Import a variant, or add one there; a deliberate use says `// pacific-ok: <why>`.
+test	the full suite	2026-11-21T08:57:11.7494416Z   + actual - expected
+test	the full suite	2026-11-21T08:57:11.7494461Z   
+test	the full suite	2026-11-21T08:57:11.7494502Z   + [
+test	the full suite	2026-11-21T08:57:11.7494571Z   +   'src/standing-checks.ts:314'
+test	the full suite	2026-11-21T08:57:11.7494610Z   + ]
+test	the full suite	2026-11-21T08:57:11.7494655Z   - []
+test	the full suite	2026-11-21T08:57:11.7494694Z   
+test	the full suite	2026-11-21T08:57:11.7494959Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/one-pacific.test.ts:26:10)
+test	the full suite	2026-11-21T08:57:11.7495047Z       at Test.runInAsyncScope (node:async_hooks:226:14)
+test	the full suite	2026-11-21T08:57:11.7495134Z       at Test.run (node:internal/test_runner/test:1402:25)
+test	the full suite	2026-11-21T08:57:11.7495218Z       at Test.start (node:internal/test_runner/test:1262:17)
+test	the full suite	2026-11-21T08:57:11.7495343Z       at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+test	the full suite	2026-11-21T08:57:11.7495397Z     generatedMessage: false,
+test	the full suite	2026-11-21T08:57:11.7495445Z     code: 'ERR_ASSERTION',
+test	the full suite	2026-11-21T08:57:11.7495645Z     actual: [ 'src/standing-checks.ts:314' ],
+test	the full suite	2026-11-21T08:57:11.7495845Z     expected: [],
+test	the full suite	2026-11-21T08:57:11.7495922Z     operator: 'deepStrictEqual',
+test	the full suite	2026-11-21T08:57:11.7495973Z     diff: 'simple'
+test	the full suite	2026-11-21T08:57:11.7496014Z   }
+test	the full suite	2026-11-21T08:57:11.7496207Z run-tests: 2 test file(s) failed; CI reruns each alone in its next step, with a deadline of its own
+test	the full suite	2026-11-21T08:57:12.7286446Z ##[error]Process completed with exit code 1.
+test	rerun failed files alone	﻿2026-11-21T08:57:12.7339551Z ##[group]Run [ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }
+test	rerun failed files alone	2026-11-21T08:57:12.7340033Z ^[[36;1m[ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7340255Z ^[[36;1mif [ -n "$LAND_REF" ]; then^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7340433Z ^[[36;1m  export DEPLOY_RERUN_DEADLINE=$(($(date +%s) + RERUN_WINDOW - 30))^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7341237Z ^[[36;1m  echo "reruns alone end by $(date -u -d "@$DEPLOY_RERUN_DEADLINE" +%T) UTC, before land.sh stops waiting"^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7341479Z ^[[36;1mfi^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7341602Z ^[[36;1mrc=0^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7341785Z ^[[36;1m# Streamed as the full suite's is: a run cancelled mid-rerun still shows the labels so far.^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7342005Z ^[[36;1m: >"$RUNNER_TEMP/reruns.log"^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7342163Z ^[[36;1mtail -n +1 -f "$RUNNER_TEMP/reruns.log" &^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7342462Z ^[[36;1mDEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_FROM="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/reruns.log" || rc=$?^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7342775Z ^[[36;1msleep 1; kill $!^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7342896Z ^[[36;1mexit "$rc"^[[0m
+test	rerun failed files alone	2026-11-21T08:57:12.7355550Z shell: /usr/bin/bash -e {0}
+test	rerun failed files alone	2026-11-21T08:57:12.7355869Z env:
+test	rerun failed files alone	2026-11-21T08:57:12.7356273Z   XDG_RUNTIME_DIR: /run/user/997
+test	rerun failed files alone	2026-11-21T08:57:12.7356718Z   DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/997/bus
+test	rerun failed files alone	2026-11-21T08:57:12.7356920Z   NICENESS: 0
+test	rerun failed files alone	2026-11-21T08:57:12.7357079Z   LAND_REF: 1
+test	rerun failed files alone	2026-11-21T08:57:12.7357436Z   RERUN_WINDOW: 180
+test	rerun failed files alone	2026-11-21T08:57:12.7357621Z ##[endgroup]
+test	rerun failed files alone	2026-11-21T08:57:12.7410766Z reruns alone end by 08:59:42 UTC, before land.sh stops waiting
+test	rerun failed files alone	2026-11-21T08:57:12.7574358Z run-tests: 2 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/reruns-rerun.log)
+test	rerun failed files alone	2026-11-21T08:57:16.6732122Z run-tests: test/auto-resume.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 6.27)
+test	rerun failed files alone	2026-11-21T08:57:16.8358813Z run-tests: test/one-pacific.test.ts: failed again alone: a real failure
+test	rerun failed files alone	2026-11-21T08:57:16.8359466Z run-tests: the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run
+test	rerun failed files alone	2026-11-21T08:57:17.8382680Z ##[error]Process completed with exit code 1.

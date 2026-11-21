@@ -78,6 +78,11 @@ the last one in line waited for every run ahead of it.
   First on trial, `hub`: a test that imports a hub (a file outside `test/` that a tenth of the test files name: today
   `src/db.ts`, `src/runner.ts`) gets no guess from imports and goes to the bisect, since almost any ship can turn it
   red. Run 44869832060 shows why: db-writer failed through `src/db.ts`, the guess held #1369, and #1356 did it.
+  Also on trial, `walk`: today the walk through imports stops, with no suspects, at a file that imports nothing by a
+  relative path (land.sh's `set -e`), so a test like that never has its own text read for a path a ship changed. Run
+  44886957865: one-pacific names `server.ts`, which #1415 changed, and the guess named nobody. With `walk` live the walk
+  goes on and names #1415. A shadow line is written only when the rule would change what the train does: a guess
+  naming no ship or two goes to the bisect either way.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`
   and `deploy:` lines, so the server posts its shipped line and risk label as for any ship (`src/land.ts`).

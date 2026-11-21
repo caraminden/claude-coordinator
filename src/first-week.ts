@@ -9,7 +9,7 @@ export const FIRST_WEEK_BRIEF = `This scheme's setup finished a week ago. Look a
 
 1. List the minions made since setup finished (list_tickets, this scheme only). Pick out those whose work only added setup-type things: an icon or manifest, a deploy, CI, land.sh or the push guard, Project facts, skills, rules, agents, or keys.
 2. Open $COORDINATOR_SHARED_DIR/onboarding.md and append a "## First week" section (add it once; if one is there, add a dated sub-heading under it instead). List each such minion as "#N title: what it added", then one line on what that says: setup missed it, or it was new work.
-3. If the same follow-up is one a kit or prompt change would have prevented (the interview didn't ask, the setup skill skipped a step, a kit file went stale), send Citadel's Taskmaster ONE message with relay_when_live (to: "Citadel"; it is delivered at once since you change nothing), naming those gaps and citing the minions by #N. If nothing looks kit-level, send nothing.
+3. If the same follow-up is one a kit or prompt change would have prevented (the interview didn't ask, the setup skill skipped a step, a kit file went stale), send Citadel's Taskmaster ONE message with relay_when_live (to: "Citadel", commit: the hash `git rev-parse main` prints, so it goes out at once), naming those gaps and citing the minions by #N. If nothing looks kit-level, send nothing.
 4. If there are no setup-type minions at all, append a one-line "## First week: nothing needed fixing" and stop.
 
 Change no repo files and start no minions.`;

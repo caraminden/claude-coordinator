@@ -324,7 +324,6 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   return { spec, size };
 }
 
-
 export const ticketRoutes: Route[] = [
   {
     // An ultra review's size, before the person confirms (#432). Person-only like starting one.

@@ -38,5 +38,6 @@ test('the brief booked in a non-Citadel scheme sends its kit gaps by relay_when_
   const [s] = store.schedules.list(p);
   assert.match(s.brief, /relay_when_live/);
   assert.match(s.brief, /to: "Citadel"/);
+  assert.match(s.brief, /commit:/);
   assert.doesNotMatch(s.brief, /message_coordinator/);
 });

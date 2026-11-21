@@ -1013,6 +1013,7 @@ train_build() {
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
     tried[${t##*/}]=1
     read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
+    [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
     [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
     b=${l[2]:-}
@@ -1024,6 +1025,10 @@ train_build() {
       [ -z "$skip" ] && [ "$c" != "$b" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null || continue
       skip="it sits on a commit that came off main"
     done < <(cat "$state/taken-back" 2>/dev/null || true)
+    for x in $train_refused_tips; do
+      [ -z "$skip" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null || continue
+      skip="it sits on a ship this train just refused"
+    done
     if [ -z "$skip" ]; then
       if [ -z "$wt" ]; then
         wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
@@ -1091,15 +1096,16 @@ gate() {
 # one more CI run. Red again on any of the same tests: the guess was wrong, and the bisect takes over on that train. Red
 # on new tests only: another round, up to 3. 0: done (rc as gate's, 1 only for this one alone or a suspect itself), 1:
 # the bisect looks, on the train as it now is (its top red, its log in $failed).
-suspect_tests=''
-# The real failures in $failed, one test file a line; fails when there are none, or the log doesn't label every file.
+suspect_tests='' train_refused=' ' train_refused_tips=''
+# The real failures in $failed, one test file a line; fails when there are none, or the log doesn't label every file as
+# a flake or as failed again alone or hung (a file not rerun, or whose rerun stopped, may be either).
 train_real() {
   local at n out
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
   n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
   out=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\).*/\2 \1/p' | sort -u -k2)
-  [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] || return 1
+  [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] && ! grep -q '^\(rerun alone stopped\|not rerun\) ' <<<"$out" || return 1
   out=$(grep -v '^failed in the full run, passed alone ' <<<"$out" | sed 's/.* //')
   [ -n "$out" ] && echo "$out"
 }
@@ -1131,7 +1137,7 @@ train_suspects() {
   for ((round = 1; round <= 3; round++)); do
     mapfile -t real < <(train_real) || true
     if [ ${#real[@]} = 0 ]; then
-      say "suspects: CI's log doesn't name the tests that really failed, so the bisect looks for the ship"
+      say "suspects: CI's log doesn't say which tests really failed, so the bisect looks for the ship"
       return 1
     fi
     for f in "${real[@]}"; do
@@ -1163,6 +1169,7 @@ train_suspects() {
       if [ -n "${sus[$((i + 1))]:-}" ]; then
         v=${sus[$((i + 1))]}
         train_say "$i" "refused $branch $ci_url likely ${v//, /,}" "$(tail -n 40 <<<"$failed")"
+        train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
       else keep+=("${train_n[$i]}"); fi
     done
     if [ -n "${sus[0]:-}" ]; then # this one is a suspect too: the others go back in line, and this one is refused below

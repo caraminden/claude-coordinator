@@ -25,10 +25,11 @@ the last one in line waited for every run ahead of it.
   whose change touched each failing test file; failing that, a file it imports by a relative path or names by its
   path; failing that, a file those import. If every real failure has a suspect, the suspects are refused at once with
   the failure, worded as likely, not certain, and the train is built again from the others, then the next ships in
-  line, up to the cap, for one more CI run. Green: it all ships. Red again on any of the same tests: the guess was
+  line, up to the cap, for one more CI run (never a ship stacked on a suspect's branch, which would bring its change
+  back). Green: it all ships. Red again on any of the same tests: the guess was
   wrong, and the bisect runs on that refilled train (its top is the one commit known red, so the bisect stays sound
   even if a newcomer did it). Red on new tests only: another round, up to 3. A failure with no suspect, or a log that
-  doesn't label every failed file: the bisect, as before. A suspect that is the front itself: the riders go back in
+  doesn't label every failed file as a flake or as failed again alone or hung: the bisect, as before. A suspect that is the front itself: the riders go back in
   line and the front is refused. An innocent suspect costs its minion one turn and a re-ship, which is accepted.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`

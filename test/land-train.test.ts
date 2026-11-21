@@ -7,10 +7,11 @@ import { test } from 'node:test';
 import { ci, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
 import { until } from './wait.ts';
 
-type Ship = { change?: [string, string]; env?: Record<string, string> };
+type Ship = { change?: [string, string]; env?: Record<string, string>; on?: number };
 
 // Ship 1 (ticket/1-x) lands alone and holds the lock in its deploy until every other ship is in line behind it, so
-// ship 2 is the front of a train with the rest behind it. Ship i changes f<i>.txt unless it says otherwise.
+// ship 2 is the front of a train with the rest behind it. Ship i changes f<i>.txt unless it says otherwise, and starts
+// from main, or from ship <on>'s branch.
 async function line(ships: Ship[], extra: Record<string, string> | ((dir: string) => Record<string, string>) = {}, before?: (r: ReturnType<typeof setup>) => void) {
   const r = setup();
   const c = ci(r);
@@ -21,9 +22,10 @@ async function line(ships: Ship[], extra: Record<string, string> | ((dir: string
   const wts = [r.wt];
   for (let i = 2; i <= ships.length; i++) {
     wts.push(join(r.dir, `wt${i}`));
-    git(r.source, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[i - 1]);
+    git(r.source, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[i - 1], ...(ships[i - 1].on ? [`ticket/${ships[i - 1].on}-x`] : []));
   }
-  ships.forEach((s, i) => r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`])));
+  ships.forEach((s, i) => s.on || r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`])));
+  ships.forEach((s, i) => s.on && (git(wts[i], 'reset', '-q', '--hard', `ticket/${s.on}-x`), r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`]))));
   const was = wts.map((wt) => git(wt, 'rev-parse', 'HEAD'));
   const out = wts.map(() => '');
   const lands = [landAsync(wts[0], { ...env, ...ships[0].env }, 150_000, (s) => (out[0] = s))];
@@ -115,6 +117,24 @@ test('a red train whose real failure maps to one ship: only it is refused, the n
   l.done();
 });
 
+test("a suspect found through what the failing test imports is refused, and a ship stacked on it stays out of the refill rather than bring its change back", async () => {
+  // Ship 1 adds the test, importing x.ts; ship 4 adds x.ts, which turns CI red; ship 5 starts from ship 4's branch.
+  const l = await line([{ change: ['test/real.test.ts', "import '../x.ts';\n"] }, {}, {}, { change: ['x.ts', 'x\n'] }, { on: 4 }, {}, {}], { FAKE_RED_PATH: 'x.ts', LAND_TRAIN_MAX: '3' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
+  assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed, so it is likely the cause.*Look into it: fix it if it is yours, re-test, commit, then run this again/s);
+  assert.match(done[1].stderr, /ship train: ticket\/5-x stays in line \(it sits on a ship this train just refused\)/);
+  assert.match(done[1].stderr, /ship train: ticket\/2-x takes the 3 ships waiting behind it \(ticket\/3-x ticket\/6-x ticket\/7-x\)/);
+  assert.doesNotMatch(done[1].stderr, /red again|bisect/);
+  for (const i of [1, 2, 3, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  for (const i of [3, 6, 7]) shipped(l, done[i - 1], i, 2, 4);
+  assert.equal(done[3].status, 1);
+  assert.equal(done[4].status, 1, 'ship 5 carries ship 4\'s change, so it is red on its own turn');
+  assert.deepEqual(l.subjects(), ['base', 'test/real.test.ts: import \'../x.ts\';', 'f2.txt: 2', 'f3.txt: 3', 'f6.txt: 6', 'f7.txt: 7']);
+  assert.equal(l.runs(), 4, "ship 1's, the red train's, the refilled train's, and ship 5's");
+  l.done();
+});
+
 test('a refilled train red again on the same test: the guess was wrong, so the bisect finds the ship', async () => {
   // Ship 4 touched the failing test, but ship 5 is what turns CI red.
   const l = await line([{}, {}, {}, { change: ['test/real.test.ts', 'x\n'] }, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '3' });
@@ -130,6 +150,16 @@ test('a refilled train red again on the same test: the guess was wrong, so the b
   shipped(l, done[6], 7, 6, 2);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f6.txt: 6', 'f7.txt: 7']);
   assert.equal(l.runs(), 6, "ship 1's, the red train's, the refilled train's, two for the bisect, and the next train's");
+  l.done();
+});
+
+test("a failed test file CI didn't rerun alone may be load or real, so it names no suspect and the bisect finds the ship", async () => {
+  const l = await line([{}, {}, {}, { change: ['test/busy.test.ts', 'x\n'] }], { FAKE_RED_PATH: 'test/busy.test.ts', FAKE_LOG: 'due' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /suspects: CI's log doesn't say which tests really failed, so the bisect looks for the ship/);
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /its bisect found ticket\/4-x the first ship that turned it red/);
+  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
 

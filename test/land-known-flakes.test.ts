@@ -190,13 +190,13 @@ test('reds of flakes only keep its place twice at most, then it is refused back 
   assert.equal(pushes(c), 6, 'two runs a go, three goes');
 });
 
-test('a second red with a real failure, or a flake the ship changed, goes back to its minion at once', () => {
-  for (const how of ['real', 'touched'] as const) {
+test('a second red with a real failure, a flake the ship changed, or leftover processes goes back to its minion at once', () => {
+  for (const how of ['real', 'touched', 'leak'] as const) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, how === 'touched' ? 'test/slow.test.ts' : 'b.txt', 'mine\n');
     const shared = join(r.dir, 'shared');
-    const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...(how === 'real' ? { FAKE_LOG_RERUN: 'mixed' } : {}), COORDINATOR_SHARED_DIR: shared });
+    const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...(how === 'real' ? { FAKE_LOG_RERUN: 'mixed' } : {}), ...(how === 'leak' ? { FAKE_LEAK: '1' } : {}), COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, 1, how);
     assert.doesNotMatch(res.stderr, /keeping its place/, how);
     assert.match(res.stderr, /on the one fresh run after a red of flakes only/, how);

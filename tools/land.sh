@@ -974,6 +974,7 @@ FLAKE_KEEP_MAX=2
 flake_keep() {
   local again f hits=() chg=()
   again=$(flake_only) || return 0
+  ! grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed" || return 0 # leftover processes are no flake
   train_chg
   for f in ${again//, / }; do
     mapfile -t hits < <(train_suspects_of "$f")

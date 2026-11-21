@@ -1673,16 +1673,19 @@ train_imports() {
 # ships as shadow and goes live by a one-word edit here after a day of those lines. test/land-verdicts.test.ts benches
 # every rule on real reds of Nov 20 to 21. hub: no guess from imports for a test that imports a hub, a file a tenth of
 # the test files name (run 44869832060: db-writer imports src/db.ts, and the guess held #1369 while #1356 did it).
-LAND_RULES=${LAND_RULES:-hub=shadow}
+# walk: the walk goes on past a file that imports nothing by a relative path; today it stops there with no suspects,
+# before the test's own text is read (run 44886957865: one-pacific names server.ts, which #1415 changed).
+LAND_RULES=${LAND_RULES:-hub=shadow walk=shadow}
 rule_on() { [[ " $2 " == *" $1=live "* ]]; } # <rule> <rules>
 # <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
 # Each shadow rule's other answer goes to the retro log when the caller sets rules_say (train_suspects does).
 train_suspects_of() {
   local live alt r
-  live=$(train_guess "$1" "$LAND_RULES")
+  # set -e as before #1484 ($( ) drops it), so a step that fails still ends the guess with no suspects.
+  live=$(set -e; train_guess "$1" "$LAND_RULES")
   for r in $LAND_RULES; do
     [ -n "${rules_say:-}" ] && [ "${r#*=}" = shadow ] || continue
-    alt=$(train_guess "$1" "$LAND_RULES ${r%=*}=live")
+    alt=$(set -e; train_guess "$1" "$LAND_RULES ${r%=*}=live")
     [ "$alt" = "$live" ] || rule_would "${r%=*}" "$1" "$live" "$alt"
   done
   [ -z "$live" ] || echo "$live"
@@ -1690,6 +1693,7 @@ train_suspects_of() {
 # <rule> <test file> <today's members> <the rule's members>: the day's line for a shadow rule that would decide otherwise.
 rule_would() {
   local m now=" $(echo $3) " then=" $(echo $4) " add='' drop='' instead='no suspects, so the bisect'
+  [ "$(wc -w <<<"$3")" = 1 ] || [ "$(wc -w <<<"$4")" = 1 ] || return 0 # none, or a guess naming two ships: the bisect either way
   for m in $4; do [[ $now == *" $m "* ]] || add+="${add:+, }$(train_label "$m")"; done
   for m in $3; do [[ $then == *" $m "* ]] || drop+="${drop:+, }$(train_label "$m")"; done
   [ -z "$4" ] || instead="suspects $(for m in $4; do train_label "$m"; done | paste -sd, | sed 's/,/, /g')"
@@ -1718,7 +1722,8 @@ train_guess() {
   fi
   reach=$f
   for lvl in 0 1 2; do
-    [ "$lvl" = 0 ] || reach=$(while read -r c; do [ -z "$c" ] || train_imports "$c"; done <<<"$reach" | sort -u)
+    [ "$lvl" = 0 ] || reach=$(while read -r c; do [ -z "$c" ] || train_imports "$c"; done <<<"$reach" | sort -u) ||
+      rule_on walk "$2" || return 0 # the last file imports nothing by a relative path: set -e stopped here before #1484
     if [ "$lvl" = 1 ] && rule_on hub "$2"; then # almost any ship can turn a test that imports a hub red: no guess
       for p in $reach; do ! train_hub "$p" || return 0; done
     fi
@@ -1737,7 +1742,7 @@ train_guess() {
 train_hub() {
   local n all
   [[ $1 != test/* ]] || return 1
-  n=$(git grep -lF -e "/${1##*/}'" -e "/${1##*/}\"" "$tip" -- test/ 2>/dev/null | wc -l)
+  n=$(git grep -lF -e "/${1##*/}'" -e "/${1##*/}\"" "$tip" -- 'test/*.test.ts' 2>/dev/null | wc -l)
   all=$(git ls-tree -r --name-only "$tip" -- test/ | grep -c '\.test\.ts$') || return 1
   [ $((n * 10)) -ge "$all" ]
 }

@@ -8,7 +8,7 @@
 // It's drawn at once from the last answer this browser had, then refreshed behind. Rows keep their place for the
 // whole visit: an answered one is gone at once (Josh, 2026-11-20), and one that arrives joins the bottom of its scheme with
 // a "new" tag (no reflow without input).
-import { HOME_LINE, api, h, isCoordinator, jumpHref, me, threadHref, view, pacificWeekdayClock } from './base.js';
+import { HOME_LINE, api, h, heldWhilePressed, isCoordinator, jumpHref, me, threadHref, view, pacificWeekdayClock } from './base.js';
 import { usage } from './core.js';
 import { mentionMap } from './inbox.js';
 import { emptyCard, schemeHue, schemeTag, statTiles, toneChip } from './look.js';
@@ -138,7 +138,7 @@ const rowHref = (t, items) => {
 const schemeOrder = () => (data?.schemes ?? []).map((s) => ({ id: s.id, name: s.name }));
 
 function drawPanel() {
-  if (!panel) return;
+  if (!panel || heldWhilePressed(drawPanel)) return;
   own();
   const rows = groups();
   const tickets = new Map((data?.tickets ?? []).map((t) => [t.id, t]));

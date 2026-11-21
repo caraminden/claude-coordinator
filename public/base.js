@@ -170,8 +170,9 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /**
- * A redraw of the sidebar while a pointer is pressed in it waits for the release (#1499): it swaps the pressed row for a
- * new one, the release lands on that, and the click reaches neither link (Cara, 2026-11-21: "it didnt open the minion").
+ * A redraw of the sidebar (or Home's list, its own page on a phone) while a pointer is pressed in it waits for the release
+ * (#1499): it swaps the pressed row for a new one, the release lands on that, and the click reaches neither link (Cara,
+ * 2026-11-21: "it didnt open the minion").
  * A redraw calls this first and returns when it says true; the held ones run once the click has gone through.
  */
 let pressedAt = 0;
@@ -187,7 +188,7 @@ const release = () => {
   // After the click, which the browser sends right after the pointerup.
   setTimeout(() => { const due = [...held]; held.clear(); for (const fn of due) fn(); });
 };
-globalThis.addEventListener?.('pointerdown', (e) => { if (e.target instanceof Element && e.target.closest('.sidebar')) pressedAt = performance.now(); }, true);
+globalThis.addEventListener?.('pointerdown', (e) => { if (e.target instanceof Element && e.target.closest('.sidebar, .home-overview')) pressedAt = performance.now(); }, true);
 for (const type of ['pointerup', 'pointercancel']) globalThis.addEventListener?.(type, release, true);
 globalThis.addEventListener?.('blur', release); // the window's own, not captured: a press moves focus, and that blur mustn't count
 

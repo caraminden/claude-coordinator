@@ -69,6 +69,20 @@ test('a row that leaves Home goes at once, its scheme heading with the last one,
   await waitFor(page, 'the empty card', `document.querySelector('.home-panel').textContent.includes('Nothing needs you')`);
 });
 
+// A redraw between a row's press and its release waits for the release (#1499), so the click opens the minion.
+test('a Home row opens its minion when Home redraws during the click', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/home`, { width: 1280, height: 800 });
+  await page.eval(`window.waiting = [101, 102, 103]`);
+  await waitFor(page, 'the rows', `document.querySelectorAll('.home-panel .thread-row').length === 3`);
+  const { x, y } = await page.centre('.home-panel .thread-row[data-id="102"] .name');
+  const at = { x, y, button: 'left', clickCount: 1 };
+  await page.mouse(x, y);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at });
+  await page.eval(`import('/home.js').then((m) => m.refreshHome())`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at });
+  await waitFor(page, 'the chat open', `location.hash.startsWith('#/home/p/1/t/8')`);
+});
+
 // Folded shut means skipped (#1405): answering the last card in an open scheme doesn't open a row of a folded one.
 for (const [folded, expect] of [[true, '#/home/p/1/t/7'], [false, '#/home/p/2/t/9']] as const) {
   test(`after an answer, Home ${folded ? 'skips' : 'moves on to'} a scheme folded ${folded ? 'shut' : 'open'}`, { skip }, async () => {

@@ -703,7 +703,7 @@ bad_check() {
 # waits for that run, still holding the lock. Landings are one at a time whatever the lock does (the one behind
 # can't know its commit until this one moves main), so letting go of it would speed nobody up. The wait is bounded
 # instead: no runner online, GitHub not answering, a job no runner starts within LAND_CI_START seconds or a run not
-# done within LAND_CI_TIMEOUT (LAND_CI_RERUN more for a run rerunning its failed files alone, ADR 0021) all fall back,
+# done within LAND_CI_TIMEOUT (LAND_CI_RERUN more for a run rerunning its failed files alone, ADR 0022) all fall back,
 # loudly, to the run on perigee (also LAND_CI=0, for when CI itself is broken). A red run refuses, and never falls
 # back, with one exception (#769): a red in which every failed test file passed when run-tests.sh reran it alone gets
 # one fresh CI run of the same commit, and only a fully green one lands.

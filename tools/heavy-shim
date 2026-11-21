@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# A heavy command a turn types itself (cargo, npm, tsc, godot, a browser...) runs through tools/heavy-unit (#1298), in
+# its own scope in citadel-heavy.slice, so running out of memory stops it, never the turn. Every turn's PATH starts
+# with pin/bin/heavy, whose entries are links to this file (src/turn-launch.ts HEAVY_SHIMS). It finds the real
+# command further down PATH and hands it to heavy-unit (../heavy-unit, beside this file). Scripts that call cargo
+# inherit the same PATH, and `mise exec -- cargo` is caught by the mise link, so wrappers need no change.
+# A command already in the heavy slice (cargo's own children, a nested call) runs as it is, at no cost.
+# shortcut: a tool called by an absolute path (`./gradlew`, a script's $JAVA_HOME/bin/java) isn't caught; gradlew
+# goes through citadel-heavy (the android-app skill), which routes its own runs.
+name=${0##*/}
+real=
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do
+  [ -n "$d" ] && [ -f "$d/$name" ] && [ -x "$d/$name" ] || continue
+  [ "$d/$name" -ef "$0" ] && continue
+  real=$d/$name
+  break
+done
+[ -n "$real" ] || { echo "$name: command not found" >&2; exit 127; }
+direct() { exec "$real" "$@"; }
+case $(</proc/self/cgroup) in */"${CITADEL_HEAVY_SLICE:-citadel-heavy.slice}"/*) direct "$@" ;; esac
+mode=()
+case $name in
+  # node is everywhere (hooks, scripts): only its test runner is heavy.
+  node) case " $* " in *" --test "*|*" --test="*) ;; *) direct "$@" ;; esac ;;
+  # mise's other subcommands are quick lookups.
+  mise) case ${1:-} in exec|x|run|r|watch|w|install|i) ;; *) direct "$@" ;; esac ;;
+  # A browser is stopped by the pid its caller started, so heavy-unit becomes it.
+  chromium|chromium-browser|chrome|google-chrome|google-chrome-stable|firefox) mode=(--exec) ;;
+esac
+exec "$(dirname "$(readlink -f "$0")")/heavy-unit" "${mode[@]}" --what "$name $*" "$real" "$@"

@@ -124,6 +124,16 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
+  // heavy-unit and its shims (#1298): pin/bin/heavy, first on every turn's PATH, sends each heavy command a turn types
+  // (or a script it runs calls) to a scope of its own in citadel-heavy.slice, so memory running out stops it, not the turn.
+  for (const tool of ['heavy-unit', 'heavy-shim']) {
+    const source = join(import.meta.dirname, '..', 'tools', tool);
+    if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
+  }
+  if (existsSync(join(MCP_DIR, 'bin', 'heavy-shim'))) {
+    mkdirSync(join(MCP_DIR, 'bin', 'heavy'), { recursive: true });
+    for (const cmd of HEAVY_SHIMS) symlinkSync('../heavy-shim', join(MCP_DIR, 'bin', 'heavy', cmd));
+  }
   // node under another name, so ananicy-cpp's stock `node` rule (SCHED_IDLE) misses the wrapper, claude under it and the MCP servers (#506, deploy/priority.md).
   mkdirSync(join(MCP_DIR, 'bin'), { recursive: true });
   symlinkSync(process.execPath, join(MCP_DIR, 'bin', TURN_NODE));
@@ -177,6 +187,9 @@ export function turnPins(): TurnPins {
   if (!pins) throw new Error('The pinned turn files were never made: call pinTurnFiles(dataDir) once at start, before any turn (src/turn-launch.ts)');
   return pins;
 }
+
+/** The commands a turn's PATH sends through tools/heavy-shim (#1298): builds, test runners, package managers, engines and browsers. */
+export const HEAVY_SHIMS = ['cargo', 'gradle', 'tsc', 'vitest', 'jest', 'pytest', 'playwright', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'node', 'dotnet', 'go', 'make', 'cmake', 'ninja', 'godot', 'godot4', 'mise', 'chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable', 'firefox'];
 
 /** The name a turn's long-lived node processes run under, from a link to node in the turn's pin/bin: anything but `node` (#506). */
 export const TURN_NODE = 'citadel-node';
@@ -721,7 +734,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   }
   env = { ...env, ...androidEnv(homedir(), env.PATH) };
   // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
-  env = { ...env, ...facts.env.heavy, PATH: [join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
+  env = { ...env, ...facts.env.heavy, PATH: [...(existsSync(join(pin, 'bin', 'heavy')) ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
   // The server's host tools list (#1147), which propose_host_tool names; the live checkout is in every container too.
   env.COORDINATOR_HOST_TOOLS = LIVE_MANIFEST;
   // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).

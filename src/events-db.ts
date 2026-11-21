@@ -128,9 +128,11 @@ export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: 
 export function moveEventsOffThread(dbPath: string): Promise<string | null> {
   return new Promise((ok, no) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: { moveEvents: dbPath } });
-    worker.once('message', ok);
+    let said: string | null = null;
+    worker.once('message', (m) => (said = m));
     worker.once('error', no);
-    worker.once('exit', (code) => (code ? no(new Error(`the chat log move's worker exited with ${code}`)) : ok(null)));
+    // On exit, not on its message: by then it has closed the database, so the Store opening next never waits on it.
+    worker.once('exit', (code) => (code ? no(new Error(`the chat log move's worker exited with ${code}`)) : ok(said)));
   });
 }
 

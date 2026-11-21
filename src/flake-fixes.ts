@@ -17,6 +17,9 @@ import { ALARM_QUIET_MS, ALARM_WINDOW_MS, FLAKE_REPEAT, sameFlake, suspectCommit
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
 /** Minions one scheme's pass starts at most. */
 const MAX_STARTS_PER_PASS = 2;
+/** Evidence is read from CI for at most this many sightings per pass, none older than this (their runs have rolled off the branch's list). */
+const MAX_EVIDENCE_PER_PASS = 10;
+const EVIDENCE_MAX_AGE_MS = 6 * 3_600_000;
 const SAME_SIGHTING_MS = 30 * 60_000;
 
 export interface FlakeFixDeps {
@@ -66,9 +69,12 @@ export class FlakeFixes {
       }
     }
     // After the check, so two log lines of one file close together both count the first time.
+    // The first pass after a deploy reads 14 days of lines: only a few hours' newest ones are looked up, a few per pass, so the alarm behind this isn't held. The rest keep no message.
+    let looked = 0;
     for (const s of fresh) {
       // Only a CI run has a log the server can read; perigee's own runs and smoke lines keep no message. A failed read never holds the row back.
-      const found = s.source === 'in CI' && s.branch ? await this.evidence(project, s.branch, s.file, s.at).catch(() => null) : null;
+      const look = s.source === 'in CI' && s.branch && now - s.at < EVIDENCE_MAX_AGE_MS && looked++ < MAX_EVIDENCE_PER_PASS;
+      const found = look ? await this.evidence(project, s.branch, s.file, s.at).catch(() => null) : null;
       this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '', ...(found ? { testName: found.name, message: found.message, cls: classifyFlake(found.message) } : {}) }]);
     }
     return fresh.length;

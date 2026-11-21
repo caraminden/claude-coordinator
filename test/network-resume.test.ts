@@ -161,6 +161,7 @@ test('one probe serves every waiting thread, and each resumes', async () => {
   const [a, b] = [minion(), minion()];
   await turn(a, OUTAGE);
   await turn(b, OUTAGE);
+  await until('the first probe', () => probes.length >= 1);
   await holds('the second wait starts no probe of its own', () => probes.length === 1, { ms: 150 });
   assert.equal(probes.length, 1, 'one loop: the second wait started no probe of its own while the first was under way');
   const before = turnsRun();

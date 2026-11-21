@@ -86,13 +86,23 @@ export function tempRoot(prefix = 'test-'): TempRoot {
     serve,
     down: () => serve(createNetServer((sock) => sock.destroy())),
     teardown: async () => {
-      await stopProcs(procs);
-      for (const s of servers) {
-        (s as Server).closeAllConnections?.();
-        await new Promise((r) => (s.listening ? s.close(r) : r(undefined)));
+      // Each step runs even if an earlier one throws, so a failed stop never leaves servers up or the folder behind.
+      try {
+        await stopProcs(procs);
+      } finally {
+        try {
+          for (const s of servers) {
+            (s as Server).closeAllConnections?.();
+            await new Promise((r) => (s.listening ? s.close(r) : r(undefined)));
+          }
+        } finally {
+          try {
+            await stopTurns(dir);
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
       }
-      await stopTurns(dir);
-      rmSync(dir, { recursive: true, force: true });
     },
   };
 }

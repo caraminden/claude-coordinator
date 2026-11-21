@@ -71,16 +71,20 @@ test('a settled card leaves the inbox, records it on the card and refuses a late
   assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question').data).settled.at > 0, true);
   assert.deepEqual(events.filter((e: any) => e.kind === 'question_result').map((e: any) => JSON.parse(e.data).id), [id]);
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }] } }), /409 Claude took this as answered/);
-  await assert.rejects(settle(id), /404 No open question card/);
+  await assert.rejects(settle(id), /404 No open card with that id/);
 });
 
-test('with no id it settles every open card, and skips ones already answered by a click', async () => {
+// #1488: settling every open card at once (no id) took cards still waiting on people; now it settles only a lone one.
+test('with no id it settles the one open card, skipping ones answered by a click, and with two open it names them and settles none', async () => {
   const clicked = await ask('First?');
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: clicked.id, answers: [{ selected: ['A'], other: '' }] } });
   await idle(ticket.id);
   const a = await ask('Second?');
   const b = await ask('Third?');
-  assert.deepEqual(await settle(), { settled: [a.id, b.id] });
+  await assert.rejects(settle(), (err: Error) => /409 2 cards are open, so say which: pass question_id/.test(err.message) && err.message.includes(`${a.id} (question card "Second?")`) && err.message.includes(b.id));
+  assert.equal((await inbox()).length, 2, 'both still wait');
+  assert.deepEqual(await settle(a.id), { settled: [a.id] });
+  assert.deepEqual(await settle(), { settled: [b.id] }, 'one left: no id needed');
   assert.deepEqual(await settle(), { settled: [] });
   assert.equal((await inbox()).length, 0);
 });

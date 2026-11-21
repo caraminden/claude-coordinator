@@ -11,7 +11,7 @@ import { adminAskRefusal, lendsMachine, managesMachine } from '../access.ts';
 import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME, type Session } from '../auth.ts';
 import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../artifacts.ts';
-import { cardHref } from '../card-links.ts';
+import { cardHref, cardLabel } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
 import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
@@ -763,23 +763,32 @@ export const ticketRoutes: Route[] = [
       const { store, runner } = app;
       // settle_question: the minion judged that a typed reply answered its card (or a newer card replaced
       // it). The card stops waiting on people: out of the inbox, no longer holding a deploy's dismissal.
+      // A plan-type card (propose_plan, edit_instructions' held edit) is withdrawn instead (#1488).
       const only = (await readJson(req)).questionId;
-      const asked = store.eventsOfKinds(id, ['question']).filter((e) => {
-        const q = JSON.parse(e.data);
-        return !q.settled && (only == null || q.id === only);
-      });
-      // An answer comes after its card: only messages after the oldest card still asked are read.
-      const answered = new Set(asked.length ? store.eventsOfKinds(id, ['user_message'], asked[0].id).map((e) => JSON.parse(e.data).answer?.questionId).filter(Boolean) : []);
-      const open = asked.filter((e) => !answered.has(JSON.parse(e.data).id));
-      if (only != null && !open.length) throw new HttpError(404, 'No open question card with that id');
-      const settled = { at: Date.now() };
-      for (const e of open) {
-        const q = JSON.parse(e.data);
-        store.setEventData(e.id, { ...q, settled });
-        runner.emit(id, 'question_result', { id: q.id, settled });
+      const open = store.openCardsOf(id);
+      // By the id its tool returned, its event id, or its link (`?e=<event id>`): the held edit's tool gave only a link.
+      const want = only == null ? null : String(only).trim();
+      const event = want === null ? null : /^\d+$/.test(want) ? Number(want) : Number(/[?&]e=(\d+)/.exec(want)?.[1] ?? NaN);
+      const picked = want === null ? open : open.filter((e) => e.id === event || JSON.parse(e.data).id === want);
+      const list = () => open.map((e) => `${JSON.parse(e.data).id} (${e.kind === 'plan' ? 'plan' : 'question'} card "${cardLabel(e.kind, JSON.parse(e.data))}")`).join('; ');
+      if (want !== null && !picked.length) throw new HttpError(404, `No open card with that id.${open.length ? ` Open: ${list()}` : ' None of yours is open.'}`);
+      // Without an id it settles only a lone open card (#1488): settling every one at once took cards still waiting.
+      if (want === null && picked.length > 1) throw new HttpError(409, `${picked.length} cards are open, so say which: pass question_id. Open: ${list()}`);
+      const busy = picked.find((e) => e.kind === 'plan' && deciding.has(e.id));
+      if (busy) throw new HttpError(409, 'A person is answering that card right now');
+      const at = Date.now();
+      for (const e of picked) {
+        const card = JSON.parse(e.data);
+        if (e.kind === 'plan') {
+          store.setEventData(e.id, { ...card, status: 'withdrawn', at });
+          runner.emit(id, 'plan_result', { id: card.id, status: 'withdrawn', at });
+        } else {
+          store.setEventData(e.id, { ...card, settled: { at } });
+          runner.emit(id, 'question_result', { id: card.id, settled: { at } });
+        }
       }
-      if (open.length) runner.broadcastTicket(id);
-      return json(res, 200, { settled: open.map((e) => JSON.parse(e.data).id) });
+      if (picked.length) runner.broadcastTicket(id);
+      return json(res, 200, { settled: picked.map((e) => JSON.parse(e.data).id) });
     },
   },
   {
@@ -1004,6 +1013,7 @@ export const ticketRoutes: Route[] = [
       // A host tool card (#1147) too.
       const fixed = card.machine || card.releaseKey || card.hostTool;
       const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
+      if (card.status === 'withdrawn') throw new HttpError(409, 'Its minion withdrew this card: nothing to answer');
       if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
       if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);

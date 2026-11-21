@@ -174,7 +174,7 @@ function mergeHead(m, desc, call) {
 }
 
 // A plan only moves forward: pending, then sent back, then superseded; approved (and a machine's notes rejected) is final.
-const PLAN_RANK = { pending: 0, revising: 1, approved: 2, rejected: 2, superseded: 2 };
+const PLAN_RANK = { pending: 0, revising: 1, approved: 2, rejected: 2, superseded: 2, withdrawn: 2 };
 
 /** "✓ Approved by Cara · Tue 14:05", "✎ Cara asked for changes", "✗ Rejected by Cara", "Superseded by a newer plan". */
 /** A held instructions edit's outcome (#1162). */
@@ -183,6 +183,7 @@ function insOutcome(r) {
   if (r.status === 'approved') return `✓ Saved anyway by ${r.by}${when}`;
   if (r.status === 'revising') return `✎ ${r.by} sent it back to work in${when}`;
   if (r.status === 'rejected') return `✗ Cancelled by ${r.by}${when}`;
+  if (r.status === 'withdrawn') return `Withdrawn by its minion${when}`;
   return 'Superseded by a newer edit';
 }
 
@@ -191,6 +192,7 @@ function planOutcome(r, machine) {
   if (r.status === 'approved') return `✓ Approved by ${r.by}${when}`;
   if (r.status === 'revising') return `✎ ${r.by} asked for changes${when}`;
   if (r.status === 'rejected') return `✗ Rejected by ${r.by}${when}`;
+  if (r.status === 'withdrawn') return `Withdrawn by its minion${when}`;
   return machine ? 'Superseded by a newer proposal' : 'Superseded by a newer plan';
 }
 

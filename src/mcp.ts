@@ -302,10 +302,10 @@ const ASK_QUESTION = () => ({
 const SETTLE_QUESTION = {
   name: 'settle_question',
   description:
-    'Settle a question card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced. Use your judgement: settle it only if their message really answers it. A settled card greys out as answered in the chat, leaves the needs-you list, and no longer holds the minion open after a deploy goes live. Leave out question_id to settle every open card.',
+    'Settle a card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced, or withdraw one no longer wanted. Use your judgement: settle a question only if their message really answers it. A settled question card greys out as answered and a plan-type card (propose_plan, edit_instructions\' held edit) as withdrawn; either leaves the needs-you list, can no longer be answered, and no longer holds the minion open. Without question_id it settles your one open card, and refuses when more than one is open, listing them.',
   inputSchema: {
     type: 'object',
-    properties: { question_id: { type: 'string', description: 'The id ask_question returned; leave out for all open cards' } },
+    properties: { question_id: { type: 'string', description: "The card's id (from ask_question, propose_plan or edit_instructions), or its link; leave out only when one card is open" } },
   },
 };
 
@@ -2184,7 +2184,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
-      return settled.length ? `Settled ${settled.join(', ')}: shown as answered in the chat.` : 'No question card was open.';
+      return settled.length ? `Settled ${settled.join(', ')}: shown as answered (a plan-type card as withdrawn) in the chat.` : 'No card of yours was open.';
     }
     case 'strike_text':
       await call('POST', `/api/tickets/${C().TICKET}/strike`, { text: args.text, reason: args.reason });
@@ -2251,7 +2251,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'edit_instructions': {
       const r = await call('POST', `/api/tickets/${C().TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
-      if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). End your turn; the answer comes as a message.`;
+      if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). Its id is ${r.id}: if the edit is no longer wanted (you work it in another way, or a later edit replaces it), withdraw the card with settle_question question_id ${r.id}, or a person may still save it. End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
     case 'propose_machine_notes': {

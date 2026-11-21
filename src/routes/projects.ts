@@ -1154,7 +1154,7 @@ export const projectRoutes: Route[] = [
           instructions: { ...held, count },
           ...(asker && store.listMembers(project.id).some((u) => u.id === asker.id) ? { to: asker.name } : {}),
         });
-        return json(res, 202, { held: count, href: cardHref(ticket, event.id), found: found.map((o) => `${o.label}${o.line ? `:${o.line}` : ''}: ${o.why}`) });
+        return json(res, 202, { held: count, id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), found: found.map((o) => `${o.label}${o.line ? `:${o.line}` : ''}: ${o.why}`) });
       }
       await saveInstructions(app, ticket.id, held);
       return json(res, 200, { saved: citadel ? `${APP_NAME}-wide` : 'scheme', edits: edits.length, length: text.length });

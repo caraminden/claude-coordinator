@@ -152,6 +152,30 @@ test('Save anyway refuses when the text changed under the card, and a Citadel-wi
   assert.match(store.appInstructions().text, /tuning details/);
 });
 
+// #1488: a stale held edit couldn't be withdrawn (settle_question said "No open question card"), so a person later
+// saved it from the card and a duplicate rule went in.
+test('the minion withdraws its held edit with settle_question, by the id it was given or by the link; then nobody can save it', async () => {
+  const settle = async (questionId: string) => {
+    const res = await fetch(`${base}/api/tickets/${ticket.id}/settle`, { method: 'POST', headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId }) });
+    return { status: res.status, body: await res.json() };
+  };
+  const was = store.getProject(project.id)!.instructions;
+  const r = await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. A held line to withdraw by its id.' }], ['CLAUDE.md says it']);
+  assert.equal(typeof r.id, 'string');
+  assert.equal(r.id, lastCard().id, 'the held reply names the card by its id');
+  assert.deepEqual(await settle(r.id), { status: 200, body: { settled: [r.id] } });
+  assert.equal(lastCard().status, 'withdrawn');
+  assert.equal(store.openCardsOf(ticket.id).length, 0, 'no longer holds the minion open (close_self)');
+  assert.equal((await verdict('approve')).status, 409, 'a withdrawn card cannot be saved');
+  assert.equal(store.getProject(project.id)!.instructions, was);
+
+  const again = await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. A held line to withdraw by its link.' }], ['CLAUDE.md says it']);
+  assert.match(again.href, /\?e=\d+$/);
+  assert.deepEqual((await settle(again.href)).body, { settled: [again.id] }, 'the link works too');
+  const event = String(store.eventsOfKinds(ticket.id, ['plan']).at(-1)!.id);
+  assert.match((await settle(event)).body.error, /No open card with that id\. None of yours is open/);
+});
+
 test('a newer held edit does not supersede a card that is mid-answer, so its answer cannot overwrite "superseded" (A2)', async () => {
   const { deciding, postPlan } = await import('../src/plan-cards.ts');
   const events = new Map<number, string>([[1, JSON.stringify({ id: 'old', status: 'pending', instructions: {} })]]);

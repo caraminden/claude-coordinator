@@ -44,7 +44,10 @@ function Start-Launcher([string]$Dir) {
 
 function Get-Log([string]$Dir) {
     $log = Join-Path $Dir 'launcher.log'
-    if (Test-Path $log) { return [IO.File]::ReadAllText($log) } else { return '' }
+    if (-not (Test-Path $log)) { return '' }
+    # Shared read: the launcher may be writing it right now.
+    $f = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
+    try { return (New-Object IO.StreamReader($f)).ReadToEnd() } finally { $f.Dispose() }
 }
 
 function Wait-Log([string]$Dir, [string]$Pattern, [int]$Seconds = 60) {

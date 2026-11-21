@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pagePlanKey, type Store } from './db.ts';
 import { applyEvent, createProgress } from '../public/progress.js';
+import { cutEvent } from '../public/eventcut.js';
 
 type Progress = ReturnType<typeof createProgress>;
 /** The task-list rules a saved state was built by: one from another public/progress.js is rebuilt in full, so no deploy leaves old counts (#530). */
@@ -42,7 +43,8 @@ export function historyPage(store: Store, ticketId: number, opts: { before?: num
   const open = opts.before == null ? store.openCardEventId(ticketId, MAX_PAGE_EVENTS) : null;
   const from = open == null ? opts.from : Math.min(open, opts.from ?? open);
   const { events, more } = store.eventsPage(ticketId, before, limit, from);
-  return { events, more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };
+  // Long tool inputs and results go as a beginning; an opened action fetches the whole event (eventcut.js).
+  return { events: events.map(cutEvent), more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };
 }
 
 function planBefore(store: Store, ticketId: number, eventId: number) {
@@ -107,7 +109,7 @@ export function mergedPage(store: Store, parts: Part[], opts: { before?: number;
   const own = parts[0];
   const firstOwn = events.find((e) => e.ticket_id === own?.id)?.id;
   const tasks = own && !own.mine && firstOwn != null && store.eventsBefore(own.id, firstOwn, 1).length ? planBefore(store, own.id, firstOwn) : [];
-  return { events, more, tasks };
+  return { events: events.map(cutEvent), more, tasks };
 }
 
 /** Every session's events after `after`, as one list in order (the merged chat's catch-up). */

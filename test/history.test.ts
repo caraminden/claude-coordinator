@@ -224,6 +224,9 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   said(t.id, 'another pelican');
   turn(store, t.id, 1);
   said(other.id, 'pelican elsewhere');
+  // A tool call whose input and result the page sends cut (#1530), fetched whole one event at a time.
+  const bigCall = store.addEvent(other.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'big', name: 'Write', input: { file_path: 'a.ts', content: 'w'.repeat(30_000) } }] } });
+  const bigResult = store.addEvent(other.id, 'claude', { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'big', content: 'r'.repeat(20_000) }] } });
 
   const srv = await bootServer({ root: routeRoot });
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
@@ -250,6 +253,35 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   assert.equal(back.events[0].id, firstHit);
   assert.equal(back.more, false);
   assert.equal((await get(`/api/projects/${p.id}/search?q=pelican`)).length, 2);
+
+  const sent = (await get(`/api/tickets/${other.id}/events`)).events;
+  const cutCall = JSON.parse(sent.find((e: any) => e.id === bigCall.id).data).message.content[0];
+  const cutResult = JSON.parse(sent.find((e: any) => e.id === bigResult.id).data).message.content[0];
+  assert.deepEqual([cutCall.cut, cutResult.cut], [{ content: 30_000 }, 20_000]);
+  for (const e of [bigCall, bigResult]) assert.equal((await get(`/api/tickets/${other.id}/events/${e.id}`)).data, store.getEvent(e.id)!.data, 'the event comes whole');
+  assert.equal((await srv.call(`/api/tickets/${t.id}/events/${bigResult.id}`)).status, 404, "another minion's event isn't read through this one");
+  assert.equal((await srv.call(`/api/tickets/${other.id}/events/999999`)).status, 404);
+});
+
+test("a long turn's newest page comes whole but small: each tool call's input and result go as a beginning (#1530)", () => {
+  const { store, t } = setup('bytes');
+  store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'go' });
+  store.addEvent(t.id, 'claude', { type: 'system', subtype: 'init', session_id: 's' });
+  // 1,500 calls like a review wave's: most by Grunts, each with a 20,000-character result, every tenth writing a 30 KB file.
+  for (let i = 0; i < 1500; i++) {
+    const id = `long${i}`;
+    const grunt = i % 8 ? { parent_tool_use_id: 'agent' } : {};
+    const input = i % 10 ? { command: `grep -rn thing src/ ${'x'.repeat(200)}`, description: 'Search' } : { file_path: '/w/a.ts', content: 'c'.repeat(30_000) };
+    store.addEvent(t.id, 'claude', { type: 'assistant', ...grunt, message: { content: [{ type: 'tool_use', id, name: i % 10 ? 'Bash' : 'Write', input }] } });
+    store.addEvent(t.id, 'claude', { type: 'user', ...grunt, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'o'.repeat(20_000) }] } });
+  }
+  const stored = store.listEvents(t.id);
+  const page = historyPage(store, t.id);
+  assert.equal(page.events.length, stored.length, 'the running turn comes whole');
+  const bytes = JSON.stringify(page).length;
+  assert.ok(JSON.stringify(stored).length > 30_000_000);
+  assert.ok(bytes < 600 * stored.length, `${bytes} bytes for ${stored.length} events`);
+  assert.equal(store.getEvent(stored.at(-1)!.id)!.data, stored.at(-1)!.data, 'what is stored stays whole');
 });
 
 test('a newer page carries on from the last replay, with the task list a full replay gives (#609)', () => {

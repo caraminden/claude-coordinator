@@ -1,11 +1,12 @@
 // The progress readout under a chat's head: the step line, its meter and the plan's steps. The pure half is progress.js.
-import { dismissedWhen, h, isCoordinator, statusLabel, view } from './base.js';
+import { api, dismissedWhen, h, isCoordinator, statusLabel, view } from './base.js';
 import { threadRefs, usage } from './core.js';
 import { rowState, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { EMPTY_TRACK } from './threadstate.js';
 import { stepMark } from './ui/chat.js';
 import { firstSentence, ticketActionRef } from './chattext.js';
+import { actionCut } from './eventcut.js';
 import { actionLabel, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 
 // ---------- work progress (thread-bar readout) ----------
@@ -32,13 +33,46 @@ function actionEl(action) {
       ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''));
   el.addEventListener('toggle', () => {
     if (!el.open || el.querySelector('.body')) return;
-    const input = block.input || {};
-    const body = h('div', { class: 'body' },
-      h('pre', {}, block.name === 'Bash' && input.command ? `$ ${input.command}` : JSON.stringify(input, null, 2)));
-    if (action.result) body.append(h('pre', { class: action.result.is_error ? 'err' : '' }, threadRefs(resultString(action.result) || '(no output)')));
+    const body = h('div', { class: 'body' });
     el.append(body);
+    if (actionCut(action)) fullAction(body, action);
+    else actionBody(body, action);
   });
   return el;
+}
+
+/** An opened action's input and result, with a status line under them while some of it is still cut. */
+function actionBody(body, action, status = null) {
+  const { block, result } = action;
+  const input = block.input || {};
+  body.replaceChildren(h('pre', {}, block.name === 'Bash' && input.command ? `$ ${input.command}` : JSON.stringify(input, null, 2)));
+  if (result) body.append(h('pre', { class: result.is_error ? 'err' : '' }, threadRefs(resultString(result) || '(no output)')));
+  if (status) body.append(status);
+}
+
+/**
+ * The page sent this action's input or result cut (eventcut.js): show the beginning at once and fetch the events
+ * whole. A failed fetch leaves the beginning with a retry, never an empty row.
+ */
+async function fullAction(body, action) {
+  const { block, result } = action;
+  actionBody(body, action, h('p', { class: 'cut-note muted', role: 'status' }, 'Loading the rest…'));
+  try {
+    const from = [block.cut && action.event, result?.cut && result.event].filter(Boolean);
+    const rows = await Promise.all(from.map((e) => api(`api/tickets/${e.ticket}/events/${e.id}`)));
+    for (const row of rows) {
+      for (const b of JSON.parse(row.data).message?.content ?? []) {
+        if (b?.type === 'tool_use' && b.id === block.id) Object.assign(block, { input: b.input, cut: undefined });
+        if (b?.type === 'tool_result' && b.tool_use_id === block.id && result) Object.assign(result, { content: b.content, cut: undefined });
+      }
+    }
+    if (actionCut(action)) throw new Error('it was not in its event');
+    actionBody(body, action);
+  } catch (err) {
+    const retry = h('button', { type: 'button', class: 'link' }, 'Try again');
+    retry.addEventListener('click', () => fullAction(body, action));
+    actionBody(body, action, h('p', { class: 'cut-note error', role: 'status' }, `Showing the beginning: couldn't load the rest (${err.message}). `, retry));
+  }
 }
 
 /** "Created #15 · Messaged #12": links to the threads some work created or messaged, or null. */

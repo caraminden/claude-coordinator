@@ -61,7 +61,7 @@ const bearer = (id: number) => ({ Authorization: `Bearer ${tokens.agentToken(id)
 type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine'; notAsPerson?: boolean };
 const FILL: Record<string, string> = {
   ticket: ':t', project: ':p', schedule: ':s', artifact: ':a', machine: ':m', machineId: ':m',
-  person: '999', token: 'not-a-token', view: '0', name: 'nope', session: '0123456789abcdef01234567', turn: '1', key: 'k',
+  person: '999', token: 'not-a-token', view: '0', name: 'nope', session: '0123456789abcdef01234567', turn: '1', event: '1', key: 'k',
   slug: 'nope', template: 'nope', to: 'nope', rest: 'x', app: 'nope', number: '1', list: 'apps', file: '1', upload: '0123456789abcdef0123456789abcdef', job: '1', hash: 'nohash', id: '1', row: 'nope', wait: '1',
 };
 // Routes probed at other paths than FILL gives: a query the route needs, or more than one case.

@@ -904,7 +904,8 @@ function drawEvent(event, scroll) {
     for (const b of data.message?.content ?? []) if (b.type === 'text' && b.text.trim()) view.turnNote = b.text.trim();
   }
   for (const { block, taskId } of applyEvent(view.progress, event.kind, data, event.created_at)) {
-    const action = { block, taskId, result: null };
+    // Which event it came from, so an opened row can fetch it whole when the page sent it cut (eventcut.js).
+    const action = { block, taskId, result: null, event: { id: event.id, ticket: event.ticket_id } };
     view.actions.set(block.id, action);
     view.turnActions.push(action);
   }
@@ -1099,7 +1100,7 @@ function drawEvent(event, scroll) {
     } else if (data.type === 'user') {
       for (const block of data.message?.content ?? []) {
         const action = block.type === 'tool_result' && view.actions.get(block.tool_use_id);
-        if (action) Object.assign(action, { result: { content: block.content, is_error: block.is_error }, doneAt: event.created_at });
+        if (action) Object.assign(action, { result: { content: block.content, is_error: block.is_error, cut: block.cut, event: { id: event.id, ticket: event.ticket_id } }, doneAt: event.created_at });
       }
     } else if (data.type === 'result') {
       // Tool calls stay out of the chat; each turn gets one collapsed line listing them.

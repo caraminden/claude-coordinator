@@ -593,6 +593,15 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // One event whole: what an opened action row fetches when the page sent its input or result cut (public/eventcut.js).
+    method: 'GET', path: '/api/tickets/:ticket/events/:event', who: ['person', 'taskmaster'], everyScheme: true,
+    async handler({ res, app, ticket, params }) {
+      const row = app.store.getEvent(Number(params.event));
+      if (!row || row.ticket_id !== ticket.id) throw new HttpError(404, 'Not found');
+      return json(res, 200, row);
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/messages', who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { req, res, app, session, caller } = ctx;

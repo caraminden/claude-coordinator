@@ -5,6 +5,7 @@ import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { mergeOpen, noteTicketChange } from './closedlist.js';
+import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
@@ -334,7 +335,8 @@ function keepOpenChat() {
   const src = v.merged?.src ?? v.id;
   const page = eventCache.get(src);
   if (!page) return;
-  const events = page.events.slice(-KEPT_EVENTS);
+  // Cut as the page is (eventcut.js): live events join the page whole.
+  const events = page.events.slice(-KEPT_EVENTS).map(cutEvent);
   keepChat(location.hash, v.projectId, v.id, { [eventsUrl(src)]: JSON.stringify({ ...page, events, more: page.more || events.length < page.events.length }) });
 }
 document.addEventListener('visibilitychange', () => {

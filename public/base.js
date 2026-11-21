@@ -59,6 +59,38 @@ export function setShowLogin(fn) {
 
 // ---------- helpers ----------
 
+// GETs on their way, by path: two asks for the same thing in one burst (a scheme's open asks for its properties and
+// inbox twice) share one request (#1528). A GET asked after a write, or after any stream news (newsArrived), never
+// joins one sent before it, since what it was sent for may have changed meanwhile.
+const inflight = new Map();
+/** The stream brought news: GETs from here on go to the server afresh (core.js connectStream). */
+export const newsArrived = () => inflight.clear();
+
+/**
+ * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
+ * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message).
+ */
+/** Run `fn` now, or once the tab is next shown while it's hidden: a hidden tab's polls ask for nothing (#1528). */
+const owedShown = new Set();
+export function whenShown(fn) {
+  if (!globalThis.document?.hidden) return void fn();
+  owedShown.add(fn);
+}
+globalThis.document?.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const fns = [...owedShown];
+  owedShown.clear();
+  for (const fn of fns) fn();
+});
+
+export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
+
+const send = (path, opts) => fetch(path, {
+  ...opts,
+  headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+  body: opts.body ? JSON.stringify(opts.body) : undefined,
+}).then(async (res) => ({ res, text: await res.text().catch(() => '') }));
+
 export async function api(path, opts = {}) {
   const get = !opts.method || opts.method === 'GET';
   if (replay && get) {
@@ -66,12 +98,20 @@ export async function api(path, opts = {}) {
     if (path in replay.answers) return JSON.parse(replay.answers[path]);
     throw Object.assign(new Error('Catching up'), { status: 0 });
   }
-  const res = await fetch(path, {
-    ...opts,
-    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
+  let sent = get ? inflight.get(path) : null;
+  if (!sent) {
+    if (!get) inflight.clear();
+    sent = send(path, opts);
+    if (get) {
+      inflight.set(path, sent);
+      const done = () => { if (inflight.get(path) === sent) inflight.delete(path); };
+      sent.then(done, done);
+    }
+  }
+  const { res, text } = await sent;
+  // Parsed for each caller, so callers that share a request can each change what they're given.
+  let data;
+  try { data = JSON.parse(text); } catch { data = {}; }
   // A copy, as callers change what they're given; histories are kept from the chat's own page (core.js keepOpenChat).
   if (get && res.ok && !/events/.test(path) && replayable(path)) {
     answers.delete(path); // newest last, so the cap drops the longest unasked

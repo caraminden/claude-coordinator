@@ -85,8 +85,8 @@ export const seenInScheme = (seen, waiting, chatId, moved) =>
   new Set(waiting.filter((i) => moved || seen.has(i.key) || i.ticketId === chatId).map((i) => i.key));
 
 /**
- * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch` when
- * news may have moved those schemes' counts, so a scheme you aren't in still lights up. `forget`
+ * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch(badge)` when
+ * news may have moved those schemes' counts (`badge` when it may move a Needs-you count, not only a spinner), so a scheme you aren't in still lights up. `forget`
  * when the counts are fetched afresh: what was last seen before then may be out of date.
  */
 export function otherSchemes(refetch) {
@@ -95,10 +95,12 @@ export function otherSchemes(refetch) {
     ticket(t) {
       const before = last.get(t.id);
       last.set(t.id, t);
-      if (countMoved(before, t) || turnMoved(before, t)) refetch();
+      // true: the news can move a Needs-you count (and the app's badge); false: only a spinner
+      if (countMoved(before, t)) refetch(true);
+      else if (turnMoved(before, t)) refetch(false);
     },
     event(event) {
-      if (cardEvent(event)) refetch();
+      if (cardEvent(event)) refetch(true);
     },
     forget: () => last.clear(),
   };

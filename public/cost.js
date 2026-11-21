@@ -1,5 +1,5 @@
 // Spend against an even day (a seventh of the week): the 7-day breakdown on the usage page, and the week share minion rows use.
-import { account, api, costText, h, view } from './base.js';
+import { account, api, costText, h, view, whenShown } from './base.js';
 import { toast } from './ui/status.js';
 import { renderSidebar } from './sidebar.js';
 
@@ -20,7 +20,17 @@ export function costDetail() {
   return el;
 }
 
-/** Fetch the daily totals again (a turn just ended) and redraw. */
+/**
+ * A turn ended: fetch the totals again, once for a burst of turns (at most every 10 s) and not while the tab is hidden,
+ * where nobody reads them (#1528); the tab coming back fetches what it put off.
+ */
+let costTimer = null;
+export function costSoon() {
+  if (!account?.admin || costTimer) return;
+  costTimer = setTimeout(() => whenShown(() => { costTimer = null; renderCost(); }), 10_000);
+}
+
+/** Fetch the daily totals again and redraw. */
 export async function renderCost() {
   if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;

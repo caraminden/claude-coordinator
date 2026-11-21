@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-import { ago, api, h, icon, view, pacificStamp } from './base.js';
+import { ago, api, h, icon, view, pacificStamp, whenShown } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -474,7 +474,7 @@ export function releasesShell() {
     } catch (err) {
       if (!ciRead && CI_TABS.has(tab)) body.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
     }
-    setTimeout(load, REFRESH_MS);
+    setTimeout(() => whenShown(load), REFRESH_MS);
   };
   draw();
   readTab();
@@ -536,7 +536,7 @@ async function readChips() {
     // The last colour stays: the next minute asks again.
   }
   chipBusy = false;
-  chipTimer = setTimeout(readChips, 60_000);
+  chipTimer = setTimeout(() => whenShown(readChips), 60_000);
 }
 
 function chip(kind, label, page, projectId) {

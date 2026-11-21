@@ -3,7 +3,7 @@
 // tiles, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
 // CI's opens that tab, its dot the worst verdict it shows.
-import { ago, api, h, view, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
+import { ago, api, h, view, whenShown, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
 import { hueRow, schemeTag, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
@@ -526,7 +526,7 @@ export function statusPane(onData = () => {}) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read status: ${err.message}`));
     }
     busy = false;
-    timer = setTimeout(load, REFRESH_MS);
+    timer = setTimeout(() => whenShown(load), REFRESH_MS);
   };
   /** Show it for `to` (a scheme's id or 'all'), once it's on the page: the first call reads, and the reads go on while it shows. */
   el.show = (to) => {
@@ -566,7 +566,7 @@ async function readChips() {
     // The last colour stays: the next minute asks again.
   }
   chipBusy = false;
-  chipTimer = setTimeout(readChips, 60_000);
+  chipTimer = setTimeout(() => whenShown(readChips), 60_000);
 }
 
 /** The Status chip: a dot and "Status", opening the page for the scheme on screen (or `projectId`). */

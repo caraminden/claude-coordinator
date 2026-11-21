@@ -13,14 +13,14 @@ let watch = null; // deploy-watch deploys, or null
 export async function loadClaims(projectId, redraw) {
   try {
     claims.set(projectId, (await api(`api/projects/${projectId}/claims`)).claims);
-    redraw();
+    redraw?.();
   } catch { /* an older server, or a restart's gap */ }
 }
 
 export async function loadWatch(redraw) {
   try {
     watch = (await api('api/deploy-watch')).deploys;
-    redraw();
+    redraw?.();
   } catch { /* as above */ }
 }
 

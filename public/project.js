@@ -18,7 +18,7 @@ import { preparePropFilter, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import * as where from './where.js';
 import * as skills from './skills.js';
-import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
+import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, takeItems } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { replaceHash } from './navstack.js';
@@ -180,7 +180,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
   // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
   const known = view?.projects?.length ? view.projects : null;
-  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines] = stale
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines, items] = stale
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, stale.artifacts, stale.shared, known, stale.machines]
     : await Promise.all([
     // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
@@ -322,7 +322,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (!projects || known) refreshSchemes();
   if (stale) refreshScheme(projectId);
   renderHiddenNote();
-  refreshInbox();
+  // A fresh open fetched the items with the list: draw those rather than ask again (#1528).
+  if (items) takeItems(projectId, items);
+  else refreshInbox();
   if (main.home) refreshHome();
   prefetchTopRows();
   if (main.kind === 'files') renderFiles();

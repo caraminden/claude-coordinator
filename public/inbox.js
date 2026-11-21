@@ -64,8 +64,12 @@ export async function refreshInbox() {
   // Home's list (#1140) moves with the same news as every scheme's counts.
   if (view.home) import('./home.js').then((m) => m.refreshHomeSoon());
   const projectId = view.projectId;
-  const items = await fetchInbox(projectId);
-  if (!items || view?.projectId !== projectId) return;
+  takeItems(projectId, await fetchInbox(projectId));
+}
+
+/** Draw a scheme's items as fetched: by refreshInbox, or by the scheme's open, which fetched them just now (project.js). */
+export function takeItems(projectId, items) {
+  if (!items || view?.kind !== 'project' || view.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
   for (const k of answered.keys()) if (!items.some((i) => i.key === k)) answered.delete(k); // the server caught up
   // A new or gone mention changes its minion's row (#1149), so the whole list redraws; renderSidebar draws the strip too.
@@ -87,8 +91,11 @@ function refreshSoon() {
   inbox.timer = setTimeout(refreshInbox, 300);
 }
 
+let countsOwed = false; // other schemes' news a hidden tab put off (countsSoon)
+
 /** Fetch every scheme's count again and redraw their pills; the open scheme's pill stays the badge's own. */
 export function refreshSchemeCounts() {
+  countsOwed = false;
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
     for (const p of projects) {
@@ -97,15 +104,28 @@ export function refreshSchemeCounts() {
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
     updateBadge();
-    refreshInbox();
-  }, () => {});
+  }, () => {}).then(refreshInbox);
 }
 
-// Other schemes' news, refetching their counts at most once a second.
-const others = otherSchemes(() => {
-  clearTimeout(inbox.countsTimer);
-  inbox.countsTimer = setTimeout(refreshSchemeCounts, 1000);
-});
+/**
+ * Fetch the counts again soon: at most one fetch every 2 s however fast news comes, so the pills keep moving in a busy
+ * minute (a restarting timer starved them, #1528). A hidden tab leaves news that only spins a pill until it's shown;
+ * news that can move a Needs-you count (`badge`) still fetches, as it keeps the installed app's badge right.
+ */
+function countsSoon(badge = true) {
+  if (globalThis.document?.hidden && !badge) return void (countsOwed = true);
+  if (inbox.countsTimer) return;
+  inbox.countsTimer = setTimeout(() => {
+    inbox.countsTimer = 0;
+    countsOwed = false;
+    refreshSchemeCounts();
+  }, 2000);
+}
+/** The tab is back (core.js): fetch the counts a hidden spell put off. */
+export const countsIfOwed = () => countsOwed && countsSoon();
+
+// Other schemes' news.
+const others = otherSchemes(countsSoon);
 
 /** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
 export function inboxEvent(event) {
@@ -192,8 +212,7 @@ function markItemsSeen(projectId, keys) {
 export function onSeenItems(projectId) {
   if (projectId === view?.projectId) return;
   seenSent.delete(projectId); // what the server holds is theirs now: write ours again when you're back in it
-  clearTimeout(inbox.countsTimer);
-  inbox.countsTimer = setTimeout(refreshSchemeCounts, 1000);
+  countsSoon();
 }
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */

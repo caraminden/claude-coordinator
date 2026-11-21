@@ -37,22 +37,25 @@ export async function loadReleases() {
   for (const s of schemes.values()) settleDeploys(s);
   member = new Set(got[1].schemes.map((s) => s.projectId));
   loaded = true;
-  refreshExtras();
+  if (pageEl?.isConnected) refreshExtras();
   redraw();
   return rowsChanged();
 }
 
-/** Claims for every scheme the page can show (a scheme with only a claim has no releases entry), and the watch. */
+/**
+ * Claims for every scheme the page can show (a scheme with only a claim has no releases entry), and the watch, drawn
+ * once they're all in. Only the Releases page shows them, so they're read when it opens and while it's open (#1528).
+ */
 function refreshExtras() {
-  for (const id of new Set([...schemes.keys(), ...(view?.projects ?? []).map((p) => p.id)])) loadClaims(id, redraw);
-  loadWatch(redraw);
+  const ids = new Set([...schemes.keys(), ...(view?.projects ?? []).map((p) => p.id)]);
+  Promise.all([...[...ids].map((id) => loadClaims(id)), loadWatch()]).then(redraw);
 }
 
-/** A `claims` event: that scheme's claims changed. */
-export function onClaims(msg) { loadClaims(msg.projectId, redraw); }
+/** A `claims` event: that scheme's claims changed. Off the Releases page the next open reads them. */
+export function onClaims(msg) { if (pageEl?.isConnected) loadClaims(msg.projectId, redraw); }
 
 /** A `ticket` event: a claim holder's stage may have moved (#1334). */
-export function onClaimHolder(ticket) { if (loaded) onHolderTicket(ticket, redraw); }
+export function onClaimHolder(ticket) { if (loaded && pageEl?.isConnected) onHolderTicket(ticket, redraw); }
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {
@@ -60,7 +63,7 @@ export function onReleases(msg) {
   const s = msg.releases;
   const had = schemes.has(msg.projectId);
   settleDeploys(s);
-  if (s.targets.some((t) => t.target.id === CITADEL_TARGET_ID)) loadWatch(redraw);
+  if (pageEl?.isConnected && s.targets.some((t) => t.target.id === CITADEL_TARGET_ID)) loadWatch(redraw);
   if (s.targets.length || s.testCopies.length) schemes.set(msg.projectId, s);
   else schemes.delete(msg.projectId);
   if (!had && schemes.has(msg.projectId)) return loadReleases();

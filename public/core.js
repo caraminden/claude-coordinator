@@ -3,13 +3,13 @@
 import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
-import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { mergeOpen, noteTicketChange } from './closedlist.js';
 import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
-import { renderCost } from './cost.js';
+import { costSoon } from './cost.js';
 import { homeScheme, openStartScheme, renderSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
@@ -17,7 +17,7 @@ import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './b
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshInbox, refreshSchemeCounts } from './inbox.js';
+import { countsIfOwed, forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
@@ -50,6 +50,7 @@ export const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
 
 let stream = null;
+let heardAt = 0; // when the stream last said anything (the focus gate, #1528)
 // The front end's version: the page's own (index.html fills it in, #1144), so a page the service worker kept from before
 // a ship finds itself stale at the stream's first hello. A page the server didn't fill in takes the first hello's.
 let assetVersion = /^[0-9a-f]+$/.test(document.querySelector('meta[name=citadel-version]')?.content ?? '') ? document.querySelector('meta[name=citadel-version]').content : null;
@@ -391,6 +392,8 @@ function connectStream(catchUp = false) {
     catchUp = true;
   };
   es.onmessage = (e) => {
+    heardAt = Date.now();
+    newsArrived();
     const msg = JSON.parse(e.data);
     if (msg.type === 'hello') {
       // The server restarted with a different front end; load it instead of running stale code.
@@ -419,7 +422,7 @@ function connectStream(catchUp = false) {
       // Rows of minions that hit the usage limit count down to its reset.
       if (view?.kind === 'project') renderSidebar();
     }
-    if (msg.type === 'turn') renderCost();
+    if (msg.type === 'turn') costSoon();
     if (msg.type === 'notify') desktopNotify(msg);
     if (msg.type === 'ticket') {
       onTicketUpdate(msg.ticket);
@@ -716,11 +719,18 @@ async function flipCodex(box) {
   renderModelPicker();
 }
 
-// Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
+// Phones and sleeping laptops drop connections quietly; recheck when the page comes back. A tab hidden under a
+// minute whose stream spoke since it hid missed nothing, so it asks for nothing (#1528). Not on the stream's
+// readyState: a frozen phone page can show OPEN on a dead stream. A stream that broke and came back resyncs on
+// its open (connectStream), and a page the browser froze resyncs whatever the time.
+let hiddenAt = 0, frozen = false;
+document.addEventListener('freeze', () => { frozen = true; });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !me) return;
+  if (document.visibilityState === 'hidden') return void ((hiddenAt = Date.now()), (frozen = false));
+  if (!me) return;
   if (!stream) connectStream(true);
-  else if (view?.kind === 'project') resync();
+  else if (view?.kind === 'project' && missedNews(hiddenAt, heardAt, Date.now(), frozen)) resync();
+  else countsIfOwed();
 });
 
 async function resync() {
@@ -749,9 +759,8 @@ async function resync() {
     view.builds = builds ?? view.builds;
     if (view.id) markSeen(view.id);
     renderSidebar();
-    // Cards raised or settled while the stream was down, here or in other schemes.
+    // Cards raised or settled while the stream was down, here or in other schemes (the counts fetch the inbox after them).
     forgetOtherSchemes();
-    refreshInbox();
     refreshSchemeCounts();
     setArtifacts(artifacts);
     if (!chat) return;

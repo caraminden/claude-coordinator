@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
-const SOURCES = ['Launcher.cs', 'Launcher.csproj'];
+export const LAUNCHER_SOURCES = ['Launcher.cs', 'Launcher.csproj', 'Trial.cs'];
 /** After a failed build, the next try waits this long. */
 const RETRY_MS = 10 * 60_000;
 
@@ -48,7 +48,7 @@ export class Launchers {
 
   /** The launcher built from the source as it is now; null when it can't be built (the feed then offers none). */
   async get(): Promise<LauncherBuild | null> {
-    const source = await Promise.all(SOURCES.map((f) => readFile(join(this.o.src, f), 'utf8'))).catch(() => null);
+    const source = await Promise.all(LAUNCHER_SOURCES.map((f) => readFile(join(this.o.src, f), 'utf8'))).catch(() => null);
     if (!source) return null;
     const version = Number(/\bVersion\s*=\s*(\d+)\s*;/.exec(source[0])?.[1]);
     if (!Number.isInteger(version)) return null;
@@ -67,7 +67,7 @@ export class Launchers {
     const tmp = await mkdtemp(join(this.o.cache, '.build-'));
     try {
       // Built in a copy: the source folder (the live checkout's) gets no obj/ or bin/.
-      for (const f of SOURCES) await copyFile(join(this.o.src, f), join(tmp, f));
+      for (const f of LAUNCHER_SOURCES) await copyFile(join(this.o.src, f), join(tmp, f));
       await (this.o.build ?? dotnetBuild)(this.o.dotnet, tmp, join(tmp, 'out'));
       await mkdir(dir, { recursive: true });
       await rename(join(tmp, 'out', 'launcher.exe'), exe);

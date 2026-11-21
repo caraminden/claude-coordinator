@@ -1,5 +1,7 @@
 // A test app for Citadel's desktop launcher (#1148): a window that shows label.txt from its folder and says it
-// started. A build with broken.txt beside it crashes at start instead, to prove the launcher keeps the old one.
+// started. A build with broken.txt beside it crashes at start instead, to prove the launcher keeps the old one; one with
+// crash-after.txt (a number of seconds) says it started and then exits with code 3 that many seconds later, a crash
+// inside the launcher's probation (#1396).
 using System;
 using System.IO;
 using System.Windows.Forms;
@@ -18,6 +20,13 @@ static class TestApp
         {
             string started = Environment.GetEnvironmentVariable("CITADEL_STARTED_FILE");
             if (!string.IsNullOrEmpty(started)) File.WriteAllText(started, "started");
+            string crash = Path.Combine(dir, "crash-after.txt");
+            if (File.Exists(crash))
+            {
+                var t = new Timer { Interval = Math.Max(1, int.Parse(File.ReadAllText(crash).Trim())) * 1000 };
+                t.Tick += (a, b) => Environment.Exit(3);
+                t.Start();
+            }
         };
         Application.Run(form);
     }

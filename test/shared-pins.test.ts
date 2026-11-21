@@ -10,8 +10,8 @@ import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
-// Files in a scheme's shared folder can be pinned: by people in the Shared viewer, and by agents
-// through pin_artifact. A pin is keyed by path, so a rewrite keeps it and a deleted file shows as missing.
+// Files in a scheme's shared folder can be pinned: by people in the Shared viewer.
+// A pin is keyed by path, so a rewrite keeps it and a deleted file shows as missing.
 const root = mkdtempSync(join(tmpdir(), 'shared-pins-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
@@ -123,23 +123,6 @@ test('list_artifacts shows shared files, marked as shared, with their pins', asy
   assert.match((await tool(M1, 'list_artifacts', { pinned_only: true })).text, /^\[shared\] Lairs handoff/);
 });
 
-test('agents pin and unpin shared files by the shown path or the absolute one', async () => {
-  const p = await tool(M1, 'pin_artifact', { path: 'scheme shared/outside.md', requested_by: 'Josh' });
-  assert.equal(p.error, false, p.text);
-  assert.match(p.text, /^Pinned\. \[shared\] outside\.md .*pinned by #\d+ for Josh/);
-  assert.equal((await entry('outside.md')).pinned_by, `#${M1.number} for Josh`);
-  assert.match((await tool(TA, 'pin_artifact', { path: join(dirA, 'outside.md'), requested_by: 'Cara' })).text, /^Already pinned/);
-  assert.match((await tool(TA, 'unpin_artifact', { path: join(dirA, 'outside.md'), requested_by: 'Cara' })).text, /^Unpinned\./);
-  assert.equal((await entry('outside.md')).pinned_at, null);
-  // Gone and pinned: unpinning takes it off the list.
-  await pin('outside.md', true);
-  unlinkSync(join(dirA, 'outside.md'));
-  assert.match((await tool(M1, 'unpin_artifact', { path: 'scheme shared/outside.md', requested_by: 'Cara' })).text, /off the Artifacts panel now/);
-  assert.equal(await entry('outside.md'), undefined);
-  const bad = await tool(M1, 'pin_artifact', { path: 'scheme shared/link.md', requested_by: 'Cara' });
-  assert.equal(bad.error, true);
-});
-
 test('people upload into the shared folder: the bytes as sent, a cleaned name, never overwriting, never outside it (#676)', async () => {
   const put = (q: string, body: Buffer | string, headers: Record<string, string> = { Cookie: srv.cookie }) =>
     fetch(`${srv.base}/api/projects/${A.id}/shared/upload?${q}`, { method: 'PUT', headers, body });
@@ -168,10 +151,7 @@ test('people upload into the shared folder: the bytes as sent, a cleaned name, n
   assert.doesNotMatch((await tool(M1, 'list_artifacts', {})).text, /snap/);
 });
 
-test('scheme scoping: another scheme can neither see nor pin these', async () => {
-  // B's Taskmaster naming A's shared file by its absolute path finds no artifact of its own scheme.
-  const r = await tool(TB, 'pin_artifact', { path: join(dirA, 'handoff.md'), requested_by: 'Cara' });
-  assert.equal(r.error, true);
+test('scheme scoping: another scheme cannot see these', async () => {
   const res = await fetch(`${srv.base}/api/projects/${A.id}/shared`, { headers: { Authorization: `Bearer ${tokens.agentToken(TB.id)}` } });
   assert.equal(res.status, 403);
   assert.equal((await shared(B.id)).find((f) => f.path === 'theirs.md').pinned_at, null);

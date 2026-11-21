@@ -1473,16 +1473,6 @@
   "m1": "200",
   "m2": "200"
  },
- "POST /api/projects/:p/artifacts/pin": {
-  "anon": "401 Not logged in",
-  "person": "403 Not for people",
-  "member": "403 Not for people",
-  "outsider": "403 Not for people",
-  "tmA": "400 requested_by is required",
-  "tmB": "403 Outside this Taskmaster's scheme",
-  "m1": "400 requested_by is required",
-  "m2": "400 requested_by is required"
- },
  "GET /api/projects/:p/briefs": {
   "anon": "401 Not logged in",
   "person": "200",

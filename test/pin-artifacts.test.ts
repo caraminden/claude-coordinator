@@ -9,8 +9,7 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
 
-// pin_artifact / unpin_artifact / list_artifacts: a Taskmaster or a minion pins an artifact of its own
-// scheme when a person asks, through the real MCP server talking to a real server.
+// list_artifacts through the real MCP server talking to a real server; the pin tools are retired (#1356).
 const root = mkdtempSync(join(tmpdir(), 'pin-artifacts-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
@@ -81,7 +80,8 @@ test('both servers offer the artifact tools', async () => {
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     const names = (await reply).result.tools.map((t: any) => t.name);
     child.kill();
-    for (const n of ['list_artifacts', 'pin_artifact', 'unpin_artifact']) assert.ok(names.includes(n), `${role} lacks ${n}`);
+    assert.ok(names.includes('list_artifacts'), `${role} lacks list_artifacts`);
+    for (const n of ['pin_artifact', 'unpin_artifact']) assert.ok(!names.includes(n), `${role} still offers ${n}`);
   }
 });
 
@@ -90,70 +90,4 @@ test('list_artifacts shows titles, and only this scheme', async () => {
   assert.equal(error, false);
   assert.match(text, new RegExp(`\\[${GLOSSARY.id}\\] Delve Glossary \\| glossary\\.html \\| from #${M1.number}`));
   assert.doesNotMatch(text, /Theirs/);
-});
-
-test('a Taskmaster pins by id and unpins, recorded as Taskmaster for the asker', async () => {
-  const pin = await tool(TA, 'pin_artifact', { artifact: GLOSSARY.id, requested_by: 'Cara' });
-  assert.equal(pin.error, false, pin.text);
-  assert.match(pin.text, /^Pinned\. .*pinned by Taskmaster for Cara/);
-  assert.equal(await pinnedBy(GLOSSARY.id), 'Taskmaster for Cara');
-  assert.match((await tool(TA, 'list_artifacts', { pinned_only: true })).text, /Delve Glossary/);
-  const unpin = await tool(TA, 'unpin_artifact', { artifact: GLOSSARY.id, requested_by: 'Cara' });
-  assert.match(unpin.text, /^Unpinned\./);
-  assert.equal(await pinnedBy(GLOSSARY.id), null);
-});
-
-test('a minion pins another minion\'s artifact by its shown path, and its own by the path it linked', async () => {
-  // M2 didn't make it, so a relative path from M2's folder doesn't name it, but the shown path does.
-  assert.match((await tool(M2, 'pin_artifact', { path: 'glossary.html', requested_by: 'Josh' })).text, /Pinned\..*pinned by #\d+ for Josh/);
-  assert.equal(await pinnedBy(GLOSSARY.id), `#${M2.number} for Josh`);
-  assert.equal((await tool(M1, 'pin_artifact', { path: join(M1.cwd, 'gone.md'), requested_by: 'Cara' })).error, false);
-  assert.equal(await pinnedBy(GONE.id), `#${M1.number} for Cara`);
-});
-
-test('a re-pin keeps the first pinner; a relative path names the caller\'s own file; an ambiguous one asks for the id', async () => {
-  const again = await tool(TA, 'pin_artifact', { artifact: GLOSSARY.id, requested_by: 'Cara' });
-  assert.match(again.text, /^Already pinned/);
-  assert.equal(await pinnedBy(GLOSSARY.id), `#${M2.number} for Josh`);
-  // M2 links a glossary.html of its own: its relative path now means that one, not M1's.
-  writeFileSync(join(M2.cwd, 'glossary.html'), '<title>Draft</title>');
-  const s = new Store(join(data, 'coordinator.db'));
-  s.syncArtifacts(M2, [{ path: 'glossary.html', size: 1, mtime: 1 }]);
-  const own = s.listArtifacts(A.id).find((a) => a.ticket_id === M2.id)!;
-  assert.match((await tool(M2, 'pin_artifact', { path: 'glossary.html', requested_by: 'Cara' })).text, new RegExp(`^Pinned\\. \\[${own.id}\\] glossary\\.html .*from #${M2.number}`));
-  // The Taskmaster's folder has neither, and both show as glossary.html.
-  const both = await tool(TA, 'unpin_artifact', { path: 'glossary.html', requested_by: 'Cara' });
-  assert.equal(both.error, true);
-  assert.match(both.text, new RegExp(`2 artifacts match glossary\\.html \\(ids .*${own.id}.*\\); give the id`));
-});
-
-test('a minion cannot pin in another scheme', async () => {
-  const byId = await tool(M1, 'pin_artifact', { artifact: THEIRS.id, requested_by: 'Cara' });
-  assert.equal(byId.error, true);
-  assert.match(byId.text, /No artifact \d+ in this scheme/);
-  const byPath = await tool(M1, 'pin_artifact', { path: join(MB.cwd, 'theirs.md'), requested_by: 'Cara' });
-  assert.equal(byPath.error, true);
-  // Straight at the API, naming the other scheme: refused before anything is looked up.
-  const res = await fetch(`${srv.base}/api/projects/${B.id}/artifacts/pin`, {
-    method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artifact: THEIRS.id, pinned: true, requested_by: 'Cara' }),
-  });
-  assert.equal(res.status, 403);
-  assert.equal(await pinnedBy(THEIRS.id), null);
-});
-
-test('requested_by is required', async () => {
-  const r = await tool(M1, 'pin_artifact', { artifact: GLOSSARY.id });
-  assert.equal(r.error, true);
-  assert.match(r.text, /requested_by is required/);
-});
-
-test('unpinning a missing artifact removes its row', async () => {
-  rmSync(join(M1.cwd, 'gone.md'));
-  const s = new Store(join(data, 'coordinator.db'));
-  s.syncArtifacts(M1, [{ path: 'glossary.html', size: 1, mtime: 1 }]); // the scan finds it gone: kept as missing, since pinned
-  assert.match((await tool(TA, 'list_artifacts', {})).text, /gone\.md.*missing/);
-  const r = await tool(TA, 'unpin_artifact', { artifact: GONE.id, requested_by: 'Cara' });
-  assert.match(r.text, /off the Artifacts panel/);
-  assert.equal((await srv.call(`/api/artifacts/${GONE.id}`)).status, 404);
 });

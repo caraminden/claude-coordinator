@@ -468,36 +468,6 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    // A Taskmaster or minion pins (or unpins) an artifact of its own scheme because a person asked;
-    // people use /api/artifacts/:artifact/pin.
-    method: 'POST', path: '/api/projects/:project/artifacts/pin', who: ['taskmaster', 'minion'],
-    async handler({ req, res, app, project, caller }) {
-      const body = await readJson(req);
-      const asker = str(body.requested_by, 'requested_by', 60);
-      if (/[\n\r]/.test(asker)) throw new HttpError(400, 'requested_by must be a login name');
-      const by = `${caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`} for ${asker}`;
-      // A file of the shared folder, by path: absolute, relative to the caller's folder, or as list_artifacts shows it.
-      if (body.artifact == null && typeof body.path === 'string' && !body.path.includes('\0')) {
-        const p = body.path.trim();
-        const abs = p.startsWith('scheme shared/') ? join(projectSharedDir(app.dataDir, project.id), p.slice('scheme shared/'.length))
-          : isAbsolute(p) ? normalize(p) : caller!.cwd ? join(caller!.cwd, p) : '';
-        const rel = await sharedPinPath(app, project.id, abs, !!body.pinned);
-        if (rel !== null) {
-          const { file, already } = await pinShared(app, project.id, rel, body.pinned ? by : null);
-          return json(res, 200, { artifact: file ? sharedView(app, project.id, file) : null, removed: !file, already });
-        }
-      }
-      const a = findPinTarget(app, project.id, caller!, body.artifact, body.path);
-      // Pinning one already pinned keeps who pinned it first.
-      const already = !!body.pinned && a.pinned_at !== null;
-      if (!already) app.store.setArtifactPinned(a.id, body.pinned ? by : null);
-      await ownWrites(); // the reply re-reads the artifact (#1244)
-      app.broadcast({ type: 'artifacts', projectId: project.id });
-      const updated = app.store.getArtifact(a.id);
-      return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated, already });
-    },
-  },
-  {
     method: 'GET', path: '/api/projects/:project/shared', who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const files = await app.sharedFiles(project.id);

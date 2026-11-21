@@ -19,7 +19,7 @@ export function answer(facts: Fact[], tool: string, input: unknown): string {
   if (/^(hand_off_land|land)$/.test(t)) return 'Handed off: the server runs tools/land.sh and wakes you if it fails. End your turn now with a short reply.';
   if (t === 'close_self') return 'The minion closes when this turn ends.';
   if (/^(host_check|search_decisions|search_memory|list_tickets|read_minion|read_ticket|ci_runners|ci_files|list_artifacts|artifact_data|contraption_read)$/.test(t)) return '(no rows)';
-  if (/^(set_thread_status|set_properties|strike_text|settle_question|mark_image|pin_artifact|unpin_artifact)$/.test(t)) return 'Done.';
+  if (/^(set_thread_status|set_properties|strike_text|settle_question|mark_image)$/.test(t)) return 'Done.';
   if (/^(message_coordinator|message_minion|message_taskmaster|relay_when_live|wake_when_live|wake_at)$/.test(t)) return 'Sent.';
   return 'ok';
 }

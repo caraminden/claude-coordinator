@@ -60,12 +60,16 @@ test('importing the runner writes nothing; the pins are made by one call and swe
       import { existsSync, readdirSync } from 'node:fs';
       const { pinTurnFiles, turnPins } = await import('./src/turn-launch.ts');
       const pins = pinTurnFiles(process.env.DATA_DIR);
-      console.log(JSON.stringify({ dir: pins.MCP_DIR, same: turnPins() === pins, tripwire: existsSync(pins.TRIPWIRE), run: readdirSync(process.env.DATA_DIR + '/run') }));`));
+      await (await import('./src/pin-spares.ts')).fillPinSpares();
+      const spares = process.env.DATA_DIR + '/run/turns/.pin-spares';
+      console.log(JSON.stringify({ dir: pins.MCP_DIR, same: turnPins() === pins, tripwire: existsSync(pins.TRIPWIRE), run: readdirSync(process.env.DATA_DIR + '/run'), spares: readdirSync(spares + '/' + readdirSync(spares)[0]).length }));`));
     assert.equal(made.same, true);
     assert.equal(made.tripwire, true);
-    assert.equal(made.run.length, 1);
+    assert.deepEqual(made.run.sort(), [made.dir.split('/').pop(), 'turns']);
+    assert.equal(made.spares, 9);
     assert.ok(made.dir.startsWith(join(scratch, 'data', 'run', 'mcp-')));
-    assert.deepEqual(readdirSync(join(scratch, 'data', 'run')), [], 'the copies go when their process does');
+    assert.deepEqual(readdirSync(join(scratch, 'data', 'run')), ['turns'], 'the copies go when their process does');
+    assert.deepEqual(readdirSync(join(scratch, 'data', 'run', 'turns', '.pin-spares')), [], 'and their spares with them');
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -84,6 +88,41 @@ test('a turn\'s pin copy links the files instead of copying their bytes, so a la
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+});
+
+// #1414: even linked, a turn's copy was ~370 calls on the loop at its start, 3 to 10.8 s held with a cold disk cache.
+test('a turn start takes a spare copy made off the loop: one rename, links for a host turn, bytes for a container turn', async () => {
+  const { copyPinned } = await import('../src/turn-launch.ts');
+  const { fillPinSpares, readySpares, SPARES } = await import('../src/pin-spares.ts');
+  const { chmodSync, mkdirSync, statSync, writeFileSync } = await import('node:fs');
+  const pins = testPins();
+  await fillPinSpares();
+  assert.equal(readySpares('link').length, SPARES.link);
+  assert.equal(readySpares('copy').length, SPARES.copy);
+  const turns = join(pins.dataDir, 'run', 'turns');
+  const [hostSpare] = readySpares('link'), [boxSpare] = readySpares('copy');
+  for (const spare of [hostSpare, boxSpare]) {
+    assert.ok(spare.startsWith(join(turns, '.pin-spares') + '/'), 'beside the turns, on their filesystem');
+    assert.doesNotMatch(spare, /person-\d+/, 'outside every container mount');
+  }
+  const made = { host: statSync(hostSpare).ino, box: statSync(boxSpare).ino };
+  const host = join(turns, '5-1', 'pin'), box = join(turns, 'person-7', '5-2', 'pin');
+  mkdirSync(dirname(host), { recursive: true });
+  mkdirSync(dirname(box), { recursive: true });
+  copyPinned(pins.MCP_DIR, host, true);
+  copyPinned(pins.MCP_DIR, box, false);
+  assert.equal(statSync(host).ino, made.host, 'the spare itself, moved: nothing copied on the loop');
+  assert.equal(statSync(box).ino, made.box);
+  const name = pins.TRIPWIRE.split('/').pop()!;
+  assert.equal(statSync(join(host, name)).ino, statSync(pins.TRIPWIRE).ino, 'a host turn links');
+  assert.notEqual(statSync(join(box, name)).ino, statSync(pins.TRIPWIRE).ino, 'a container turn never gets a link');
+  chmodSync(join(box, name), 0o644);
+  writeFileSync(join(box, name), 'tampered');
+  assert.notEqual(readFileSync(pins.TRIPWIRE, 'utf8'), 'tampered', "a container turn can't change the server's tripwire");
+  assert.notEqual(readFileSync(join(host, name), 'utf8'), 'tampered', "nor another turn's");
+  await fillPinSpares();
+  assert.equal(readySpares('link').length, SPARES.link, 'made again behind it');
+  assert.ok(!readySpares('link').includes(hostSpare));
 });
 
 test('the pinned files are read-only, so a write through a turn\'s linked copy fails instead of reaching the server\'s', async () => {

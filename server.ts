@@ -43,6 +43,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
+import { fillPinSpares } from './src/pin-spares.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
@@ -167,6 +168,8 @@ await mkdir(DATA_DIR, { recursive: true });
 // The copies of the server files turns run (src/turn-launch.ts): taken first, before a later deploy can move the
 // checkout under a server that is still starting, and before any turn starts or is picked up again.
 pinTurnFiles(DATA_DIR);
+// Spare turn copies of them, made off the loop so a turn's start doesn't copy ~370 files there (#1414).
+void fillPinSpares();
 // The front end as it was when this server started, or last reloaded on SIGHUP. Serving this copy,
 // not the files on disk, keeps pages in step with the running server: a deploy that changes the
 // server swaps both at the restart, so a tab never gets a new front end that calls API routes the old

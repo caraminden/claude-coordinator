@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { PoolSpec } from './pool-client.mjs';
+import { pinSparesAt, takeSpare } from './pin-spares.ts';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
@@ -157,6 +158,11 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     }
   };
   lock(MCP_DIR);
+  // Spare turn copies of these files (src/pin-spares.ts), swept like the copies themselves when their process is gone.
+  const SPARES_DIR = join(RUN_DIR, 'turns', '.pin-spares');
+  mkdirSync(SPARES_DIR, { recursive: true });
+  for (const name of readdirSync(SPARES_DIR)) if (Number(name) !== process.pid && !alive(Number(name))) rmSync(join(SPARES_DIR, name), { recursive: true, force: true });
+  pinSparesAt(join(SPARES_DIR, String(process.pid)), MCP_DIR);
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
 }
 
@@ -165,8 +171,10 @@ export function pinTurnFiles(dataDir: string): TurnPins {
  * under load (#1215, #1125). A restart's sweep of the originals only unlinks a name, so the turn's links stay good. Falls back
  * to a byte copy when links aren't possible (another filesystem). A container's turn gets copies (`link` false): its folder is
  * mounted writable and it runs as the server's user, so it could chmod a link back and change the server's pinned tripwire.
+ * A turn of the server's own pins takes a spare made ahead off the loop when one is ready (#1414, src/pin-spares.ts).
  */
 export function copyPinned(src: string, dst: string, link = true): void {
+  if (takeSpare(src, dst, link ? 'link' : 'copy')) return;
   if (link) try {
     mkdirSync(dst, { recursive: true });
     for (const e of readdirSync(src, { withFileTypes: true })) {

@@ -7,6 +7,7 @@ import { EMPTY_TRACK } from './threadstate.js';
 import { stepMark } from './ui/chat.js';
 import { firstSentence, ticketActionRef } from './chattext.js';
 import { actionCut } from './eventcut.js';
+import { failedLine, loadingLine } from './ui/state.js';
 import { actionLabel, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 
 // ---------- work progress (thread-bar readout) ----------
@@ -56,7 +57,7 @@ function actionBody(body, action, status = null) {
  */
 async function fullAction(body, action) {
   const { block, result } = action;
-  actionBody(body, action, h('p', { class: 'cut-note muted', role: 'status' }, 'Loading the rest…'));
+  actionBody(body, action, loadingLine('Loading the rest…'));
   try {
     const from = [block.cut && action.event, result?.cut && result.event].filter(Boolean);
     const rows = await Promise.all(from.map((e) => api(`api/tickets/${e.ticket}/events/${e.id}`)));
@@ -69,9 +70,7 @@ async function fullAction(body, action) {
     if (actionCut(action)) throw new Error('it was not in its event');
     actionBody(body, action);
   } catch (err) {
-    const retry = h('button', { type: 'button', class: 'link' }, 'Try again');
-    retry.addEventListener('click', () => fullAction(body, action));
-    actionBody(body, action, h('p', { class: 'cut-note error', role: 'status' }, `Showing the beginning: couldn't load the rest (${err.message}). `, retry));
+    actionBody(body, action, failedLine(`Showing the beginning: couldn't load the rest (${err.message}).`, { retry: () => fullAction(body, action) }));
   }
 }
 

@@ -436,6 +436,10 @@ test('the stack: the 4th in line builds nothing until a place frees, and a red c
     assert.doesNotMatch(lands[3].stderr(), /rebasing/, 'the 4th is outside the stack');
     assert.equal(lands[2].child.exitCode, null, 'the 3rd waits');
     c.verdict(tb, RED);
+    // Red stacked on unlanded work: the 2nd marks itself skip before the 1st lands. Landed first, the 2nd is the head
+    // when it reads red, and the 4th, 3rd in line then, builds on its commit meanwhile.
+    const t2 = c.tickets()[1];
+    await until("the 2nd to read its red", () => readFileSync(join(c.state, 'land-queue', t2), 'utf8').split('\n')[4] === 'skip');
     c.verdict(ta, GREEN);
     assert.equal(await lands[0].exit, 0, lands[0].stderr());
     assert.equal(await lands[1].exit, 1, lands[1].stderr());
@@ -655,6 +659,8 @@ test('batches: the line follows land-queue/.order (#1007), so the batches form i
   const c = ciSetup(4, { stack: '1', batch: '2', check: gated });
   try {
     const [a, b, d, e] = await c.lands(1, 2, 3, 4);
+    // Its ticket is out before it reads the line: an order written in between is no news to it, and it never says it.
+    await until('the 4th to see its place', () => /4th in line/.test(e.stderr()));
     const [, t2, t3, t4] = c.tickets();
     writeFileSync(join(c.state, 'land-queue', '.order'), `# Cara moved ticket/4-x to land next\n${t4}\n${t2}\n${t3}\n`);
     await until('the 4th to move up', () => /queue: Cara moved ticket\/4-x to land next\nqueue: 2nd in line/.test(e.stderr()));

@@ -93,7 +93,7 @@ export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: st
 };
 const TIMING_OK = /\/\/\s*timing-ok:\s*\S/;
 const BASELINE = join(dir, 'flake-baseline.json');
-const FLAKE_EXEMPT = new Set(['wait.ts', 'helpers.ts', 'one-until.test.ts']);
+const FLAKE_EXEMPT = new Set(['wait.ts', 'holds.ts', 'helpers.ts', 'one-until.test.ts']);
 
 type Counts = Record<string, { n: number; ok: number }>;
 type Hits = Record<string, { bare: number[]; ok: number[] }>;

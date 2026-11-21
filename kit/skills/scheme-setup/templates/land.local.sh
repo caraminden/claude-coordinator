@@ -13,8 +13,8 @@
 # run before a land gets in line, so what it refuses never waits in line or for CI. '' none.
 # SMOKE_CMD='npm run lint'
 # SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
-# The smoke check also runs the check of the branch's lane on the branch rebased onto main, so a red check is refused
-# before the line too, and skipped in line when main hasn't moved since. 0: only in line (it runs twice when main moves).
+# The smoke check also runs CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the
+# line too, and skipped in line when main hasn't moved since. 0: only in line (it runs twice when main moves).
 # EARLY_CHECK=${LAND_EARLY_CHECK:-1}
 
 # The scheme's main branch.

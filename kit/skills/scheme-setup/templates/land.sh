@@ -41,7 +41,7 @@
 #    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
 #    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
-#    the check of step 3 on the branch rebased onto main, so a red check is refused before the line too. A fail says
+#    CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the line too. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
 # 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
@@ -50,8 +50,8 @@
 #    onto a newer main that keeps the branch's old files (undo_guard below; a message line "Undoes: <sha>"
 #    lets a meant undo through).
 # 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
-#    1800). A failure or overrun stops here. With lanes (LANES below), the check of the commit's lane. When main
-#    hasn't moved since step 0's early check passed, the commit that check passed is taken as it is instead.
+#    1800). A failure or overrun stops here. With lanes (LANES below), the check of the commit's lane. When that is
+#    CHECK_LIGHT and main hasn't moved since step 0's early check passed it, the commit it passed is taken as it is.
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
 #    waits for CI to pass exactly that commit (with lanes, land/<lane>/<branch>, or no push for a lane with no CI). Red stops here. On the way out the scratch branch is
 #    deleted and its unfinished runs cancelled, except those of a commit that landed: they finish, so
@@ -82,12 +82,12 @@ CHECK='npm test'
 # break. '' none (the conflict check still runs). Past SMOKE_TIMEOUT seconds it doesn't decide, and the land goes on.
 SMOKE_CMD=''
 SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
-# The early check (#1177): 1 runs the check of the branch's lane (CHECK, CHECK_LIGHT, CHECK_<LANE>) once more in the
-# smoke check, on the branch rebased onto main, so a branch it refuses never takes a place in line (Peek Auras, 15 to
-# 19 November: 19 of 60 refused lands were a red check after the rebase, refused only at the front). When main hasn't
-# moved by the time the branch reaches the front, that checked commit lands as it is and the check doesn't run again;
-# when it has, the check runs again on the new main. 0 off: worth it for a check of minutes whose main moves under most
-# landings, which then pays the check twice for each land that passes.
+# The early check (#1177): 1 runs CHECK_LIGHT in the smoke check too, on the branch rebased onto main, so a branch it
+# refuses never takes a place in line (Peek Auras, 15 to 19 November: 19 of 60 refused lands were a red light check
+# after the rebase, refused only at the front). It runs for a branch whose lane is light or full (CHECK_LIGHT is taken
+# as a part of CHECK), never with CHECK_LIGHT ''. When main hasn't moved by the time a light branch reaches the front,
+# that checked commit lands as it is and the check doesn't run again; when it has, it runs again on the new main. 0
+# off: worth it when main moves under most landings, which then pay the light check twice for each land that passes.
 EARLY_CHECK=${LAND_EARLY_CHECK:-1}
 # The scheme's main branch.
 BRANCH=main
@@ -326,11 +326,13 @@ fi
 # it stays longer than them whatever a scheme sets them to.
 # shortcut: a waiter counts with its own limits, not the holder's; write the holder's into its
 # ticket if landings in one scheme ever run with different limits.
-QUEUE_STALL=$((CHECK_LIMIT * BUILDERS + CI_LIMIT * (1 + BISECT) + ${LAND_QUEUE_SLACK:-300}))
-# The wait for the check lock: the checks ahead of this one (at most BUILDERS, each within CHECK_LIMIT, and half the
+EARLY_AHEAD=0 # the early check (EARLY_CHECK): one at a time takes the check lock from outside the line, ahead of the head
+[ "$EARLY_CHECK" != 1 ] || EARLY_AHEAD=1
+QUEUE_STALL=$((CHECK_LIMIT * (BUILDERS + EARLY_AHEAD) + CI_LIMIT * (1 + BISECT) + ${LAND_QUEUE_SLACK:-300}))
+# The wait for the check lock: the checks ahead of this one (at most BUILDERS and one early check, each within CHECK_LIMIT, and half the
 # slack for the 30 s each may take to die) end within it, so past it the check holding it is stopped (a SIGSTOP, a
 # frozen cgroup) or hung. Shorter than QUEUE_STALL, so the one waiting refuses before the ones behind it give up.
-CHECK_WAIT=$((CHECK_LIMIT * BUILDERS + ${LAND_QUEUE_SLACK:-300} / 2))
+CHECK_WAIT=$((CHECK_LIMIT * (BUILDERS + EARLY_AHEAD) + ${LAND_QUEUE_SLACK:-300} / 2))
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID='' Q_LINE=() Q_ORDER=() Q_BY=''
 
@@ -1389,16 +1391,15 @@ leave() {
   exit "$rc"
 }
 
-# The early check (EARLY_CHECK, the header's step 0): which check the branch's lane runs, as early_cmd ('' none: off,
-# not a plain land, a fast land, or a lane with no check). A merge into a build and a build itself never run it.
+# The early check (EARLY_CHECK, the header's step 0): CHECK_LIGHT as early_cmd, or '' none: off, not a plain land, a
+# fast land, no CHECK_LIGHT, or a lane other than light and full (full with no CHECK). A merge into a build and a build
+# itself never run it.
 early_cmd='' early_on='' early_tree='' early_tip=''
 early_plan() {
-  local lane=full why v
-  [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] || return 0
-  early_cmd=$CHECK
-  [ -n "$LANES" ] || return 0
-  read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
-  case $lane in light) early_cmd=$CHECK_LIGHT ;; full) ;; *) v=CHECK_${lane^^} && early_cmd=${!v-$CHECK} ;; esac
+  local lane=full why
+  [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] && [ -n "$CHECK_LIGHT" ] || return 0
+  [ -z "$LANES" ] || read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
+  case $lane in light) early_cmd=$CHECK_LIGHT ;; full) [ -z "$CHECK" ] || early_cmd=$CHECK_LIGHT ;; esac
 }
 
 # The worktree back on the branch after the early check, or with a commit, the branch moved to that commit (the rebased
@@ -1433,10 +1434,11 @@ early_check() {
   printf '%s\n' "$branch" "$rb" >"$gitdir/land-branch"
   log="$state/land-check-${branch//\//-}.log"
   rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
+  # One early check at a time waits for the check lock, so the head of the line waits behind at most one (EARLY_AHEAD).
   (
-    flock -w "$CHECK_WAIT" 7 || exit 1
-    timeout -k 30 "$CHECK_LIMIT" bash -c "$early_cmd" >"$log" 2>&1 9>&- 7>&- 6>&-
-  ) 7>"$state/land-check.lock" 9>&- 6>&- || rc=$?
+    flock -w "$CHECK_WAIT" 8 && flock -w "$CHECK_WAIT" 7 || exit 1
+    timeout -k 30 "$CHECK_LIMIT" bash -c "$early_cmd" >"$log" 2>&1 9>&- 8>&- 7>&- 6>&-
+  ) 8>"$state/land-early.lock" 7>"$state/land-check.lock" 9>&- 6>&- || rc=$?
   if [ "$rc" = 0 ]; then
     early_on=$want early_tree=$(git rev-parse "$rb^{tree}") early_tip=$(git rev-parse HEAD)
     early_back
@@ -1445,7 +1447,7 @@ early_check() {
   fi
   if [ ! -e "$log" ]; then
     early_back
-    say "smoke: the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check doesn't decide here: getting in line"
+    say "smoke: the check lock ($state/land-check.lock, or the early checks' land-early.lock) was still taken after ${CHECK_WAIT}s, so the check doesn't decide here: getting in line"
     return 1
   fi
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then

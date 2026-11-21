@@ -249,3 +249,21 @@ test('a reply that says the minion is closing is sent back unless close_self was
   assert.equal(await ask('Cara asked "closing this minion?" and I said no.'), null);
   assert.equal(await check({ last_assistant_message: 'Closing this minion.' }, cfg), null, 'no readable transcript: say nothing');
 });
+
+test('a reply that says something waits on a person with no card is sent back; a card, a button or a done line lets it through (#1507)', async () => {
+  const step = 'Run the command above in a shell.\n\nStill waiting on you: install git-lfs.';
+  const v = await check({ last_assistant_message: step }, cfg);
+  assert.equal(v?.decision, 'block');
+  assert.match(v.reason, /Still waiting on you: install git-lfs/);
+  assert.match(v.reason, /ask_question/);
+  // The open card linked: passes (a settled one goes through the stale check, tested in card-links.test.ts).
+  assert.equal(await check({ last_assistant_message: 'Still waiting on you: [the card](#/p/2/t/268?e=7).' }, cfg), null);
+  // A lone go as a reply button, and lines that say nothing waits.
+  assert.equal(await check({ last_assistant_message: `${step}\n<!-- status: {"state":"ready","note":"x","replies":["Done"]} -->` }, cfg), null);
+  assert.equal(await check({ last_assistant_message: 'Nothing is waiting on you.' }, cfg), null);
+  assert.equal(await check({ last_assistant_message: 'That was waiting on you, and you already ran it.' }, cfg), null);
+  // A card posted this turn covers it.
+  const transcript_path = join(root, 't-1507.jsonl');
+  writeFileSync(transcript_path, [{ type: 'user', message: { role: 'user', content: 'hi' } }, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'mcp__thread__ask_question', input: {} }] } }].map((l) => JSON.stringify(l)).join('\n'));
+  assert.equal(await check({ last_assistant_message: step, transcript_path }, cfg), null);
+});

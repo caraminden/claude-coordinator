@@ -7,6 +7,7 @@
 // the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
 // linked as "above" or "below" when it sits the other way, or one already answered linked as still waiting, the page check: a linked HTML page with an
 // answer button of its own instead of the mock kit's Send dock (#417), the choices check: a linked page with pick bars that no card opens (#804),
+// the waiting check (#1507): a line that says something waits on a person with no card linked, posted or offered as a reply button,
 // and the card check: a choice asked in prose when the turn posted no card and the status line has no reply button (#806).
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
@@ -14,7 +15,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { choicesPage, fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
-import { explainCards, explainMisplaced, explainStale, misplacedCards, staleCards, unlinkedCards } from './card-links.ts';
+import { explainCards, explainMisplaced, explainStale, explainWaiting, misplacedCards, staleCards, unlinkedCards, waitingNoCard } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { takeStatus } from './status-trailer.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
@@ -206,8 +207,9 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
   const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
   const asked = proseChoice(reply, status, input.transcript_path);
+  const waiting = !(Array.isArray(status?.replies) && status.replies.length) && postedCard(input.transcript_path) !== true ? waitingNoCard(reply) : null;
   const closing = closingClaim(reply, status, input.transcript_path, refs ? (refs.self ?? null) : undefined);
-  if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length && !closing) return null;
+  if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length && !closing && !waiting) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -246,11 +248,12 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     ? `Your reply says this minion is closing, but ${closing}. Words don't close it: call close_self (state null in the status line, no card open), or rewrite the line to say plainly why it stays open `
       + '(for example "Staying open in state ready for you to do X").\n'
     : '';
+  const wait = waiting ? `${explainWaiting(waiting)}\n` : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
     + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${close}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${close}${wait}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ci, git, setup, landAsync, tickets, issued, quietProc } from './land-fixture.ts';
+import { ci, git, seen, setup, landAsync, tickets, issued, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
 
 type Ship = { change?: [string, string]; also?: [string, string]; env?: Record<string, string>; on?: number };
@@ -188,6 +188,28 @@ test("a train's red of flakes only is unchanged: one fresh run, and a ship that 
   assert.equal(l.runs(), 2, "ship 1's and the train's, run twice");
   assert.equal(l.deployed().length, 2);
   l.done();
+});
+
+// #1419: known flakes (seen passing alone on another branch) ship the whole train with no fresh run, and every rider
+// says so; a known flake one rider touched isn't excused, so the train gets #769's one fresh run as before.
+test("a train's red of known flakes only ships every rider on that one run; one a rider touched gets the fresh run", async () => {
+  for (const touched of [false, true]) {
+    const l = await line([{}, {}, touched ? { change: ['test/slow.test.ts', 'x\n'] } : {}, {}], (dir) => ({ FAKE_FLAKY_PATH: touched ? 'test/slow.test.ts' : 'f2.txt', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: join(dir, 'shared') }),
+      (r) => seen(join(r.dir, 'shared'), ['test/busy.test.ts', 'test/slow.test.ts']));
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    if (touched) {
+      assert.match(done[1].stderr, /test\/slow\.test\.ts is a known flake, but #3 changed it or what it imports, so it isn't excused/);
+      assert.match(done[1].stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
+      assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /shipped past/);
+    } else {
+      assert.doesNotMatch(done[1].stderr, /running CI once more/);
+      for (const i of [1, 2, 3]) assert.match(done[i].stderr, /^land: shipped past known flakes test\/busy\.test\.ts \(seen on 1 other branch in 14 days\), test\/slow\.test\.ts \(seen on 1 other branch in 14 days\)$/m, `ship ${i + 1}`);
+    }
+    assert.equal(l.runs(), 2, "ship 1's and the train's");
+    assert.equal(l.deployed().length, 2);
+    l.done();
+  }
 });
 
 // #1377: on Nov 20 a bisect refused #1302 for a run interrupted at 55 s with no failing test (#1372's report).

@@ -249,3 +249,11 @@ touch ${active}
     server.close();
   }
 }
+
+/** #1419: sightings of `files` on another branch, as land.sh's ci_failed writes them, in today's retro log (tools/known-flakes.ts reads them). */
+export function seen(shared: string, files: string[], branch = 'ticket/7-other') {
+  const now = new Date().toISOString();
+  const dir = join(shared, 'retro-log', now.slice(0, 10));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'land.md'), files.map((f) => `- ${now.slice(11, 19)}Z · flake · ${f} · load 20.5 · ${branch} · in CI\n`).join(''), { flag: 'a' });
+}

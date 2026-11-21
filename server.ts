@@ -640,6 +640,7 @@ waiters.deliver = (r) => {
   const from = store.getTicket(r.ticket);
   if (!from) return;
   const who = `#${from.number} ${from.title}`;
+  if (r.repeat) r = { ...r, text: `${r.text}\n\n(The server restarted while sending this, so it may repeat.)` };
   if ('scheme' in r.to) {
     const own = store.getProject(from.project_id)!;
     const author = `${own.name} #${from.number} (relayed once live)`;

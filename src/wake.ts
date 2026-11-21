@@ -16,9 +16,9 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
-import type { Delivery, DeliveryState } from './db/deliveries.ts';
+import type { Delivery, DeliveryState, NewDelivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
-import { type Outbox, span } from './outbox.ts';
+import { type Outbox, type Outcome, span } from './outbox.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
@@ -37,6 +37,8 @@ export interface Relay {
   to: { scheme: string; taskmaster: number } | { minion: number; number: number };
   text: string;
   commit: string;
+  /** A killed server left it half sent: the copy delivered now says it may repeat (set by the outbox). */
+  repeat?: true;
 }
 
 /** Relays split into runs from one minion with the same text and commit, in order: they share their Taskmaster notes. */
@@ -264,6 +266,61 @@ export class LiveWaiters {
       // The check found it live and saved the text (meet); a row whose text is missing was never met.
       deliver: (rows, ctx) => rows.map((r) => ctx.send(r, r.payload.text ?? r.payload.reason)),
     });
+    outbox?.register({
+      kind: 'relay',
+      onDismiss: 'deliver', // a relay to a dismissed minion still goes out, as held mail
+      migrate: () => this.migrateRelays(),
+      describe: (r) => `relay to ${relayDests([this.relayOf(r)])}: ${String(r.payload.text).slice(0, 60)}`,
+      deliver: (rows, ctx) => this.deliverRelays(rows, ctx.repeat),
+    });
+  }
+
+  private relayOf = (r: Delivery): Relay => ({ id: r.id, ticket: r.payload.ticket, to: r.payload.to, text: r.payload.text, commit: r.when_arg });
+
+  /** Hand each relay to `deliver` (held mail); then, once no other relay of its group (one minion, text and commit) waits, the sender's Taskmaster gets its one note. */
+  private deliverRelays(rows: Delivery[], repeat: (r: Delivery) => boolean): Outcome[] {
+    const outcomes: Outcome[] = rows.map((r) => {
+      try {
+        this.deliver({ ...this.relayOf(r), ...(repeat(r) ? { repeat: true as const } : {}) });
+        return { state: 'accepted' };
+      } catch (err) {
+        return { state: 'retry', reason: String((err as Error)?.message ?? err) };
+      }
+    });
+    const open = this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held', 'sending'] });
+    const done = this.store.listDeliveries({ kind: 'relay', states: ['sent'] });
+    for (const batch of new Set(rows.filter((_, i) => outcomes[i].state === 'accepted').map((r) => r.payload.batch))) {
+      if (open.some((o) => o.payload.batch === batch && !rows.some((r) => r.id === o.id))) continue;
+      const group = [...done.filter((d) => d.payload.batch === batch), ...rows.filter((r, i) => r.payload.batch === batch && outcomes[i].state === 'accepted')];
+      try {
+        this.sent(group.map(this.relayOf));
+      } catch (err) {
+        console.error(`Noting #${group[0].payload.ticket}'s relays failed:`, err);
+      }
+    }
+    return outcomes;
+  }
+
+  /** Move the old key's relays into the table, in one transaction that empties it: none dropped (one already live is sent by the next check). */
+  private migrateRelays() {
+    const old = this.store.getSetting<Relay[]>(RELAYS);
+    if (!old?.length || !this.outbox) return;
+    this.store.importDeliveries(RELAYS, old.map((r) => this.relayRow(r, createHash('sha256').update(JSON.stringify(r)).digest('hex').slice(0, 16))), this.outbox.clock());
+  }
+
+  private relayRow(r: Relay, hash?: string): NewDelivery {
+    return {
+      ...(hash ? { id: r.id } : {}),
+      project_id: this.store.getTicket(r.ticket)?.project_id ?? 0,
+      kind: 'relay',
+      to_kind: 'minion' in r.to ? 'minion' : 'taskmaster',
+      to_id: 'minion' in r.to ? r.to.minion : (this.store.getTicket(r.to.taskmaster)?.project_id ?? 0),
+      when_kind: 'live',
+      when_arg: r.commit,
+      payload: { ticket: r.ticket, to: r.to, text: r.text },
+      set_by: `minion:${r.ticket}`,
+      ...(hash ? { origin: `${RELAYS}:${hash}` } : {}),
+    };
   }
 
   private waiter = (r: Delivery): Waiter => ({ ticket: r.to_id, commit: r.when_arg, reason: r.payload.reason, since: r.payload.since, ...(r.payload.light ? { light: true as const } : {}) });
@@ -473,13 +530,15 @@ export class LiveWaiters {
     return go.length;
   }
 
+  /** Pending relays: the table's, and any still in the old key (the dual read). */
   relays(ticket?: number): Relay[] {
-    return (this.store.getSetting<Relay[]>(RELAYS) ?? []).filter((r) => ticket === undefined || r.ticket === ticket);
+    const rows = this.outbox ? this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held'] }).map(this.relayOf) : [];
+    return [...(this.store.getSetting<Relay[]>(RELAYS) ?? []), ...rows].filter((r) => ticket === undefined || r.ticket === ticket);
   }
 
   /** Queue a relay; false (it was delivered at once) when its commit is live already. */
   async addRelay(r: Omit<Relay, 'id'>): Promise<{ queued: boolean; relay: Relay }> {
-    const relay = { ...r, id: Math.max(0, ...this.relays().map((o) => o.id)) + 1 };
+    let relay: Relay = { ...r, id: Math.max(0, ...this.relays().map((o) => o.id)) + 1 };
     // Asked again if a deploy went live meanwhile, as add() does: its check has been and gone without this relay.
     let since: number | string | undefined;
     do {
@@ -489,6 +548,11 @@ export class LiveWaiters {
         return { queued: false, relay };
       }
     } while (since !== this.head);
+    if (this.outbox) {
+      const row = this.outbox.add({ ...this.relayRow(relay), when_kind: (await this.elsewhere(r.ticket)) ? 'merged' : 'live' });
+      relay = this.relayOf(row);
+      return { queued: true, relay };
+    }
     // Read again: another relay may have been queued while git ran.
     const now = this.relays();
     relay.id = Math.max(relay.id, ...now.map((o) => o.id + 1));
@@ -498,14 +562,32 @@ export class LiveWaiters {
 
   /** Drop `ticket`'s pending relay `id`; the relay, or null when it has none. */
   cancelRelay(ticket: number, id: number): Relay | null {
-    const all = this.relays();
-    const r = all.find((o) => o.id === id && o.ticket === ticket) ?? null;
-    if (r) this.store.setSetting(RELAYS, all.filter((o) => o !== r));
-    return r;
+    const old = this.store.getSetting<Relay[]>(RELAYS) ?? [];
+    const o = old.find((x) => x.id === id && x.ticket === ticket);
+    if (o) {
+      this.store.setSetting(RELAYS, old.filter((x) => x !== o));
+      return o;
+    }
+    const row = this.outbox && this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held'] }).find((d) => d.id === id && d.payload.ticket === ticket);
+    return row && this.outbox!.cancel(row.id) ? this.relayOf(row) : null;
   }
 
   /** Deliver each relay whose commit is live, once; a dismissed minion's relays go out too. */
   private async checkRelays(): Promise<void> {
+    if (this.outbox) {
+      this.migrateRelays();
+      // The check finds a relay's commit live; the outbox sends it. One batch per minion, text and commit: they share the Taskmaster's note.
+      const found: Delivery[] = [];
+      for (const r of this.store.listDeliveries({ kind: 'relay', states: ['waiting'] })) {
+        if (r.met_at == null && (await this.live({ ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.head }))) found.push(r);
+      }
+      const first = new Map<string, number>();
+      for (const r of found) {
+        const key = JSON.stringify([r.payload.ticket, r.when_arg, r.payload.text]);
+        if (!first.has(key)) first.set(key, r.id);
+        this.outbox.meet(r.id, { batch: first.get(key) });
+      }
+    }
     const ready: Relay[] = [];
     for (const r of this.relays()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
     // Dropped before sending, so a send that throws can't deliver one twice; read again: one cancelled meanwhile stays cancelled.

@@ -36,6 +36,8 @@ export type DeliverCtx = {
   bootAt: number;
   /** Send `text` to the row's minion, with its delivery id, and the possible-repeat line on a row a killed server left sending. */
   send(row: Delivery, text: string): Outcome;
+  /** A killed server left this row `sending`: what it sends now may repeat (for kinds that don't use `send`). */
+  repeat(row: Delivery): boolean;
 };
 
 export type Kind = {
@@ -297,7 +299,7 @@ export class Outbox {
       }
     }
     const claimed = rows.filter((r) => this.store.updateDelivery(r.id, { state: 'sending', met_at: r.met_at ?? now }, ['waiting'], now));
-    const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text, repeats.has(row.id)) };
+    const ctx: DeliverCtx = { now, bootAt: this.bootAt, send: (row, text) => this.sendTo(row, text, repeats.has(row.id)), repeat: (row) => repeats.has(row.id) };
     this.started = new Set();
     try {
       for (const kindName of new Set(claimed.map((r) => r.kind))) {

@@ -599,10 +599,11 @@ function waitSummary(id, w, gone) {
   const text = w.text ?? w.what ?? '', all = sentences(text), key = waitKey(w), full = waitAll.has(key) || all.length <= 3;
   return h('div', { class: 'wait-sum' }, h('div', { class: 'wait-sum-in' },
     text ? h('p', { class: 'wait-sum-words' }, full ? text : all.slice(0, 3).join('').trim(), full ? '' : [' ', h('button', { type: 'button', class: 'wait-more', onclick: () => { waitAll.add(key); waitTips.tips?.refresh(); } }, 'Show all')]) : '',
-    h('p', { class: 'wait-facts' },
-      (w.facts ?? []).join(' · '),
-      w.link ? [w.facts?.length ? ' · ' : '', h('a', { href: `#/p/${w.link.project}/t/${w.link.number}`, onclick: () => waitTips.tips?.close() }, `Open #${w.link.number}`)] : '',
-      w.cancellable && !gone ? h('button', { type: 'button', class: 'wait-cancel', onclick: () => cancelWait(id, w) }, 'Cancel') : '')));
+    w.facts?.length ? h('p', { class: 'wait-facts' }, w.facts.join(' · ')) : '',
+    // The link and Cancel share their own row, so neither leaves a dangling "·" when the facts wrap.
+    w.link || (w.cancellable && !gone) ? h('div', { class: 'wait-acts' },
+      w.link ? h('a', { href: `#/p/${w.link.project}/t/${w.link.number}`, onclick: () => waitTips.tips?.close() }, `Open #${w.link.number}`) : '',
+      w.cancellable && !gone ? h('button', { type: 'button', class: 'wait-cancel', onclick: () => cancelWait(id, w) }, 'Cancel') : '') : ''));
 }
 function cancelWait(id, w) {
   const was = { state: w.state, reason: w.reason, cancellable: w.cancellable };

@@ -3472,6 +3472,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/waits/1/cancel": {
+  "anon": "401 Not logged in",
+  "person": "404 No such wait on this minion",
+  "member": "404 No such wait on this minion",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people cancel a wait from the list",
+  "tmB": "403 Only people cancel a wait from the list",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/wake": {
   "anon": "401 Not logged in",
   "person": "400 Reason is required",
@@ -4259,6 +4269,16 @@
   "outsider": "404 No such minion",
   "tmA": "403 Only people approve plans",
   "tmB": "403 Only people approve plans",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/waits/1/cancel": {
+  "anon": "401 Not logged in",
+  "person": "404 No such wait on this minion",
+  "member": "404 No such wait on this minion",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people cancel a wait from the list",
+  "tmB": "403 Only people cancel a wait from the list",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

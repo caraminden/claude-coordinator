@@ -516,6 +516,7 @@ export function threadRow(t, href = threadHref(t)) {
     st.cell ? stateChip(t, st) : '',
     presenceChip(t),
     ownerChip(t, coord),
+    waitChip(t, coord),
     wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
       : rel ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
       : note || ship || gone ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, gone ? h('span', { class: 'closed-at', title: gone.full }, `Dismissed ${gone.short}`) : '', gone && note ? ' · ' : '', note) : '',
@@ -537,6 +538,38 @@ function stateChip(t, st) {
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
   return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': `${st.cell}: ${st.label}` },
     st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
+}
+
+/**
+ * What the minion waits for (ADR 0021 step 7, #1387; Cara picked take C, 2026-11-20): `⏱ 06:00` for a timed wake, `⇢ #1177`
+ * for another minion's work, `⇢ event` otherwise. A tap opens the waits with Cancel. Its slot is always drawn (hidden when
+ * empty) so a wait coming or going moves nothing; the Taskmaster's own waits are shown in its chat, not here.
+ */
+const waitTips = { tips: null };
+function waitChip(t, coord) {
+  const rows = coord ? [] : t.outbox_waits ?? [];
+  const live = rows.filter((w) => w.state !== 'dropped' && w.state !== 'failed');
+  const shown = live[0] ?? rows[0];
+  if (!shown) return h('span', { class: 'wait-chip empty', 'aria-hidden': 'true' });
+  drawnWaits.set(t.id, rows);
+  waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
+  const more = live.length > 1 ? ` +${live.length - 1}` : '';
+  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.what).join('; ')}` }, shown.chip, more);
+}
+const drawnWaits = new Map();
+function waitBody(id) {
+  const rows = drawnWaits.get(id);
+  if (!rows) return null;
+  const clock = (ms) => ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }) : '';
+  return h('div', { class: 'why' }, rows.map((w) => h('div', { class: `wait-line${w.state === 'dropped' || w.state === 'failed' ? ' gone' : ''}` },
+    h('b', { class: 'why-title' }, `${w.chip} ${w.kind.replaceAll('_', ' ')}`),
+    h('p', {}, w.what),
+    h('p', { class: 'why-more' }, [`set by ${w.set_by}`, w.since ? `since ${clock(w.since)}` : '', w.state === 'dropped' || w.state === 'failed' ? `${w.state}: ${w.reason ?? ''}` : ''].filter(Boolean).join(' · ')),
+    w.cancellable ? h('div', { class: 'why-acts' }, h('button', { type: 'button', class: 'secondary', onclick: () => cancelWait(id, w) }, 'Cancel')) : '')));
+}
+function cancelWait(id, w) {
+  waitTips.tips?.close();
+  api(`api/tickets/${id}/waits/${w.id}/cancel`, { method: 'POST', body: {} }).catch((e) => toast(`Couldn't cancel the wait: ${e.message}`, { tone: 'warn', ms: 8000 }));
 }
 
 function whyBody(id) {

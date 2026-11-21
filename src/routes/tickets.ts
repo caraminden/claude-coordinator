@@ -1669,6 +1669,17 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // The list chip's Cancel (ADR 0021 step 7): a person drops one of the outbox's waiting rows for this minion.
+    method: 'POST', path: '/api/tickets/:ticket/waits/:wait/cancel', who: ['person'], refuse: 'Only people cancel a wait from the list',
+    async handler({ res, app, ticket, params, session }) {
+      const row = app.store.getDelivery(Number(params.wait));
+      if (!row || (row.to_kind === 'minion' ? row.to_id !== ticket.id : row.to_id !== ticket.project_id)) throw new HttpError(404, 'No such wait on this minion');
+      if (!app.outbox?.cancel(row.id, `cancelled by ${session.name}`)) throw new HttpError(409, 'It already went out or was cancelled');
+      app.runner.broadcastTicket(ticket.id);
+      return json(res, 200, { cancelled: row.id });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/wake-runners', who: ['minion'],
     async handler(ctx) {
       const { req, res, ticket, app } = ctx;

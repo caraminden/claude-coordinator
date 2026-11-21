@@ -681,6 +681,8 @@ export class Runner {
   heldBrief: (ticketId: number) => { text: string; from: string; leader: number; when: 'live' | 'merged'; is: string } | null = () => null;
   /** What wakes a parked minion by itself (an unheld start_after, wake_when_live, wake_when_runners_back), or null (set by the server). */
   wakesOn: (ticketId: number) => string | null = () => null;
+  /** What the minion waits for, for the list's chip (src/waits-readout.ts, set by the server). */
+  outboxWaits: (ticket: Ticket) => unknown[] = () => [];
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
   private relays: Relay;
@@ -918,6 +920,8 @@ export class Runner {
       held_brief: closed ? null : this.heldBrief(ticket.id),
       // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a parked minion as Waiting, not Parked.
       wakes_on: ticket.state === 'parked' ? this.wakesOn(ticket.id) : null,
+      // Everything it waits for, timed or on an event, for the list row's chip (ADR 0021 step 7).
+      outbox_waits: closed ? [] : this.outboxWaits(ticket),
       // When its oldest question or plan card still waiting on a person was posted.
       pending_card_at: cards[0]?.created_at ?? null,
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).

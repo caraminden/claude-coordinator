@@ -153,6 +153,11 @@
 /* A quiet turn (#906): the working dot, stopped and hollow; the chip opens why. */
 .thread-row .state .still { display: inline-block; width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; margin-right: 4px; vertical-align: 1px; }
 .thread-row .state[data-tip-id] { cursor: help; }
+/* The wait chip (ADR 0021 step 7): its slot is drawn even when empty, at a fixed width, so waits coming and going move nothing. */
+.thread-row .wait-chip { align-self: center; margin-left: 0.4rem; box-sizing: border-box; min-width: 5.2em; text-align: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--waiting, #7c5cd6) 14%, transparent); color: var(--waiting, #7c5cd6); cursor: help; }
+.thread-row .wait-chip.empty { visibility: hidden; }
+.thread-row .wait-chip.gone, .wait-line.gone { opacity: 0.5; }
+.wait-line + .wait-line { margin-top: 0.6rem; }
 /* The chip's popover (public/ui/tip.js): what, since when, the usual, and a link to what it waits on. */
 .why-tip { max-width: min(20rem, calc(100vw - 16px)); }
 .why { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.88rem; line-height: 1.4; }

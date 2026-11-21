@@ -48,6 +48,7 @@ import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { Outbox } from './src/outbox.ts';
+import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
@@ -656,6 +657,12 @@ runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
   return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
+// The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
+runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
+  ...waiters.chains().filter((c) => c.ticket === id && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
+  ...waiters.list().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
+  ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
+]);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);

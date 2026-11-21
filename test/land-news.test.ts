@@ -7,7 +7,7 @@ import { landNews, readTail } from '../src/land-news.ts';
 
 // src/land-news.ts (#1368): the ship under way's news on Releases, read from its land.sh output. The lines are land.sh's
 // own words, as a real train's log has them (landing 2832, 2026-11-20); "bisect: testing the first K of N ships" is the line
-// land.sh gets in #1368's pipeline ship.
+// land.sh gets in #1368's pipeline ship; the rerun window's and the cut-off run's are #1374's and #1377's.
 const root = mkdtempSync(join(tmpdir(), 'land-news-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -79,6 +79,12 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
   const slow = "land: waiting for CI or a quiet perigee: CI: CI didn't finish within 360s, but perigee is busy";
   assert.equal(at(slow).at(-1)!.text, 'CI is past its time limit: waiting on CI, or on a quiet perigee to run the suite here');
   assert.deepEqual(at(slow, `land: CI passed on a49185c7 in 395s (${url}/4)`), [], 'gone once CI answers');
+  // #1374's rerun window and #1377's cut-off run, in their words.
+  const rerun = `land: CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to 3 min 0 s more for them instead of falling back at 360s (${url}/5)`;
+  assert.deepEqual(at(slow, rerun).map((x) => x.text), ["CI's full run ended red: rerunning the failed files alone, to tell flakes from real failures (up to 3 min 0 s more)"]);
+  assert.deepEqual(at(rerun, ...red).map((x) => x.text), ["CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time", 'Finding the ship that turned the train red'], 'the red replaces it');
+  assert.deepEqual(at('land: the CI run on d66e2d82 was cut off before any test failed (the runner went away), so it says nothing about this commit: running CI once more'),
+    [{ tone: 'warn', text: 'CI run cut off before any test failed (the runner went away): one more run' }]);
   assert.deepEqual(at(slow, 'land: CI FALLBACK: perigee went quiet. Running the full suite on perigee instead.').map((x) => x.text),
     ['CI fallback: the full suite runs on perigee (perigee went quiet)'], 'or once the suite runs here');
 });

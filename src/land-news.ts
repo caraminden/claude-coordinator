@@ -1,7 +1,7 @@
 /**
  * What happened so far in the ship under way, for the Releases page's Next bar (#1368): read from the shipping minion's
  * land.sh output (its `land:` lines), not sent from anywhere new. Ships staying in line, CI red on the train and its
- * failing tests, flakes run once more, the bisect, the ship it refused and the ones that went back in line, the CI fallback.
+ * failing tests, CI's reruns of the failed files alone (#1374), a run cut off (#1377), flakes run once more, the bisect, the ship it refused and the ones that went back in line, the CI fallback.
  * Train membership is #1303's (the line and change rows); failed tries after the fact are #1375's (Previous releases).
  */
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
@@ -69,8 +69,13 @@ export function landNews(output: string, name: (branch: string) => string): News
       if (bisect && !/testing the first/.test(bisect.text)) bisect.text = `Finding the ship that turned the train red: CI run ${ciRuns}`;
     } else if (/^waiting for CI or a quiet perigee: /.test(s)) {
       slow = { tone: 'warn', text: 'CI is past its time limit: waiting on CI, or on a quiet perigee to run the suite here' };
+    } else if ((m = s.match(/^CI's full run ended red and it is rerunning the failed files alone.*?waits up to (.+?) more/))) {
+      slow = { tone: 'warn', text: `CI's full run ended red: rerunning the failed files alone, to tell flakes from real failures (up to ${m[1]} more)` };
     } else if (/^CI passed on /.test(s)) slow = null;
-    else if ((m = s.match(/^CI is red on the ship train/))) {
+    else if ((m = s.match(/^the CI run on \S+ was cut off before any test failed \((.*)\), so/))) {
+      news.push({ tone: 'warn', text: `CI run cut off before any test failed (${m[1]}): one more run` });
+    } else if ((m = s.match(/^CI is red on the ship train/))) {
+      slow = null;
       const d = failureDetail(lines.slice(since, i).join('\n'), 1);
       const names = d.names.length ? `: ${d.names.map(clip).join(' · ')}${d.more ? ` +${d.more} more` : ''}` : '';
       news.push({ tone: 'bad', text: `CI red on the train${names}` });

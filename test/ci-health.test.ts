@@ -683,23 +683,44 @@ test("the land gate's alarm: a job no runner took is named as that, not as a cap
   assert.equal(landProblems(s, through(s, 6, 'tools/deploy.sh', [['deploy', null, MIN]], t)).length, 1);
 });
 
-test('a land in the line over 30 min is a quiet item, waiting in line included, ringing at 1 h, until that land ends (#561, #968)', () => {
+test('the ship line is a quiet item once it has been still 20 min and rings at 40; a deep line whose head keeps moving never does (#561, #968, #1342)', () => {
   const s = newLandState();
   const t = NOW;
-  landStep(s, [land(1, '#549', 'tests'), land(2, '#551', 'line')], t);
-  landStep(s, [land(1, '#549', 'tests'), land(2, '#551', 'line')], t + 29 * MIN);
-  assert.deepEqual(landProblems(s, t + 29 * MIN), []);
-  landStep(s, [land(2, '#551', 'rebase'), land(3, '#552', 'line')], t + 31 * MIN);
-  const slow = landProblems(s, t + 31 * MIN);
-  assert.deepEqual(slow.map((x) => [x.key, x.quiet, x.title]), [['land:slow', true, `CI: #551 has been shipping since ${clock(t)} (over 30 min)`]]);
-  assert.match(slow[0].why!, /under 15 min/);
-  assert.deepEqual(landProblems(s, t + 40 * MIN), slow, 'the words stay put as the minutes pass, so it is not re-sent');
-  const ringing = landProblems(s, t + LAND_RING_MS);
-  assert.deepEqual(ringing.map((x) => [x.quiet, x.title]), [[false, `CI: #551 has been shipping since ${clock(t)} (over 1 h)`]]);
-  landStep(s, [land(3, '#552', 'rebase')], t + 41 * MIN);
-  assert.deepEqual(landProblems(s, t + 41 * MIN), [], 'cleared when #551 left the line');
-  landStep(s, [land(3, '#552', 'rebase'), land(4, '#553', 'line')], t + 95 * MIN);
-  assert.match(landProblems(s, t + 95 * MIN)[0].title, /^CI: #552 has been shipping since /);
+  const line = (n: number, headPhase: string, ci: string | null = null) =>
+    Array.from({ length: n }, (_, i) => (i === 0 ? land(1, '#1', headPhase, ci, ci ? 5 : null) : land(i + 1, `#${i + 1}`, 'line')));
+  landStep(s, line(3, 'tests'), t);
+  landStep(s, line(3, 'tests'), t + 19 * MIN);
+  assert.deepEqual(landProblems(s, t + 19 * MIN), []);
+  const slow = landProblems(s, t + 21 * MIN);
+  assert.deepEqual(slow.map((x) => [x.key, x.quiet, x.title]), [['land:slow', true, `CI: the ship line has been still since ${clock(t)} (over 20 min): #1 is first of 3, 2 waiting behind`]]);
+  assert.match(slow[0].why!, /have not changed/);
+  assert.deepEqual(landProblems(s, t + 30 * MIN), slow, 'the words stay put as the minutes pass, so it is not re-sent');
+  assert.deepEqual(landProblems(s, t + LAND_RING_MS).map((x) => [x.quiet, x.title.includes('over 40 min')]), [[false, true]]);
+  // The head moving on (a new phase) is progress.
+  landStep(s, line(3, 'deploy'), t + 41 * MIN);
+  assert.deepEqual(landProblems(s, t + 41 * MIN), []);
+  // A land leaving is progress too, and an empty line is never "still".
+  landStep(s, line(3, 'deploy').slice(0, 2), t + 55 * MIN);
+  assert.deepEqual(landProblems(s, t + 70 * MIN), []);
+  landStep(s, [], t + 100 * MIN);
+  assert.deepEqual(landProblems(s, t + 200 * MIN), []);
+});
+
+test('a line 15 deep for over an hour whose head keeps changing raises nothing (#1342)', () => {
+  const s = newLandState();
+  let t = NOW;
+  for (let head = 1; head <= 15; head++) {
+    const behind = Array.from({ length: 15 - head }, (_, i) => land(head + 1 + i, `#${head + 1 + i}`, 'line'));
+    for (const [phase, ci, ms] of green) {
+      landStep(s, [land(head, `#${head}`, phase, ci, ci ? head : null), ...behind], t);
+      assert.deepEqual(landProblems(s, t), [], `ship ${head} in ${phase}`);
+      t += ms;
+    }
+  }
+  assert.ok(t - NOW > 45 * MIN, 'the walk took a good while');
+  landStep(s, Array.from({ length: 3 }, (_, i) => land(16 + i, `#${16 + i}`, i ? 'line' : 'tests')), t);
+  assert.deepEqual(landProblems(s, t + 19 * MIN), []);
+  assert.equal(landProblems(s, t + 21 * MIN).length, 1, 'but still for 20 min it is quiet');
 });
 
 test("the land gate's items: quiet under the live scheme first, then joining CI health's one alert as it rings, and clearing themselves (#561, #968)", async () => {

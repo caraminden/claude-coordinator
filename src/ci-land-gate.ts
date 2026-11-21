@@ -10,10 +10,13 @@ import { clock, type Problem } from './ci-problems.ts';
 // while Cara's desktop was off, which isn't the gate failing (the runner-offline alert says it), so a land that never
 // reached the CI wait (no runner online, LAND_CI=0, GitHub not answering) neither counts nor clears.
 export const LAND_STREAK = 2;
-export const LAND_SLOW_MS = 30 * 60_000;
+// #1342: the line, not a ship, is what is slow. A ship 15th in line waits over an hour with nothing wrong, so the clock is
+// how long the line has been still (its head land, that land's phase or CI run, and who is in it all unchanged), not a
+// ship's age. Quiet after 20 min still (a ship's slowest honest step, the 6-min CI cap plus a 4-min suite, is ~10 min), ring after 40.
+export const LAND_SLOW_MS = 20 * 60_000;
 // #968 (Cara: "Quiet, ring after 1 h"): those make a quiet item; these ring.
 export const LAND_RING_STREAK = 4;
-export const LAND_RING_MS = 3600_000;
+export const LAND_RING_MS = 40 * 60_000;
 // land.sh's CI_LIMIT is 360 s: a run still going this far into the CI wait was cut off by it.
 export const LAND_CAP_MS = 5 * 60_000;
 
@@ -43,6 +46,9 @@ export interface LandState {
   lands: Record<string, Landing>;
   /** The fallbacks since the last green gate, oldest first. */
   fellBack: { name: string; why: string; run: number | null }[];
+  /** #1342: when the line last moved (its head, the head's phase or CI run, or a land leaving), and what it looked like then. Absent in state kept before. */
+  moved?: number;
+  head?: string;
 }
 export const newLandState = (): LandState => ({ lands: {}, fellBack: [] });
 
@@ -75,7 +81,13 @@ export function landStep(s: LandState, seen: LandSeen[], now: number): LandState
       s.fellBack = [];
     }
   }
-  for (const key of Object.keys(s.lands)) if (!here.has(key)) delete s.lands[key];
+  let left = false;
+  for (const key of Object.keys(s.lands)) if (!here.has(key)) { delete s.lands[key]; left = true; }
+  // The head is the lowest seq in the line: it holds the lock, and each phase or CI run it passes through is progress.
+  const first = seen.filter((x) => x.name !== 'tools/deploy.sh').sort((a, b) => a.seq - b.seq)[0];
+  const head = first ? `${first.seq}/${first.phase}/${first.ci ?? ''}/${first.run ?? ''}` : '';
+  if (s.moved == null || left || head !== s.head) s.moved = now;
+  s.head = head;
   return s;
 }
 
@@ -94,16 +106,17 @@ export function landProblems(s: LandState, now: number): Problem[] {
         : 'open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
     });
   }
-  const slow = Object.values(s.lands).filter((l) => now - l.joined >= LAND_SLOW_MS).sort((a, b) => a.joined - b.joined);
-  if (slow.length) {
-    const names = slow.map((l) => l.name);
-    const ring = now - slow[0].joined >= LAND_RING_MS;
-    const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} have` : `${names[0]} has`;
+  // Ringing needs a line that is still non-empty and has not moved: a deep line whose head keeps changing is just busy.
+  const line = Object.entries(s.lands).sort((a, b) => Number(a[0]) - Number(b[0])).map(([, l]) => l);
+  const since = s.moved ?? now;
+  if (line.length && now - since >= LAND_SLOW_MS) {
+    const ring = now - since >= LAND_RING_MS;
+    const behind = line.length - 1;
     out.push({
       key: 'land:slow', quiet: !ring,
-      title: `CI: ${who} been shipping since ${clock(slow[0].joined)} (over ${ring ? '1 h' : '30 min'})`,
-      why: 'shipping normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
-      fix: "read the shipping minion's land.sh output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster shipping is jammed",
+      title: `CI: the ship line has been still since ${clock(since)} (over ${ring ? 40 : 20} min): ${line[0].name} is first of ${line.length}${behind ? `, ${behind} waiting behind` : ''}`,
+      why: 'the first ship, its step and the ships in the line have not changed, though each ship normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
+      fix: "read the first minion's land.sh output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster shipping is jammed",
     });
   }
   return out;

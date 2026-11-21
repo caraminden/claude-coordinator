@@ -49,3 +49,18 @@ test('the scheme list names each scheme\'s Taskmaster', async () => {
   const { data } = await srv.call('/api/projects');
   assert.equal(data.find((p: any) => p.id === P.id).coordinator_id, TM.id);
 });
+
+test('the dismissed list pages newest first with limit and before, and finds by q, since and ids', async () => {
+  const get = async (q: string) => (await srv.call(`/api/projects/${P.id}?tickets=closed${q}`)).data;
+  const page1 = await get('&limit=1');
+  assert.equal(page1.tickets.length, 1);
+  assert.equal(page1.more, true);
+  const last = page1.tickets[0];
+  const page2 = await get(`&limit=1&before=${last.updated_at}&before_id=${last.id}`);
+  assert.equal(page2.tickets.length, 1);
+  assert.notEqual(page2.tickets[0].id, last.id);
+  assert.equal(page2.more, false);
+  assert.deepEqual((await get('&q=two')).tickets.map((t: any) => t.id), [gone2]);
+  assert.deepEqual((await get(`&ids=${gone}`)).tickets.map((t: any) => t.id), [gone]);
+  assert.equal((await get('&since=99999999999999')).tickets.length, 0);
+});

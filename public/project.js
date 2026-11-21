@@ -7,6 +7,7 @@ import * as settings from './settings.js';
 import { ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import * as settingsMachines from './settings-machines.js';
 import { isOrdersPage, pageRow } from './settings-pages.js';
+import { closedSnapshot, closedState, fetchClosedByNumber, restoreClosed, setClosedTotal } from './closedlist.js';
 import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { startPick } from './pick.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
@@ -60,9 +61,9 @@ const getApp = () => offersApp()
 export async function showReleases(projectId, scope, hl) {
   setReleasesPage(scope, hl);
   if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
-  const { kind, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'releases', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects,
+    kind, main: 'releases', projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null, ...chatView(null, null),
   });
   renderCrumbs({ kind: 'releases' });
@@ -175,7 +176,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines] = stale
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, stale.artifacts, stale.shared, known, stale.machines]
     : await Promise.all([
-    // The dismissed minions come behind the first paint (loadDismissed): most of a big scheme's payload (#538).
+    // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
     api(`api/projects/${projectId}?tickets=open`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
@@ -190,9 +191,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   ]);
   if (stale) preparePropFilter(projectId);
   let tickets = open;
-  // A link to a dismissed minion waits for the dismissed list; any other open draws without it.
+  // A link to a dismissed minion fetches that one minion; any other open draws without it.
   const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);
-  if (findClosed) tickets = open.concat((await api(`api/projects/${projectId}?tickets=closed`)).tickets);
+  if (findClosed) tickets = open.concat((await api(`api/projects/${projectId}?tickets=closed&number=${main.number}`)).tickets);
   let chatId = null;
   if (main.kind === 'chat') {
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
@@ -227,6 +228,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     file: main.file ?? null,
     ...chatView(chatId, ticket, merged),
   });
+  if (stale) restoreClosed(view.tickets, stale.closed);
+  else setClosedTotal(view.tickets, dismissed);
   renderCrumbs(main);
   try { localStorage.setItem(LAST_SCHEME, String(projectId)); } catch {}
 
@@ -313,9 +316,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderGithubStrip();
   renderSchemesShelf();
   if (!projects || known) refreshSchemes();
-  // The recap waits on it: it lists minions dismissed while you were away.
-  if (stale) view.dismissedLoad = refreshScheme(projectId);
-  else if (!findClosed && dismissed) view.dismissedLoad = loadDismissed(projectId);
+  if (stale) refreshScheme(projectId);
   renderHiddenNote();
   refreshInbox();
   if (main.home) refreshHome();
@@ -336,7 +337,7 @@ function rememberScheme() {
   if (view?.kind !== 'project' || !view.tickets) return;
   const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, machines } = view;
   schemeCache.delete(projectId);
-  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], seen, personNotes, pins, artifacts, shared, machines });
+  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, artifacts, shared, machines });
   if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
 }
 
@@ -346,8 +347,8 @@ export function forgetSchemes() {
 }
 
 /**
- * Bring a scheme drawn from its last payload up to date in place (#538), with a ring by "Minions" meanwhile,
- * then fetch its dismissed minions. A failed fetch (a restart's gap) tries again, backing off to 30 s.
+ * Bring a scheme drawn from its last payload up to date in place (#538), with a ring by "Minions" meanwhile.
+ * A failed fetch (a restart's gap) tries again, backing off to 30 s.
  */
 async function refreshScheme(projectId) {
   const list = view.tickets;
@@ -373,10 +374,14 @@ async function refreshScheme(projectId) {
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
-  const [{ project, coordinator, taskmasters, tickets: open, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
+  closedState(list).total = dismissed ?? 0;
   const now = new Set(open.map((t) => t.id));
-  // Dismissed since you left: gone until the dismissed list below brings it back as it is now.
-  for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) list.delete(id);
+  // Dismissed since you left: gone until the Dismissed list brings it back as it is now.
+  let gone = false;
+  for (const [id, t] of list) if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) { list.delete(id); gone = true; }
+  // The pages read so far start below these: read from the newest again (the rows already in hand are skipped).
+  if (gone) Object.assign(closedState(list), { cursor: null, more: true });
   for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
   if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
   Object.assign(view, { project, taskmasters: taskmasters ?? view.taskmasters, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, builds: builds ?? view.builds, buildPreviews: build_previews ?? view.buildPreviews, machines });
@@ -385,25 +390,6 @@ async function refreshScheme(projectId) {
   setArtifacts(artifacts, shared);
   renderGithubStrip();
   renderHiddenNote();
-  await loadDismissed(projectId);
-  if (view?.kind === 'project') headUp();
-}
-
-/**
- * Fetch a scheme's dismissed minions behind its first paint and add them to the list (#538); a newer load of
- * the list wins. A failed fetch (a restart's gap) tries again, backing off to 30 s, as refreshSchemes does.
- */
-async function loadDismissed(projectId) {
-  const list = view.tickets;
-  let closed = null;
-  for (let wait = 1000; !closed; wait = Math.min(30_000, wait * 2)) {
-    closed = await api(`api/projects/${projectId}?tickets=closed`).then((r) => r.tickets, () => null);
-    if (view?.kind !== 'project' || view.tickets !== list) return;
-    if (!closed) await new Promise((r) => setTimeout(r, wait));
-  }
-  // The stream may have brought a fresher copy meanwhile (one reopened, say): that one stays.
-  for (const t of closed) if (!list.has(t.id)) list.set(t.id, t);
-  renderSidebar();
 }
 
 /**
@@ -411,19 +397,21 @@ async function loadDismissed(projectId) {
  * (and only its events not already cached). False when the thread is not one we know of yet.
  */
 async function switchChat(main, seq) {
-  const chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
+  let chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
+  // A dismissed minion the page hasn't read (one a search found, say): that one minion comes, not the list.
+  if (!chatId && main.number != null) chatId = (await fetchClosedByNumber(main.number).catch(() => null))?.id;
   if (!chatId) return false;
   // The list already has the minion, kept current by the stream: draw the chat from it at once, with the
   // cached history when there is one, and fetch behind it (#527). Only a history not yet downloaded waits.
   const ticket = chatId === view.coordinator.id ? view.coordinator : view.tickets.get(chatId);
-  if (!ticket) return false; // a dismissed one before the dismissed list has come (#538): the full load finds it
+  if (!ticket) return false; // a dismissed one the page hasn't read: the full load fetches it
   const merged = chatId === view.coordinator.id ? mergedView(view.projectId, chatId, view.taskmasters, tmViewMode()) : null;
   const cached = cachedEvents(merged?.src ?? chatId);
   const page = cached?.page ?? await loadEvents(merged?.src ?? chatId);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, home, projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, home, main: 'chat', projectId, project, coordinator, taskmasters, tickets, dismissedLoad, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
+    kind, home, main: 'chat', projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null,
     ...chatView(chatId, ticket, merged),
   });

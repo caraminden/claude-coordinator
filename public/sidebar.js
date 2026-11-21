@@ -13,6 +13,7 @@ import { refreshWelcome, welcomePanel } from './welcome.js';
 import { byUrgency, cardChip, cardsYours, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
+import { CLOSED_PAGE, closedCount, closedState, loadAllClosed, loadMoreClosed, loadedClosed, searchClosed } from './closedlist.js';
 import { pendingRelease, releaseOrder } from './releases.js';
 import { replaceHash } from './navstack.js';
 import { openDialog } from './ui/dialog.js';
@@ -197,7 +198,7 @@ export function renderSidebar() {
   const head = [pinnedGroup, ...sections];
   const tail = [!all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
     : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : ''];
-  if (!closed.length) {
+  if (!closed.length && !closedCount()) {
     closedRows.clear();
     return finish(el, head, tail);
   }
@@ -206,6 +207,9 @@ export function renderSidebar() {
   // a big scheme has a thousand, and every minion update redraws.
   closedGroup ??= dismissedGroup();
   closedGroup.open = view.showClosed;
+  // A property filter has to look at every dismissed minion; the rest of the time a page at a time is read as the list scrolls.
+  if (picks.size && view.showClosed && closedState().more && !closedState().failed) loadAllClosed().then(() => renderSidebar());
+  closedSummary(picks.size && !closedState().more ? closed.length : closedCount());
   fillClosed(closed);
   // The list stays in the page while the rest is swapped, so a redraw doesn't restyle its rows.
   if (closedGroup.parentNode !== el) el.replaceChildren(...head, closedGroup, ...tail);
@@ -228,13 +232,49 @@ const closedRows = new Map();
 // The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place) and the weekly limit (cost.js).
 let closedUsage = null, closedDay = '', closedShare = null;
 
+// The Dismissed list shows a page of rows at a time (CLOSED_PAGE) and reads another from the server when its foot scrolls into view:
+// a scheme can have thousands, and their rows are most of the page's elements.
+let closedShown = CLOSED_PAGE, closedFor = null, closedFoot = null, closedWatch = null;
+
 function dismissedGroup() {
-  const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed'));
+  const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed', h('span', { class: 'count' })));
+  closedFoot = h('div', { class: 'closed-foot muted small' });
+  g.append(closedFoot);
   g.addEventListener('toggle', () => {
     view.showClosed = g.open;
-    if (g.open) renderSidebar();
+    if (g.open) {
+      renderSidebar();
+      growClosed(); // the newest page at once
+    }
   });
+  // Observed again after each redraw (observe() always reports once), so a foot still in view asks for the next page.
+  closedWatch = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) growClosed(); }, { rootMargin: '300px' });
   return g;
+}
+
+function closedSummary(n) {
+  const count = closedGroup.querySelector('summary .count');
+  if (count.textContent !== String(n)) count.textContent = String(n);
+}
+
+/** The foot asked for more: build another page of rows, reading it from the server first when the page has none left in hand. */
+async function growClosed() {
+  const list = view.tickets, s = closedState(list);
+  if (!view.showClosed || list !== closedFor) return;
+  if (closedShown < loadedClosed(list).length) closedShown += CLOSED_PAGE;
+  else if (s.more && !s.failed) {
+    if (!await loadMoreClosed(list) || view.tickets !== list) return renderClosedFoot();
+    closedShown += CLOSED_PAGE;
+  } else return;
+  renderSidebar();
+}
+
+/** The foot's words: nothing while more is coming, how to retry after a failed read. */
+function renderClosedFoot() {
+  const s = closedState();
+  const failed = s.failed && s.more;
+  if (!failed) return closedFoot.replaceChildren();
+  closedFoot.replaceChildren('Couldn’t load more dismissed minions. ', h('button', { type: 'button', class: 'secondary small', onclick: () => { s.failed = false; growClosed(); } }, 'Try again'));
 }
 
 /** What a dismissed row shows besides its minion: when any of it changes the row is built again. */
@@ -246,7 +286,12 @@ function closedKey(t) {
 /** Fills the Dismissed list with its rows (none while it is shut), building only the rows that are new or changed. */
 function fillClosed(closed) {
   const rows = [];
+  if (view.tickets !== closedFor) { closedFor = view.tickets; closedShown = CLOSED_PAGE; }
   if (view.showClosed) {
+    // The minion you're on keeps its row built, however far down it sits.
+    const at = closed.findIndex((t) => t.id === view.id);
+    if (at >= closedShown) closedShown = at + 1;
+    closed = closed.slice(0, closedShown);
     const day = todayPacific();
     const share = weekShare(1);
     if (closedUsage !== usage || closedDay !== day || closedShare !== share) closedRows.clear();
@@ -267,13 +312,16 @@ function fillClosed(closed) {
     for (const id of closedRows.keys()) if (!live.has(id)) closedRows.delete(id);
   } else closedRows.clear();
   // In place: a row already where it belongs isn't touched.
-  if (rows.length === closedList.length && rows.every((r, i) => r === closedList[i]) && closedGroup.childElementCount === rows.length + 1) return;
+  renderClosedFoot();
+  closedWatch.disconnect();
+  if (view.showClosed) closedWatch.observe(closedFoot);
+  if (rows.length === closedList.length && rows.every((r, i) => r === closedList[i]) && closedGroup.childElementCount === rows.length + 2) return;
   let at = closedGroup.firstElementChild.nextElementSibling;
   for (const r of rows) {
     if (r === at) at = at.nextElementSibling;
     else closedGroup.insertBefore(r, at);
   }
-  while (at) {
+  while (at !== closedFoot) {
     const next = at.nextElementSibling;
     at.remove();
     at = next;
@@ -307,14 +355,15 @@ export function revealActiveRow() {
 
 // The threads search, kept across thread switches within a project. `meaning`: the last search of
 // the chats by meaning (#488), which only Enter or its button runs: each costs the box a CPU-second.
-const threadSearch = { projectId: null, q: '', meaning: null };
+const threadSearch = { projectId: null, q: '', meaning: null, closed: null };
 
 export function threadSearchBox(projectId) {
-  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', meaning: null });
+  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', meaning: null, closed: null });
   const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, ...noAutofill('thread-search') });
   input.addEventListener('input', () => {
     threadSearch.q = input.value.trim();
     renderSidebar();
+    searchClosedSoon();
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && input.value) {
@@ -324,6 +373,31 @@ export function threadSearchBox(projectId) {
     if (e.key === 'Enter' && threadSearch.q.length >= 2) searchByMeaning();
   });
   return input;
+}
+
+let closedSearchTimer = 0;
+
+/**
+ * The dismissed minions the page hasn't read can't match a search here, so the server is asked, a moment after the last key.
+ * What it found shows with what the page has (renderThreadResults); nothing is asked once every dismissed minion is in hand.
+ */
+function searchClosedSoon() {
+  clearTimeout(closedSearchTimer);
+  const { projectId, q } = threadSearch;
+  if (!q || !closedState().more) return void (threadSearch.closed = null);
+  closedSearchTimer = setTimeout(async () => {
+    const list = view.tickets;
+    let run = { q, busy: true, tickets: [], more: false };
+    threadSearch.closed = run;
+    renderSidebar();
+    try {
+      Object.assign(run, await searchClosed(q));
+    } catch (err) {
+      run.error = err.message;
+    }
+    run.busy = false;
+    if (threadSearch.closed === run && view.tickets === list && threadSearch.projectId === projectId) renderSidebar();
+  }, 250);
 }
 
 /** Search the scheme's chats by meaning for the box's text; the answer shows under the title results. */
@@ -368,12 +442,18 @@ function meaningSection() {
 /** Search results: threads whose title, number or properties match, then the chats by meaning. */
 function renderThreadResults(el, tickets) {
   // The Taskmaster's row stays above the search, so results are minions only.
-  const results = tickets.filter((t) => threadMatches(t, threadSearch.q));
+  const found = tickets.filter((t) => threadMatches(t, threadSearch.q));
+  // Dismissed minions the page hasn't read, found by the server (searchClosedSoon), after the ones in hand.
+  const asked = threadSearch.closed?.q === threadSearch.q ? threadSearch.closed : null;
+  const picks = propFilter.projectId === view.projectId ? propFilter.picks : new Map();
+  const have = new Set(found.map((t) => t.id));
+  const results = [...found, ...(asked?.tickets ?? []).filter((t) => !have.has(t.id) && !view.tickets.has(t.id) && matchesPicks(t, picks))].sort((a, b) => b.updated_at - a.updated_at);
   el.replaceChildren(
     h('section', { class: 'column' },
       h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
       results.length
-        ? results.map((t) => threadRow(t))
+        ? [results.map((t) => threadRow(t)), asked?.busy ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…') : asked?.error ? h('p', { class: 'muted small' }, `Couldn’t search the dismissed minions: ${asked.error}`) : asked?.more ? h('p', { class: 'muted small' }, `Showing the newest ${CLOSED_PAGE} dismissed matches: type more to narrow.`) : '']
+        : asked?.busy ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…')
         : h('div', { class: 'empty-state' },
           h('p', {}, 'No minion has “', threadSearch.q.trim(), '” in its title, number or properties.'),
           h('button', { type: 'button', class: 'secondary small', onclick: () => {

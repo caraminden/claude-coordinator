@@ -692,9 +692,39 @@ export const projectRoutes: Route[] = [
       const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
       const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
       const dismissed = all.filter((t) => t.status === 'closed').length;
-      const tickets = app.runner.views(all
+      let picked = all
         .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : true)
-        .filter((t) => number === null || t.number === number));
+        .filter((t) => number === null || t.number === number);
+      // The dismissed list is read a page at a time, newest first (closed-list-on-demand): ?limit= a page, ?before=<updated_at>&before_id=
+      // the last row of the page before, ?q= only those whose number, title or properties match (the page's thread search), ?since= only
+      // those updated after that time (the recap), ?ids=1,2 only those. `more` says whether another page follows; none of them is sent
+      // without ?limit=, so the old whole list still comes to a caller that asks for it.
+      let more = false;
+      if (which === 'closed') {
+        const num = (k: string) => (url.searchParams.has(k) ? Number(url.searchParams.get(k)) : null);
+        const [limit, before, beforeId, since] = [num('limit'), num('before'), num('before_id'), num('since')];
+        const ids = url.searchParams.get('ids')?.split(',').map(Number).filter(Number.isFinite);
+        const q = url.searchParams.get('q')?.trim().toLowerCase();
+        picked.sort((a, b) => b.updated_at - a.updated_at || b.id - a.id);
+        if (ids) picked = picked.filter((t) => ids.includes(t.id));
+        if (since !== null) picked = picked.filter((t) => t.updated_at > since);
+        if (before !== null) picked = picked.filter((t) => t.updated_at < before || (t.updated_at === before && t.id < (beforeId ?? Infinity)));
+        if (q) {
+          // The page's own match (threadMatches in public/threadgroups.js): the number, or the title or a property value containing it.
+          const props = app.store.props.forTargets('minion', picked.map((t) => t.id));
+          picked = picked.filter((t) => {
+            if (String(t.number) === q.replace(/^#/, '')) return true;
+            const p = props.get(t.id) ?? {};
+            const fields = [t.title, ...Object.entries(p).flatMap(([k, v]) => [v].flat().map((x) => (q.includes(':') ? `${k}: ${x}` : String(x))))];
+            return fields.some((f) => f?.toLowerCase().includes(q));
+          });
+        }
+        if (limit !== null && picked.length > limit) {
+          more = true;
+          picked = picked.slice(0, limit);
+        }
+      }
+      const tickets = app.runner.views(picked);
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
       // People's notes (#146) are for people only: a minion or the Taskmaster gets none.
@@ -712,7 +742,7 @@ export const projectRoutes: Route[] = [
       const taskmasters = all_tms.length > 1
         ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null }))
         : [];
-      return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, seen, person_notes, pins, builds, build_previews });
+      return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
     },
   },
   {

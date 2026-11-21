@@ -3,6 +3,7 @@
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { mergeOpen, noteTicketChange } from './closedlist.js';
 import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
@@ -709,14 +710,14 @@ async function resync() {
     held = hold;
   }
   try {
-    const [{ coordinator, tickets, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([
-      api(`api/projects/${view.projectId}`),
+    const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([
+      api(`api/projects/${view.projectId}?tickets=open`),
       api(`api/projects/${view.projectId}/artifacts`),
       view.id ? api(`api/tickets/${view.id}`) : null,
     ]);
     if (view !== v) return; // you went to another view meanwhile; its own load is fresh
     view.coordinator = coordinator;
-    view.tickets = new Map(tickets.map((t) => [t.id, t]));
+    view.tickets = mergeOpen(tickets, dismissed); // the dismissed rows already read stay (closedlist.js)
     view.seen = seen ?? view.seen;
     view.personNotes = person_notes ?? view.personNotes;
     view.pins = pins ?? view.pins;
@@ -869,6 +870,7 @@ export function onTicketUpdate(ticket) {
     return void inboxTicket(before, ticket);
   }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
+  if (ticket.kind !== 'coordinator') noteTicketChange(before, ticket);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
   inboxTicket(before, ticket);

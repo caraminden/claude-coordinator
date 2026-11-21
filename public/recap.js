@@ -2,6 +2,7 @@
 // in the scheme puts a card at the bottom listing what changed since, built from the minions'
 // own states and notes. It is yours alone, never stored in the chat, and goes once you act.
 import { ago, api, h, me, view } from './base.js';
+import { loadClosedSince } from './closedlist.js';
 import { usage } from './core.js';
 import { threadRow } from './sidebar.js';
 import { rowState } from './threadstate.js';
@@ -12,9 +13,11 @@ const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent
 /** Fetch the recap for the open Taskmaster chat and show it, if you have been away long enough. */
 export async function showRecap() {
   const { projectId, id } = view;
-  // Its Dismissed section needs the dismissed minions, which load behind the scheme's first paint (#538).
-  const [recap] = await Promise.all([api(`api/projects/${projectId}/recap`).catch(() => null), view.dismissedLoad]);
+  const recap = await api(`api/projects/${projectId}/recap`).catch(() => null);
   if (!recap?.since || Date.now() - recap.since < AWAY_MS || view?.id !== id) return;
+  // Its Dismissed section needs the minions dismissed since you left, which the page doesn't read until asked.
+  await loadClosedSince(recap.since);
+  if (view?.id !== id) return;
   const tickets = [...view.tickets.values()];
   const sections = recapSections(tickets, recap.since, recap.turns, (t) => rowState(t, usage));
   const log = document.getElementById('log');

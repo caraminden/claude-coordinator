@@ -375,7 +375,7 @@ export function worstOf(data) {
 
 // The chips (the shelf's and the top bar's) share one read a minute, like CI's.
 const chips = new Set();
-let chipTimer = null;
+let chipTimer = null, chipBusy = false; // a chip made while a read runs or is due takes its answer: no second read
 let chipRead = null;
 const paintChip = (c, { title, tone }) => {
   c.title = title;
@@ -386,6 +386,7 @@ async function readChips() {
   chipTimer = null;
   for (const c of chips) if (!c.isConnected && c.dataset.placed) chips.delete(c);
   if (!chips.size) return;
+  chipBusy = true;
   try {
     const data = await api('api/status');
     if (data) {
@@ -396,6 +397,7 @@ async function readChips() {
   } catch {
     // The last colour stays: the next minute asks again.
   }
+  chipBusy = false;
   chipTimer = setTimeout(readChips, 60_000);
 }
 
@@ -407,7 +409,6 @@ export function statusChip(projectId = null) {
   c.dataset.placed = '1';
   chips.add(c);
   if (chipRead) paintChip(c, chipRead);
-  if (chipTimer) clearTimeout(chipTimer);
-  chipTimer = setTimeout(readChips, 0);
+  if (!chipTimer && !chipBusy) chipTimer = setTimeout(readChips, 0);
   return c;
 }

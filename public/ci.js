@@ -323,7 +323,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
 
 // The chips (the overview's and the top bar's) share one read a minute.
 const chips = new Set();
-let chipTimer = null;
+let chipTimer = null, chipBusy = false; // a chip made while a read runs or is due takes its answer: no second read
 // What the last read said, drawn on a new chip at once: a chip that waits for its own read pops in beside the usage bar (#989).
 let chipRead = null;
 const paintChip = (c, { hidden, title, worst }) => {
@@ -337,6 +337,7 @@ async function readChips() {
   chipTimer = null;
   for (const c of chips) if (c.dataset.placed && !c.isConnected) chips.delete(c);
   if (!chips.size) return;
+  chipBusy = true;
   try {
     const { schemes, pcs, now } = await api('api/ci');
     const worst = schemes.reduce((w, s) => (RANK[stateOf(s, now)] > RANK[w] ? stateOf(s, now) : w), pcs.some(trouble) ? 'fix' : 'ready');
@@ -348,6 +349,7 @@ async function readChips() {
   } catch {
     // The last colour stays: the next minute asks again.
   }
+  chipBusy = false;
   chipTimer = setTimeout(readChips, 60_000);
 }
 
@@ -359,7 +361,6 @@ export function ciChip(projectId = null) {
   chips.add(c);
   if (chipRead) paintChip(c, chipRead);
   if (projectId === null) c.dataset.placed = '1';
-  if (chipTimer) clearTimeout(chipTimer);
-  chipTimer = setTimeout(readChips, 0);
+  if (!chipTimer && !chipBusy) chipTimer = setTimeout(readChips, 0);
   return c;
 }

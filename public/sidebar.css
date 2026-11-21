@@ -51,6 +51,10 @@
 .thread-group > summary::-webkit-details-marker { display: none; }
 .thread-group > summary::after { content: ' ▸'; }
 .thread-group[open] > summary::after { content: ' ▾'; }
+.thread-group > summary .count { margin-left: 0.4em; font-weight: normal; }
+/* The Dismissed list's foot: what the page scrolls to for the next page; one pixel tall so it is always something to watch. */
+.closed-foot { min-height: 1px; padding: 0.25rem 0.4rem; }
+.closed-foot:empty { padding: 0; }
 .g-build { --gc: hsl(205 65% 45%); }
 .g-build > h3 { color: var(--gc); }
 .g-build > h3 .muted { text-transform: none; font-weight: normal; }

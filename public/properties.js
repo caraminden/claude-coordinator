@@ -112,9 +112,20 @@ export const propFilter = { projectId: null, keys: null, picks: new Map(), open:
 // Each scheme's keys and saved views as last fetched: a scheme you switch to draws its Filters button in the first paint.
 const filterSeen = new Map();
 
+// The registry is asked for by the filter and the Settings count in the same load: one read serves both for a few seconds.
+let registryRead = null;
+function readRegistry(projectId) {
+  if (registryRead?.projectId !== projectId || Date.now() - registryRead.at > 5000) {
+    const read = api(`api/projects/${projectId}/properties`);
+    registryRead = { projectId, at: Date.now(), read };
+    read.catch(() => { if (registryRead?.read === read) registryRead = null; });
+  }
+  return registryRead.read;
+}
+
 /** Fetch a scheme's filter data before it is shown (project.js waits on it the first time); a scheme seen before shows its last and refreshes behind. */
 export function preparePropFilter(projectId) {
-  const load = Promise.all([api(`api/projects/${projectId}/properties`), api(`api/projects/${projectId}/views`).catch(() => null)]).then(([reg, views]) => {
+  const load = Promise.all([readRegistry(projectId), api(`api/projects/${projectId}/views`).catch(() => null)]).then(([reg, views]) => {
     const had = filterSeen.get(projectId);
     filterSeen.set(projectId, { keys: reg.keys, views });
     if (propFilter.projectId === projectId && had && JSON.stringify(had) !== JSON.stringify(filterSeen.get(projectId))) {
@@ -290,7 +301,7 @@ function toReview(reg) {
 
 async function loadProperties() {
   const projectId = view.projectId;
-  const reg = await api(`api/projects/${projectId}/properties`);
+  const reg = await readRegistry(projectId);
   return view?.projectId === projectId ? reg : null;
 }
 

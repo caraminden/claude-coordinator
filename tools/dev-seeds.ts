@@ -655,7 +655,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'busy-scheme': {
-    about: 'a scheme as big as Citadel\'s own (#1077): a long Taskmaster chat, 20 open minions with 5 running, and 1,060 dismissed ones, for tools/typing-lag.ts',
+    about: 'a scheme as big as Citadel\'s own (#1077): a long Taskmaster chat, 20 open minions with 5 running, and 1,244 dismissed ones, for tools/typing-lag.ts and the closed-list checks (#1330)',
     seed(c) {
       const tm = taskmaster(c);
       const w = chat(c, tm, 400);
@@ -667,7 +667,7 @@ mock.boards('#takes', { boards: [
       }
       const states = [{ state: 'ready', note: 'tested, risk low' }, { state: 'parked', note: 'waiting on another minion' }, { state: 'outside', note: 'CI running' }, {}];
       for (let i = 1; i <= 20; i++) minion(c, `Busy minion ${i}`, i <= 5 ? { status: 'running', last_activity: 'Running commands' } : states[i % 4], i % 3 ? 'feature' : 'bug');
-      for (let i = 1; i <= 1060; i++) minion(c, `Dismissed minion ${i}: a change that shipped a while ago`, { status: 'closed', ...(i % 10 ? {} : { state: 'ready', note: `shipped, note ${i}` }) }, i % 3 ? 'feature' : 'bug');
+      for (let i = 1; i <= 1244; i++) minion(c, `Dismissed minion ${i}: a change that shipped a while ago`, { status: 'closed', ...(i % 10 ? {} : { state: 'ready', note: `shipped, note ${i}` }) }, i % 3 ? 'feature' : 'bug');
       return `#/p/${c.project.id}`;
     },
   },

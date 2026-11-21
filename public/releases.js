@@ -4,7 +4,7 @@
 // desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, icon, schemeIcon, view } from './base.js';
+import { ago, api, fileUrl, h, icon, pacificClock, schemeIcon, view } from './base.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
@@ -356,11 +356,48 @@ function previousList(projectId, tv) {
       const when = r.live ? `live ${ago(r.live)}` : r.started ? `${failed ? 'tried' : 'built'} ${ago(r.started)}` : '';
       return h('li', {},
         r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),
-        failed ? h('span', { class: 'rel-failed' }, r.outcome) : '',
+        failed ? h('span', { class: 'rel-failed' }, r.failure ? failText(r.failure) : r.outcome) : '',
         h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
         r.changes.length > 1 ? h('span', { class: 'rel-together muted' }, `${r.changes.length} ships went out together`) : '',
-        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title)) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '');
+        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title)) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title])) : '',
+        r.failure ? failureLines(projectId, r) : '');
     })));
+}
+
+/** A failed try's kind in a few words (#1375): "3 tests failed", "merge conflict in 2 files", "smoke check". */
+function failText(f) {
+  const n = f.names.length + f.more, s = n === 1 ? '' : 's';
+  if (f.kind === 'tests failed' && n) return `${n} test${s} failed`;
+  if (f.kind === 'merge conflict' && n) return `merge conflict in ${n} file${s}`;
+  return f.kind;
+}
+
+/** The failing tests or conflicted files (the first few, "+N more") and the CI run, or nothing when it has neither. */
+function failureNames(f) {
+  const names = [f.names.join(', '), f.more ? `+${f.more} more` : ''].filter(Boolean).join(' ');
+  const ci = f.ci ? h('a', { href: f.ci, target: '_blank', rel: 'noopener' }, 'CI run') : '';
+  return names || ci ? [names, names && ci ? ' · ' : '', ci] : null;
+}
+
+/** Under a failed try's row: what failed, then what happened since (its minion fixing it, back in line, shipped). */
+function failureLines(projectId, r) {
+  const f = r.failure, nx = f.next, c = r.changes[0];
+  const who = c ? h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`) : 'its minion';
+  const now = nx.kind === 'again' ? `tried again at ${pacificClock(nx.at)} and failed again (above)`
+    : nx.kind === 'shipped' ? `shipped since${nx.release ? ` in ${nx.release}` : ''}`
+    : nx.kind === 'line' ? `handed off again: ${nx.holds ? 'shipping now' : nx.place ? `${nx.place} in line` : 'in line'}`
+    : nx.kind === 'closed' ? [who, ' closed without shipping it again']
+    : nx.kind === 'fixing' ? [who, ' is fixing it', nx.note ? `: ${nx.note}` : '']
+    : nx.note ? [who, `: ${nx.note}`] : 'nothing yet';
+  const names = failureNames(f);
+  return [names ? h('span', { class: 'rel-prev-why muted' }, names) : '', h('span', { class: 'rel-prev-next' }, h('b', {}, 'Now: '), now)];
+}
+
+/** A ship back in line after a failed try: that try in one line (#1375), "last try: 3 tests failed, 7:18 PM PST · CI run". */
+function lastTryLine(x) {
+  const l = x?.lastTry;
+  if (!l) return '';
+  return h('span', { class: 'rel-last-try muted' }, `last try: ${failText(l)}, ${pacificClock(l.at)}`, l.ci ? [' · ', h('a', { href: l.ci, target: '_blank', rel: 'noopener' }, 'CI run')] : '');
 }
 
 // ---------- deploying (#629) ----------
@@ -558,14 +595,14 @@ function changeList(projectId, tv) {
       return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title),
         h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)),
-        landNext(wait), stuck(why), placedNote(placed), tryIt(projectId, tv, c)));
+        lastTryLine(c), landNext(wait), stuck(why), placedNote(placed), tryIt(projectId, tv, c)));
     }
     return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
       h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
         e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
           : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)]),
-      landNext(wait), stuck(why), placedNote(placed)));
+      lastTryLine(e), landNext(wait), stuck(why), placedNote(placed)));
   }
   /** Who placed a waiter (#1358): a person's drag pins it; a Taskmaster's move says why it went there. */
   function placedNote(p) {

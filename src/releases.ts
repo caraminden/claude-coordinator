@@ -9,6 +9,7 @@ import { placedKey, readState, shipLineKey, type Placed } from './ship-line-stat
 import type { DeployInfo } from './auto-deploy.ts';
 import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
+import type { FailureDetail, FailureNext, LastTry } from './ship-failures.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
@@ -46,6 +47,8 @@ export interface Release {
   stages: Record<string, number>;
   /** The commit it was built from when `version` is a version name (a CI-signed APK's): what a roll back compares. */
   commit?: string;
+  /** A failed ship try's saved detail and what happened next (src/ship-failures.ts, #1375); absent on old rows. */
+  failure?: FailureDetail & { next: FailureNext };
 }
 
 /** Where a change, or a whole next release, is: its stage, since when, its usual length, and what it waits on. */
@@ -76,6 +79,8 @@ export interface Change extends Progress {
   later?: boolean;
   /** Nothing is running or scheduled for it (an APK change waiting on a version bump): a minion row doesn't call it deploying. */
   idle?: boolean;
+  /** Back in line after a failed ship try: that try (#1375). */
+  lastTry?: LastTry;
 }
 
 export interface Next extends Progress {
@@ -116,6 +121,8 @@ export interface LineEntry {
   placed?: Placed;
   stage: string;
   since: number;
+  /** Back in line after a failed ship try: that try (#1375). */
+  lastTry?: LastTry;
 }
 
 export interface TestCopy {
@@ -174,7 +181,7 @@ export interface Reader {
 }
 
 /** How many earlier releases a card lists under Previous releases. */
-const PREVIOUS = 10;
+export const PREVIOUS = 10;
 
 /** A releases row as a Release. */
 export function releaseOf(row: ReleaseRow, link: string | null, number: number | null): Release {

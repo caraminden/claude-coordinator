@@ -113,6 +113,7 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { Waits, readHeavy } from './src/waits.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
@@ -1000,6 +1001,7 @@ const releases = new Releases({
   releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
     landsInFlight.attach(views);
     prsInFlight.attach(views);
+    attachFailures(views, { store, landing: (id) => landings.hasHandoff(id), running: (id) => runner.isRunning(id) });
   },
   scan: async () => {
     await targetFinder.scan();
@@ -1281,7 +1283,11 @@ if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.t
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
-  failed: (id, kind) => stallWatch.shipFailed(id, kind),
+  failed: (id, kind) => {
+    stallWatch.shipFailed(id, kind);
+    const run = landings.get(id);
+    if (run) recordFailure(store, id, run.output, run.code);
+  },
   landed: (id, commit) => {
     runner.holderShipped(id);
     const t = store.getTicket(id);
@@ -1295,6 +1301,8 @@ const landHandoffs = new LandHandoffs({
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);
     if (!project || !repoSlug(project.repo_url ?? null) || !runnerLabel(project.name)) return false;
     addRunnerWaiter(store, id, reason);
+    const run = landings.get(id); // CI gave no verdict: parked till runners are back, still a failed try (#1375)
+    if (run) recordFailure(store, id, run.output, run.code);
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),

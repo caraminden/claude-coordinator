@@ -9,7 +9,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
-import { until, holds } from './wait.ts';
+import { until } from './wait.ts';
+import { holds } from './holds.ts';
 import { settled as settledInProcess } from '../src/settled.ts';
 import { isTurnNote } from '../src/codex.ts';
 

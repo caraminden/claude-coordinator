@@ -67,7 +67,7 @@ test('the inline-poll guard flags sleep loops and leaves look-alikes alone', () 
 export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: string }> = {
   sleep: {
     re: (r) => /\bawait\b.*\bsetTimeout\b|\bawait\s+(?:sleep|delay|nap|pause)\w*\(\s*\d/.test(r),
-    why: 'a bare sleep guesses how long the thing takes. Wait on its done signal: until(\'<what>\', () => cond) from ./wait.ts; to show nothing happens, do a second action and wait for that.',
+    why: 'a bare sleep guesses how long the thing takes. Wait on its done signal: until(\'<what>\', () => cond) from ./wait.ts; to show nothing happens, use holds(\'<what>\', () => stillTrue, { after: () => secondActionSeen }) from ./holds.ts.',
   },
   elapsed: {
     re: (r) => /\bassert\b.*(?:(?:Date|performance).now\(\)\s*-(?!\s*(?:Date\.parse|new Date))|\belapsed\w*|\btook\w*|\bwaitedMs\b|\bduration\w*|\.ms\b)[^;]*?<=?\s*\d/.test(r),

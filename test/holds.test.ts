@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { holds } from './wait.ts';
+import { holds } from './holds.ts';
 
 test('holds returns once the witness is in and the check never broke', async () => {
   let n = 0;

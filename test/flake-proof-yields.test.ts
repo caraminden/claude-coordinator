@@ -12,8 +12,19 @@ const script = readFileSync(join(root, 'tools/flake-proof.sh'), 'utf8');
 const yml = readFileSync(join(root, '.github/workflows/flake-proof.yml'), 'utf8');
 
 test('burners and test runs start under nice -n 19', () => {
-  assert.match(script, /nice -n 19 bash -c 'while :; do :; done'/);
-  assert.match(script, /nice -n 19 "\$here\/citadel-node" --test/);
+  const dir = mkdtempSync(join(tmpdir(), 'fp-nice-'));
+  writeFileSync(join(dir, 'nice'), `#!/usr/bin/env bash\necho "nice $*" >>${dir}/log\nshift 2\nexec "$@"\n`);
+  chmodSync(join(dir, 'nice'), 0o755);
+  writeFileSync(join(dir, 'x.test.ts'), "import { test } from 'node:test'; test('ok', () => {});\n");
+  const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '1', '1'], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: '' }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = readFileSync(join(dir, 'log'), 'utf8').trim().split('\n');
+  assert.ok(lines.some((l) => l.startsWith('nice -n 19 bash -c')), 'the burner is niced');
+  assert.ok(lines.some((l) => /^nice -n 19 .*citadel-node --test/.test(l)), 'the test run is niced');
+});
+
+test("the workflow's token may read the run list the wait asks for", () => {
+  assert.match(yml, /^permissions:\n  contents: read\n  actions: read/m);
 });
 
 test('every batch step passes the token the wait reads, and keeps a name cleanRuns counts', () => {

@@ -3173,9 +3173,12 @@ export class Runner {
       // sets another state or a person wrote to it (personWrote).
       // A limited minion's note is the server's, about the wait this turn ends; a complete one's says nothing is left (#547).
       // A minion parked on start_after stays parked through a turn that answers a message (#261).
-      // One recover() put back is a cut-off turn's, from before that turn could change the state (#1452).
+      // One recover() put back is a cut-off turn's, from before that turn could change the state (#1452). A turn
+      // after a resume that never started (a re-run batch, a person's message) keeps it: the minion is still held.
       const parkedAs = this.parkedAs.get(ticket.id);
       this.parkedAs.delete(ticket.id);
+      // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.
+      if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
       else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });

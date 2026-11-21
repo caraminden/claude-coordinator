@@ -36,13 +36,13 @@ test('the pings come from the event loop: none while it is held, and they resume
   const w = startWatchdog(env, { pid: 1, log: () => {}, notify: (_s, done) => (at.push(Date.now()), done(null)) })!;
   try {
     await until('three pings before the hang', () => at.length >= 3);
+    const before = at.length;
     const from = Date.now();
     while (Date.now() < from + 1000); // a hang: synchronous work on the loop
-    const to = Date.now();
-    await until('two pings after the hang', () => at.filter((t) => t >= to).length >= 2);
-    assert.ok(at.filter((t) => t < from).length >= 3, `pinged every 100 ms before: ${at}`);
-    assert.deepEqual(at.filter((t) => t >= from && t < to), [], 'no ping while the loop was held');
-    assert.ok(at.filter((t) => t >= to).length >= 2, `pinged again after: ${at}`);
+    const during = at.length;
+    await until('two pings after the hang', () => at.length >= during + 2);
+    assert.ok(before >= 3, `pinged every 100 ms before: ${at}`);
+    assert.ok(at.slice(before).every((t) => t >= from + 1000), `no ping while the loop was held: ${at}`);
   } finally {
     w.stop();
   }

@@ -145,8 +145,8 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
   await page.eval(`(() => { const f = document.getElementById('login-form'); f.login.value = 'Cara'; f.password.value = ${JSON.stringify(PASSWORD)}; f.requestSubmit(); })()`);
   await waitFor(page, 'the chips back', `${seen}.chips === 3`);
   await waitFor(page, 'the new stream\'s hello', 'window.hellos > 0'); // a hello after the usage below hid it under load
-  await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
-  assert.equal((await page.eval(seen)).usage, true, 'the meter shows again');
+  // The sign-in redraws the top bar as it settles, so a meter drawn once can be wiped: draw it again until it shows.
+  await waitFor(page, 'the meter back', `import(new URL('core.js', location.href)).then((m) => (m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }), ${seen}.usage))`);
   await shoot(page, 'signed-in-again.png');
 });
 

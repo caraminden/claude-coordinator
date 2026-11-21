@@ -27,7 +27,7 @@
 // The token can come from CC_MACHINE_TOKEN instead. Needs Node 18 or newer; no other installs.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, watchFile, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, watchFile, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { homedir, hostname } from 'node:os';
@@ -358,18 +358,22 @@ function pidAlive(pid) {
   }
 }
 
+const LINE_STALE_MS = 60_000; // a waiter that hasn't touched its place in a minute is gone
+const LINE_POLL_MS = 2_000;
+const LINE_ABSENT_MS = 3 * 60_000; // a queued task nobody has asked about this long leaves the line at its turn
+
 /**
  * The test box's screen lock (#369): one file naming who has the screen, taken by the agent for a
  * task or a screenshot and by the box's CI job hooks (tools/win-test-box/screen-lock.ps1), so no
  * two of them put windows on the one screen at once. A holder whose process is gone, a lock older
  * than LOCK_STALE_MS, or an unreadable one over a minute old is broken and taken over.
+ * Takes it for `mine` if it is free (or stale) and returns true; false while someone else has it.
  */
-export function takeScreenLock(file, what, who) {
-  const mine = { pid: process.pid, what, who, since: Date.now(), token: randomBytes(6).toString('hex') };
+export function tryScreenLock(file, mine) {
   for (let tries = 0; tries < 3; tries++) {
     try {
       writeFileSync(file, JSON.stringify(mine), { flag: 'wx' });
-      return mine;
+      return true;
     } catch (err) {
       if (err.code !== 'EEXIST') throw new ToolError(`Could not take the screen lock ${file}: ${err.message}`);
     }
@@ -387,16 +391,109 @@ export function takeScreenLock(file, what, who) {
     } catch {}
     const valid = Number.isInteger(held?.pid) && Number.isFinite(held?.since);
     const stale = valid ? !pidAlive(held.pid) || Date.now() - held.since > LOCK_STALE_MS : Date.now() - mtime > 60_000;
-    if (!stale) {
-      const since = valid ? held.since : mtime;
-      throw new ToolError(`The screen is busy: ${held?.what ?? 'something'} for ${held?.who ?? 'someone'}, started ${secondsSince(since)} s ago. Nothing was started. Try again in a few minutes.`);
-    }
+    if (!stale) return false;
     // Only the lock we judged: another taker may have broken it and taken it since.
     try {
       if (readFileSync(file, 'utf8') === raw) rmSync(file, { force: true });
     } catch {}
   }
   throw new ToolError(`Could not take the screen lock ${file}: it keeps coming back`);
+}
+
+/**
+ * The screen's one waiting line (#1422), shared with the CI job hooks: a folder beside the lock with a file per
+ * waiter, named by when it arrived, so both sides serve it in arrival order. Each waiter touches its file while it
+ * waits; one whose pid is gone or whose file is a minute old is dropped by whoever reads the line next.
+ */
+export const screenLineDir = (file) => join(dirname(file), 'screen-line');
+
+/** Joins the line; the ticket is also the lock to write once it is this waiter's turn. */
+export function joinScreenLine(file, what, who) {
+  const dir = screenLineDir(file);
+  mkdirSync(dir, { recursive: true });
+  const mine = { pid: process.pid, what, who, since: Date.now(), token: randomBytes(6).toString('hex') };
+  const place = join(dir, `${String(mine.since).padStart(15, '0')}-${mine.token}.json`);
+  writeFileSync(place, JSON.stringify(mine));
+  return { mine, place };
+}
+
+export function leaveScreenLine(ticket) {
+  const leave = () => rmSync(ticket.place, { force: true });
+  try {
+    leave();
+  } catch {
+    // Windows refuses to delete a file another process is reading this moment; once more shortly.
+    setTimeout(() => {
+      try {
+        leave();
+      } catch {}
+    }, 1000).unref?.();
+  }
+}
+
+/** The live waiters, in arrival order, dropping dead ones. */
+export function screenLine(file) {
+  const dir = screenLineDir(file);
+  let names;
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+  } catch {
+    return [];
+  }
+  const line = [];
+  for (const name of names) {
+    const p = join(dir, name);
+    let mtime;
+    let w = null;
+    try {
+      mtime = statSync(p).mtimeMs;
+      w = JSON.parse(readFileSync(p, 'utf8'));
+    } catch {}
+    if (mtime === undefined) continue; // left since the listing
+    const fresh = Date.now() - mtime <= LINE_STALE_MS;
+    // An unreadable one may be mid-write: skipped, and dropped only once it is stale.
+    if (Number.isInteger(w?.pid) && pidAlive(w.pid) && fresh) line.push({ ...w, place: p });
+    else if (w || !fresh) {
+      try {
+        rmSync(p, { force: true });
+      } catch {}
+    }
+  }
+  return line;
+}
+
+/**
+ * One look at the line for a ticket: touches its place, and takes the screen when it is first and the lock is free.
+ * Returns { lock } once taken (it has left the line), else { holder, ahead, waiting }.
+ */
+export function screenTurn(file, ticket) {
+  try {
+    utimesSync(ticket.place, new Date(), new Date());
+  } catch {
+    writeFileSync(ticket.place, JSON.stringify(ticket.mine)); // dropped while it was slow: back in its place
+  }
+  const line = screenLine(file);
+  const at = line.findIndex((w) => w.token === ticket.mine.token);
+  const ahead = at < 0 ? line.length : at;
+  if (ahead === 0 && tryScreenLock(file, ticket.mine)) {
+    leaveScreenLine(ticket);
+    return { lock: ticket.mine };
+  }
+  return { holder: screenHolder(file), ahead, waiting: line.length };
+}
+
+/** "task run in peek for Peek Auras #777, started 40 s ago", or what a free screen with others ahead looks like. */
+function holderText(held) {
+  if (!held) return 'nobody has the screen this moment';
+  return `${held.what ?? 'something'} for ${held.who ?? 'someone'} has the screen${Number.isFinite(held.since) ? `, started ${secondsSince(held.since)} s ago` : ''}`;
+}
+
+/** Who holds the screen and who waits, for the workspaces tool and the Machines page. */
+export function screenState(file) {
+  const line = screenLine(file);
+  const held = screenHolder(file);
+  const brief = (w) => ({ what: String(w.what ?? '').slice(0, 200), who: String(w.who ?? '').slice(0, 200), since: Number.isFinite(w.since) ? w.since : null });
+  return { holder: held ? brief(held) : null, line: line.map(brief) };
 }
 
 /** Lets go of the screen lock if it is still ours. */
@@ -522,11 +619,14 @@ async function captureScreen(file, window) {
 
 /** The workspaces this computer offers, shared by every thread session: one lock and one job list. */
 export class WorkspaceHost {
-  constructor({ configFile, env = process.env, jobsDir, capture = captureScreen }) {
+  constructor({ configFile, env = process.env, jobsDir, capture = captureScreen, screenWaitS = WAIT_MAX, linePollMs = LINE_POLL_MS }) {
     this.configFile = configFile;
     this.env = env;
     this.jobsDir = jobsDir;
     this.capture = capture;
+    // How long a screenshot waits in the screen's line, and how often a waiter looks (shorter in tests).
+    this.screenWaitS = screenWaitS;
+    this.linePollMs = linePollMs;
     this.busy = new Map(); // workspace name -> { what, who, since, job? }
     this.jobs = new Map();
     // The workspace names minions get (#439), as ticked on the Machines page; null lends them all (an agent set up the old way).
@@ -652,8 +752,12 @@ export class WorkspaceHost {
       ].filter(Boolean).join('\n'));
     }
     if (this.screenLock) {
-      const held = screenHolder(this.screenLock);
-      parts.push(`Screen: ${held ? `busy, ${held.what} for ${held.who}` : 'free'}. Tasks that use it and screenshots wait their turn with this computer's CI desktop jobs.`);
+      const { holder, line } = screenState(this.screenLock);
+      parts.push([
+        `Screen: ${holder ? `busy, ${holder.what} for ${holder.who}` : 'free'}; ${line.length ? `${line.length} in line` : 'nobody in line'}.`,
+        ...line.map((x, i) => `${i + 1}. ${x.what} for ${x.who}`),
+        'Tasks that use it and screenshots join one line with this computer\'s CI desktop jobs, served in arrival order.',
+      ].join('\n'));
     }
     if (this.screenshots) parts.push('Screenshots: on (the screenshot tool).');
     if (this.problems.length) parts.push(`Problems in this computer's config (left out above):\n${this.problems.join('\n')}`);
@@ -702,33 +806,40 @@ export class WorkspaceHost {
     mkdirSync(this.jobsDir, { recursive: true });
     this.prune();
     const lock = this.take(w, `task ${name}`, who);
-    let screen = null;
+    let ticket = null;
     try {
-      if (this.screenLock && task.screen) screen = takeScreenLock(this.screenLock, `task ${name} in ${w.name}`, who);
+      // Every screen task joins the line, even with the screen free: it is the line that keeps arrival order.
+      if (this.screenLock && task.screen) ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
     } catch (err) {
       this.release(w, lock);
-      throw err;
+      throw new ToolError(`Could not join the screen's line: ${err.message}`);
     }
     const id = randomBytes(4).toString('hex');
-    const job = { id, workspace: w.name, task, name, who, started: Date.now(), ended: null, code: null, error: null, tail: [], partial: '', log: join(this.jobsDir, `${id}.log`) };
+    const job = { id, workspace: w.name, task, name, who, started: Date.now(), ended: null, code: null, error: null, tail: [], partial: '', log: join(this.jobsDir, `${id}.log`), line: null, seen: Date.now(), watching: 0 };
     lock.job = job;
     this.jobs.set(id, job);
     const file = createWriteStream(job.log).on('error', () => {});
     file.write(`${argv.join(' ')}\n(in ${w.path}, for ${who})\n\n`);
     job.done = new Promise((resolveDone) => {
       let child;
+      let screen = null;
+      let limit = null;
+      let poll = null;
       // Why it is being stopped: it may exit while that is under way.
       let stopping = null;
       const finish = (code, error) => {
         if (job.ended) return;
         error ??= stopping;
         clearTimeout(limit);
+        clearTimeout(poll);
         job.ended = Date.now();
         job.code = code;
         job.error = error;
         if (job.partial) job.tail.push(job.partial);
         file.end(error ? `\n${error}\n` : `\nexit ${code}\n`);
         this.release(w, lock);
+        if (ticket && job.line) leaveScreenLine(ticket);
+        job.line = null;
         if (screen) releaseScreenLock(this.screenLock, screen);
         resolveDone();
       };
@@ -737,37 +848,79 @@ export class WorkspaceHost {
         if (child) await killTree(child);
         finish(null, why);
       };
-      const limit = setTimeout(() => {
-        stopping = `Stopped after ${TASK_LIMIT_MS / 60_000} minutes`;
-        if (child) killTree(child);
-        finish(null, stopping);
-      }, TASK_LIMIT_MS);
-      try {
-        child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP });
-        if (OWN_GROUP && child.pid) trackGroup(child.pid);
-      } catch (err) {
-        return finish(null, `Could not start ${argv[0]}: ${err.message}`);
-      }
-      const take = (d) => {
-        if (job.ended) return;
-        file.write(d);
-        const lines = (job.partial + d.toString()).split(/\r?\n/);
-        job.partial = lines.pop();
-        job.tail.push(...lines);
-        if (job.tail.length > TAIL_LINES) job.tail.splice(0, job.tail.length - TAIL_LINES);
+      const start = () => {
+        job.started = Date.now();
+        // The 30 minutes count from when it has the screen, not from when it joined the line.
+        limit = setTimeout(() => {
+          stopping = `Stopped after ${TASK_LIMIT_MS / 60_000} minutes`;
+          if (child) killTree(child);
+          finish(null, stopping);
+        }, TASK_LIMIT_MS);
+        try {
+          child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP });
+          if (OWN_GROUP && child.pid) trackGroup(child.pid);
+        } catch (err) {
+          return finish(null, `Could not start ${argv[0]}: ${err.message}`);
+        }
+        const take = (d) => {
+          if (job.ended) return;
+          file.write(d);
+          const lines = (job.partial + d.toString()).split(/\r?\n/);
+          job.partial = lines.pop();
+          job.tail.push(...lines);
+          if (job.tail.length > TAIL_LINES) job.tail.splice(0, job.tail.length - TAIL_LINES);
+        };
+        child.stdout.on('data', take);
+        child.stderr.on('data', take);
+        child.on('error', (err) => finish(null, err.code === 'ENOENT' ? `${argv[0]} is not on this computer's PATH` : `Could not start ${argv[0]}: ${err.message}`));
+        child.on('close', (code) => finish(code, null));
+        // A program it started (the game, say) can hold the output open after it exits; don't wait on that.
+        child.on('exit', (code) => setTimeout(() => finish(code, null), 1000));
       };
-      child.stdout.on('data', take);
-      child.stderr.on('data', take);
-      child.on('error', (err) => finish(null, err.code === 'ENOENT' ? `${argv[0]} is not on this computer's PATH` : `Could not start ${argv[0]}: ${err.message}`));
-      child.on('close', (code) => finish(code, null));
-      // A program it started (the game, say) can hold the output open after it exits; don't wait on that.
-      child.on('exit', (code) => setTimeout(() => finish(code, null), 1000));
+      if (!ticket) return start();
+      const look = () => {
+        if (job.ended) return;
+        let turn;
+        try {
+          // At the front with nobody asking after it (its minion's turn ended, say): it leaves rather than run unwatched.
+          if (job.line?.ahead === 0 && !job.watching && Date.now() - job.seen > LINE_ABSENT_MS) {
+            return finish(null, `Left the screen's line: its turn came and nobody had called job for it in ${LINE_ABSENT_MS / 60_000} minutes. Nothing was started.`);
+          }
+          turn = screenTurn(this.screenLock, ticket);
+        } catch (err) {
+          return finish(null, err.message);
+        }
+        if (turn.lock) {
+          screen = turn.lock;
+          job.line = null;
+          return start();
+        }
+        job.line = turn;
+        poll = setTimeout(look, this.linePollMs);
+        poll.unref?.();
+      };
+      job.line = { holder: null, ahead: 0, waiting: 1 };
+      look();
     });
     return this.report(job, wait, 60);
   }
 
   async report(job, wait, lines) {
-    if (!job.ended) await Promise.race([job.done, sleep(wait * 1000)]);
+    if (!job.ended) {
+      // A queued job keeps its place while someone keeps asking after it (LINE_ABSENT_MS).
+      job.seen = Date.now();
+      job.watching = (job.watching ?? 0) + 1;
+      try {
+        await Promise.race([job.done, sleep(wait * 1000)]);
+      } finally {
+        job.watching--;
+        job.seen = Date.now();
+      }
+    }
+    if (job.line) {
+      const { holder, ahead, waiting } = job.line;
+      return { text: `${job.name} in ${job.workspace} is waiting in line for the screen (job ${job.id}), ${secondsSince(job.started)} s so far: ${holderText(holder)}; ${ahead ? `${ahead} ahead of it` : 'it is next'}, ${waiting} in line. Nothing has started yet. It keeps its place while you wait: call job with id "${job.id}" (each call waits up to ${WAIT_MAX} s). If nobody calls job for it for ${LINE_ABSENT_MS / 60_000} minutes when its turn comes, it leaves the line; stop_job leaves it now.` };
+    }
     const tail = job.tail.slice(-Math.min(Math.max(1, lines), TAIL_LINES)).join('\n');
     if (!job.ended) return { text: `${job.name} in ${job.workspace} is still running after ${secondsSince(job.started)} s (job ${job.id}). Call job with id "${job.id}" to wait for it.\n--- latest output ---\n${job.tail.slice(-20).join('\n')}` };
     const ok = job.code === 0;
@@ -822,7 +975,7 @@ export class WorkspaceHost {
     // A minion looking at the app its own job launched already has the screen.
     const held = this.screenLock ? screenHolder(this.screenLock) : null;
     const own = held && held.pid === process.pid && held.who === who;
-    const screen = this.screenLock && !own ? takeScreenLock(this.screenLock, 'a screenshot', who) : null;
+    const screen = this.screenLock && !own ? await this.waitForScreen('a screenshot', who) : null;
     try {
       await sleep(Math.min(SHOT_DELAY_MAX, Math.max(0, delay)) * 1000);
       mkdirSync(this.jobsDir, { recursive: true });
@@ -834,6 +987,24 @@ export class WorkspaceHost {
       return { text: `Took ${what} (${size(bytes.length)}) and copied it to ${dest} on the app's server. Open that file to look at it.` };
     } finally {
       if (screen) releaseScreenLock(this.screenLock, screen);
+    }
+  }
+
+  /** A screenshot's place in the line: it waits inside the call, at most WAIT_MAX seconds, then leaves it. */
+  async waitForScreen(what, who) {
+    const ticket = joinScreenLine(this.screenLock, what, who);
+    const until = Date.now() + this.screenWaitS * 1000;
+    try {
+      for (;;) {
+        const turn = screenTurn(this.screenLock, ticket);
+        if (turn.lock) return turn.lock;
+        if (Date.now() >= until) {
+          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}, and ${turn.waiting - 1} other${turn.waiting === 2 ? ' is' : 's are'} in line (${turn.ahead} ahead of this). Waited ${this.screenWaitS} s; nothing was taken. A screenshot can't hold a place in line: try again in a few minutes, or take it from inside a run task once that has the screen.`);
+        }
+        await sleep(Math.max(0, Math.min(this.linePollMs, until - Date.now())));
+      }
+    } finally {
+      leaveScreenLine(ticket);
     }
   }
 
@@ -1996,12 +2167,12 @@ async function main() {
     // It lends nothing until it has said what it found and heard what is ticked.
     if (managed) url.searchParams.set('v', '2');
     // The app pings every 25 s. Silence for a minute (after a sleep, say) means the connection is dead though
-    // nothing said so: drop it and connect again. A beat every 20 s tells the app this computer is awake.
+    // nothing said so: drop it and connect again. A beat every 20 s tells the app this computer is awake, and on a test box who has its screen (#1422).
     const quiet = new AbortController();
     let lastHeard = Date.now();
     const watch = setInterval(() => {
       if (Date.now() - lastHeard > SILENT_MS) return quiet.abort(new Error(`nothing from the app for ${SILENT_MS / 1000} s`));
-      fetch(new URL('/api/machines/send', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{"beat":true}', signal: AbortSignal.timeout(15_000) }).catch(() => {});
+      fetch(new URL('/api/machines/send', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ beat: true, ...(host?.screenLock ? { screen: screenState(host.screenLock) } : {}) }), signal: AbortSignal.timeout(15_000) }).catch(() => {});
     }, BEAT_MS);
     try {
       return await listen(url, quiet.signal, () => (lastHeard = Date.now()));

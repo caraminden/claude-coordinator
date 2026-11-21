@@ -17,9 +17,19 @@ export function onMachinesUpdate(machines) {
 
 /** A machine's status line as the server words it (#437): "Asleep · seen 3h ago". */
 function machineStatusText(m) {
-  const reason = m.lend?.gpu_off ? `${m.reason} · GPU jobs off` : m.reason;
+  const reason = `${m.reason}${m.lend?.gpu_off ? ' · GPU jobs off' : ''}${m.screen ? ` · screen ${m.screen.holder ? 'busy' : 'free'}${m.screen.line.length ? `, ${m.screen.line.length} waiting` : ''}` : ''}`;
   if (!m.when) return reason;
   return `${reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
+}
+
+/** A test box's screen (#1422): who has it, then its line in arrival order (CI jobs and minions alike). */
+function machineScreen(sc) {
+  const user = (u, when) => `${u.what} for ${u.who}${u.since ? `, ${when} ${ago(u.since)}` : ''}`;
+  return h('div', { class: 'small' },
+    h('div', {}, sc.holder ? user(sc.holder, 'started') : 'Free'),
+    sc.line.length
+      ? h('ol', { class: 'machine-screen-line' }, sc.line.map((u) => h('li', {}, user(u, 'joined'))))
+      : h('div', { class: 'muted' }, 'Nobody waiting'));
 }
 
 /** Whether this scheme's minions get a machine for the viewer: a shared one lent here, or their own (their turns get it). */
@@ -409,6 +419,7 @@ function machineBody(m) {
       kv('Computer',
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
+      m.screen ? kv('Screen', machineScreen(m.screen)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : []),
     m.jobs ? machineJobsSection(m) : '',

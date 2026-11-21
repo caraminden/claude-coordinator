@@ -203,6 +203,21 @@ interface Agent {
   os: 'windows' | 'linux';
   /** When it last beat; null for an agent from before beats, which is never dropped for missing them. */
   beat?: number;
+  /** A test box's screen (#1422), from its beats: who has it and who waits in its line. */
+  screen?: ScreenState | null;
+}
+
+export type ScreenUser = { what: string; who: string; since: number | null };
+export type ScreenState = { holder: ScreenUser | null; line: ScreenUser[] };
+
+/** The screen a beat reports, cut to size; null when it says nothing usable. */
+export function cleanScreen(v: unknown): ScreenState | null {
+  const s = v as any;
+  if (!s || typeof s !== 'object' || !Array.isArray(s.line)) return null;
+  const user = (u: any): ScreenUser | null => (u && typeof u === 'object'
+    ? { what: String(u.what ?? '').slice(0, 200), who: String(u.who ?? '').slice(0, 200), since: Number.isFinite(u.since) ? u.since : null }
+    : null);
+  return { holder: user(s.holder), line: s.line.slice(0, 50).map(user).filter((u: ScreenUser | null): u is ScreenUser => !!u) };
 }
 
 /** One job for a CI runner agent (#328): add, list or remove one scheme's runners on its PC. */
@@ -383,6 +398,8 @@ export class MachineRelay {
       /** What its owner's machine-agent.json lets jobs use (#857), or null: no jobs there. */
       jobs: storedOffer(machine),
       job_settings: storedSettings(machine),
+      /** A test box's screen (#1422): who has it and who waits; null for other machines and while offline. */
+      screen: agent?.screen ?? null,
     };
   }
 
@@ -457,11 +474,17 @@ export class MachineRelay {
     this.jobHooks?.offline(machineId);
   }
 
-  /** The agent says it is awake. False if it isn't connected. */
-  beat(machine: Machine): boolean {
+  /** The agent says it is awake, and a test box's agent who has its screen. False if it isn't connected. */
+  beat(machine: Machine, screen?: unknown): boolean {
     const agent = this.agents.get(machine.id);
-    if (agent) agent.beat = Date.now();
-    return !!agent;
+    if (!agent) return false;
+    agent.beat = Date.now();
+    const next = screen === undefined ? null : cleanScreen(screen);
+    const key = (st: ScreenState | null | undefined) => JSON.stringify(st ?? null);
+    const was = key(agent.screen);
+    agent.screen = next;
+    if (key(next) !== was) this.onChange();
+    return true;
   }
 
   /** Disconnect a machine's agent (it was removed, or got a new token). */
@@ -732,8 +755,9 @@ export class MachineRelay {
     }
     const reply = body.message as any;
     if (s.gpuAsks?.delete(reply?.id)) {
-      // The agent's report of a job that outlasted the call's wait: "... still running after 50 s (job 1a2b3c4d)."
-      const job = /still running after \d+ s \(job ([0-9a-f]+)\)/.exec(String(reply?.result?.content?.[0]?.text ?? ''))?.[1];
+      // The agent's report of a job that outlasted the call's wait: "... still running after 50 s (job 1a2b3c4d).",
+      // or one still waiting in the screen's line (#1422): "... is waiting in line for the screen (job 1a2b3c4d)".
+      const job = /(?:still running after \d+ s|waiting in line for the screen) \(job ([0-9a-f]+)\)/.exec(String(reply?.result?.content?.[0]?.text ?? ''))?.[1];
       if (job) {
         const jobs = this.gpuJobs.get(s.machineId) ?? new Set();
         this.gpuJobs.set(s.machineId, jobs.add(job));

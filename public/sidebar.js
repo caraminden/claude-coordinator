@@ -556,18 +556,20 @@ function waitChip(t, coord) {
   if (waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
-  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.what).join('; ')}` }, shown.chip, more);
+  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.what).join('; ')}` }, shown.chip, more);
 }
-const drawnWaits = new Map();
-function waitBody(id) {
+export const drawnWaits = new Map();
+/** One line a wait, all of a minion's at once (Cara, 2026-11-21: "cut all the details and have a single line for each"): its chip, a short what, a small cancel. */
+export function waitBody(id) {
   const rows = drawnWaits.get(id);
   if (!rows) return null;
-  const clock = (ms) => (ms ? pacificWeekdayClock(ms) : '');
-  return h('div', { class: 'why' }, rows.map((w) => h('div', { class: `wait-line${w.state === 'dropped' || w.state === 'failed' ? ' gone' : ''}` },
-    h('b', { class: 'why-title' }, `${w.chip} ${w.kind.replaceAll('_', ' ')}`),
-    h('p', {}, w.what),
-    h('p', { class: 'why-more' }, [`set by ${w.set_by}`, w.since ? `since ${clock(w.since)}` : '', w.state === 'dropped' || w.state === 'failed' ? `${w.state}: ${w.reason ?? ''}` : ''].filter(Boolean).join(' · ')),
-    w.cancellable ? h('div', { class: 'why-acts' }, h('button', { type: 'button', class: 'secondary', onclick: () => cancelWait(id, w) }, 'Cancel')) : '')));
+  const short = (s) => (s.length > 90 ? `${s.slice(0, 89)}…` : s);
+  return h('div', { class: 'why wait-lines' }, rows.map((w) => {
+    const gone = w.state === 'dropped' || w.state === 'failed';
+    return h('div', { class: `wait-line${gone ? ' gone' : ''}` },
+      h('b', { class: 'wait-line-chip' }, w.chip), h('span', { class: 'wait-line-what' }, short(w.what), gone ? ` (${w.reason ?? w.state})` : ''),
+      w.cancellable ? h('button', { type: 'button', class: 'wait-cancel', title: 'Cancel this wait', 'aria-label': 'Cancel this wait', onclick: () => cancelWait(id, w) }, '×') : '');
+  }));
 }
 function cancelWait(id, w) {
   waitTips.tips?.close();

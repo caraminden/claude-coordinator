@@ -672,7 +672,7 @@ for (const fn of ['addDelivery', 'updateDelivery'] as const) {
 }
 runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
   ...waiters.chains().filter((c) => c.ticket === id && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
-  ...waiters.list().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
+  ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
   ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
 ]);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.

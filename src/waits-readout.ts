@@ -52,6 +52,8 @@ export function waitsFor(store: Store, t: Ticket, legacy: LegacyWaits = () => []
   });
   const live = store.listDeliveries({ ...q, states: ['waiting', 'held', 'sending'] }).map(row);
   const dropped = store.listDeliveries({ ...q, states: ['dropped', 'failed'] }).filter((r) => r.updated_at > now - DROPPED_SHOWN_MS).map(row);
-  const old = t.kind === 'coordinator' ? [] : legacy(t.id).map((l): WaitRow => ({ id: null, ...l, due: null, state: 'waiting', reason: null, cancellable: false }));
+  // A wait the table already holds is never also read from an old key (a kind mid-move would show it twice).
+  const seen = new Set(live.map((r) => `${r.kind}\0${r.what}`));
+  const old = t.kind === 'coordinator' ? [] : legacy(t.id).filter((l) => !seen.has(`${l.kind}\0${l.what}`)).map((l): WaitRow => ({ id: null, ...l, due: null, state: 'waiting', reason: null, cancellable: false }));
   return [...live, ...old, ...dropped];
 }

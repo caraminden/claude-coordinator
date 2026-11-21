@@ -618,7 +618,8 @@ export class LiveWaiters {
     return [...(this.store.getSetting<Waiter[]>(KEY) ?? []), ...this.rows(['waiting', 'held']).map(this.waiter)];
   }
 
-  private legacy(): Waiter[] {
+  /** Only what is still in the old key (list() also has the table's rows): the readout must not show a wait twice. */
+  legacy(): Waiter[] {
     return this.store.getSetting<Waiter[]>(KEY) ?? [];
   }
 

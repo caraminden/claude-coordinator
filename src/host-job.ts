@@ -45,11 +45,14 @@ export class HostJobs {
   private starting = new Set<string>();
   private readonly units: () => boolean;
   private readonly slice: string;
+  private readonly props: string[];
 
-  /** `units`: whether to start each job in a unit of its own (the runner's `units`, read at each start); `slice`: where. */
-  constructor(units: () => boolean = () => false, slice: string = BUILD_SLICE) {
+  /** `units`: whether to start each job in a unit of its own (the runner's `units`, read at each start); `slice`: where;
+   * `props`: more of systemd-run's `-p` arguments for each unit. */
+  constructor(units: () => boolean = () => false, slice: string = BUILD_SLICE, props: string[] = []) {
     this.units = units;
     this.slice = slice;
+    this.props = props;
   }
 
   /**
@@ -69,7 +72,7 @@ export class HostJobs {
     const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', join(dir, 'wrapper.sh'), dir, job.cwd];
     if (!this.units()) return this.child(wrapper, dir, job.onChildEnd);
     this.starting.add(dir);
-    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
+    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', ...this.props, `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
       if (!err) return fallbacks.started();
       fallbacks.record(job.ticketId, job.description, String(stderr).trim() || err.message);

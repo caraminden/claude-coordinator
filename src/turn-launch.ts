@@ -727,18 +727,21 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     args.unshift(pinned(pins.CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(codex.thread ? ['--codex-thread', codex.thread] : []));
   }
   const wrapper = [node, pinned(pins.TURN_WRAPPER), dir];
+  // systemd-oomd (#1338): a minion turn is `avoid`, the last pick once heavy commands, ships and test scopes are gone;
+  // a Taskmaster turn is `omit`, never picked. A turn unit is a leaf cgroup, which is where oomd reads the mark.
   const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
-    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`]), '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
+    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
     : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
-  // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M).
+  // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M). `omit` (#1338): every turn's
+  // Citadel tools go through it, and with minion turns `avoid` it would otherwise be oomd's pick ahead of all of them.
   const poolDir = join(dirname(dir), '.pool', pins.POOL_VERSION);
   const poolEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]]));
   const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
   const pool: PoolSpec | undefined = pooled ? {
     dir: poolDir, script: pinned(pins.POOL), node, version: pins.POOL_VERSION, env: poolEnv,
-    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'UMask=0077'] } : {}),
+    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077'] } : {}),
   } : undefined;
   return { command, args, env, configDir, files, spawn, ...(pool ? { pool } : {}) };
 }

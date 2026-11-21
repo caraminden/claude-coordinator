@@ -1,16 +1,25 @@
-# Host turns (src/turn-launch.ts TURN_SLICE) and ultra reviews run here; since #1280 lands, kit-sync and fast-verify
-# run beside it in citadel-builds.slice. Both are under
-# citadel.slice (MemoryMax=22G for everything Citadel runs). MemoryHigh makes the kernel reclaim from and
-# throttle these before they crowd out the server and the containers (2026-11-10: load ~100 with 19 GiB
-# swapped out). Measured 2026-11-19/20 (#1214): host turns up to 1.1G each; on 2026-11-20 18 turns at 350-650M
-# plus one land filled 10G and stalled (#1280). Raised 10G to 16G (#1328): at 16:05 PST on 2026-11-20 this slice sat at
-# 10.1G of 10G while citadel.slice had 6.3G free, and oomd killed 4 turns from 16:02 to 16:05. Cara, 2026-11-20:
-# picked "Raise to 16G" over waiting a week of storm records (Josh's earlier note), and called it "a stopgap though,
-# we need a REAL solution". Citadel's outer caps (19G soft, 22G hard) are unchanged, so it takes no more of the box.
-# No MemoryMax on purpose: it would OOM-kill turns. citadel.slice's MemoryMax is the hard stop. Container
-# turns carry their own caps on their unit (src/claude-link.ts CONTAINER_MEMORY).
+# Host minion turns (src/turn-launch.ts TURN_SLICE) and ultra reviews run here, under citadel.slice (MemoryHigh=19G,
+# MemoryMax=22G for everything Citadel runs), beside citadel-builds.slice (ships, kit-sync, fast-verify),
+# citadel-heavy.slice (the tests, browsers and builds a turn runs) and citadel-taskmasters.slice.
+#
+# Turns slow down; they are not capped or killed for running short (#1338, the memory design in the scheme's shared
+# folder: reports/memory-kills-2026-11-20.md). Cara, 2026-11-20: "I want to be able to just kick off as many minions as
+# I want ... if the individual jobs take longer ... thats ok"; "Its the tests/heavy slots/builds that are the thing that
+# hits performance, we should limit/off load those, not stop minions from starting"; on #1335's choices page "B: no
+# kill on the turns' line: Go" and "C: protect turns instead of capping them: Go".
+#
+# No MemoryHigh: on 2026-11-20 this slice sat at its own line (10G, then #1328's 16G, which Cara called "a stopgap")
+# and the kernel's throttle there stalled every turn in it at 99-100% memory pressure for up to 11 minutes, while
+# citadel.slice had room; CachyOS's oomd rule then killed 23 turns. Without it, turns grow into citadel.slice's room.
+# MemoryLow=8G instead: when citadel.slice's MemoryHigh or MemoryMax has to reclaim, it takes from ships, heavy
+# commands, containers and caches first, and from turns only beyond their first 8G (about 15 turns at their usual
+# 350-650M). The kernel honours it without root (memory_recursiveprot), measured 2026-11-20 with a parent's
+# memory.high at 300M over two 253M holders: the protected one kept all 253M in RAM, the other was cut to 45M.
+# Reclaim the whole box starts ignores it (user.slice above has no MemoryLow; that one would need Cody).
+# No MemoryMax: it would OOM-kill turns. systemd-oomd's rules for this slice (none of its own) and the ones above it:
+# deploy/oomd.md. Container turns run in their own units (src/claude-link.ts CONTAINER_MEMORY), outside this reserve.
 [Unit]
 Description=Host turns of Citadel
 
 [Slice]
-MemoryHigh=16G
+MemoryLow=8G

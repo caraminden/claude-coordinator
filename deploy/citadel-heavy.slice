@@ -6,8 +6,8 @@
 # off as many minions as I want ... if the individual jobs take longer or whatever because of CPU or Memory constraints
 # stopping real work, thats ok").
 # MemoryHigh throttles them first; past MemoryMax the kernel kills inside this slice, never in a turn. systemd-oomd
-# also watches it, by the drop-in every user slice gets (/usr/lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf:
-# memory pressure past 80% for 30 s), which overrides this file: a stall that long kills a heavy command, not a turn.
+# kills a heavy command here sooner than anywhere else in Citadel, past 60% memory pressure for 20 s (#1338: its
+# drop-in, citadel-heavy.slice.d/, and deploy/oomd.md): heavy work gives way before turns slow down much.
 # Low CPU and IO weight: turns, the server and ships get the cores first; heavy work takes what's left.
 # Starting numbers (#1298), not measured yet: single-file runs and a browser take well under 1G each, and about one to
 # four run at once; cargo and gradle builds go to CI first (#1160). Tune from #1280's storm records on the Status page.

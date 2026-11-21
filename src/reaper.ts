@@ -8,13 +8,14 @@
 // folder is mounted at its own path (src/claude-link.ts).
 //
 // What it never touches, whatever its folder: a process at or under the server itself or a turn's wrapper (an open
-// minion's turn, a Taskmaster's `git -C` into a closed minion's worktree); one in a ship, deploy, kit-sync, ultra review
+// minion's turn, a Taskmaster's `git -C` into a closed minion's worktree; a supervisor turn's shell, src/turn-run.mjs SHIM, #1343); one in a ship, deploy, kit-sync, ultra review
 // or tool-pool unit, a contraption's service or the server's own unit; one in a person's login session or with a
 // terminal (a person's own shell, its children too, and what holds its terminal: script, tmux, a terminal app); another account's; and any minion's that isn't closed when it is
 // read again right before the kill. Never by name (the tripwire's rule): only pids matched by folder, each checked to be
 // the same process (pid and start time) before each signal.
 //
 // It reads /proc with async calls, off the server's thread (src/runner.ts's wrapperInProc is the synchronous one).
+import { SHIM } from './turn-run.mjs';
 import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -142,7 +143,7 @@ export function ownerOf(projectsRoot: string, p: Proc): { projectId: number; tic
 export function guardedPids(procs: Proc[], o: { selfPid: number; wrapperMark: string | readonly string[]; guardCgroup: (cg: string) => boolean }): Set<number> {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
   const marks = typeof o.wrapperMark === 'string' ? [o.wrapperMark] : o.wrapperMark;
-  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || marks.some((m) => !!p.argv.at(-2)?.endsWith(m));
+  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || (marks.some((m) => !!p.argv.at(-2)?.endsWith(m)) || (p.argv[1] === '-c' && p.argv[2] === SHIM));
   const memo = new Map<number, boolean>();
   const guarded = (p: Proc): boolean => {
     const known = memo.get(p.pid);

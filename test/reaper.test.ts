@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { folderOf, guardedCgroup, guardedPids, ownerOf, Reaper, REAPED, scanProcs, shownCommand, startOf, WRAPPER_MARKS, type Proc } from '../src/reaper.ts';
+import { SHIM } from '../src/turn-run.mjs';
 import { bootServer, until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'reaper-'));
@@ -68,9 +69,14 @@ test('people\'s sessions, terminals, ships, deploys, contraptions and the server
     proc({ pid: 61, ppid: 60, argv: ['claude'] }),
     proc({ pid: 70, ppid: 1, argv: ['node', '/pin/turn-wrapper.ts', '/turns/9'] }),
     proc({ pid: 80, ppid: 1, argv: ['node', '/w/other.mjs', '/turns/10'] }),
+    // A turn the shared supervisor started (#1343): its shell is the guard, not a node wrapper.
+    proc({ pid: 90, ppid: 1, argv: ['/bin/sh', '-c', SHIM, '/turns/11', '5', 'claude', '-p'] }),
+    proc({ pid: 91, ppid: 90, argv: ['claude', '-p'] }),
+    proc({ pid: 92, ppid: 91, argv: ['git', '-C', '/closed/minion', 'log'] }),
+    proc({ pid: 95, ppid: 1, argv: ['/bin/sh', '-c', 'sleep 1', '/turns/12'] }),
   ];
   const t = guardedPids(turns, { selfPid: 1, wrapperMark: WRAPPER_MARKS, guardCgroup: () => false });
-  assert.deepEqual([...t].sort((a, b) => a - b), [60, 61, 70]);
+  assert.deepEqual([...t].sort((a, b) => a - b), [60, 61, 70, 90, 91, 92]);
 });
 
 test('a command line shown to people has its secrets masked', () => {

@@ -35,6 +35,11 @@ never read as the answer.
   logged as `cut-off rerun · <branch> · <run> · green|red|no answer|not started`; a second cut-off is no answer (the
   fallback; in a train's bisect, nobody is refused). A fresh run after a flake-only red that is cut off is no answer too.
   Run 44859457680 was interrupted at 55 s, and a bisect refused #1302 for it (reports/incident-2026-11-20-1840-cause.md).
+- So is a run killed from outside (#1393, 2026-11-20: exit 137, the desktop's out-of-memory killer) before any test
+  failed: `run-tests.sh` says `the tests were killed (exit 137)` rather than calling it a hang when its timeout's limit
+  wasn't reached (timeout's own KILL comes only past the limit), or GitHub's log shows only the step's exit 137. A SIGKILL
+  leaves Node no summary, so here no test failed means no `✖` anywhere in the log. On perigee's own fallback run it
+  keeps its place and goes again once, as a red of flakes only does (#1360).
 - run-tests.sh is unchanged in what it does: its rerun alone still only labels, and its exit code stays red. A red run of
   the fallback on perigee still refuses at once.
 

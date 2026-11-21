@@ -812,7 +812,8 @@ bad_check() {
 # (#1361, Cara 2026-11-20 "Wait for a busy desktop": 39 suites ran on perigee that day, every one with the desktop
 # online). A red run refuses, and never falls back, with two exceptions. #769: a red in which every failed test file
 # passed when run-tests.sh reran it alone gets one fresh CI run of the same commit, and only a fully green one lands.
-# #1377: a run cut off before any test failed gets the same one fresh run, and cut off again it is no answer.
+# #1377: a run cut off before any test failed (or killed from outside, #1393) gets the same one fresh run, and cut off
+# again it is no answer.
 # That reverses Cara's 2026-11-10 "Keep failing, log it" for CI: she picked "2 Rerun CI on flake-only red" on #767's
 # card, 2026-11-15 (docs/adr/0006-rerun-ci-on-flake-only-red.md).
 tip=$(git rev-parse HEAD)
@@ -1198,8 +1199,13 @@ flake_only() {
 # Whether $failed is a run cut off from outside before any test failed (#1377): Node's test runner printed its
 # "Interrupted while running:" (a SIGINT or SIGTERM: run 44859457680 of Nov 20, at 55 s), no test failed, and run-tests.sh
 # didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
+# #1393: so is a run killed from outside (exit 137, the desktop's out-of-memory killer): run-tests.sh's "were killed" line,
+# or only GitHub's exit 137 line when the whole step went. A SIGKILL leaves Node no summary, so "no test failed" there
+# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red.
 cut_off() {
-  grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed" && ! grep -qF 'run-tests: the tests ran past' <<<"$failed"
+  ! grep -qF 'run-tests: the tests ran past' <<<"$failed" || return 1
+  if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
+  grep -qE 'run-tests: the tests were killed \(exit [0-9]+\)|Process completed with exit code 137\.' <<<"$failed" && ! grep -qF '✖' <<<"$failed"
 }
 
 # The ship train (#1166), the front's side: up to LAND_TRAIN_MAX plain lands waiting behind this one, in line order,
@@ -1744,6 +1750,11 @@ else
     failed=$(cat "$kept" 2>/dev/null) || failed=''
     if ! flakes=$(flake_only) || ! known_flakes "$flakes"; then
       [ -z "$flakes" ] || retry_in_place "only flakes failed on perigee: $flakes"
+      # Killed from outside before any test failed (#1393): no verdict on the change, so it goes again once, as flakes do.
+      if cut_off; then
+        retry_in_place "the suite on perigee was killed from outside before any test failed"
+        refuse "the suite on perigee was killed from outside before any test failed (full log: $kept): that says nothing about $branch, but it is no answer either, so $untouched. Run this again"
+      fi
       refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
     fi
     say "only known flakes failed on perigee: $known_why, so this goes on as green"

@@ -3,6 +3,8 @@
 #   tools/run-tests.sh <log>     (from the repo to test; exits with the tests' status)
 # --test-force-exit ends a test file once its tests are done even if one leaked a handle (a server a
 # failed test never closed), and the time limit stops a test that hangs outright, with a line saying so.
+# A run killed from outside before that limit (exit 137, an out-of-memory kill) gets a line of its own instead, not a
+# hang (#1393): land.sh reads it as a lost run, with no verdict on the change.
 # DEPLOY_TEST_TIMEOUT sets the limit in seconds (default 600; the suite takes 1-2 minutes).
 # Each test (and hook) also has its own limit, CITADEL_TEST_TIMEOUT seconds (default 60; the slowest without its own
 # { timeout } takes about 14 s), so one hang fails in a minute by name instead of holding the deploy lock for the whole
@@ -119,9 +121,15 @@ rerun_alone() {
     this=$((left < want ? left : want))
     [ -z "$due" ] || [ "$due" -ge "$this" ] || this=$due
     echo "== $f" >>"$rerun_log"
+    began=$SECONDS
     timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" "$f" >>"$rerun_log" 2>&1
-    case $? in
+    frc=$?
+    # 137 before its limit: killed from outside, as in the full run above (#1393). It says nothing, so no label.
+    kind=$frc
+    [ "$frc" -le 128 ] || [ $((SECONDS - began)) -ge "$this" ] || kind=killed
+    case $kind in
       0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
+      killed) say "$f: killed (exit $frc) when rerun alone after $((SECONDS - began))s, before its ${this}s limit: stopped from outside, so it has no label (an unlabelled file keeps the run red)" ;;
       124 | 137)
         real=1
         if [ "$this" = "$due" ]; then
@@ -229,13 +237,20 @@ progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
+started=$SECONDS
 CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-timeout="$test_limit" "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" "${targets[@]}" >>"$log" 2>&1
 rc=$?
 rm -f "$progress" "$progress.tmp"
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
-if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+# 124: timeout stopped it at the limit. 137 is timeout's KILL after a TERM that didn't take, but only past the limit:
+# sooner, something else killed it (#1393: the desktop's out-of-memory killer), as deploy.sh says of its boot check.
+# That is a lost run, not a hang: land.sh reads this line (with no test failed before it) as a run cut off from outside.
+ran=$((SECONDS - started))
+if [ "$rc" -eq 124 ] || { [ "$rc" -eq 137 ] && [ "$ran" -ge "$limit" ]; }; then
   echo "run-tests: the tests ran past ${limit}s and were stopped: a test hung (the hung file is the one with no results above)." | tee -a "$log" >&2
+elif [ "$rc" -gt 128 ]; then
+  echo "run-tests: the tests were killed (exit $rc) after ${ran}s, before the ${limit}s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change" | tee -a "$log" >&2
 fi
 [ "$rc" -eq 1 ] || exit "$rc" # green, hung or killed: nothing to rerun
 

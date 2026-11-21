@@ -491,7 +491,7 @@ takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs
 to, and adds a `ci fallback` line to the day's retro log (`retro-log/<date>/land.md`), so they can be counted. A red
 run refuses the landing; it never falls back. Two exceptions (ADR 0006): a red in which every failed file passed when
 `run-tests.sh` reran it alone (#769) gets one fresh run of the same commit, which must be fully green to land, and a
-`flake rerun` line in the retro log; a run cut off before any test failed (#1377) gets the same one fresh run and a
+`flake rerun` line in the retro log; a run cut off before any test failed (#1377; killed from outside too, #1393) gets the same one fresh run and a
 `cut-off rerun` line, and cut off again it is no answer, which falls back. `LAND_CI=0 tools/land.sh` skips CI, for when the runner itself is broken.
 
 ## A Dev Drive for Peek's build runners (#1344)

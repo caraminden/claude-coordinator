@@ -147,8 +147,9 @@ export { until };
 
 /**
  * Wait until this process's own background work is done (#1437): its DB write workers' queues, session saves and
- * restores, WAL checkpoint rounds. For a test with an in-process Store; a booted server has `srv.settled()`. Throws,
- * naming what was still busy, after `ms`.
+ * restores, WAL checkpoint rounds, app deploys and their install-check retries. For a test with an in-process Store; a
+ * booted server has `srv.settled()`. Throws, naming what was still busy, after `ms`. Only what reports to src/settled.ts
+ * counts: other background work (a machine's check, a preview's boot, a turn) needs its own wait, or a track() there.
  */
 export async function settled(ms = 30_000): Promise<void> {
   const busy = await settledInProcess(ms);
@@ -178,8 +179,9 @@ export type Booted = {
   as: (who: { cookie?: string; token?: string }) => Caller;
   /**
    * Wait until the server has finished everything it was doing (#1437): its DB write queue, session saves and restores,
-   * WAL checkpoint rounds and every other request. Wait on this, not on a first sign of the work (a row, a log line).
-   * Throws, naming what was still busy, after `ms`.
+   * WAL checkpoint rounds, app deploys and every request not yet answering. Wait on this, not on a first sign of the
+   * work (a row, a log line). Throws, naming what was still busy, after `ms`. Only what reports to src/settled.ts counts:
+   * a machine's check, a preview's boot or a turn needs its own wait (or a track() call where it starts).
    */
   settled: (ms?: number) => Promise<void>;
   /**

@@ -3352,6 +3352,46 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/ultrareview/batch": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/ultrareview/batch": {
+  "anon": "401 Not logged in",
+  "person": "400 areas must list at least one area",
+  "member": "400 areas must list at least one area",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/tickets/:minion1/ultrareview/batch/nope": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/ultrareview/batch/nope/start": {
+  "anon": "401 Not logged in",
+  "person": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "member": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/unpark": {
   "anon": "401 Not logged in",
   "person": "409 #1 isn't parked",
@@ -4093,6 +4133,46 @@
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:taskmasterA/ultrareview": {
+  "anon": "401 Not logged in",
+  "person": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "member": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/ultrareview/batch": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/ultrareview/batch": {
+  "anon": "401 Not logged in",
+  "person": "400 areas must list at least one area",
+  "member": "400 areas must list at least one area",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/tickets/:taskmasterA/ultrareview/batch/nope": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/ultrareview/batch/nope/start": {
   "anon": "401 Not logged in",
   "person": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
   "member": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",

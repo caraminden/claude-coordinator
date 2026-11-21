@@ -41,7 +41,7 @@ import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
-import { cleanPaths, defaultBranch, diffSize, LIMITS, type ReviewSpec } from '../ultrareview.ts';
+import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
@@ -140,6 +140,14 @@ function pluginPicks(store: App['store'], ticket: { kind: string; project_id: nu
 }
 
 const ULTRAREVIEW_REFUSE = 'Only a person can start an ultra review: it is billed to their own Claude account';
+/** At most this many areas in one batch ask (#1399). */
+const BATCH_MAX = 20;
+/** A batch row as the panel sees it: no repo path or user id. */
+const rowView = ({ repo, uid, ...row }: BatchRow) => row;
+const hasGithub = (app: App, uid: number) => {
+  const person = app.store.getUser(uid);
+  return !!(person && app.github.token(person));
+};
 
 // How long one wait for an approval card's outcome holds the request open.
 const APPROVAL_POLL_MS = 25_000;
@@ -352,6 +360,83 @@ export const ticketRoutes: Route[] = [
       } catch (err: any) {
         throw new HttpError(409, err.message);
       }
+    },
+  },
+  {
+    // A person's prepped ultra reviews in this chat (#1399): one draft PR per area, each waiting for its Start.
+    method: 'GET', path: '/api/tickets/:ticket/ultrareview/batch', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ res, app, session, ticket }) {
+      const uid = session.uid;
+      return json(res, 200, {
+        rows: uid ? app.ultrareviews.rows(ticket.id, uid).map(rowView) : [], limits: LIMITS,
+        linked: !!(uid && app.claude.place(uid)), github: !!(uid && hasGithub(app, uid)),
+      });
+    },
+  },
+  {
+    // Prep a batch (#1399): each area is measured, one over the CLI's caps is refused with its size, and the rest each
+    // get a draft PR as the asker's own GitHub login. Prepping costs nothing, but stays person-only so nothing is
+    // queued for a person without them: no MCP tool reaches it.
+    method: 'POST', path: '/api/tickets/:ticket/ultrareview/batch', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ req, res, app, session, ticket }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself to prep ultra reviews: their pull requests go out as your own GitHub login');
+      const body = await readJson(req);
+      if (!Array.isArray(body.areas) || !body.areas.length) throw new HttpError(400, 'areas must list at least one area');
+      if (body.areas.length > BATCH_MAX) throw new HttpError(400, `At most ${BATCH_MAX} areas at once`);
+      const repo = app.store.getProject(ticket.project_id)?.repo_dir;
+      if (!repo) throw new HttpError(400, 'This scheme has no repo to review');
+      const base = await defaultBranch(repo);
+      const refused: { index: number; name: string; error: string; size?: { files: number; lines: number } }[] = [];
+      for (const [index, a] of (body.areas as any[]).entries()) {
+        let name = '';
+        try {
+          const paths = cleanPaths(a?.paths);
+          name = typeof a?.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 80) : paths.join(', ').slice(0, 80);
+          const question = typeof a?.question === 'string' && a.question.trim() ? a.question.trim().slice(0, 2000) : undefined;
+          const size = await diffSize({ mode: 'area', repo, base, paths }).catch((err: any) => {
+            throw new Error(String(err?.stderr || err?.message).trim().split('\n')[0]);
+          });
+          if (!size.files) throw new Error('Nothing to review: those paths hold no files');
+          if (overLimit(size)) {
+            refused.push({ index, name, size, error: `${size.lines.toLocaleString('en-US')} lines in ${size.files.toLocaleString('en-US')} files: over the CLI's limit of ${LIMITS.lines.toLocaleString('en-US')} lines and ${LIMITS.files} files. Split it.` });
+            continue;
+          }
+          await app.ultrareviews.prep(ticket.id, session.uid, session.name, { repo, base, name, paths, question, size });
+        } catch (err: any) {
+          refused.push({ index, name, error: err.message });
+        }
+      }
+      return json(res, 200, { rows: app.ultrareviews.rows(ticket.id, session.uid).map(rowView), refused });
+    },
+  },
+  {
+    // Start one prepped review (#1399): billed to the clicker, so person-only and confirmed, like the single start.
+    method: 'POST', path: '/api/tickets/:ticket/ultrareview/batch/:row/start', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ req, res, app, session, ticket, params }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself to run an ultra review: it runs on your own Claude login');
+      const body = await readJson(req);
+      if (body.confirm !== true) throw new HttpError(400, 'Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after');
+      const row = app.ultrareviews.rows(ticket.id, session.uid).find((x) => x.id === params.row);
+      if (!row) throw new HttpError(404, 'No such prepped review in this chat');
+      try {
+        return json(res, 202, await app.ultrareviews.startRow(row.id, session.uid, session.name, app.sharedDir(app.store.getTicket(ticket.id)!)));
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+    },
+  },
+  {
+    // Discard a prepped review (#1399): its row goes now; its PR is closed and its branches deleted behind it.
+    method: 'DELETE', path: '/api/tickets/:ticket/ultrareview/batch/:row', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ res, app, session, ticket, params }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself');
+      const row = app.ultrareviews.rows(ticket.id, session.uid).find((x) => x.id === params.row);
+      try {
+        if (row) app.ultrareviews.discard(row.id, session.uid);
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+      return json(res, 200, { ok: true });
     },
   },
   {

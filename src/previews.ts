@@ -117,7 +117,7 @@ export async function copyData(fromFile: string, to: string): Promise<void> {
  */
 export function scrub(to: string): void {
   const copy = new DatabaseSync(to);
-  copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key = 'ultrareview_running'");
+  copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key IN ('ultrareview_running', 'ultrareview_batch')");
   copy.close();
 }
 

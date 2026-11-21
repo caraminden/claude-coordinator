@@ -515,6 +515,12 @@ const ultrareviews = new UltraReviews({
   claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
   emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: (k) => store.getSetting(k), setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
   jobsDir: join(DATA_DIR, 'run', 'ultrareviews'), units: () => runner.units,
+  // Draft PRs for ultra reviews (#1399) go out only as the person who asked, never the box's login or anyone else's.
+  github: (uid) => {
+    const person = store.getUser(uid);
+    const t = person ? githubLink.token(person) : null;
+    return t ? { token: t.secret, login: t.login } : null;
+  },
 });
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();

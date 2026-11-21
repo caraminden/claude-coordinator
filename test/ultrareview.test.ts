@@ -100,7 +100,7 @@ test("a branch review clones the minion's branch, committed work only, against m
   assert.equal(readFileSync(join(clone, 'src/a.ts'), 'utf8'), 'a\nb\nc\n', 'nothing uncommitted came along');
 });
 
-function reviews(bin: string, place: any = { host: true }) {
+function reviews(bin: string, place: any = { host: true }, extra: Record<string, unknown> = {}) {
   const events: { ticketId: number; kind: string; data: any }[] = [];
   const settings = new Map<string, unknown>();
   const scratch = mkdtempSync(join(root, 'scratch-'));
@@ -109,6 +109,7 @@ function reviews(bin: string, place: any = { host: true }) {
     claudeBin: bin, place: () => place, scratch: () => scratch, hostEnv: { PATH: process.env.PATH! }, jobsDir,
     emit: (ticketId, kind, data) => events.push({ ticketId, kind, data }),
     getSetting: (k) => settings.get(k) as any, setSetting: (k, v) => settings.set(k, v),
+    github: () => null, ...extra,
   });
   const result = () => until('the result', () => events.find((e) => e.kind === 'ultrareview_result')?.data as ReviewResult | undefined);
   return { ur, events, settings, scratch, jobsDir, result };
@@ -210,6 +211,19 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
       ...(method === 'POST' ? { body: JSON.stringify({ mode: 'branch', confirm: true }) } : {}),
     });
     for (const id of [M.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await asAgent(id, method)).status, 403, `${id} ${method}`);
+    // The batch routes (#1399) too: nothing can be prepped, started or discarded for a person by a turn.
+    for (const id of [M.id, TM.id]) {
+      for (const [method, path] of [['GET', 'batch'], ['POST', 'batch'], ['POST', 'batch/x/start'], ['DELETE', 'batch/x']]) {
+        const res = await fetch(`${srv.base}/api/tickets/${M.id}/ultrareview/${path}`, { method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ areas: [{ paths: 'lib' }], confirm: true }) }) });
+        assert.equal(res.status, 403, `${id} ${method} ${path}`);
+      }
+    }
+    const batch = await srv.call(`/api/tickets/${M.id}/ultrareview/batch`, { areas: [{ name: 'Lib', paths: 'lib' }, { paths: 'nope' }] });
+    assert.equal(batch.status, 200, JSON.stringify(batch.data));
+    assert.deepEqual(batch.data.rows, []);
+    assert.match(batch.data.refused[0].error, /Lib: you haven't linked GitHub/, "no GitHub link of the person's own: nothing borrowed");
+    assert.match(batch.data.refused[1].error, /Not in main: nope/);
+    assert.equal((await srv.call(`/api/tickets/${M.id}/ultrareview/batch`)).data.github, false);
 
     const size = await srv.call(`/api/tickets/${M.id}/ultrareview?mode=branch`);
     assert.equal(size.status, 200, JSON.stringify(size.data));
@@ -291,4 +305,182 @@ test('a review outlives a restart: the next server follows it and posts its find
     writeFileSync(go, '');
     await srv?.stop();
   }
+});
+
+// #1399: on a big repo the CLI refuses the scratch clone ("Repo is too large"), so the area goes up as a draft pull
+// request instead: review/<slug> (the area put back, a green tree) into review/<slug>-base (made through the API at
+// the commit without the area). A fake gh logs its calls; pushes go to a bare repo standing in for GitHub.
+
+/** A repo whose origin is github.com/o/r, and a bare repo standing in for it. */
+function githubRepo(): { dir: string; bare: string } {
+  const dir = repo();
+  git(dir, 'remote', 'add', 'origin', 'https://github.com/o/r');
+  const bare = mkdtempSync(join(root, 'bare-'));
+  git(bare, 'init', '-q', '--bare');
+  return { dir, bare };
+}
+
+/** A stand-in gh: logs each call with the token it saw; `pr create` prints PR 42's URL, or fails with a `fail-pr` file. */
+function fakeGh(): { bin: string; log: string; calls: () => string[] } {
+  const dir = mkdtempSync(join(root, 'gh-'));
+  const bin = join(dir, 'gh');
+  const log = join(dir, 'log');
+  writeFileSync(bin, `#!/bin/sh
+{ echo "[$GH_TOKEN] $*" | tr '\\n' ' '; echo; } >> '${log}'
+if [ "$1 $2" = "pr create" ]; then
+  [ -e '${dir}/fail-pr' ] && { echo 'pull request create failed: GraphQL: Resource not accessible by integration' >&2; exit 1; }
+  echo "https://github.com/o/r/pull/42"
+fi
+exit 0
+`);
+  chmodSync(bin, 0o755);
+  return { bin, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
+}
+
+/** A claude that refuses any local review as too large, and reviews a PR number. */
+function bigRepoClaude(): { bin: string; log: string } {
+  const dir = mkdtempSync(join(root, 'bin-'));
+  const bin = join(dir, 'claude');
+  const log = join(dir, 'log');
+  writeFileSync(bin, `#!/bin/sh
+echo "args: $*" >> '${log}'
+case "$2" in
+  [0-9]*) echo "remote: $(git remote get-url origin)" >> '${log}'; echo "2 bugs found in PR $2";;
+  *) echo 'Ultrareview could not launch: Repo is too large. Push a PR and use \`claude ultrareview <PR#>\` instead.' >&2; exit 1;;
+esac
+`);
+  chmodSync(bin, 0o755);
+  return { bin, log };
+}
+
+const linked = (uid: number) => (uid === 1 ? { token: 'tok-cara', login: 'cara' } : null);
+
+test('area mode falls back to a draft PR when the CLI says the repo is too large, then closes it', async () => {
+  const { dir, bare } = githubRepo();
+  const { bin, log } = bigRepoClaude();
+  const gh = fakeGh();
+  const { ur, events, scratch, result } = reviews(bin, { host: true }, { github: linked, gh: gh.bin, remoteUrl: () => bare });
+  const shared = mkdtempSync(join(root, 'shared-'));
+  await ur.start(7, 1, 'Cara', { mode: 'area', repo: dir, base: 'main', paths: ['src/a.ts', 'lib'] }, { files: 3, lines: 6 }, shared);
+  const r = await result();
+  assert.equal(r.ok, true, r.text);
+  assert.equal(r.text, '2 bugs found in PR 42');
+  assert.deepEqual(r.pr, { number: 42, url: 'https://github.com/o/r/pull/42' });
+  const seen = readFileSync(log, 'utf8');
+  assert.match(seen, /^args: ultrareview ultrareview-base /m, 'the scratch clone first');
+  assert.match(seen, /^args: ultrareview 42 --trust-workspace --timeout 45$/m, 'then the PR');
+  assert.match(seen, /^remote: https:\/\/github.com\/o\/r$/m, 'from a folder whose remote is the scheme repo');
+  // What went up: review/<slug> is main's tree; its parent is main without the area, which the API made the base.
+  const heads = git(bare, 'for-each-ref', '--format=%(refname)', 'refs/heads/');
+  const head = heads.split('\n').find((h) => h.startsWith('refs/heads/review/'))!;
+  assert.ok(head && heads.split('\n').length === 1, `only one review branch pushed: ${heads}`);
+  assert.equal(git(bare, 'rev-parse', `${head}^{tree}`), git(dir, 'rev-parse', 'main^{tree}'));
+  assert.match(git(bare, 'log', '-2', '--format=%s', head), /\[skip ci\][\s\S]*\[skip ci\]/, 'neither commit runs CI');
+  const parent = git(bare, 'rev-parse', `${head}^`);
+  const name = head.replace('refs/heads/', '');
+  const calls = gh.calls();
+  assert.ok(calls.every((c) => c.startsWith('[tok-cara] ')), "every gh call runs on the clicker's own GitHub token");
+  assert.ok(calls.some((c) => c.includes(`api repos/o/r/git/refs -f ref=refs/heads/${name}-base -f sha=${parent}`)), calls.join('\n'));
+  assert.ok(calls.some((c) => /pr create --repo o\/r --draft/.test(c) && c.includes(`--head ${name} --base ${name}-base`)), calls.join('\n'));
+  // Once the findings are in, the PR is closed and both branches deleted.
+  await until('the clean-up', () => gh.calls().some((c) => c.includes(`git/refs/heads/${name}-base`) && c.includes('DELETE')));
+  const after = gh.calls();
+  assert.ok(after.some((c) => c.includes('pr close 42 --repo o/r')));
+  assert.ok(after.some((c) => c.trimEnd().endsWith(`api -X DELETE repos/o/r/git/refs/heads/${name}`)));
+  assert.equal(events.filter((e) => e.kind === 'note').length, 0, 'a clean-up that worked says nothing');
+  await until('no scratch left', () => !readdirSync(scratch).some((n) => n.startsWith('ultrareview')));
+});
+
+test('without a GitHub login of their own, the too-large fallback says so and opens nothing', async () => {
+  const { dir, bare } = githubRepo();
+  const { bin } = bigRepoClaude();
+  const gh = fakeGh();
+  const { ur, result } = reviews(bin, { host: true }, { github: () => null, gh: gh.bin, remoteUrl: () => bare });
+  await ur.start(7, 2, 'Josh', { mode: 'area', repo: dir, base: 'main', paths: ['lib'] }, { files: 2, lines: 3 });
+  const r = await result();
+  assert.equal(r.ok, false);
+  assert.match(r.text, /Repo is too large/);
+  assert.match(r.text, /haven't linked GitHub/);
+  assert.deepEqual(gh.calls(), []);
+  assert.equal(git(bare, 'for-each-ref'), '');
+});
+
+test('a batch preps one draft PR per area, refuses one over the caps, and survives a restart', async () => {
+  const { dir, bare } = githubRepo();
+  const { bin } = bigRepoClaude();
+  const gh = fakeGh();
+  const extra = { github: linked, gh: gh.bin, remoteUrl: () => bare };
+  const { ur, settings } = reviews(bin, { host: true }, extra);
+  await assert.rejects(ur.prep(7, 1, 'Cara', { repo: dir, base: 'main', name: 'Huge', paths: ['src'], size: { files: 3, lines: 9001 } }), /9,001 lines/);
+  await assert.rejects(ur.prep(7, 2, 'Josh', { repo: dir, base: 'main', name: 'Lib', paths: ['lib'], size: { files: 2, lines: 3 } }), /haven't linked GitHub/);
+  const a = await ur.prep(7, 1, 'Cara', { repo: dir, base: 'main', name: 'The A file', paths: ['src/a.ts'], question: 'Is the off-by-one real?', size: { files: 1, lines: 3 } });
+  assert.equal(a.state, 'prepping');
+  assert.match(a.pr!.head, /^review\/the-a-file-[a-z0-9]+$/);
+  const ready = await until('prepped', () => ur.rows(7, 1).find((x) => x.id === a.id && x.state === 'ready'));
+  assert.deepEqual([ready.pr!.number, ready.pr!.url], [42, 'https://github.com/o/r/pull/42']);
+  assert.ok(gh.calls().some((c) => c.includes('Is the off-by-one real?')), 'the question goes in the PR description');
+  assert.deepEqual(ur.rows(7, 2), [], "a person sees only their own rows");
+  // A row still prepping when the server stops can't be finished: the next server marks it failed and deletes its branches.
+  const half = { ...ready, id: 'half', state: 'prepping', pr: { slug: 'o/r', head: 'review/half-x', base: 'review/half-x-base' } };
+  settings.set('ultrareview_batch', [...(settings.get('ultrareview_batch') as any[]), half]);
+  const next = reviews(bin, { host: true }, extra);
+  for (const [k, v] of settings) next.settings.set(k, v);
+  next.ur.recover();
+  const rows = next.ur.rows(7, 1);
+  assert.deepEqual(rows.find((x) => x.id === a.id), ready, 'the ready row is back as it was');
+  assert.equal(rows.find((x) => x.id === 'half')!.state, 'failed');
+  await until('the half-made branches go', () => gh.calls().some((c) => c.includes('DELETE repos/o/r/git/refs/heads/review/half-x-base')));
+});
+
+test("a batch row's Start reviews its PR, posts the findings and cleans up; discard and expiry clean up too", async () => {
+  const { dir, bare } = githubRepo();
+  const { bin, log } = bigRepoClaude();
+  const gh = fakeGh();
+  const { ur, events, result } = reviews(bin, { host: true }, { github: linked, gh: gh.bin, remoteUrl: () => bare });
+  const shared = mkdtempSync(join(root, 'shared-'));
+  const area = { repo: dir, base: 'main', paths: ['lib'], size: { files: 2, lines: 3 } };
+  const one = await ur.prep(7, 1, 'Cara', { ...area, name: 'One' });
+  const two = await ur.prep(7, 1, 'Cara', { ...area, name: 'Two' });
+  const three = await ur.prep(7, 1, 'Cara', { ...area, name: 'Three' });
+  await until('prepped', () => ur.rows(7, 1).every((x) => x.state === 'ready') || undefined);
+  const heads = Object.fromEntries(ur.rows(7, 1).map((x) => [x.name, x.pr!.head]));
+
+  assert.throws(() => ur.startRow(one.id, 2, 'Josh', shared), /not yours|no such/i, "nobody starts someone else's row");
+  await ur.startRow(one.id, 1, 'Cara', shared);
+  assert.equal(ur.rows(7, 1).find((x) => x.id === one.id)!.state, 'running');
+  await assert.rejects(Promise.resolve().then(() => ur.startRow(one.id, 1, 'Cara', shared)), /already/, 'a second click never pays twice');
+  const r = await result();
+  assert.equal(r.ok, true, r.text);
+  assert.match(readFileSync(log, 'utf8'), /^args: ultrareview 42 --trust-workspace --timeout 45$/m);
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /ultrareview-base/, 'a prepped row goes straight to its PR');
+  assert.ok(readdirSync(shared).length === 1, 'findings saved to the chat');
+  await until('its branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${heads.One}-base`)));
+  assert.equal(ur.rows(7, 1).some((x) => x.id === one.id), false, 'its row is gone once its findings are posted');
+
+  ur.discard(two.id, 1);
+  assert.equal(ur.rows(7, 1).some((x) => x.id === two.id), false, 'discard drops the row at once');
+  await until('discarded branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${heads.Two}-base`)));
+
+  // Nobody starts the third within 7 days: it's cleaned up the same way, and the chat hears it in one line.
+  ur.sweep(Date.now() + 8 * 86_400_000);
+  assert.deepEqual(ur.rows(7, 1), []);
+  await until('expired branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${heads.Three}-base`)));
+  const notes = events.filter((e) => e.kind === 'note');
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].ticketId, 7);
+  assert.match(notes[0].data.text, /^Discarded 1 prepped ultra review nobody started in 7 days \(Three\) and closed its draft PR\.$/);
+  assert.ok(gh.calls().filter((c) => c.includes('pr close 42')).length >= 3);
+  void three;
+});
+
+test('a failed prep shows GitHub\'s words on its row and deletes what it pushed', async () => {
+  const { dir, bare } = githubRepo();
+  const gh = fakeGh();
+  writeFileSync(join(gh.bin, '..', 'fail-pr'), '');
+  const { ur } = reviews(bigRepoClaude().bin, { host: true }, { github: linked, gh: gh.bin, remoteUrl: () => bare });
+  const row = await ur.prep(7, 1, 'Cara', { repo: dir, base: 'main', name: 'Lib', paths: ['lib'], size: { files: 2, lines: 3 } });
+  const head = row.pr!.head;
+  const failed = await until('failed', () => ur.rows(7, 1).find((x) => x.id === row.id && x.state === 'failed'));
+  assert.match(failed.error!, /Resource not accessible by integration/);
+  await until('its branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${head}-base`)));
 });

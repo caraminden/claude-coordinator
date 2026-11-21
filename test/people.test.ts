@@ -299,6 +299,19 @@ test("a disabled person's held mail is dropped with a line, and never decides or
   assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0);
   assert.equal(started.length, 1);
   assert.deepEqual(runner.queue.peek(hers.id), []);
+  // A restart resume runs on her login (her interrupted turn's), and his held mail doesn't ride along on it.
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'resumed with', images: [], parked: '2026-11-21 20:10' }] });
+  (runner as any).resume(hers.id, 1);
+  await until('the resume starts a turn', () => started.length === 2);
+  assert.equal(started[1].person, olive.id);
+  assert.ok(!started[1].texts.includes('resumed with'), 'his held mail is dropped, not run on her login');
+  // An unpark doesn't promise mail that is about to be dropped.
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'parked one', images: [], parked: '2026-11-21 20:15' }] });
+  store.updateTicket(hers.id, { state: 'parked' });
+  assert.ok(runner.unpark(hers.id, 'Olive', 'Olive'));
+  await until('the unpark starts a turn', () => started.length === 3);
+  assert.equal(started[2].person, olive.id);
+  assert.match(started[2].texts.join('\n'), /Nothing was left for you while you were parked/);
 });
 
 test("a wake from no person runs on the minion's own person, not on another person's held mail, signed in or lapsed (#1509 2C2)", async () => {

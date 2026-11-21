@@ -40,9 +40,10 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
  * someone taken out of it (or deleted) no longer pays for its turns, its owner does (#211, #1270). A disabled person
  * is still picked, so their turn is refused (turnPlace) rather than moved onto someone else's plan. A message whose author
  * names no person but which carries an `asker` (a contraption's ask to the Taskmaster, sent under the contraption's label)
- * is that asker's, checked like a relay's (#1449). Held mail rides along after what woke the turn and never picks who pays
- * for it: a wake from no person runs on the minion's last person, not on a held message's author (#1509). Only with
- * nothing else waiting ("Deliver now") does held mail name the payer. A plain list is all what woke the turn.
+ * is that asker's, checked like a relay's (#1449). Held mail rides along after what woke the turn and doesn't pick who pays
+ * for it: a wake from no person runs on the minion's last person, not on a held message's author (#1509). Held mail names
+ * the payer only with nothing else waiting ("Deliver now"), when its author is disabled (so it is refused, above), and on
+ * a person's own Taskmaster, where a held ask from someone else runs on theirs (below). A plain list is all what woke it.
  */
 export function turnPayer(store: Store, ticket: Ticket, project: Project, waiting: PayerMsg[] | { msgs: PayerMsg[]; held: PayerMsg[] }, personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
   const { msgs, held } = Array.isArray(waiting) ? { msgs: waiting, held: [] } : waiting;

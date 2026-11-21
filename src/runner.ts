@@ -2158,6 +2158,7 @@ export class Runner {
     if (!t || t.kind === 'coordinator' || t.status === 'closed' || t.state !== 'parked') return false;
     this.emit(ticketId, 'note', { text: `${by} unparked this minion.` });
     if (!quiet && !this.isRunning(ticketId)) {
+      this.dropDisabled(ticketId); // so the count below says only what follows (#1509)
       const n = this.heldCount(ticketId);
       const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were parked ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were parked.';
       // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.

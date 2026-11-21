@@ -47,7 +47,7 @@ test('one failed file seen for the first time gets the one fresh run, as before,
   assert.equal(res.status, 1);
   assert.match(res.stderr, /test\/busy\.test\.ts \(not seen on another branch in 14 days, and no minion is fixing it\) is no known flake/);
   assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run/);
-  assert.match(res.stderr, /on the one fresh run after a red of flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/);
+  assert.match(res.stderr, /on the one fresh run after a red whose files all passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/);
   assert.equal(pushes(c), 2);
   assert.doesNotMatch(res.stderr, /shipped past/);
   assert.doesNotMatch(landLog(shared), /· known flake ·/);

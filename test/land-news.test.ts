@@ -113,7 +113,8 @@ test('readTail: the log\'s end, read again only once it grows; a cut first line 
 
 test('suspects: the ships sent back replace the bisect line, naming each with its failing tests (G2)', () => {
   const sus = "land: suspects: #1331 (test/memory.test.ts, test/a.test.ts), #1351 (test/b.test.ts): CI is red on the ship train (" + url + "/1) in tests only their changes touched, so they are likely the cause: they go back to their minions with the failure, and the next ships in line take their places";
-  const n = landNews([...front, ...red, sus].join('\n'), name);
+  // land.sh guesses suspects before it bisects, so the log has no "CI is red on the ship train" line first
+  const n = landNews([...front, ...red.slice(0, -1), sus].join('\n'), name);
   assert.deepEqual(n.slice(1), [
     { tone: 'bad', text: 'CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time' },
     { tone: 'bad', text: 'Sent back to their minions: #1331 (memory, a), #1351 (b)' },

@@ -1837,7 +1837,7 @@ elif [ "$rc" = 1 ]; then
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"
   [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI ($ci_url): $burn_said, so it never reached the full suite and $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again. This is the ship's own red, never a known flake"
   [ -z "$reran" ] || flake_keep
-  [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
+  [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red whose files all passed alone ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else
   ci_done

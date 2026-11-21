@@ -363,7 +363,7 @@ test('a red of flakes only whose fresh run is red again refuses, whatever its la
   // keep its place again; test/land-known-flakes.test.ts has those).
   const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared, LAND_FLAKE_KEPT: '2' });
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /running CI once more.*the red test's output \(run 8\).*tests failed on the rebased branch in CI again \(https:\/\/ci\/8\), on the one fresh run after a red of flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/s);
+  assert.match(res.stderr, /running CI once more.*the red test's output \(run 8\).*tests failed on the rebased branch in CI again \(https:\/\/ci\/8\), on the one fresh run after a red whose files all passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/s);
   assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'two runs, never three');
   assert.equal(res.stderr.match(/once more/g)!.length, 1);
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · red$/m);

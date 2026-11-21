@@ -49,6 +49,12 @@ export function landNews(output: string, name: (branch: string) => string): News
     if (bisect) news.splice(news.indexOf(bisect), 1);
     bisect = null;
   };
+  // The train's red CI, with the tests CI printed since the wait began.
+  const redNews = (at: number) => {
+    const d = failureDetail(lines.slice(since, at).join('\n'), 1);
+    const names = d.names.length ? `: ${d.names.map(clip).join(' · ')}${d.more ? ` +${d.more} more` : ''}` : '';
+    news.push({ tone: 'bad', text: `CI red on the train${names}` });
+  };
   const backInLine = (bs: string[]) => (bs.length ? `; back in line: ${list(bs.map(name), 6)}` : '');
 
   for (let i = 0; i < lines.length; i++) {
@@ -76,9 +82,7 @@ export function landNews(output: string, name: (branch: string) => string): News
       news.push({ tone: 'warn', text: `CI run cut off before any test failed (${m[1]}): one more run` });
     } else if ((m = s.match(/^CI is red on the ship train/))) {
       slow = null;
-      const d = failureDetail(lines.slice(since, i).join('\n'), 1);
-      const names = d.names.length ? `: ${d.names.map(clip).join(' · ')}${d.more ? ` +${d.more} more` : ''}` : '';
-      news.push({ tone: 'bad', text: `CI red on the train${names}` });
+      redNews(i);
       bisect = { tone: 'warn', text: 'Finding the ship that turned the train red' };
       ciRuns = 0;
       news.push(bisect);
@@ -93,7 +97,9 @@ export function landNews(output: string, name: (branch: string) => string): News
         ? { tone: 'bad', text: `${list(files)} failed in the full suite but passed alone, but a fresh CI run couldn't start, so it stays red` }
         : { tone: 'warn', text: `${list(files)} failed in the full suite but passed alone: one fresh CI run` });
     } else if ((m = s.match(/^suspects: (.*): CI is red on the ship train \(/))) {
-      done(); // the guess replaces the bisect's progress line
+      slow = null;
+      done();
+      redNews(i); // land.sh guesses before it bisects, so no "CI is red" line came first
       news.push({ tone: 'bad', text: `Sent back to their minions: ${m[1].replace(/\(([^)]*)\)/g, (_, fs: string) => `(${fs.split(', ').map(short).join(', ')})`)}` });
     } else if ((m = s.match(/^the bisect found (\S+) the first ship that turned the train red .*?the (\d+) before it ship/))) {
       done();

@@ -41,7 +41,8 @@ test('the remainders come from each step: the rest of the account, other apps an
   const b = await readLedger({ ...tree(base(2)), uid: UID });
   const w = cpuTable(ledgerSteps([{ at: 0, cpu_ledger: JSON.stringify(a) }, { at: 300_000, cpu_ledger: JSON.stringify(b) }]), 300_000, 3_600_000);
   const sec = (k: string) => w.rows.find((r) => r.key === k)!.coreSeconds;
-  assert.equal(sec('mine'), 17); // manager's 5 + citadel.slice's unnamed 12
+  assert.equal(sec('mine'), 5); // the manager's own
+  assert.equal(sec('citadel-other'), 12); // citadel.slice's unnamed (an ended container lands here)
   assert.equal(sec('apps'), 3); // app.slice less godot
   assert.equal(sec('others'), 20);
 });
@@ -53,6 +54,7 @@ test('a restarted named unit does not show as a burst in the remainders', async 
   const b = await readLedger({ ...tree(after), uid: UID });
   const w = cpuTable(ledgerSteps([{ at: 0, cpu_ledger: JSON.stringify(a) }, { at: 300_000, cpu_ledger: JSON.stringify(b) }]), 300_000, 3_600_000);
   assert.equal(w.rows.find((r) => r.key === 'mine')?.coreSeconds ?? 0, 0);
+  assert.equal(w.rows.find((r) => r.key === 'citadel-other')?.coreSeconds ?? 0, 0);
 });
 
 test('the table is the difference of two readings, per window, with kernel share and the host line', async () => {

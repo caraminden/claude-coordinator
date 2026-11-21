@@ -27,6 +27,7 @@ export const CPU_SOURCES: { key: string; label: string; group: string }[] = [
   { key: 'embed', label: 'citadel-embed (search index)', group: 'apps' },
   { key: 'contraptions', label: 'Contraptions', group: 'apps' },
   { key: 'apps', label: 'Other app units', group: 'apps' },
+  { key: 'citadel-other', label: 'Other Citadel units (containers that ended, MCP)', group: 'containers' },
   { key: 'mine', label: 'Everything else in this account', group: 'mine' },
   { key: 'others', label: 'Other users (total only)', group: 'others' },
   { key: 'system', label: 'System and kernel threads', group: 'others' },
@@ -124,8 +125,9 @@ function withRemainders(d: Record<string, [number, number]>) {
   const citadelRest = less('t:citadel', ['server', 'turns', 'taskmasters', 'builds', 'heavy', ...boxes]);
   const mgrRest = less('t:mgr', ['t:citadel', 't:app', 'contraptions']);
   if (apps) out.apps = apps;
-  if (mgrRest && d['t:mine']) out.mine = [mgrRest[0] + (citadelRest?.[0] ?? 0) + Math.max(0, g('t:mine')[0] - g('t:mgr')[0]), mgrRest[1] + (citadelRest?.[1] ?? 0) + Math.max(0, g('t:mine')[1] - g('t:mgr')[1])];
-  else if (citadelRest) out.mine = citadelRest;
+  if (!mgrRest && citadelRest) out.mine = citadelRest;
+  if (mgrRest && d['t:mine']) out.mine = [mgrRest[0] + Math.max(0, g('t:mine')[0] - g('t:mgr')[0]), mgrRest[1] + Math.max(0, g('t:mine')[1] - g('t:mgr')[1])];
+  if (citadelRest) out['citadel-other'] = citadelRest;
   if (d['t:users'] && d['t:mine']) out.others = [Math.max(0, d['t:users'][0] - d['t:mine'][0]), Math.max(0, d['t:users'][1] - d['t:mine'][1])];
   return out;
 }
@@ -182,17 +184,19 @@ export function cpuTable(all: LedgerStep[], now: number, windowMs: number): CpuW
   const rowsOut: CpuRow[] = [];
   const keys = [...CPU_SOURCES.map((s) => s.key).filter((k) => k !== 'containers' && k !== 'system'), ...[...use.keys()].filter((k) => k.startsWith('container:')).sort()];
   let accounted = 0;
+  let accountedSys = 0;
   for (const key of keys) {
     const [u, sys] = total(key);
     if (!use.has(key)) continue;
     accounted += u;
+    accountedSys += sys;
     rowsOut.push({ key, label: labelOf(key), group: groupOf(key), cores: seconds ? u / 1e6 / seconds : 0, kernel: u ? sys / u : 0, coreSeconds: u / 1e6 });
   }
   if (hostSec && host[0] > 0) {
     // Whatever the host was busy with that no user's cgroup holds (kernel threads, interrupts, root's own).
     const busyUs = host[0] * 1000;
     const sysRest = Math.max(0, busyUs - accounted);
-    rowsOut.push({ key: 'system', label: labelOf('system'), group: 'others', cores: seconds ? sysRest / 1e6 / seconds : 0, kernel: 1, coreSeconds: sysRest / 1e6 });
+    rowsOut.push({ key: 'system', label: labelOf('system'), group: 'others', cores: seconds ? sysRest / 1e6 / seconds : 0, kernel: sysRest ? Math.min(1, Math.max(0, host[1] * 1000 - accountedSys) / sysRest) : 0, coreSeconds: sysRest / 1e6 });
   }
   rowsOut.sort((a, b) => b.cores - a.cores);
   return {

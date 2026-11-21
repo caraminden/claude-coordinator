@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# citadel-callgrind (#1397): count a program's instructions with valgrind's callgrind on perigee, the steadiest way to
+# catch a small slowdown on a shared, noisy box (the count doesn't move with load; the same binary and input give the
+# same count, run after run).
+#   citadel-callgrind setup                       build valgrind and fetch the generic libraries, once per account
+#   citadel-callgrind [valgrind options] [--] <program> [args...]
+#                                                 run it under callgrind; the last line is "Ir <count>"
+# Why it's needed: perigee runs CachyOS's x86-64-v4 packages, so glibc, its loader and its libc.a are compiled with
+# AVX-512 throughout, and valgrind (3.27.1 included, the newest release when this was written) has no AVX-512 decoder:
+# it stops at the loader's first EVEX instruction ("unhandled instruction bytes: 0x62 0xF1 0x7F 0x48", SIGILL).
+# GLIBC_TUNABLES can't help (that code isn't picked at run time) and neither can -static against the system libc.a.
+# Two routes work without root:
+#   - A static musl binary (Rust: --target x86_64-unknown-linux-musl): no system code at all. Run directly.
+#   - Anything else dynamic: started through Arch's generic (x86-64) glibc loader and libraries, kept under
+#     $CITADEL_CALLGRIND_HOME/libs, on a copy with its x86-64-v4 ISA note removed (CachyOS's crt files stamp every
+#     binary "needs v4", which the generic loader refuses under valgrind's CPUID). Programs that re-exec
+#     /proc/self/exe see the loader there, so prefer the musl route for those.
+# Builds run at nice 19 through citadel-heavy. Several minions can call setup at once: a lock keeps it to one build.
+# CITADEL_CALLGRIND_HOME (default ~/.local/opt/citadel-callgrind) moves the install; CITADEL_CALLGRIND_MIRROR the
+# Arch mirror (default https://geo.mirror.pkgbuild.com).
+set -euo pipefail
+
+VG_VERSION=3.27.1
+HOME_DIR=${CITADEL_CALLGRIND_HOME:-$HOME/.local/opt/citadel-callgrind}
+MIRROR=${CITADEL_CALLGRIND_MIRROR:-https://geo.mirror.pkgbuild.com}
+VG=$HOME_DIR/valgrind-$VG_VERSION
+LIBS=$HOME_DIR/libs/usr/lib
+usage='usage: citadel-callgrind setup | citadel-callgrind [valgrind options] [--] <program> [args...]'
+
+die() { echo "citadel-callgrind: $*" >&2; exit 2; }
+
+ready() { [[ -x $VG/bin/valgrind && -e $LIBS/ld-linux-x86-64.so.2 && -e $LIBS/libgcc_s.so.1 && -e $LIBS/libstdc++.so.6 ]]; }
+
+setup() {
+  mkdir -p "$HOME_DIR"
+  exec 9>"$HOME_DIR/.lock"
+  flock 9
+  if [[ ! -x $VG/bin/valgrind ]]; then
+    local src
+    src=$(mktemp -d "${TMPDIR:-/tmp}/citadel-callgrind.XXXXXX")
+    echo "citadel-callgrind: building valgrind $VG_VERSION into $VG (a few minutes at nice 19)" >&2
+    curl -sSfL "https://sourceware.org/pub/valgrind/valgrind-$VG_VERSION.tar.bz2" | tar -C "$src" -xj
+    local heavy=()
+    command -v citadel-heavy >/dev/null && heavy=(citadel-heavy --here)
+    (cd "$src/valgrind-$VG_VERSION" && "${heavy[@]}" nice -n 19 bash -c \
+      "./configure --prefix='$VG' >'$src/configure.log' 2>&1 && make -j4 >'$src/make.log' 2>&1 && make install >'$src/install.log' 2>&1") \
+      || die "the valgrind build failed; logs in $src"
+    rm -rf "${src:?}"
+  fi
+  if ! ready; then
+    echo "citadel-callgrind: fetching Arch's generic glibc, libgcc and libstdc++ into $HOME_DIR/libs" >&2
+    local index pkg new
+    index=$(curl -sSfL "$MIRROR/core/os/x86_64/")
+    new=$(mktemp -d "$HOME_DIR/libs.XXXXXX")
+    trap 'rm -rf "${new:?}"' EXIT  # a failed fetch leaves no half-filled folder
+    for name in glibc libgcc 'libstdc%2B%2B'; do
+      pkg=$(grep -oE "\"$name-[0-9][^\"]*-x86_64\.pkg\.tar\.zst\"" <<<"$index" | tr -d '"' | head -1)
+      [[ -n $pkg ]] || die "no $name package on $MIRROR"
+      curl -sSfL "$MIRROR/core/os/x86_64/$pkg" | tar -C "$new" --zstd -x usr  # all of usr: glibc hard-links usr/lib/getconf to usr/bin
+    done
+    rm -rf "${HOME_DIR:?}/libs"
+    mv "$new" "$HOME_DIR/libs"
+  fi
+  ready || die "setup finished but $VG or $LIBS is incomplete"
+  echo "citadel-callgrind: ready ($VG, generic libraries in $LIBS)"
+}
+
+[[ $# -gt 0 ]] || die "$usage"
+case $1 in
+  -h|--help) echo "$usage"; exit 0 ;;
+  setup) setup; exit 0 ;;
+esac
+ready || die "not set up yet: run 'citadel-callgrind setup' first (builds valgrind at nice 19, once per account)"
+
+# Options up to the program: anything starting with - before it, or everything before a --.
+opts=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --) shift; break ;;
+    -*) opts+=("$1"); shift ;;
+    *) break ;;
+  esac
+done
+[[ $# -gt 0 ]] || die "$usage"
+prog=$1; shift
+[[ -f $prog ]] || prog=$(command -v "$prog") || die "no such program: $1"
+
+has_tool=0
+for o in "${opts[@]}"; do [[ $o == --tool=* ]] && has_tool=1; done
+[[ $has_tool == 1 ]] || opts=(--tool=callgrind "${opts[@]}")
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/citadel-callgrind.XXXXXX")
+trap 'rm -rf "${work:?}"' EXIT
+log=$work/valgrind.log
+if readelf -l "$prog" 2>/dev/null | grep -q 'Requesting program interpreter'; then
+  # Dynamic: a copy without the ISA note, started through the generic loader.
+  objcopy --remove-section=.note.gnu.property "$prog" "$work/$(basename "$prog")"
+  cmd=("$LIBS/ld-linux-x86-64.so.2" --library-path "$LIBS" "$work/$(basename "$prog")" "$@")
+else
+  cmd=("$prog" "$@")
+fi
+status=0
+"$VG/bin/valgrind" "${opts[@]}" --log-file="$log" "${cmd[@]}" || status=$?
+if grep -q 'unhandled instruction bytes' "$log"; then
+  grep -m1 'unhandled instruction bytes' "$log" >&2
+  die "valgrind met an AVX-512 instruction inside $prog itself. A static glibc binary carries CachyOS's AVX-512 libc.a: link it dynamically, or statically with musl. Otherwise build it for x86-64-v3 or lower (no -march=native, no target-cpu=native)."
+fi
+grep -E '^==[0-9]+== (Events|Collected|I +refs)' "$log" | sed 's/^==[0-9]*== //' >&2 || true
+ir=$(grep -oE 'Collected : [0-9]+' "$log" | grep -oE '[0-9]+$' || true)
+[[ -n $ir ]] && echo "Ir $ir"
+exit "$status"

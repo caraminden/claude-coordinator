@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Server as NetServer } from 'node:net';
 import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
@@ -19,7 +19,7 @@ import { isTurnNote } from '../src/codex.ts';
  * makes them at start. Without `dataDir` they go in a scratch folder removed when the process exits.
  */
 export function testPins(dataDir?: string): TurnPins {
-  const dir = dataDir ?? mkdtempSync(join(tmpdir(), 'test-pins-'));
+  const dir = dataDir ?? mkdtempSync(join(resolve(tmpdir()), 'test-pins-'));
   if (!dataDir) process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
   return pinTurnFiles(dir);
 }
@@ -60,7 +60,7 @@ export type TempRoot = {
  * boots a server uses bootServer, whose stop() does the same plus the settled drain.
  */
 export function tempRoot(prefix = 'test-'): TempRoot {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkdtempSync(join(resolve(tmpdir()), prefix));
   const procs: ChildProcess[] = [];
   const servers: (Server | NetServer)[] = [];
   const track = <T extends ChildProcess>(proc: T): T => {
@@ -275,7 +275,7 @@ export type Booted = {
  * says otherwise; `env` entries override the defaults, and an undefined one removes it.
  */
 export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string } = {}): Promise<Booted> {
-  const root = opts.root ?? mkdtempSync(join(tmpdir(), 'boot-'));
+  const root = opts.root ?? mkdtempSync(join(resolve(tmpdir()), 'boot-'));
   const data = join(root, 'data');
   // `wrap`: a command the server runs under, that execs it (systemd-run --scope for a CPU limit); `log`: a file its stdout and stderr are appended to.
   const [bin, ...pre] = [...(opts.wrap ?? []), process.execPath];

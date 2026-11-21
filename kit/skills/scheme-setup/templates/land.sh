@@ -115,7 +115,10 @@ FACTS=CLAUDE.md
 #   its one argument (with lanes, the run's lane as a second) and answers by exit code: 0 green, 1 red, 2 running, 3 not started (no run yet,
 #   or still queued), 4 ended without a verdict (cancelled, the runner lost, its jobs skipped);
 #   anything else: no answer this time. What it prints is shown when CI is red. It must judge the
-#   newest run on that commit.
+#   newest run on that commit. With a red (1), a line per other workflow that hasn't gone green lets a
+#   known red (LAND_KNOWN_RED) wait for it rather than ship: "<workflow>: in_progress …" (or queued,
+#   waiting, pending, requested, not started) for one still going, "<workflow>: no verdict …" for one that
+#   ended without one.
 CI_WORKFLOWS=''
 CI_STATUS=''
 # Lanes: off while LANES is empty, and then every landing is full, as above. LANES is the repo path of the scheme's
@@ -1016,8 +1019,12 @@ ci_runs() {
   lane_ci "$ln" || return 0
   if [ -n "$CI_STATUS" ]; then
     timeout 120 bash -c "$CI_STATUS \"\$@\"" _ "$sha" ${LANES:+"$ln"} >"$cilog" 2>&1 9>&- 6>&- || rc=$?
-    # Its lines for workflows still going ("<file>: in_progress …", "<file>: not started …") keep a red from deciding.
-    [ "$rc" != 1 ] || ! grep -Eq '^[[:space:]]*[^:[:space:]][^:]*: (in_progress|queued|waiting|pending|requested|not started)' "$cilog" || ci_open=2
+    # Its lines for the other workflows keep a red from deciding: "<file>: no verdict …" for one that ended without one
+    # (as the built-in reader's 4, which ranks above running), "<file>: in_progress …" or "… not started" for one going.
+    if [ "$rc" = 1 ]; then
+      if grep -Eq '^[[:space:]]*[^:[:space:]][^:]*: no verdict' "$cilog"; then ci_open=4
+      elif grep -Eq '^[[:space:]]*[^:[:space:]][^:]*: (in_progress|queued|waiting|pending|requested|not started)' "$cilog"; then ci_open=2; fi
+    fi
     return "$rc"
   fi
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5

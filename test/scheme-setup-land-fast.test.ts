@@ -97,6 +97,17 @@ test('known reds: a smoke, check or CI red only on known reds goes through and s
   const cr = g.run({ ...ci.env, ...known });
   assert.equal(cr.status, 0, cr.stderr);
   assert.match(cr.stderr, /CI on [0-9a-f]{12} failed only on known reds, so it goes on: ci:ci\.yml: known red, #42 is fixing it/);
+
+  // A known red beside a workflow that ended with no verdict doesn't ship: that one never went green (Mandate #153's review).
+  const n = setup('true', CI);
+  const nci = fakeCi(n.dir);
+  n.commit(n.wt, 'b.txt', 'b\n');
+  const before = git(n.main, 'rev-parse', 'main');
+  nci.answer(git(n.wt, 'rev-parse', 'HEAD'), 1, 'ci.yml: completed failure https://x\nslow.yml: no verdict (cancelled) https://y\n');
+  const nr = n.run({ ...nci.env, ...known });
+  assert.notEqual(nr.status, 0, nr.stderr);
+  assert.doesNotMatch(nr.stderr, /failed only on known reds, so it goes on/);
+  assert.equal(git(n.main, 'rev-parse', 'main'), before, 'nothing shipped');
 });
 
 test('--verify: the full check and CI on HEAD, out of line; prints green, or each failing id and red', () => {

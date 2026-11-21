@@ -102,9 +102,12 @@ type Hits = Record<string, { bare: number[]; ok: number[] }>;
 export function flakeHits(text: string): Hits {
   const rows = text.split('\n');
   const out: Hits = {};
+  // rmTemp only counts in a file that boots a server: a plain unit test's own temp dir is fine (Cara, 2026-11-21, card on the guard)
+  const boots = /\bbootServer\b/.test(text);
   rows.forEach((row, i) => {
     if (/^\s*\/\//.test(row)) return;
     for (const [name, rule] of Object.entries(FLAKE_RULES)) {
+      if (name === 'rmTemp' && !boots) continue;
       if (!rule.re(row)) continue;
       const escaped = TIMING_OK.test(row) || TIMING_OK.test(rows[i - 1] ?? '');
       ((out[name] ??= { bare: [], ok: [] })[escaped ? 'ok' : 'bare']).push(i + 1);
@@ -173,7 +176,8 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
     "await until('x', () => ok(), 60_000);",
     "// await new Promise((r) => setTimeout(r, 50));",
   ].join('\n');
-  const h = flakeHits(text);
+  assert.deepEqual(flakeHits('rmSync(d, { recursive: true, force: true });'), {}, 'a file with no bootServer may clean its own temp dir');
+  const h = flakeHits(`import { bootServer } from './helpers.ts';\n${text}`);
   assert.deepEqual(Object.fromEntries(Object.entries(h).map(([p, v]) => [p, [v.bare, v.ok]])), {
     sleep: [[1], [9]], elapsed: [[2], []], freePort: [[3], []], shortUntil: [[4], []], rmTemp: [[5], []],
   });

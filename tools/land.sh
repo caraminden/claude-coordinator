@@ -1003,6 +1003,12 @@ flake_only() {
   [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
   sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
 }
+# Whether $failed is a run cut off from outside before any test failed (#1377): Node's test runner printed its
+# "Interrupted while running:" (a SIGINT or SIGTERM: run 44859457680 of Nov 20, at 55 s), no test failed, and run-tests.sh
+# didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
+cut_off() {
+  grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed" && ! grep -qF 'run-tests: the tests ran past' <<<"$failed"
+}
 
 # The ship train (#1166), the front's side: up to LAND_TRAIN_MAX plain lands waiting behind this one, in line order,
 # each replayed onto the one before it in a scratch worktree, so CI runs once on the top. Its riders: own=this ship's
@@ -1130,22 +1136,39 @@ gate() {
   # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
   # never read as the answer. A no-answer this time falls back to the run here, which must be green too. If the branch
   # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
+  # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer.
+  local cut=''
   if [ "$rc" = 1 ]; then
     ci_failed
-    if ! reran=$(flake_only); then
+    if cut_off; then
+      cut=$ci_url
+    elif ! reran=$(flake_only); then
       reran=''
+    fi
+    if [ -z "$cut$reran" ]; then
+      :
     elif ! hub git push -q "$REMOTE" ":refs/heads/$CI_REF" 2>"$state/ci.err"; then
-      say "only flakes failed ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
-      retro_log "flake rerun · $branch · $reran · not started"
-      reran=''
+      if [ -n "$cut" ]; then
+        why="the CI run was cut off before any test failed ($cut), and deleting $CI_REF on GitHub to start a fresh run failed$(ci_said)"
+        retro_log "cut-off rerun · $branch · $cut · not started"
+        rc=2
+      else
+        say "only flakes failed ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
+        retro_log "flake rerun · $branch · $reran · not started"
+        reran=''
+      fi
     else
-      say "only flakes failed ($reran); running CI once more on $short, the land needs a fully green run"
+      if [ -n "$cut" ]; then say "the CI run on $short was cut off before any test failed ($cut), so it says nothing about this commit: running CI once more"
+      else say "only flakes failed ($reran); running CI once more on $short, the land needs a fully green run"; fi
       ci_id='' ci_pushed=''
       rc=0
       ci_gate || rc=$?
+      if [ "$rc" = 1 ]; then
+        ci_failed
+        ! cut_off || { why="CI was cut off twice before any test failed ($cut, $ci_url)"; [ -n "$cut" ] || why="CI's one fresh run after a red of flakes only ($reran) was cut off before any test failed ($ci_url)"; rc=2; }
+      fi
       case $rc in 0) result=green ;; 1) result=red ;; *) result='no answer' ;; esac
-      retro_log "flake rerun · $branch · $reran · $result"
-      [ "$rc" != 1 ] || ci_failed
+      if [ -n "$cut" ]; then retro_log "cut-off rerun · $branch · $cut · $result"; else retro_log "flake rerun · $branch · $reran · $result"; fi
     fi
   fi
   [ "$rc" != 0 ] || greens="$greens$1 "

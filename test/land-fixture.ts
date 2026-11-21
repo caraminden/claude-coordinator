@@ -99,6 +99,9 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
+// FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
+// after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
+// hang run-tests.sh stopped (the same interrupt, but a verdict);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
@@ -124,6 +127,12 @@ case "$*" in
     if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi
     [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
+      if [ -n "\${FAKE_CUT:-}" ] && { [ "$st" = green ] || [ "$st" = red ]; }; then
+        grep -qxF "$sha $id" "${calls}.seen" 2>/dev/null || echo "$sha $id" >>"${calls}.seen"
+        k=$(grep -nxF "$sha $id" "${calls}.seen" | cut -d: -f1)
+        read -r cs cn <<<"\$FAKE_CUT"
+        [ "$k" -le "$cs" ] || [ "$k" -gt "$((cs + cn))" ] || st=red
+      fi
       case $st in
         green) printf '%s\\tcompleted\\tsuccess\\thttps://ci/%s\\n' $id $id ;;
         red) printf '%s\\tcompleted\\tfailure\\thttps://ci/%s\\n' $id $id ;;
@@ -139,8 +148,21 @@ case "$*" in
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
     [ -z "\${FAKE_FLAKY_PATH:-}" ] || : >"${calls}.flaky"
+    p='test\\tthe full suite\\t2026'
+    # Cut off from outside (#1377, run 44859457680's log): Node's interrupt and the files it never ran, no failing test.
+    sha=$(grep -o 'head_sha=[0-9a-f]*' "${calls}" | tail -n 1) sha=\${sha#head_sha=}
+    k=$(grep -nxF "$sha $3" "${calls}.seen" 2>/dev/null | cut -d: -f1)
+    read -r cs cn <<<"\${FAKE_CUT:-0 0}"
+    if [ -n "$k" ] && [ "$k" -gt "$cs" ] && [ "$k" -le "$((cs + cn))" ]; then
+      printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b ##[error]Process completed with exit code 1.\\n' "$p" "$p" "$p"
+      exit 0
+    fi
+    if [ "\${FAKE_LOG:-}" = hung ]; then # run-tests.sh's timeout stopped a hung test: Node prints the same interrupt
+      printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b run-tests: the tests ran past 300s and were stopped: a test hung (the hung file is the one with no results above).\\n' "$p" "$p" "$p"
+      exit 0
+    fi
     echo "not ok 1 - the red test's output (run $3)"
-    p='test\\tthe full suite\\t2026 run-tests:'
+    p="$p run-tests:"
     case \${FAKE_LOG:-mixed} in
       many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
       *)

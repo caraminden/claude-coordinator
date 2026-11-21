@@ -407,6 +407,49 @@ test('a red with no rerun labels (too many files failed) refuses at once, and a 
   assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
 });
 
+// #1377 (#1372's report: run 44859457680 was interrupted at 55 s with no failing test, and a bisect refused #1302 for
+// it): a run cut off from outside says nothing about the commit. It gets one fresh run; cut off again, it is no answer.
+test('a run cut off before any test failed is no verdict: one fresh run decides, and a second cut-off is no answer', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  let res = c.run({ FAKE_CUT: '0 1', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /the CI run on \w+ was cut off before any test failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed/);
+  assert.match(landLog(shared), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · green$/m);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2);
+  assert.equal(c.localRuns(), 0);
+  assert.equal(c.refs(), '');
+
+  // Both cut off: no answer, so it falls back to the suite here, as for any CI that can't answer.
+  const r2 = setup();
+  const c2 = ci(r2);
+  r2.commit(r2.wt, 'b.txt', 'mine\n');
+  const shared2 = join(r2.dir, 'shared');
+  res = c2.run({ FAKE_CUT: '0 2', COORDINATOR_SHARED_DIR: shared2 });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: CI was cut off twice before any test failed \(https:\/\/ci\/7, https:\/\/ci\/8\)/);
+  assert.doesNotMatch(res.stderr, /tests failed/);
+  assert.match(landLog(shared2), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · no answer$/m);
+  assert.equal(c2.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'never a third run');
+  assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
+});
+
+test('a hang run-tests.sh stopped prints the same interrupt but is a real red: refused, not run again', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'hung' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /a test hung.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.doesNotMatch(res.stderr, /cut off|once more|CI FALLBACK/);
+  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
 test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {
   const cases: [string, Record<string, string>, RegExp][] = [
     ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],

@@ -10,6 +10,7 @@ paths:
   - "tools/citadel-heavy"
   - "tools/heavy-ci.ts"
   - ".github/workflows/citadel-heavy.yml"
+  - "tools/known-flakes.ts"
   - "tools/boot-check.ts"
   - "tools/failed-files-reporter.ts"
   - "tools/progress-reporter.ts"

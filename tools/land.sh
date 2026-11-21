@@ -505,11 +505,13 @@ train_verdict() {
       [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
       return 0 ;;
     landed)
+      x=$(sed -n 2p "$f" 2>/dev/null) || x=''
       rm -f "$f"
       [ "$at" = "$a" ] || { [ "$at" = "$d" ] && git reset -q --keep "$a"; } ||
         say "$branch moved after the train took it, so it stays as it is; what shipped of it is $(git rev-parse --short "$a")"
       say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
       say "main is now at $(git log -1 --format='%h "%s"' "$a"), in $c's ship train"
+      [ -z "$x" ] || say "$x"
       land_mark lock
       land_mark landed
       if [ "$b" = live ]; then
@@ -1148,6 +1150,7 @@ cut_off() {
 # those land alone), has merge commits, sits on a commit that came off main, conflicts with the train, or fails the
 # undo guard against it.
 own=$tip train_tip=() train_br=() train_n=() train_was=() greens=' '
+declare -A known_by=() # #1419: <commit> -> the known flakes its green was let through on
 # <from> <to>: whether the change touches a path in tools/pipeline-files.txt (a path ending / is its folder).
 pipeline_touch() {
   [ -f tools/pipeline-files.txt ] || return 1
@@ -1179,7 +1182,7 @@ train_drop() {
 train_landed() { # <rider index>
   local kind=restart
   ! grep -q '^live ' "$times" 2>/dev/null || kind=live
-  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))"
+  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))" "${known_by[$tip]:+shipped past known flakes ${known_by[$tip]}}"
 }
 # "<commit> <branch>" of each ship in the train but the top one, which is "$tip $train_owner": what came off main with
 # it when main goes back (taken-back), so each branch on its train commit leaves the others' commits behind.
@@ -1275,7 +1278,8 @@ gate() {
   # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
   # never read as the answer. A no-answer this time falls back to the run here, which must be green too. If the branch
   # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
-  # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer.
+  # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer. A red of
+  # known flakes only (#1419: known_flakes) needs no fresh run: it is a green.
   local cut=''
   if [ "$rc" = 1 ]; then
     ci_failed
@@ -1283,6 +1287,10 @@ gate() {
       cut=$ci_url
     elif ! reran=$(flake_only); then
       reran=''
+    elif known_flakes "$reran"; then
+      say "only known flakes failed in CI ($ci_url): $known_why, so this goes on as green, with no fresh run"
+      retro_log "known flake · $branch · $known_why · $ci_url"
+      known_by[$1]=$known_why reran='' rc=0
     fi
     if [ -z "$cut$reran" ]; then
       :
@@ -1357,6 +1365,47 @@ train_suspects_of() {
     [ -z "$hits" ] || { echo "$hits"; return 0; }
   done
 }
+# Sets chg (the caller's local): each train member's own changed files, 0 being this ship's.
+train_chg() {
+  local m
+  chg=()
+  for ((m = 0; m <= ${#train_n[@]}; m++)); do
+    if [ "$m" = 0 ]; then chg[0]=$(git diff --no-renames --name-only "$old" "$own"); else chg[m]=$(git diff --no-renames --name-only "$(train_at $((m - 1)))" "$(train_at "$m")"); fi
+  done
+}
+# <member>: its #N, or its branch when that names no ticket.
+train_label() {
+  local t
+  if [ "$1" = 0 ]; then t=$branch; else t=${train_br[$(($1 - 1))]}; fi
+  [[ ! $t =~ ^ticket/([0-9]+)- ]] || t="#${BASH_REMATCH[1]}"
+  echo "$t"
+}
+# Known flakes (#1419, Cara 2026-11-20, "Known flakes only": "Skip the extra run when each failed test has already flaked on
+# other ships in the last 2 weeks, or a minion is fixing it"; ADR 0006's amendment). <files, comma-separated>, each of
+# which passed alone: whether every one is a known flake (tools/known-flakes.ts: the retro log's sightings on other
+# branches, an open fix minion) that no ship on the train changed, nor what it imports (the suspects' map). Says why
+# not; on yes, sets $known_why ("<file> (<why>), ..."). Anything it can't tell keeps today's fresh run.
+known_flakes() {
+  local files=() f m out hits=() chg=() ok=1 who
+  known_why=''
+  [ -f "$tools/known-flakes.ts" ] || return 1
+  IFS=, read -ra files <<<"${1//, /,}"
+  out=$(LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
+    "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$old" "$branch ${train_br[*]}" "${files[@]}" 2>/dev/null) || ok=''
+  [ -n "$out" ] || { say "couldn't tell whether $1 are known flakes (tools/known-flakes.ts gave no answer)"; return 1; }
+  [ -n "$ok" ] || { while read -r f; do [[ $f != *'(not seen on another branch'* ]] || say "$f is no known flake"; done <<<"$out"; return 1; }
+  train_chg
+  for f in "${files[@]}"; do
+    mapfile -t hits < <(train_suspects_of "$f")
+    [ ${#hits[@]} -gt 0 ] || continue
+    who=''
+    for m in "${hits[@]}"; do who+="${who:+ and }$(train_label "$m")"; done
+    say "$f is a known flake, but $who changed it or what it imports, so it isn't excused"
+    ok=''
+  done
+  [ -n "$ok" ] || return 1
+  known_why=$(sed ':a;N;$!ba;s/\n/, /g' <<<"$out")
+}
 train_suspects() {
   local round prev=' ' f m i t v line real=() hits=() keep=() was=() chg=()
   local -A sus=()
@@ -1369,10 +1418,8 @@ train_suspects() {
     for f in "${real[@]}"; do
       [[ $prev != *" $f "* ]] || { say "red again on $f with the likely causes off the train, so the guess was wrong: the bisect looks for the ship"; return 1; }
     done
-    chg=() sus=()
-    for ((m = 0; m <= ${#train_n[@]}; m++)); do
-      if [ "$m" = 0 ]; then chg[0]=$(git diff --no-renames --name-only "$old" "$own"); else chg[m]=$(git diff --no-renames --name-only "$(train_at $((m - 1)))" "$(train_at "$m")"); fi
-    done
+    sus=()
+    train_chg
     for f in "${real[@]}"; do
       mapfile -t hits < <(train_suspects_of "$f")
       if [ ${#hits[@]} = 0 ]; then
@@ -1383,9 +1430,7 @@ train_suspects() {
     done
     line=''
     for m in $(printf '%s\n' "${!sus[@]}" | sort -n); do
-      if [ "$m" = 0 ]; then t=$branch; else t=${train_br[$((m - 1))]}; fi
-      [[ ! $t =~ ^ticket/([0-9]+)- ]] || t="#${BASH_REMATCH[1]}"
-      line+="${line:+, }$t (${sus[$m]})"
+      line+="${line:+, }$(train_label "$m") (${sus[$m]})"
     done
     say "suspects: $line: CI is red on the ship train ($ci_url) in tests only their changes touched, so they are likely the cause: they go back to their minions with the failure, and the next ships in line take their places"
     retro_log "ship train suspects · $label · $line · $ci_url"
@@ -1532,8 +1577,13 @@ else
     kept="$state/land-red-${branch//\//-}.log"
     cp "$log" "$kept" 2>/dev/null || kept=$log
     failed=$(cat "$kept" 2>/dev/null) || failed=''
-    ! flakes=$(flake_only) || retry_in_place "only flakes failed on perigee: $flakes"
-    refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
+    if ! flakes=$(flake_only) || ! known_flakes "$flakes"; then
+      [ -z "$flakes" ] || retry_in_place "only flakes failed on perigee: $flakes"
+      refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
+    fi
+    say "only known flakes failed on perigee: $known_why, so this goes on as green"
+    retro_log "known flake · $branch · $known_why · on perigee"
+    known_by[$tip]=$known_why
   fi
 fi
 if [ "$mode" = full ]; then
@@ -1603,6 +1653,7 @@ trap 'land_rc=$?; train_drop; top_done; land_timing $land_rc || true; [ "$(head 
 moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
+[ -z "${known_by[$tip]:-}" ] || say "shipped past known flakes ${known_by[$tip]}"
 if [ ${#train_n[@]} -gt 0 ]; then
   # Each rider moves its own branch (its worktree is its own) within a poll of the line, before the deploy writes the
   # release row, which finds each ship by its branch's tip (src/releases.ts landedIn).

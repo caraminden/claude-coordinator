@@ -626,7 +626,8 @@ export class LandHandoffs {
     }
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
     const failed = deploys.filter((d) => !d.ok);
-    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
+    const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
+    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

@@ -70,7 +70,7 @@ test("a known flake the ship changed, or that imports what it changed, gets the 
     seen(shared, ['test/busy.test.ts', 'test/slow.test.ts']);
     const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stderr, /test\/slow\.test\.ts is a known flake, but ticket\/1-x changed it or what it imports, so it isn't excused/, how);
+    assert.match(res.stderr, /test\/slow\.test\.ts is a known flake, but #1 changed it or what it imports, so it isn't excused/, how);
     assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/, how);
     assert.equal(pushes(c), 2, how);
     assert.doesNotMatch(res.stderr, /shipped past/, how);

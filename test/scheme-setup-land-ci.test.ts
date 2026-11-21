@@ -335,6 +335,27 @@ test('the stack: a run lost twice parks that landing with exit 75, and the one b
   }
 });
 
+// KT7 (#1519): a second land.sh in a worktree whose landing is still alive leaves that landing alone, where the
+// killed-landing recovery used to take its detached HEAD back onto the branch and abort its rebase.
+test('a land.sh run again while the first is still landing in that worktree touches nothing, and the first lands', async () => {
+  const c = ciSetup(1);
+  try {
+    const a = c.land(1);
+    const ta = await c.tip(a);
+    assert.equal(c.on(1), '', 'the first is detached on its rebased commit');
+    const again = c.land(1);
+    assert.equal(await again.exit, 1, again.stderr());
+    assert.match(again.stderr(), /a landing is still running in .* \(pid \d+\) and has its HEAD detached on purpose, so this touched nothing/);
+    assert.doesNotMatch(again.stderr(), /stopped mid-way/);
+    assert.equal(git(c.wt, 'rev-parse', 'HEAD'), git(c.main, 'rev-parse', ta), 'still on the first one\'s commit');
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.deepEqual(c.landed(), ['f1.txt: 1']);
+  } finally {
+    c.stop();
+  }
+});
+
 test('the stack: when the head is killed mid-CI the ones behind build again on main, and its branch is as it was', async () => {
   const c = ciSetup(3);
   try {

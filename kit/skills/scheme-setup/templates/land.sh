@@ -851,9 +851,13 @@ if [ -n "$check" ]; then
   exit 0 # --full: no rebase, so nothing to check
 fi
 # A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
+# Its third line names the landing that wrote it (pid and start time): while that one is alive, it is a landing still
+# running here, not a killed one, and is left alone (KT7, #1519).
 if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
+  { read -r branch; read -r left; read -r owner; } <"$gitdir/land-branch" || true
+  [ -z "$owner" ] || [ "$(queue_proc "${owner%% *}")" != "$owner" ] ||
+    refuse "a landing is still running in $here (pid ${owner%% *}) and has its HEAD detached on purpose, so this touched nothing. Wait for it to end, or stop it, then run this again"
   git rebase --abort 2>/dev/null || true
-  { read -r branch; read -r left; } <"$gitdir/land-branch" || true
   # Anything committed here since would be lost with the detached commit, which may also hold other minions' unlanded work.
   [ "$(git rev-parse HEAD)" = "$left" ] || refuse "an earlier landing was stopped mid-way and left $here on a detached commit (${left:0:12}), and HEAD has moved since. If you committed here, put those commits on $branch (git checkout $branch, then git cherry-pick each one of yours); otherwise just git checkout $branch. Then run this again"
   git checkout -q "$branch" || refuse "an earlier landing was stopped mid-way and $here could not go back onto $branch (above); a person needs to look"
@@ -1216,21 +1220,21 @@ build() {
   [ "$mode" != build ] || phase="merging $BRANCH into $build"
   queue_phase "$phase"
   if [ "$mode" = build ]; then say "merging $on into $build on $branch"; else say "rebasing $branch onto $on"; fi
-  # The branch, and the commit this leaves the worktree on: how the next run puts things back if this one is killed.
-  printf '%s\n' "$branch" "$pre" >"$gitdir/land-branch"
+  # The branch, the commit this leaves the worktree on and who wrote it: how the next run puts things back if this one is killed.
+  printf '%s\n' "$branch" "$pre" "$(queue_proc $$)" >"$gitdir/land-branch"
   # 9>&- on git: a git gc --auto it starts detaches, and mustn't keep the lock.
   git checkout -q --detach "$pre" 9>&- 6>&-
   if [ "$mode" = build ]; then
     # A build takes $BRANCH in by merge: a rebase would flatten its merges of $BRANCH and change its feeders' commits.
     if git merge-base --is-ancestor "$want" HEAD || git merge -q -m "Merge $BRANCH into $build" "$want" 9>&- 6>&-; then
-      printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+      printf '%s\n' "$branch" "$(git rev-parse HEAD)" "$(queue_proc $$)" >"$gitdir/land-branch"
     else
       git merge --abort 2>/dev/null || true
       blocked="merging $BRANCH into $build failed (see git's output above), so nothing landed. Take $BRANCH in on your branch by hand (git merge $BRANCH), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again"
       return 0
     fi
   elif git rebase -q "$want" 9>&- 6>&-; then
-    printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+    printf '%s\n' "$branch" "$(git rev-parse HEAD)" "$(queue_proc $$)" >"$gitdir/land-branch"
   else
     git rebase --abort 2>/dev/null || true # nothing to abort if it never started
     blocked="the rebase onto $BRANCH failed (see git's output above), so nothing landed. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"

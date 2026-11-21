@@ -687,14 +687,14 @@ export class MachineJobs {
   }
 
   /**
-   * The agent connected and said which jobs it knows (the contract's reconcile; `known` is empty for an agent that
-   * dropped its jobs block, which knows none). The server is the queue of record: a job it thinks is on the machine that the
-   * agent lost failed ("the machine restarted"); one the agent runs that ended here, or that this server never
-   * started, is told to stop. Then start what may start.
+   * The agent connected and said which jobs it knows (the contract's reconcile). The server is the queue of record: a
+   * job it thinks is on the machine that the agent lost failed ("the machine restarted"); one the agent runs that ended
+   * here, or that this server never started, is told to stop. Then start what may start. `known` is null when the info
+   * named no jobs at all (an agent from before MA1 whose block broke): nothing is lost on that.
    */
-  reconcile(m: Machine, known: { id: number; state: string }[], since: number) {
-    const knows = new Map(known.map((k) => [k.id, k.state]));
-    for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
+  reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number) {
+    const knows = new Map((known ?? []).map((k) => [k.id, k.state]));
+    if (known) for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
       // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
       if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
       this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });

@@ -337,17 +337,89 @@ test('on reconnect the server reconciles: a lost job failed, one it ended is tol
   assert.equal((await job(j.id)).state, 'failed');
   assert.equal((await job(j.id)).error, 'the machine restarted');
   await until('job.stop for the old job', () => agent.jobs('job.stop').some((s) => s.id === 1));
-  // One that comes back with no jobs block at all knows none: its running job is lost too.
+  // One that comes back with no jobs block and an empty list knows none: its running job is lost too.
   const k = await queue({});
   await until('job.start', () => agent.jobs('job.start').some((s) => s.id === k.id));
   await state(k.id, 'running');
   agent.close();
   await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
-  agent = await wakes(() => connect(boxToken, {}));
+  // An agent from before MA1 lost its block and names no jobs at all: that says nothing about the job, which stays.
+  agent = await connect(boxToken, {});
+  assert.equal((await job(k.id)).state, 'running');
+  agent.close();
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  agent = await wakes(() => connect(boxToken, { known_jobs: [] }));
   assert.equal((await job(k.id)).error, 'the machine restarted');
   agent.close();
   await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
   agent = await connect(boxToken, OFFER);
+});
+
+test('a config edit that breaks the jobs block leaves a running job alone: the real agent against the real server (MA1)', async () => {
+  // The real public/machine-agent.mjs on a second machine, with a stand-in podman on its PATH that keeps each
+  // container as a file and logs every call; a test ends the container by writing its exit code.
+  const pc = join(root, 'pc');
+  const bin = join(pc, 'bin');
+  const jobsDir = join(pc, 'jobs');
+  const models = join(pc, 'models');
+  for (const d of [bin, jobsDir, models]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
+const [cmd, ...args] = process.argv.slice(2);
+appendFileSync(${JSON.stringify(join(pc, 'podman.log'))}, JSON.stringify([cmd, ...args]) + '\\n');
+const state = ${JSON.stringify(join(pc, 'container'))};
+const read = () => (existsSync(state) ? readFileSync(state, 'utf8') : 'gone');
+if (cmd === 'run') writeFileSync(state, 'running');
+else if (cmd === 'rm') writeFileSync(state, 'gone');
+else if (cmd === 'inspect') { if (read() === 'gone') process.exit(125); console.log(read().startsWith('exited') ? 'exited ' + read().split(' ')[1] : read()); }
+else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s === 'gone') process.exit(125); if (s.startsWith('exited')) { clearInterval(t); console.log(s.split(' ')[1]); } }, 50); }
+`);
+  chmodSync(join(bin, 'podman'), 0o755);
+  const config = join(pc, 'machine-agent.json');
+  const good = { jobs: { dir: jobsDir, folders: { models }, max_limit_h: 12, max_disk_gb: 1, gpu: true } };
+  writeFileSync(config, JSON.stringify(good));
+  const { machine: m, token } = await call('Josh', '/api/machines', { name: 'josh-pc' });
+  await call('Josh', `/api/machines/${m.id}`, { projects: [scheme.id] }, 'PATCH');
+  const { spawn } = await import('node:child_process');
+  let out = '';
+  const startAgent = () => {
+    const proc = spawn(process.execPath, [join(import.meta.dirname, '..', 'public/machine-agent.mjs'), base, token, '--config', config], {
+      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, HOME: pc, CLAUDE_CONFIG_DIR: pc, PATH: `${bin}:${process.env.PATH}` },
+    });
+    procs.push(proc);
+    proc.stdout!.on('data', (d) => (out += d));
+    proc.stderr!.on('data', (d) => (out += d));
+    return proc;
+  };
+  let proc = startAgent();
+  const store = new Store(join(data, 'coordinator.db'));
+  await until('the agent offers jobs', () => store.getMachine(m.id)!.jobs !== null, undefined, () => out);
+  const j = await queue({ machine: 'josh-pc' });
+  await answer('Josh', j.id, 'Run now');
+  await until('the job to run on the real agent', async () => (await job(j.id)).state === 'running', undefined, () => out);
+  // The agent restarts (an update, a reboot of WSL): it finds the job on disk and names it on connect, so the job
+  // now started before this connection, the case the server's "lost" pass looks at.
+  proc.kill();
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((x: any) => x.id === m.id).status !== 'ready');
+  store.updateMachine(m.id, { jobs: null });
+  proc = startAgent();
+  await until('the agent back with its jobs block', () => store.getMachine(m.id)!.jobs !== null, undefined, () => out);
+  assert.equal((await job(j.id)).state, 'running', 'the agent named the job it found on disk');
+  // The owner saves a typo: the jobs block is gone from the agent's config, and its info says so.
+  writeFileSync(config, JSON.stringify({ jobs: { dir: join(pc, 'no-such-folder') } }));
+  await until('the agent to tell the app it has no jobs block', () => store.getMachine(m.id)!.jobs === null, undefined, () => out);
+  // Its next report is where a "lost" job's 409 makes the agent remove the container: wait for it, or for that.
+  const heard = store.getMachineJob(j.id)!.live_at!;
+  await until('the agent\'s next report', () => store.getMachineJob(j.id)!.live_at! > heard || jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'), undefined, () => out);
+  assert.equal((await job(j.id)).state, 'running', 'the job the agent still holds is not "lost"');
+  assert.equal(readFileSync(join(pc, 'container'), 'utf8'), 'running');
+  assert.ok(!jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'), 'nothing removed its container');
+  // It runs to its end as it would have: the result reaches the app, the minion hears it.
+  await wakes(async () => {
+    writeFileSync(join(pc, 'container'), 'exited 0');
+    await until('the job to end done', async () => (await job(j.id)).state === 'done', undefined, () => out);
+  });
+  proc.kill();
 });
 
 test('a contraption queues on its home scheme\'s machine, and can\'t read or stop another app\'s job', async () => {

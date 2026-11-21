@@ -2027,7 +2027,7 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), ...(jobs ? { jobs, known_jobs: runner.known() } : {}) }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
     }).then(async (res) => {
       // fetch doesn't throw on a refusal; a silent one hid #301's 404.
       if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);

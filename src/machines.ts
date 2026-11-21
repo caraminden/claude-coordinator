@@ -352,7 +352,7 @@ export class MachineRelay {
   private startedAt = Date.now();
   private shown = '';
   /** The jobs queue's hooks (#857), set once by the server: an agent's report of the jobs it knows, and an agent gone. */
-  jobHooks: { info(machine: Machine, known: { id: number; state: string }[], since: number): void; offline(machineId: number): void } | null = null;
+  jobHooks: { info(machine: Machine, known: { id: number; state: string }[] | null, since: number): void; offline(machineId: number): void } | null = null;
 
   constructor(store: Store, onChange: () => void) {
     this.store = store;
@@ -558,14 +558,14 @@ export class MachineRelay {
     agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])]
       : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
-    // Its owner's jobs block (#857), or none; with one it also says which jobs it knows, which the queue reconciles.
+    // Its owner's jobs block (#857), or none, and the jobs it holds, which the queue reconciles. An agent lists them even
+    // with no block (a typo in its config still leaves them running there); with no list at all nothing is taken as lost (MA1).
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
-    // One that had a block and comes back without it knows no jobs: the ones it ran are lost.
-    if (offer || machine.jobs) {
-      const known = (offer && Array.isArray(body.known_jobs) ? body.known_jobs : []).slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []));
-      this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
-    }
+    const known = Array.isArray(body.known_jobs)
+      ? body.known_jobs.slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []))
+      : null;
+    if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
       const prev = storedLend(machine);

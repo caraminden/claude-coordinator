@@ -88,10 +88,10 @@ export class CiMirror {
     const run = { project_id: w.project.id, workflow: w.workflow, run_id: w.run.id, run_attempt: w.run.run_attempt ?? 1 };
     // Filed at the run's own time, so the store's rules see the runs in the order they ran, not the order mirrored.
     const meta = { kind: w.kind, target: w.target, sha: w.run.head_sha, ref: `refs/heads/${w.run.head_branch}`, created_at: Date.parse(w.run.updated_at ?? w.run.created_at) || this.now() };
-    const over = "doesn't fit the CI store's spare room (a file's, the scheme's or all schemes' cap; a mirror never pushes another file out)";
     const size = w.artifact.size_in_bytes ?? 0;
-    if (!this.ci.fits(run, { ...meta, size })) {
-      console.warn(`CI mirror: not mirroring ${what(w)} (${w.artifact.size_in_bytes ?? '?'} bytes): it ${over}`);
+    const no = this.ci.refusal(run, { ...meta, size });
+    if (no) {
+      console.warn(`CI mirror: not mirroring ${what(w)} (${w.artifact.size_in_bytes ?? '?'} bytes): ${no}`);
       return false;
     }
     const dir = this.ci.dir(w.project.id);
@@ -116,8 +116,8 @@ export class CiMirror {
       await exec('tar', ['-czf', file, '-C', into, '.'], { timeout: 30 * 60_000 });
       return file;
     });
-    if (!row) {
-      console.warn(`CI mirror: not keeping ${what(w)}: once downloaded it ${over}`);
+    if (typeof row === 'string') {
+      console.warn(`CI mirror: not keeping ${what(w)} once downloaded: ${row}`);
       return false;
     }
     console.log(`CI mirror: kept ${what(w)} as ${basename(row.name)} (${row.size} bytes)`);

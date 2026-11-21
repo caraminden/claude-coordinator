@@ -111,3 +111,32 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
   assert.deepEqual(left.filter((f) => f.includes('.part')), []);
   assert.ok(!existsSync(join(ci.dir(p.id), 'windows.yml', '3-2')) && !existsSync(join(ci.dir(p.id), 'windows.yml', '4-2')), 'a refused run leaves no folder');
 });
+
+test("a build mirror past its fifth run takes the place of the oldest, which the rules retire anyway; a rule-due file of another scheme doesn't refuse it; a real refusal says why (#1521, CA4)", async () => {
+  const store = new Store(join(root, 'b.db'));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek-auras');
+  const q = store.createProject('Delve', 'https://github.com/o/delve');
+  const ci = new CiStore(store, join(root, 'bdata'), undefined, { ...RULES, fileBytes: 1000, schemeBytes: 2500 });
+  const clock = Date.now();
+  const mirror = new CiMirror(ci, async (_w: Want, dir: string) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'app.apk'), 'x'.repeat(100)); }, () => clock);
+  const run = (id: number): Run => ({ id, name: 'android', workflow_id: 1, head_branch: 'main', head_sha: 'a'.repeat(40), status: 'completed', conclusion: 'success', created_at: new Date(clock - (100 - id) * 60_000).toISOString(), run_attempt: 1 });
+  const want = (id: number): Want => ({ project: p, slug: 'o/peek-auras', run: run(id), artifact: { id, name: `apk-${id}`, expired: false, size_in_bytes: 100 }, workflow: 'android.yml', kind: 'build', target: 'android', done: () => {} });
+  // Delve has six runs of a build: its oldest is due to go by the rules (buildRuns 5) whenever the daily sweep comes.
+  for (let i = 1; i <= 6; i++) store.putCiFile({ project_id: q.id, workflow: 'w.yml', run_id: i, run_attempt: 1, name: 'd.zip', sha: 'b'.repeat(40), ref: '', kind: 'build', target: 'win', size: 10, sha256: '', created_at: clock - (10 - i) * 60_000 });
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => void warned.push(a.join(' '));
+  try {
+    for (let id = 1; id <= 7; id++) { mirror.want(want(id)); await mirror.idle(); }
+  } finally { console.warn = warn; }
+  const runs = store.ciFiles(p.id).map((f) => f.run_id).sort((a, b) => a - b);
+  assert.deepEqual(runs, [3, 4, 5, 6, 7], `each newer run is kept and the oldest past five goes: ${warned.join('; ')}`);
+  assert.deepEqual(warned, []);
+
+  // Over the scheme's cap, where only pushing out another file would fit it: refused, and the log says that, not "full".
+  store.putCiFile({ project_id: p.id, workflow: 'big.yml', run_id: 1, run_attempt: 1, name: 'big.zip', sha: 'b'.repeat(40), ref: '', kind: 'report', target: '', size: 2100, sha256: '', created_at: clock });
+  console.warn = (...a: unknown[]) => void warned.push(a.join(' '));
+  try { mirror.want(want(8)); await mirror.idle(); } finally { console.warn = warn; }
+  assert.equal(store.ciFiles(p.id).filter((f) => f.run_id === 8).length, 0);
+  assert.match(warned.join('\n'), /would push out another file/);
+});

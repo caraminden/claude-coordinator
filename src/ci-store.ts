@@ -347,7 +347,7 @@ export class CiStore {
       if (declared !== size) throw new HttpError(400, 'The upload stopped part-way');
 
       const row = await this.commit(key, part, { sha: claims.sha, ref: claims.ref, kind: u.kind, target: u.target, size, sha256: hash.digest('hex') });
-      if (row) return row;
+      if (typeof row !== 'string') return row;
       const words = `The CI store refused ${u.name} from ${claims.workflow}: ${project.name}'s files are at its ${gib(this.rules.schemeBytes)} limit (or all schemes' at ${gib(this.rules.totalBytes)}), and what is left is each target's newest build or release and published releases.`;
       const now = Date.now();
       if (now - (this.toldFull.get(project.id) ?? 0) > DAY) {
@@ -363,32 +363,39 @@ export class CiStore {
   }
 
   /**
-   * The rules planned with a file of `meta.size` at `key` in: the rows they give up for it, or null when it doesn't fit
-   * (too big, dropped by the rules, or over a cap). With `evict` false it only fits in spare room: null if any other
-   * file would go for it.
+   * The rules planned with a file of `meta.size` at `key` in: the rows they give up for it, or why it doesn't fit (too big,
+   * dropped by the rules, or over a cap). With `evict` false it only fits in spare room: no file may go for it but those
+   * the rules retire by count or age anyway (#1521: the oldest of a target's runs once a sixth comes, another scheme's due file).
    */
-  private plan(rows: CiFile[], key: Key, meta: { kind: string; target: string; size: number; created_at: number }, evict: boolean): { was?: CiFile; gone: Set<number> } | null {
-    if (meta.size > this.rules.fileBytes) return null;
+  private plan(rows: CiFile[], key: Key, meta: { kind: string; target: string; size: number; created_at: number }, evict: boolean): { was?: CiFile; gone: Set<number> } | string {
+    if (meta.size > this.rules.fileBytes) return `it is bigger than one file may be (${meta.size} bytes, over ${this.rules.fileBytes})`;
     const was = rows.find((r) => r.project_id === key.project_id && r.workflow === key.workflow && r.run_id === key.run_id && r.run_attempt === key.run_attempt && r.name === key.name);
     const mine = { ...key, ...meta, id: was?.id ?? -1, published_to: null, published_at: null };
     const next = [...rows.filter((r) => r !== was), mine];
-    const gone = new Set(sweepPlan(next, Date.now(), this.rules, this.keep()));
+    const now = Date.now();
+    const gone = new Set(sweepPlan(next, now, this.rules, this.keep()));
     const left = next.filter((r) => !gone.has(r.id));
     const sum = (list: { size: number }[]) => list.reduce((n, r) => n + r.size, 0);
-    if (gone.has(mine.id) || (!evict && gone.size) || sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes || sum(left) > this.rules.totalBytes) return null;
+    if (gone.has(mine.id)) return 'it is older than the runs the store keeps for its workflow and target, so the rules would delete it at once';
+    if (!evict && gone.size) {
+      const ruled = new Set(sweepPlan(next, now, { ...this.rules, schemeBytes: Infinity, totalBytes: Infinity }, this.keep()));
+      if ([...gone].some((id) => !ruled.has(id))) return "it doesn't fit the CI store's spare room: it would push out another file to stay under the scheme's or all schemes' cap, and a mirror never does";
+    }
+    if (sum(left.filter((r) => r.project_id === key.project_id)) > this.rules.schemeBytes) return `it would take the scheme over its cap (${this.rules.schemeBytes} bytes)`;
+    if (sum(left) > this.rules.totalBytes) return `it would take all schemes over their cap (${this.rules.totalBytes} bytes)`;
     return { was, gone };
   }
 
   /**
    * With the store locked, plan the rules with the file at `part` in: if it fits, it becomes `key`'s file (replacing
-   * the same run's file of that name) and what the rules give up for it is deleted; if not, null and nothing is touched.
+   * the same run's file of that name) and what the rules give up for it is deleted; if not, why, and nothing is touched.
    */
-  private commit(key: Key, part: string, meta: Meta & { created_at?: number }, evict = true): Promise<CiFile | null> {
+  private commit(key: Key, part: string, meta: Meta & { created_at?: number }, evict = true): Promise<CiFile | string> {
     return this.locked(async () => {
       const m = { ...meta, created_at: meta.created_at ?? Date.now() };
       const rows = this.store.ciFiles();
       const plan = this.plan(rows, key, m, evict);
-      if (!plan) return null;
+      if (typeof plan === 'string') return plan;
       await rename(part, this.path(key));
       const row = this.store.putCiFile({ ...key, ...m });
       for (const r of rows) if (r !== plan.was && plan.gone.has(r.id)) await this.remove(r);
@@ -396,18 +403,19 @@ export class CiStore {
     });
   }
 
-  /** Whether a fetched file of `size` would fit in `run`'s spare room now: a check before fetching one, which keeping it makes again. */
-  fits(run: Omit<Key, 'name'>, meta: { kind: string; target: string; size: number; created_at: number }): boolean {
-    return !!this.plan(this.store.ciFiles(), { ...run, name: '' }, meta, false);
+  /** Why a fetched file of `size` wouldn't fit in `run`'s spare room now, or null when it would: a check before fetching one, which keeping it makes again. */
+  refusal(run: Omit<Key, 'name'>, meta: { kind: string; target: string; size: number; created_at: number }): string | null {
+    const plan = this.plan(this.store.ciFiles(), { ...run, name: '' }, meta, false);
+    return typeof plan === 'string' ? plan : null;
   }
 
   /**
    * Keep a file this server fetched itself, as a run's file (a GitHub artifact mirrored for the Releases page, #673):
    * `fetch` writes it into the part folder it is given (in the run's own folder, so the stray sweep clears what a
    * restart cuts off) and returns its path, named as the store names files. Unlike an upload it only takes spare room:
-   * nothing else is deleted for it (#673). Null when it doesn't fit; the part folder goes either way.
+   * nothing else is deleted for it (#673) but what the rules retire anyway. Why, when it doesn't fit; the part folder goes either way.
    */
-  async fetched(run: Omit<Key, 'name'>, meta: Omit<Meta, 'size' | 'sha256'> & { created_at: number }, fetch: (dir: string) => Promise<string>): Promise<CiFile | null> {
+  async fetched(run: Omit<Key, 'name'>, meta: Omit<Meta, 'size' | 'sha256'> & { created_at: number }, fetch: (dir: string) => Promise<string>): Promise<CiFile | string> {
     const dir = dirname(this.path({ ...run, name: 'x' }));
     const part = join(dir, `.${randomBytes(6).toString('hex')}.part`);
     await mkdir(part, { recursive: true });

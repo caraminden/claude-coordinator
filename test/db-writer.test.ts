@@ -42,17 +42,17 @@ test('a write on a stalled disk never holds the event loop; reads go on, stale, 
   const tick = setInterval(() => { worst = Math.max(worst, performance.now() - last); last = performance.now(); }, 10);
   const t0 = performance.now();
   for (let i = 0; i < 4; i++) store.updateTicket(t.id, { title: `new ${i}` }); // 1.6 s of writes on the worker
-  assert.ok(performance.now() - t0 < 100, 'sending writes is instant');
-  // The first read waits READ_WAIT_MS for them, then reads without; the next doesn't wait again.
-  const r0 = performance.now();
+  // Sending didn't wait for the worker: the writes are still queued (and `worst` below shows no send held the loop).
+  assert.ok(w.queued(), 'sending writes is instant: they are still queued');
+  // The first read waits READ_WAIT_MS for them, then reads without (stale, the queue still there); the next don't wait again.
   assert.equal(title(), 'a minion');
-  assert.ok(performance.now() - r0 < READ_WAIT_MS + 100);
-  const r1 = performance.now();
-  for (let i = 0; i < 20; i++) assert.equal(title(), 'a minion');
-  assert.ok(performance.now() - r1 < 50, 'later reads skip the wait while the disk is stalled');
+  assert.ok(w.queued(), 'the read gave up waiting instead of waiting out the queue');
+  // Waiting READ_WAIT_MS on every read would let the 1.6 s of writes land within ~32 reads and the title flip to 'new 3'.
+  for (let i = 0; i < 60; i++) assert.equal(title(), 'a minion', 'later reads skip the wait while the disk is stalled');
   await until('the queued writes to land', () => !w.queued(), 15_000);
   clearInterval(tick);
   assert.ok(performance.now() - t0 >= 1500, 'the writes really were slow');
+  // timing-ok: a true speed bound (the loop is never held), listed for a bench in #1444
   assert.ok(worst < 200, `the event loop was held ${Math.round(worst)} ms`);
   assert.equal(title(), 'new 3', 'they landed in order');
 });
@@ -151,9 +151,8 @@ test('a read in a request still waits only READ_WAIT_MS; awaiting its own writes
   const has = (key: string) => store.db.prepare('SELECT 1 FROM settings WHERE key = ?').get(key) !== undefined;
   await writes.request.run({ seq: 0 }, async () => {
     store.setSetting('mine', 1);
-    const t0 = performance.now();
     assert.equal(has('mine'), false, 'a read gives up waiting: the disk is "stalled"');
-    assert.ok(performance.now() - t0 < READ_WAIT_MS + 100, 'and never holds the server longer than any read');
+    assert.ok(w.queued(), 'and never holds the server for the queue: the write is still queued');
     await ownWrites();
     assert.equal(has('mine'), true, 'once it has awaited its own writes, it sees them');
     writes.request.getStore()!.done = true;
@@ -178,6 +177,7 @@ test('a response waits for its own request\'s writes, however slow, off the even
     await writes.landed!();
     clearInterval(tick);
     assert.equal(seen(), '"yes"', 'a client reading the file sees it');
+    // timing-ok: a true speed bound (the loop is never held), listed for a bench in #1444
     assert.ok(worst < 100, `the event loop was held ${Math.round(worst)} ms`);
     assert.equal(writes.landed!(), null, 'once they have landed, nothing to wait for');
   });
@@ -186,15 +186,14 @@ test('a response waits for its own request\'s writes, however slow, off the even
 
 test('a response whose own writes outlast the wait goes out once, without them (#1244)', async () => {
   const { store, w } = open(READ_WAIT_MS * 20, READ_WAIT_MS * 2);
-  const sent: number[] = [];
-  const res = { destroyed: false, headersSent: false, writeHead() { this.headersSent = true; }, end() { sent.push(performance.now()); } };
-  const t0 = performance.now();
+  const sent: boolean[] = []; // was the write still queued when the reply went out
+  const res = { destroyed: false, headersSent: false, writeHead() { this.headersSent = true; }, end() { sent.push(!!w.queued()); } };
   writes.request.run({ seq: 0 }, () => {
     store.setSetting('slow', 1);
     json(res as never, 200, { ok: true });
   });
   await until('the reply goes out', () => sent.length > 0);
-  assert.ok(sent[0] - t0 < READ_WAIT_MS * 15, `sent after ${Math.round(sent[0] - t0)} ms, not held until the write landed`);
+  assert.equal(sent[0], true, 'sent while the write was still queued, not held until it landed');
   assert.ok(w.drain(5000), 'the write lands');
   assert.equal(sent.length, 1, 'sent once, never held again');
 });

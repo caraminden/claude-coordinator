@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -194,18 +194,25 @@ test("main catches up through a fetch that runs as the scheme owner's GitHub log
 test('a fetch from a remote that stalls gives up after its own limit, and main is caught up from what is there (#468 S07-4)', async () => {
   const r = join(root, 'stalled');
   git(['clone', '--quiet', remote, r], root);
-  // A remote that answers and then says nothing: the "ssh" sleeps (exec'd, so nothing names this folder).
+  // A remote that answers and then says nothing: the "ssh" notes its pid and sleeps far longer than the test (exec'd,
+  // so nothing names this folder). Its stderr goes away so a sleep that outlives git can't hold the fetch open.
   const ssh = join(root, 'ssh-stall');
-  writeFileSync(ssh, '#!/bin/sh\nexec sleep 4\n', { mode: 0o755 });
+  const pidFile = join(root, 'ssh-stall.pid');
+  const sshPid = () => { try { return Number(readFileSync(pidFile, 'utf8')) > 0 ? Number(readFileSync(pidFile, 'utf8')) : 0; } catch { return 0; } }; // never 0: kill(0) is our own group
+  writeFileSync(ssh, `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 60 2>/dev/null\n`, { mode: 0o755 });
   git(['config', 'core.sshCommand', ssh], r);
   git(['remote', 'set-url', 'origin', 'ssh://stall.invalid/x.git'], r);
   const was = mainSync.fetchMs;
   mainSync.fetchMs = 300;
   try {
-    const t0 = Date.now();
     await syncMain(r);
-    assert.ok(Date.now() - t0 < 2500, `took ${Date.now() - t0} ms`);
+    // The remote never answers on its own, so getting back while it is still asleep means the fetch gave up at its limit.
+    // (On a box so slow that the ssh never started inside fetchMs, there is no pid: git gave up before it, which is fine.)
+    const pid = sshPid();
+    if (pid) process.kill(pid, 0); // throws if the remote already ended
   } finally {
     mainSync.fetchMs = was;
+    const pid = sshPid();
+    if (pid) try { process.kill(pid, 'SIGKILL'); } catch {}
   }
 });

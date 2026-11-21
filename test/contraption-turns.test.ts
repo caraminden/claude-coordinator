@@ -11,6 +11,9 @@ import type { TurnPlace } from '../src/claude-link.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
+import { realClock } from '../src/clock.ts';
+import { KILL_AFTER_MS } from '../src/contraption-turns.ts';
+import { FakeClock } from './fake-clock.ts';
 import { bootServer, jsonLines, lines, until, stopTurns, testPins } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
@@ -501,10 +504,19 @@ test('a stopped turn that ignores SIGTERM is killed and frees its session within
   const stubborn = turns.run(mandate, parseTurn({ person: cara.id, session: 'stub', prompt: 'stubborn' }, mandate), (event, data) => evs.push({ event, data }));
   const started = await until('the stubborn turn', () => evs.find((e) => e.event === 'start'));
   await until('claude to start', () => runs().some((r) => r.prompt === 'stubborn'));
-  const t0 = Date.now();
-  turns.cancel(mandate.id, started.data.turn);
-  await stubborn;
-  assert.ok(Date.now() - t0 < 3500, `freed after ${Date.now() - t0} ms`);
+  const clock = new FakeClock();
+  turns.clock = clock;
+  try {
+    turns.cancel(mandate.id, started.data.turn);
+    // SIGTERM is ignored, so only the SIGKILL timer can free it: armed within a few seconds, and nothing frees it before it fires.
+    assert.deepEqual(clock.pending().map((x) => x.ms), [KILL_AFTER_MS]);
+    assert.ok(KILL_AFTER_MS <= 3000, 'a few seconds');
+    assert.ok(!evs.some((e) => e.event === 'end' || e.event === 'error'), 'still running until SIGKILL');
+    clock.advance(KILL_AFTER_MS);
+    await stubborn;
+  } finally {
+    turns.clock = realClock;
+  }
   assert.equal(errorOf(evs), 'canceled');
   assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'stub')!.busy, false);
 });
@@ -531,10 +543,17 @@ test('a drain waits for the contraption\'s running turns, holds its new ones unt
 });
 
 test('a drain stops waiting at its cap and names the turns it will cut; with none running it doesn\'t wait (#319)', async () => {
-  const t0 = Date.now();
-  const idle = await turns.drain(mandate.id, 10_000);
+  const clock = new FakeClock();
+  turns.clock = clock;
+  let idle;
+  try {
+    const draining = turns.drain(mandate.id, 10_000); // a wait arms its first 200 ms timer before drain() yields
+    assert.deepEqual(clock.pending(), [], 'no wait with nothing running');
+    idle = await draining;
+  } finally {
+    turns.clock = realClock;
+  }
   assert.equal(idle.said, null);
-  assert.ok(Date.now() - t0 < 100, 'no wait with nothing running');
   idle.release();
   const evs: Ev[] = [];
   const slow = turns.run(mandate, parseTurn({ person: cara.id, session: 'cap-1', prompt: 'slow' }, mandate), (event, data) => evs.push({ event, data }));

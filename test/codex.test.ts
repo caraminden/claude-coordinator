@@ -315,7 +315,7 @@ test("a review waits behind the person's Codex turn that holds their lock, but n
   rmSync(fakeLog, { force: true });
   let waited = false;
   const other = review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env, onWait: () => (waited = true) });
-  await new Promise((r) => setTimeout(r, 400));
+  await until('the review to say it waits', async () => waited);
   assert.ok(waited, 'it says it waits');
   assert.deepEqual(logged(), [], 'no app-server while the other turn runs');
   rmSync(lock, { recursive: true, force: true });

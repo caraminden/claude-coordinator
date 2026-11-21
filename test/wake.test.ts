@@ -6,6 +6,7 @@ import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Outbox } from '../src/outbox.ts';
 import { pacificTime, parseWakeTime, TimedWakes } from '../src/wake.ts';
+import { FakeClock } from './fake-clock.ts';
 import { stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -45,24 +46,37 @@ test('on a real runner the timer delivers, a wake due mid-turn waits behind the 
   const { chmodSync, writeFileSync } = await import('node:fs');
   const fake = join(root, 'claude-fake');
   writeFileSync(fake, `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', () => setTimeout(() => {
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-}, 400));
+const release = ${JSON.stringify(join(root, 'release'))};
+require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
+  // The turn runs until the test releases it, so "mid-turn" doesn't depend on how long anything takes.
+  const poll = setInterval(() => {
+    if (!require('node:fs').existsSync(release)) return;
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+    process.exit(0);
+  }, 20);
+});
 `);
   chmodSync(fake, 0o755);
   const runner = new Runner(store, () => {}, () => ({}), fake);
+  let queued = false; // the outbox handed the due wake to the minion's lane
+  const onLane = runner.onLane.bind(runner);
+  runner.onLane = ((ticket: number, name: string, step: () => Promise<unknown>) => ((queued = queued || name === 'outbox'), onLane(ticket, name, step))) as typeof runner.onLane;
   const id = minion();
   store.setTicketDir(id, root, null);
-  const outbox = new Outbox(store, runner, { author: 'Citadel' });
+  const fakeNow = new FakeClock(); // the outbox's clock: the wake comes due when the test says
+  const outbox = new Outbox(store, runner, { author: 'Citadel', now: fakeNow.now });
   runner.onTurnStart = (t, ids) => outbox.turnStarted(t, ids);
   await outbox.boot();
   const wakes = new TimedWakes(store, outbox);
   runner.send(id, 'Cara', 'first');
   assert.ok(runner.isRunning(id));
-  const w = wakes.add(id, Date.now() + 100, 'mid-turn wake', 'Cara'); // real clock, real timer: it comes due while the turn runs
-  await new Promise((r) => setTimeout(r, 250));
+  const w = wakes.add(id, fakeNow.now() + 100, 'mid-turn wake', 'Cara');
+  fakeNow.advance(200); // it comes due while the turn is still running
+  const poked = outbox.poke({ type: 'tick' }); // ends once the delivery has run, so not awaited until the turn is released
+  await until('the due wake to queue on the minion lane', async () => queued);
   assert.equal(store.getDelivery(w.id)!.state, 'waiting', 'its delivery waits on the lane behind the running turn');
+  writeFileSync(join(root, 'release'), ''); // the turn ends; the wake, due since, is delivered
+  await poked;
   await until('the wake to be sent', async () => store.getDelivery(w.id)!.state === 'sent');
   await until('the turn to stop', async () => !runner.isRunning(id));
   outbox.stop();

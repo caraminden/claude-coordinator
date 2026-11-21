@@ -26,6 +26,7 @@ import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { clockTime, parseResetTime, ZONE } from './pacific.ts';
+import { realClock, type Clock } from './clock.ts';
 import type { ImageBlock } from './turn-images.ts';
 import { type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { suggestTools, unknownToolName } from './tool-suggest.ts';
@@ -138,7 +139,7 @@ export const DEFAULT_TIMEOUT_SEC = 180;
 /** How long a restart of a contraption waits for its running turns (#319): about a turn's default timeout. */
 export const DRAIN_MS = 3 * 60_000;
 /** How long a stopped turn's claude has between SIGTERM and SIGKILL: on the host it exits in under a second (#319). */
-const KILL_AFTER_MS = 2_000;
+export const KILL_AFTER_MS = 2_000;
 /** Where a blind turn's random folder goes: a path with no login, home or app in it. */
 const BLIND_ROOT = '/tmp';
 interface Blind { root: string | null; cwd: string }
@@ -291,6 +292,9 @@ export class ContraptionTurns {
   /** A tool call that came back is_error, for the daily error digest (src/contraption-errors.ts, #835): set by server.ts. */
   onToolError: (c: ContraptionRow, tool: string, error: string) => void = () => {};
 
+  /** The clock a stopped turn's SIGKILL wait and a drain's wait run on; tests move it (#1444). */
+  clock: Clock = realClock;
+
   constructor(store: Store, contraptions: Contraptions, claude: ClaudePlaces, opts: { dataDir: string; claudeBin: string; podman?: string; env?: NodeJS.ProcessEnv }) {
     this.store = store;
     this.contraptions = contraptions;
@@ -361,12 +365,12 @@ export class ContraptionTurns {
       hold.release();
     };
     const mine = () => [...this.live.values()].filter((t) => t.contraption === contraption);
-    const started = Date.now();
+    const started = this.clock.now();
     const ran = mine().length;
-    while (mine().length && Date.now() - started < capMs) await new Promise((ok) => setTimeout(ok, 200));
+    while (mine().length && this.clock.now() - started < capMs) await new Promise<void>((ok) => this.clock.setTimeout(ok, 200));
     if (!ran) return { said: null, release };
     const left = mine();
-    const waited = `Waited ${Math.round((Date.now() - started) / 1000)} s for ${ran} running turn${ran === 1 ? '' : 's'}`;
+    const waited = `Waited ${Math.round((this.clock.now() - started) / 1000)} s for ${ran} running turn${ran === 1 ? '' : 's'}`;
     if (!left.length) return { said: `${waited} to end.`, release };
     const said = `${waited}: restarting anyway, which cuts off ${left.map((t) => `turn ${t.id} (person ${t.person}, session ${t.session})`).join(', ')}.`;
     console.warn(`contraption ${contraption}: ${said}`);
@@ -867,7 +871,7 @@ export class ContraptionTurns {
       } catch {}
     };
     kill('TERM');
-    setTimeout(() => kill('KILL'), KILL_AFTER_MS).unref();
+    this.clock.setTimeout(() => kill('KILL'), KILL_AFTER_MS).unref();
   }
 
   /** Cancel a contraption's own running turn; false when it has no such turn running. */

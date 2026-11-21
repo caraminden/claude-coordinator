@@ -6,6 +6,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { realClock } from '../src/clock.ts';
+import { FakeClock } from './fake-clock.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -144,11 +146,18 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   runner.send(t.id, 'Cara', 'wait');
   const dir = (runner as any).turns.get(t.id).dir;
   assert.ok(!existsSync(join(dir, 'pid.json')), 'stopped before the wrapper started claude');
-  const started = Date.now();
-  runner.stop(t.id);
-  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
-  assert.ok(!runner.isRunning(t.id), 'the turn ended');
-  assert.ok(Date.now() - started < 8000, `ended after ${Date.now() - started} ms`);
+  // The stop's kill timers run on a clock nobody moves: the turn can only end by the signal sent once claude
+  // starts, never by the SIGKILL retry, which would need the clock advanced by stopKillMs.
+  const clock = new FakeClock();
+  runner.clock = clock;
+  try {
+    runner.stop(t.id);
+    assert.ok(clock.pending().some((p) => p.ms === runner.stopKillMs), 'the SIGKILL retry is armed');
+    await until('the turn to stop', async () => !runner.isRunning(t.id));
+    assert.ok(!runner.isRunning(t.id), 'the turn ended without the clock moving');
+  } finally {
+    runner.clock = realClock;
+  }
   assert.equal(store.getTicket(t.id)!.status, 'idle');
 });
 

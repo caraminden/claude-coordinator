@@ -71,9 +71,10 @@ test('with plenty of life in the token, runs go side by side and nothing refresh
   const dir = home(9 * DAY);
   const a = await codexLock(dir, () => {}, opts(dir));
   assert.deepEqual([a.serial, a.refreshed, locked(dir)], [false, false, false], 'the first run holds nothing while it runs');
-  const b = await codexLock(dir, () => assert.fail('the second run waited'), opts(dir));
+  let reads = 0; // the lock reads its clock once to start and once at the end; each wait round reads it again
+  const b = await codexLock(dir, () => assert.fail('the second run waited'), { ...opts(dir), now: () => (reads++, 0) });
   assert.equal(b.serial, false);
-  assert.ok(b.waitedMs < 1000);
+  assert.equal(reads, 2, 'the second run did not wait');
   assert.deepEqual(refreshes(dir), []);
   a.unlock(), b.unlock();
 });
@@ -103,8 +104,11 @@ test('a run stays serial when the refresh fails, the token is short-lived or it 
   const a = await codexLock(failed, () => {}, opts(failed, { FAKE: 'fail' }));
   assert.deepEqual([a.serial, a.refreshed, locked(failed)], [true, false, true], 'a stale token nobody could refresh');
   let waited = false;
-  const b = codexLock(failed, () => (waited = true), { ...opts(failed, { FAKE: 'fail' }), noteMs: 100 });
-  await new Promise((r) => setTimeout(r, 500));
+  let t = 0; // its clock moves by hand: the note is due once noteMs have passed on it
+  const b = codexLock(failed, () => (waited = true), { ...opts(failed, { FAKE: 'fail' }), noteMs: 100, now: () => t });
+  assert.equal(waited, false, 'not before noteMs');
+  t = 100;
+  await until('the next run to say it waits', async () => waited);
   assert.ok(waited, 'the next run waits for it, and says so');
   a.unlock();
   (await b).unlock();

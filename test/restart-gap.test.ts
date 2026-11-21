@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { Agent, createServer as createHttpServer, request, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
@@ -50,6 +50,7 @@ test('an MCP call made while the server is down goes through once the next one i
   const port = await freePort();
   const call = threadMcp(port);
   const result = call('set_thread_status', { note: 'still going' });
+  // timing-ok: setup pacing only. If the box is slow and the server comes up first, the call just goes through on its first try; nothing asserts how long this took.
   await new Promise((r) => setTimeout(r, 700)); // the first try was refused and the retry (after 500 ms) is pending
   const seen: string[] = [];
   const api = await listen(port, (req, res) => {
@@ -81,7 +82,8 @@ test('a write cut off mid-request is not sent again, as it may have run', async 
 });
 
 test('on SIGTERM the server ends its event streams and exits within the grace period', async () => {
-  const { base, cookie, proc: server } = await bootServer({ root, env: { TURN_UNITS: '0' } });
+  const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
+  const { base, cookie, proc: server } = await bootServer({ root, log, env: { TURN_UNITS: '0' } });
   procs.push(server);
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(health.interruptible, 0);
@@ -89,12 +91,14 @@ test('on SIGTERM the server ends its event streams and exits within the grace pe
   const reading = (async () => {
     for await (const _ of stream.body!);
   })();
-  const started = Date.now();
-  const exited = new Promise<number | null>((r) => server.once('exit', r));
+  const closed = new Promise<number | null>((r) => server.once('close', r));
   server.kill('SIGTERM');
   await reading; // the stream ends rather than hanging on
-  assert.equal(await exited, 0);
-  assert.ok(Date.now() - started < 6000, `took ${Date.now() - started} ms`);
+  assert.equal(await closed, 0);
+  // It left through server.close(), not by its grace timer, which logs how many connections it cut off.
+  const out = readFileSync(log, 'utf8');
+  assert.match(out, /SIGTERM: finishing requests/);
+  assert.doesNotMatch(out, /still open after/, 'the grace period ran out');
 });
 
 // Requests made while the server restarts wait in systemd's socket for the next one, so every second the old
@@ -113,7 +117,8 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
     contraption.closeAllConnections();
     contraption.close();
   });
-  const { base, cookie, call, proc: server } = await bootServer({ root: mkdtempSync(join(root, 'ws-')), env: { TURN_UNITS: '0' } });
+  const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
+  const { base, cookie, call, proc: server } = await bootServer({ root: mkdtempSync(join(root, 'ws-')), log, env: { TURN_UNITS: '0' } });
   procs.push(server);
   const made = await call('/api/contraptions', { name: 'stub', title: 'Stub', port: contraptionPort, open_paths: ['/ws'] });
   assert.equal(made.status, 201, JSON.stringify(made.data));
@@ -135,11 +140,13 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
   });
   const streamEnded = new Promise((r) => stream.resume().on('end', r));
 
-  const started = Date.now();
-  const exited = new Promise<number | null>((r) => server.once('exit', r));
+  const closed = new Promise<number | null>((r) => server.once('close', r));
   server.kill('SIGTERM');
   await Promise.all([streamEnded, wsClosed]);
-  assert.equal(await exited, 0);
+  assert.equal(await closed, 0);
   agent.destroy();
-  assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
+  // Exiting at once means server.close() finished; sitting out the grace logs how many connections it cut off.
+  const out = readFileSync(log, 'utf8');
+  assert.match(out, /SIGTERM: finishing requests/);
+  assert.doesNotMatch(out, /still open after/, 'it sat out its grace period');
 });

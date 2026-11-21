@@ -118,10 +118,11 @@ export interface CodexLock {
  * `env[LOCK_ENV]` names the holder, the caller runs inside that holder's serial turn (a review from a
  * Codex turn's shell): it goes ahead, since waiting would wait on itself (#468 S04-6).
  */
-export async function codexLock(home: string, onWait: () => void, opts: { env?: Record<string, string | undefined>; bin?: string; inTurn?: boolean; noteMs?: number } = {}): Promise<CodexLock> {
+export async function codexLock(home: string, onWait: () => void, opts: { env?: Record<string, string | undefined>; bin?: string; inTurn?: boolean; noteMs?: number; now?: () => number } = {}): Promise<CodexLock> {
   const env = opts.env ?? process.env;
   const noteMs = opts.noteMs ?? (Number(env.CITADEL_CODEX_WAIT_NOTE_MS) || 3000);
-  const began = Date.now();
+  const now = opts.now ?? Date.now; // a test's own clock for the wait note and waitedMs (#1444); the lock's age stays on file times
+  const began = now();
   mkdirSync(home, { recursive: true });
   const dir = join(home, 'citadel-turn.lock');
   for (let said = false; ; ) {
@@ -158,13 +159,13 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       if (!alive && (existsSync(join(dir, 'refreshing')) ? age > REFRESH_MAX_MS : pid || age > 10_000)) rmSync(dir, { recursive: true, force: true });
       else {
         // A login check takes a second or so: only a longer wait is worth a line in the chat.
-        if (!said && Date.now() - began >= noteMs) (said = true), onWait();
+        if (!said && now() - began >= noteMs) (said = true), onWait();
         await new Promise((r) => setTimeout(r, said ? 1000 : 200));
       }
     }
   }
   const unlock = () => rmSync(dir, { recursive: true, force: true });
-  const waitedMs = Date.now() - began;
+  const waitedMs = now() - began;
   try {
     let life = tokenLife(home);
     const before = life;

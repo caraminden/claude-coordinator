@@ -18,7 +18,7 @@ import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
 import { loadingLine, tabs as uiTabs } from './ui/state.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { allSchemes, closeReleases, opening, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage, targetNames } from './releases.js';
+import { allSchemes, closeReleases, opening, serverScheme, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage, targetNames } from './releases.js';
 import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD } from './status.js';
 
 const REFRESH_MS = 30_000;
@@ -321,9 +321,12 @@ export function releasesShell() {
     const words = (st, n, noun = 'problem') => (n ? `${n} ${noun}${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]);
     if (tab === 'status') {
       if (!statusData) return { st: 'none', line: '' };
+      // A scheme's dot is its apps'; the server's verdict sits only on the row of the scheme that ships it.
       const apps = statusData.apps.filter((a) => a.scheme === id);
-      const v = [statusData.citadel.verdict, ...apps.map((a) => a.verdict)].reduce((w, x) => (STATUS_RANK[x.tone] > STATUS_RANK[w.tone] ? x : w));
-      return { st: STATUS_DOT[v.tone], line: apps.length ? `${apps.length} app${apps.length === 1 ? '' : 's'} · ${STATUS_WORD[v.tone]}` : `no app · ${STATUS_WORD[v.tone]}` };
+      const verdicts = [...(id === serverScheme() ? [statusData.citadel.verdict] : []), ...apps.map((a) => a.verdict)];
+      if (!verdicts.length) return { st: 'none', line: 'no app' };
+      const v = verdicts.reduce((w, x) => (STATUS_RANK[x.tone] > STATUS_RANK[w.tone] ? x : w));
+      return { st: STATUS_DOT[v.tone], line: `${apps.length ? `${apps.length} app${apps.length === 1 ? '' : 's'}` : 'server'} · ${STATUS_WORD[v.tone]}` };
     }
     if (CI_TABS.has(tab)) {
       if (!s) return { st: 'none', line: 'no CI' };

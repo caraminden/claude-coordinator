@@ -493,7 +493,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-why .ci-li-name { white-space: normal; font-size: 0.92em; }
 .ci-li-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-li-state { grid-column: 2; font-size: 0.8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ci-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }
+.ci-detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; align-content: start; }
 .ci-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
 .ci-head h3 { margin: 0; }
 .ci-tabs { gap: 0.25rem; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
@@ -628,8 +628,8 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 [data-step="4"].st-seg, .st-key[data-step="4"]::before { background: color-mix(in srgb, var(--running) 75%, var(--panel)); }
 [data-step="5"].st-seg, .st-key[data-step="5"]::before { background: color-mix(in srgb, var(--running) 88%, var(--panel)); }
 [data-step="6"].st-seg, .st-key[data-step="6"]::before { background: var(--running); }
-/* The shelf's heading is uppercase; its chips aren't. */
-.status-chip { text-transform: none; letter-spacing: normal; font-weight: 400; }
+/* The shelf's heading is uppercase; its three chips (Releases, CI, Status) aren't, so they look alike (#1423). */
+.ci-chip { text-transform: none; letter-spacing: normal; font-weight: 400; }
 @media (max-width: 800px) {
   .st-tiles { grid-template-columns: minmax(0, 1fr); }
 }

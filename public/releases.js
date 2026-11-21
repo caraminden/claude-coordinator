@@ -271,13 +271,16 @@ export function releaseTrouble(id, now = Date.now()) {
     const n = tv.next;
     if (n && [n, ...n.changes].some((p) => stuckFor(p, now))) out.push(`${tv.target.name} is stuck: ${n.waitingOn ?? stageName(n.stage)}`);
     const open = tv.recent.filter((r) => ['fixing', 'idle'].includes(r.failure?.next.kind) && now - (r.started ?? 0) < 12 * 3_600_000).length;
-    if (open) out.push(`${tv.target.name}: ${open} failed ship tr${open === 1 ? 'y' : 'ies'} not shipped since`);
+    if (open) out.push(`${tv.target.name}: ${open} failed ship tr${open === 1 ? 'y' : 'ies'} in 12 h, not shipped yet`);
   }
   return out;
 }
 
 /** True once the first read is in, for a dot that would otherwise say "all clear" before it knows. */
 export const releasesLoaded = () => loaded;
+
+/** The scheme that ships Citadel's own server (its target is citadel-server), whose row carries the server's Status; null before the read. */
+export const serverScheme = () => [...schemes].find(([, s]) => s.targets.some((tv) => tv.target.id === CITADEL_TARGET_ID))?.[0] ?? null;
 
 /** A scheme's target names, for its line in the page's list when it has no CI. */
 export const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');

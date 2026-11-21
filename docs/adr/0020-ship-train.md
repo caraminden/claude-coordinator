@@ -56,11 +56,12 @@ the last one in line waited for every run ahead of it.
   That path now holds only when the run has another red that may be the train's own (below).
 - **Ship through main's red** (#1478; Cara, 2026-11-21, asked on #1430 "if it is red on main, do we resume the deployment
   and just fix it separately?", then picked "Ship through" on its card). When every real failure is main's red, no
-  ship on the train changed one of those tests or what it imports, and every other failed file passed alone (a flake),
-  the train is no worse than main: the gate counts as green and it ships, riders and all. The
+  ship on the train changed one of those tests or what it imports, and every other failed file passed alone and is a
+  known flake no ship changed (#1419's rule), the train is no worse than main: the gate counts as green and it ships, riders and all. The
   output says "SHIPPING THROUGH MAIN'S RED" and each ship's shipped line names main's red test ("shipped through main's
   red on …"), so the Taskmaster sees main still needs its fix; the retro log says "shipped through main's red". Still
-  #1430's path: a second real failure that passes on main, a failed file never rerun or whose rerun was killed, or a
+  #1430's path: a second real failure that passes on main, a failed file never rerun or whose rerun was killed, a
+  flake never seen on another branch, the leak guard's red (processes left running), or a
   ship that changed main's red test (the front alone is refused, its change doesn't make it pass). A burn-in red and a
   test that only times out on main are never main's red. The accepted cost: a second break in the same test stays
   hidden until main's fix ships.

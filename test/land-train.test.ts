@@ -770,6 +770,24 @@ test("a ship red on main's red test plus a new flake, or the leak guard, doesn't
   }
 });
 
+// A burn-in red is the ship's own racy test, even when main is red on that test too: no ship through (#1443, #1478).
+test("a ship whose burn-in is red doesn't ship through main's red on the same test (#1478)", async () => {
+  const l = await line(
+    [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, { change: ['test/real.test.ts', 'racy\n'] }],
+    (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn', ...shared(d) }),
+    (r) => {
+      r.commit(r.source, 'test/real.test.ts', "throw new Error('red on main');\n");
+      seen(join(r.dir, 'shared'), ['test/slow.test.ts']);
+    },
+  );
+  const [first, one] = await l.go();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(one.status, 1, one.stderr);
+  assert.doesNotMatch(one.stderr, /SHIPPING THROUGH|shipped through|red on main/);
+  assert.match(one.stderr, /land: a new or changed test failed its burn-in in CI \(https:\/\/ci\/\d+\)/);
+  l.done();
+});
+
 // A ship that changed main's red test and left it red is still no culprit for a bisect, but it hears its change doesn't make
 // the test pass, rather than "not this change", and takes no retry (#1430 review).
 test("a ship that changes main's red test and leaves it red hears so, with no retry (#1430)", async () => {

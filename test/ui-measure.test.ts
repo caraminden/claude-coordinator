@@ -194,3 +194,11 @@ test('the sweep lists the view before --click changes it', { skip }, async () =>
   assert.ok(has(at(r, 1440), 'click-no-result', '#dead'), JSON.stringify(r.pages[0].sweep) + JSON.stringify(at(r, 1440)));
   assert.equal(r.pages[0].sweep.skipped_changed, 0);
 });
+
+test('a wrong browser path is a setup error (exit 2), not a findings exit', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const script = join(import.meta.dirname, '..', 'kit', 'skills', 'critique', 'scripts', 'ui-measure.mjs');
+  const r = spawnSync(process.execPath, [script, '--chrome', '/nonexistent/chrome', 'http://127.0.0.1:1/'], { encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /^ui-measure: no browser at \/nonexistent\/chrome/m);
+});

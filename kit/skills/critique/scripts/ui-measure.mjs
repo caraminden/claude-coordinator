@@ -626,6 +626,8 @@ async function sweep(browser, url, width, o, slug, rec, list, args) {
 export async function measure(o) {
   const bin = o.chrome || process.env.CHROME || findChrome();
   if (!bin) throw new Error('no browser: install Playwright\'s chrome-headless-shell (npx playwright install chromium-headless-shell) or pass --chrome');
+  // A wrong path stops here as a setup error (exit 2), not as an unhandled spawn error that reads like findings (exit 1).
+  if (!existsSync(bin)) throw new Error(`no browser at ${bin}: fix --chrome or CHROME`);
   if (o.shots) mkdirSync(o.shots, { recursive: true });
   const browser = launch(bin);
   const pages = [];

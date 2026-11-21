@@ -282,7 +282,9 @@ test('only the owner (or an admin) pauses, resumes and stops; paused time is the
   await until('job.stop', () => agent.jobs('job.stop').some((s) => s.id === j.id));
   await wakes(() => state(j.id, 'stopped'));
   assert.equal((await job(j.id)).state, 'stopped');
-  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running', 'paused', 'running', 'ended']);
+  // The job's chat card moves to 'ended' after its state is saved (the server places it, then the minion is woken): wait for it, don't read the instant the state flips.
+  const stages = await until('the ended card', async () => { const st = (await events('job')).filter((e) => e.job === j.id).map((e) => e.stage); return st.at(-1) === 'ended' && st; });
+  assert.deepEqual(stages, ['waiting', 'running', 'paused', 'running', 'ended']);
 });
 
 test('results upload under the job\'s and the scheme\'s caps', async () => {

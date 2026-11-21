@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
-import { until } from './wait.ts';
+import { until, holds } from './wait.ts';
 import { settled as settledInProcess } from '../src/settled.ts';
 import { isTurnNote } from '../src/codex.ts';
 
@@ -210,7 +210,7 @@ export function agentToken(data: string, id: number): string {
   return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);
 }
 
-export { until };
+export { until, holds };
 
 /**
  * Wait until this process's own background work is done (#1437): its DB write workers' queues, session saves and

@@ -1,13 +1,12 @@
 // The release monitor (#626, specs/release-monitor.md; data from #625's GET /api/releases and `releases` event): each
 // scheme's targets under its row in the Schemes list (take A's stage track, the whole release's estimate, the current version,
-// a hover with the detail), the Releases page over the chat (a scheme's cards, take D; All's stage board, take E, on
-// desktop and every member scheme's cards on a phone) and the chip beside a minion's PR info (take F).
+// a hover with the detail), the Releases tab of the Releases page (a scheme's cards, take D; All's stage board, take E, on
+// desktop and every member scheme's cards on a phone; the page itself, with the CI list and tabs, is ci.js's: #1423) and the
+// chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, icon, pacificClock, schemeIcon, view } from './base.js';
-import { canBack, canForward, goBack, goForward } from './navstack.js';
+import { ago, api, fileUrl, h, pacificClock, schemeIcon, view } from './base.js';
 import { iconSrc } from './schemes.js';
-import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
 import { claimsBlock, loadClaims, loadWatch, onHolderTicket, watchBlock } from './release-extras.js';
@@ -99,7 +98,6 @@ const stageName = (key) => {
 const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
 /** Where Releases opens from scheme `id` with no scope named (Josh, 2026-11-19): that scheme's own, and every scheme's only from Citadel (project 2). */
-export const defaultScope = (id) => (Number(id) === 2 ? 'all' : Number(id));
 
 const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
@@ -154,8 +152,8 @@ function estimate(next) {
 }
 
 /** Remember where the page was opened from, for its ×. */
-function opening() {
-  if (!/\/releases\//.test(location.hash)) returnTo = location.hash;
+export function opening() {
+  if (!/^#\/p\/\d+\/(releases|ci)(\/|$)/.test(location.hash)) returnTo = location.hash;
 }
 
 /**
@@ -178,11 +176,6 @@ export function releaseRows(projectId) {
     versionLink(tv.next.number != null ? tv.next : { ...tv.next, link: null }, 'rel-ver', true),
     stageTrack(tv.next.stages, tv.next));
   }));
-}
-
-/** The Releases link beside the Schemes heading, styled as Browse beside Artifacts: opens All. */
-export function releasesLink() {
-  return h('a', { class: `browse${view?.main === 'releases' && page?.scope === defaultScope(view.projectId) ? ' active' : ''}`, href: pageHref(defaultScope(view?.projectId)), onclick: opening, title: Number(view?.projectId) === 2 ? 'Releases of every scheme you\'re a member of' : 'This scheme\'s releases' }, 'Releases');
 }
 
 // ---------- tracks ----------
@@ -226,26 +219,29 @@ function changeNow(next, c) {
 
 let pageEl = null;
 
-/** Open the page on `scope` ('all' or a scheme's id), with change `hl` (a ticket id) highlighted. */
-export function setReleasesPage(scope, hl) {
+/** Open the Releases tab on `scope` ('all' or a scheme's id), with change `hl` (a ticket id) highlighted; redraws an open one. */
+export function setReleasesPage(scope, hl = null) {
+  if (page?.scope === scope && page?.hl === hl) return;
   page = { scope, hl };
+  if (pageEl?.isConnected) fillPage();
 }
 
-/** The Releases page over the chat column (on a phone, the whole screen with a back arrow). */
+/** The Releases tab's body, kept by this module as releases arrive (the page around it is ci.js's). */
 export function releasesPage() {
   if (loaded) refreshExtras();
-  pageEl = h('section', { class: 'releases-main', onkeydown: (e) => { if (e.key === 'Escape') closePage(); } });
+  pageEl = h('div', { class: 'rel-body' });
   fillPage();
   return pageEl;
 }
 
-function closePage() {
+/** The page's ×: back where it was opened from. */
+export function closeReleases() {
   location.hash = returnTo ?? `#/p/${view.projectId}`;
   returnTo = null;
 }
 
 /** The schemes All covers, in the Schemes list's order, then any it doesn't list. */
-function allSchemes() {
+export function allSchemes() {
   const order = (view?.projects ?? []).map((p) => p.id);
   const rank = (id) => (order.includes(id) ? order.indexOf(id) : order.length + id);
   return [...schemes.keys()].filter((id) => member.has(id)).sort((a, b) => rank(a) - rank(b));
@@ -253,55 +249,14 @@ function allSchemes() {
 
 function fillPage() {
   const scope = page?.scope ?? 'all';
-  const ids = allSchemes();
-  const chipIds = scope !== 'all' && !ids.includes(scope) ? [...ids, scope] : ids;
-  const chip = (s, label) => h('a', { class: `chip${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined }, label);
-  // The chat header's ‹ › × (thread.js renderTicketHead): its buttons, icons and history, at the end of the pills' line.
-  const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
-  const body = !loaded ? [loadingLine('Loading releases…')]
-    : scope === 'all' ? allView(ids)
-      : schemeCards(scope, true);
-  // On a phone the chips give way to one box naming the scheme you're on, which opens the list of them (#820, Cara
-  // picked take A, 2026-11-16): a strip of 11 chips showed 3 and could hide the one you were on.
-  const picker = h('button', { type: 'button', class: 'rel-pick', 'aria-haspopup': 'dialog', title: 'Pick a scheme', onclick: () => openPicker(scope, chipIds) },
-    pickIcon(scope), h('span', { class: 'rel-pick-name' }, scopeName(scope)),
-    h('span', { class: 'rel-pick-sub' }, scope === 'all' ? `${ids.length} schemes` : targetNames(scope)), h('span', { class: 'rel-pick-caret', 'aria-hidden': 'true' }, '▾'));
-  pageEl.replaceChildren(
-    h('div', { class: 'ticket-head rel-head' },
-      h('div', { class: 'row' }, close('narrow-only', 'back'), h('h2', {}, 'Releases', h('span', { class: 'wide-only' }, ` · ${scopeName(scope)}`))),
-      h('div', { class: 'head-sub rel-sub' },
-        h('nav', { class: 'chips rel-chips', 'aria-label': 'Schemes' }, chip('all', 'All'), chipIds.map((id) => chip(id, schemeName(id)))),
-        picker,
-        h('span', { class: 'spacer' }),
-        h('span', { class: 'head-nav' },
-          h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
-          h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
-          close('wide-only', 'close')))),
-    h('div', { class: 'rel-body' }, body));
+  pageEl.replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? [allView(allSchemes())] : [schemeCards(scope, true)].flat()));
   // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
   const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');
   if (hl) { page.shown = true; hl.scrollIntoView({ block: 'nearest' }); }
 }
 
-const scopeName = (scope) => (scope === 'all' ? 'All' : schemeName(scope));
-const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');
-/** The scheme's icon for the picker, its initial when it has none (so the names line up), a mark for All. */
-function pickIcon(scope) {
-  if (scope === 'all') return h('span', { class: 'rel-pick-icon all', 'aria-hidden': 'true' }, '∗');
-  // The initial sits under the icon, so it shows while the icon loads or if it fails (TripPresenter's 404s).
-  const p = schemeOf(scope);
-  return h('span', { class: 'rel-pick-icon', 'aria-hidden': 'true' }, schemeName(scope).slice(0, 1), p && iconSrc(p) ? schemeIcon(p) : '');
-}
-
-/** The phone's list of schemes: a sheet along the bottom (the kit's dialog), the one you're on ticked. */
-function openPicker(scope, ids) {
-  const row = (s) => h('a', { class: `rel-opt${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined, onclick: () => dialog.close() },
-    pickIcon(s), h('span', { class: 'rel-opt-name' }, scopeName(s)),
-    h('span', { class: 'rel-opt-sub' }, s === 'all' ? 'every scheme' : targetNames(s)), h('span', { class: 'rel-opt-check', 'aria-hidden': 'true' }, scope === s ? '✓' : ''));
-  // new-scheme: project.css's sizing, a sheet along the bottom on phones, as briefstart.js and ultrareview.js use it.
-  const dialog = openDialog({ title: 'Releases of', className: 'new-scheme rel-sheet',
-    body: h('nav', { class: 'rel-opts', 'aria-label': 'Schemes' }, row('all'), ids.map(row)) });
-}
+/** A scheme's target names, for its line in the page's list when it has no CI. */
+export const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');
 
 /** The server's own deploy: the post-deploy watch is this server's, so only Citadel's card shows it. */
 const CITADEL_TARGET_ID = 'citadel-server';

@@ -35,7 +35,7 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
     writeFileSync(bad, planted);
     const broken = join(dir, 'broken.ps1');
     writeFileSync(broken, "if ($true) { Write-Output 'x'\n");
-    const files = [...ps1s('tools/ci-runner'), ...ps1s(kit), ...ps1s('kit/skills/run-on-windows/scripts/wco'), ...ps1s('public'), ...['gpu.ps1', 'gpu-host.ps1', 'add-scheme.ps1'].map((f) => join(root, 'tools/win-test-box', f))];
+    const files = [...ps1s('tools/ci-runner'), ...ps1s(kit), ...ps1s('kit/skills/run-on-windows/scripts/wco'), ...ps1s('kit/skills/run-on-windows/scripts/desktop-launcher'), ...ps1s('public'), ...['gpu.ps1', 'gpu-host.ps1', 'add-scheme.ps1'].map((f) => join(root, 'tools/win-test-box', f))];
     const scratch = join(dir, 'scratch');
     mkdirSync(scratch);
     const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, ...files, bad, broken], { encoding: 'utf8', env: { ...process.env, TMPDIR: scratch } });

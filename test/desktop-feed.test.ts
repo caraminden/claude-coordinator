@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ciPublisher, DesktopError, DesktopFeeds, desktopTargetOf, KEEP } from '../src/desktop-feed.ts';
-import { Launchers } from '../src/desktop-launcher.ts';
+import { LAUNCHER_SOURCES, Launchers } from '../src/desktop-launcher.ts';
 import { desktopRoutes } from '../src/routes/desktop.ts';
 
 let root: string;
@@ -107,11 +107,13 @@ test('the launcher is built once per source, with its version from the source; a
   const src = await mkdtemp(join(root, 'lsrc-'));
   await writeFile(join(src, 'Launcher.cs'), 'public const int Version = 4;');
   await writeFile(join(src, 'Launcher.csproj'), '<Project/>');
+  await writeFile(join(src, 'Trial.cs'), '// rules');
   let builds = 0;
   let fail = false;
   const launchers = new Launchers({
     src, cache: join(root, 'lcache'), dotnet: 'dotnet',
-    build: async (_d, _dir, out) => {
+    build: async (_d, dir, out) => {
+      assert.equal(await readFile(join(dir, 'Trial.cs'), 'utf8'), '// rules', 'every source is copied into the build folder');
       builds++;
       if (fail) throw new Error('no sdk');
       await mkdir(out, { recursive: true });
@@ -130,6 +132,13 @@ test('the launcher is built once per source, with its version from the source; a
   assert.equal(await launchers.get(), null);
   assert.equal(await launchers.get(), null);
   assert.equal(builds, 2, 'not retried at once');
+});
+
+test('the launcher build copies every file Launcher.csproj compiles', async () => {
+  const proj = await readFile(join(import.meta.dirname, '../kit/desktop-launcher/Launcher.csproj'), 'utf8');
+  const compiled = [...proj.matchAll(/<Compile Include="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(compiled.length >= 2);
+  for (const f of compiled) assert.ok(LAUNCHER_SOURCES.includes(f), `${f} is in SOURCES`);
 });
 
 test("CI's publisher publishes a run's build once and tells the Taskmaster, waits for a missing file, and reports a failure once", async () => {

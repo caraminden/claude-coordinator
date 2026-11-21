@@ -62,7 +62,7 @@ test('parked minions whose note names the changed rule, and the chains behind th
 
 let srv: Booted;
 before(async () => { srv = await bootServer(); });
-after(() => srv.stop());
+after(() => srv?.stop());
 
 test('through the server: a person\'s Settings save mails the Taskmaster about a minion parked under the old wording', async () => {
   const p = (await srv.call('/api/projects', { name: 'P' })).data;

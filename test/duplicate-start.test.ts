@@ -19,7 +19,7 @@ before(async () => {
   mkdirSync(join(shared, 'handoffs'), { recursive: true });
   for (const f of ['x', 'y', 'z']) writeFileSync(join(shared, 'handoffs', `${f}.md`), `# ${f}\n`);
 });
-after(() => srv.stop());
+after(() => srv?.stop());
 
 const start = async (title: string, message: string, extra: object = {}) => {
   const tm = (await srv.call(`/api/projects/${p.id}`)).data.coordinator;

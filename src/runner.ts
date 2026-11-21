@@ -733,7 +733,7 @@ export class Runner {
     const shared = project && this.sharedDir(project);
     // Its pushes and gh calls go out as the person the minion's turns run for, as from the turn (#911): the box's gh
     // login can't see a member's private repo. Its gh folder is the person's, since the land outlives the turn's folder.
-    // Outside a turn (a fast-mode verify, a queued hand-off) its last person, while still an enabled member, else the owner (#1449).
+    // Outside a turn (a fast-mode verify, a queued hand-off) its last person while still in the scheme (canSee, as turnPayer) and enabled, else the owner (#1449).
     const live = this.turns.has(ticket.id) ? this.store.getSetting<TurnState>(turnKey(ticket.id))?.person : null;
     const last = project ? payerInScheme(this.store, project, ticket.person_id) : ticket.person_id;
     const person = live ?? (project && this.store.getUser(last ?? -1)?.disabled_at ? project.owner_id : last);

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, until, PASSWORD, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -92,7 +93,7 @@ for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
     console.log(`# ${label}: the kept chat showed while ${held.length} connection(s) to the server were held open`);
     await shoot(page, `${label}-offline.png`);
     // It stays as it is, saying so, while there is no server.
-    await page.eval('new Promise((r) => setTimeout(r, 500))');
+    await holds('the chat stays as it is', async () => (await page.eval(chip)) === 'Catching up…' && (await page.eval(said('hello from before'))) === true, { ms: 500 });
     assert.equal(await page.eval(chip), 'Catching up…');
     assert.equal(await page.eval(said('hello from before')), true);
   });

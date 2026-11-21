@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { isNetworkFailure, MAX_NET_RESUMES, Runner } from '../src/runner.ts';
-import { lines, stopTurns, testPins } from './helpers.ts';
+import { holds, lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -138,7 +138,7 @@ test('an outage waits for the probe, backing off, then resumes with the messages
   // The probe backs off, doubling up to the cap, and no turn starts while it fails.
   await until('four failed probes', () => probes.length >= 4);
   assert.deepEqual(probes.slice(0, 4), [20, 40, 80, 80]);
-  await sleep(100);
+  await holds('the queued message starts no turn into the outage', () => turnsRun() === before + 1, { ms: 100 });
   assert.equal(turnsRun(), before + 1, 'the queued message did not start a turn into the outage');
   setRelease('ok');
   up = true;
@@ -161,7 +161,7 @@ test('one probe serves every waiting thread, and each resumes', async () => {
   const [a, b] = [minion(), minion()];
   await turn(a, OUTAGE);
   await turn(b, OUTAGE);
-  await sleep(150);
+  await holds('the second wait starts no probe of its own', () => probes.length === 1, { ms: 150 });
   assert.equal(probes.length, 1, 'one loop: the second wait started no probe of its own while the first was under way');
   const before = turnsRun();
   setRelease('ok');
@@ -226,7 +226,7 @@ test(`it stops retrying after ${MAX_NET_RESUMES} network resumes in a row`, asyn
   assert.equal(store.getTicket(id)!.note, `Network: stopped retrying after ${MAX_NET_RESUMES} resumes`);
   assert.match(events(id, 'error').at(-1)!, /EAI_AGAIN[\s\S]*resumed 3 times in a row after a network outage, so it stopped retrying/);
   assert.equal(pushes.length, 1, 'giving up pushes, as any failure does');
-  await sleep(200);
+  await holds('no more turns', () => turnsRun() - before === 1 + MAX_NET_RESUMES, { ms: 200 });
   assert.equal(turnsRun() - before, 1 + MAX_NET_RESUMES, 'no more turns');
   assert.equal(runner.netWait(id), null);
   // A person's message starts the count over.
@@ -255,7 +255,7 @@ test("a person's message that arrives first wins, and takes the held messages wi
   assert.doesNotMatch(lastPrompt(), /network or the model's API was unreachable/, 'their turn, not a resume');
   assert.equal(runner.netWait(id), null);
   up = true;
-  await sleep(150);
+  await holds('no resume after it', () => turnsRun() === before + 1, { ms: 150 });
   assert.equal(turnsRun(), before + 1, 'no resume after it');
 });
 
@@ -271,7 +271,7 @@ test('a stop or a dismissal ends the wait', async () => {
   assert.equal(runner.netWait(b), null);
   const before = turnsRun();
   up = true;
-  await sleep(200);
+  await holds('neither resumed', () => turnsRun() === before, { ms: 200 });
   assert.equal(turnsRun(), before, 'neither resumed');
   setRelease('ok');
   runner.send(a, 'Cara', 'carry on');
@@ -336,7 +336,7 @@ test("the wait stays saved until the resume's turn starts, so a restart during t
     await turn(id, OUTAGE);
     const before = turnsRun();
     up = true;
-    await sleep(150);
+    await holds('the resume waits for the save', () => turnsRun() === before, { ms: 150 });
     assert.equal(turnsRun(), before, 'the resume waits for the save');
     assert.ok(runner.netWait(id), 'and the wait is still saved for the next server');
   } finally {

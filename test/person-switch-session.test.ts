@@ -8,7 +8,7 @@ import { Runner } from '../src/runner.ts';
 import { ticketWorktree } from '../src/build-output.ts';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { projectSlug, restoreAhead, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
-import { jsonLines, stopTurns, testPins } from './helpers.ts';
+import { jsonLines, holds, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -169,7 +169,7 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   assert.equal(turns()[0].resume, 'kept');
   // The restore ahead on a worker failed too (#612): only the turn start's own try says so, once.
   assert.equal(notes(t.id).filter((n) => n.startsWith('Could not restore the session from the database')).length, 1, notes(t.id).join('\n'));
-  await new Promise((res) => setTimeout(res, 300)); // the failed turn's save
+  await until('!(r as any).lanes.busy(t.id)', () => !(r as any).lanes.busy(t.id)); // the failed turn's save
   assert.equal(store.getTicket(t.id)!.session_id, 'kept');
   assert.ok(store.getClaudeState(path), "the database's copy survives the failed turn");
   rmSync(join(hostConfig, 'projects', projectSlug(cwd)));
@@ -248,7 +248,7 @@ test('while a turn waits for its restore, its message is saved for a restart, an
   r.send(t.id, 'Cara', 'two');
   assert.equal(r.isRunning(t.id), false);
   await r.close(t.id, 'Dismissed.');
-  await new Promise((res) => setTimeout(res, 200));
+  await holds('no turn for a dismissed minion', () => turns().length === 1, { ms: 200 });
   assert.equal(turns().length, 1, 'no turn for a dismissed minion');
   assert.equal(store.getSetting(`minion-queue:${t.id}`), null, 'the dismissal noted it and cleared the queue');
   assert.equal(store.getTicket(t.id)!.status, 'closed');

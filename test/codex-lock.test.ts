@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { codexLock, LOCK_ENV, MARGIN_S, SERIAL_FILE, startTime, tokenLife } from '../src/codex-lock.ts';
+import { holds } from './helpers.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'codex-lock-'));
@@ -138,7 +139,7 @@ test('the switch brings back one at a time: the file in CODEX_HOME or CITADEL_CO
   assert.ok(locked(dir), "its turn's lock stays");
   let turn: unknown = null;
   const second = codexLock(dir, () => {}, opts(dir, own)).then((l) => (turn = l));
-  await new Promise((r) => setTimeout(r, 500));
+  await holds('a turn with the same name in its environment still waits', () => turn === null, { ms: 500 });
   assert.equal(turn, null, 'a turn with the same name in its environment still waits');
   a.unlock();
   (await second).unlock();
@@ -173,7 +174,7 @@ test("a holder that died while refreshing keeps its lock until its codex is done
   writeFileSync(join(lock, 'refreshing'), '');
   let next: unknown = null;
   const run = codexLock(dir, () => {}, opts(dir)).then((l) => (next = l));
-  await new Promise((r) => setTimeout(r, 700));
+  await holds('it waits, and starts no refresh of its own', () => next === null && refreshes(dir).length === 0, { ms: 700 });
   assert.equal(next, null, 'it waits');
   assert.deepEqual(refreshes(dir), [], 'and starts no refresh of its own');
   // Without the mark (a holder that died doing anything else) the lock is taken over at once.

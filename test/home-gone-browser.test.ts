@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -78,7 +79,7 @@ for (const [folded, expect] of [[true, '#/home/p/1/t/7'], [false, '#/home/p/2/t/
     await waitFor(page, 'the chat open', `location.hash === '#/home/p/1/t/7'`);
     // Answer 101's card: the list loses that row, the way /api/home does once it's settled.
     await page.eval(`window.waiting = [103]; import('/home.js').then((m) => m.homeEvent({ ticket_id: 101, kind: 'user_message', data: JSON.stringify({ answer: true, author: 'Cara' }) }))`);
-    await new Promise((r) => setTimeout(r, folded ? 2500 : 0));
+    if (folded) await holds('Home stays at the chat', async () => (await page.eval<string>('location.hash')).startsWith(expect), { ms: 2500 });
     if (!folded) await waitFor(page, 'the move', `location.hash.startsWith('${expect}')`);
     assert.equal((await page.eval<string>('location.hash')).startsWith(expect), true);
   });

@@ -14,7 +14,7 @@ import { Store } from '../src/db.ts';
 import { realClock } from '../src/clock.ts';
 import { KILL_AFTER_MS } from '../src/contraption-turns.ts';
 import { FakeClock } from './fake-clock.ts';
-import { bootServer, jsonLines, lines, until, tempRoot, testPins } from './helpers.ts';
+import { bootServer, jsonLines, lines, until, holds, tempRoot, testPins } from './helpers.ts';
 
 const tmp = tempRoot('contraption-turns-');
 const root = tmp.dir;
@@ -531,7 +531,7 @@ test('a drain waits for the contraption\'s running turns, holds its new ones unt
   await first;
   assert.match(said!, /^Waited \d+ s for 1 running turn to end\.$/);
   assert.equal(lingering.at(-1)!.event, 'end', 'the running turn finished, not cut');
-  await new Promise((r) => setTimeout(r, 100));
+  await holds('the new turn waits for the restart', () => held.length === 0, { ms: 100 });
   assert.deepEqual(held, [], 'the new turn waits for the restart');
   assert.equal(turns.running(), 0);
   release();

@@ -9,7 +9,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, COLD_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { jsonLines, withoutTurnNote, lines, stopTurns, until, testPins } from './helpers.ts';
+import { jsonLines, withoutTurnNote, lines, stopTurns, until, holds, testPins } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
@@ -200,7 +200,7 @@ test('a dismissed minion is never cold: a message reopens it as before; one dism
   store.updateTicket(minion.id, { status: 'closed' });
   const before = promptCount();
   runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('the cap must not reopen a dismissed minion', () => promptCount() === before && !runner.isRunning(minion.id), { ms: 300 });
   assert.equal(promptCount(), before, 'the cap must not reopen a dismissed minion');
   assert.equal(runner.isRunning(minion.id), false);
   assert.ok((store.getSetting<any>(`minion-queue:${minion.id}`)?.held ?? null), 'its mail waits for a person');

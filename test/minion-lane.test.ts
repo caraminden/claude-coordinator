@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
-import { lines, tempRoot, testPins } from './helpers.ts';
+import { holds, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -224,7 +224,7 @@ test("a usage-limit resume that comes due while the last turn's session is still
   await until('the limited turn to end and start saving', () => save.saves() === 1);
   assert.equal(store.getTicket(id)!.state, 'limited');
   writeFileSync(result, 'ok');
-  await sleep(200);
+  await holds('no resume while the save is still under way', () => turnsRun() === 1 && !r.isRunning(id), { ms: 200 });
   assert.equal(turnsRun(), 1, 'no resume while the save is still under way');
   assert.equal(r.isRunning(id), false);
   save.open();

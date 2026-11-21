@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { themeCss } from '../src/theme.ts';
 import { chromium, launch, serve, skipMessage, waitFor, type App, type Browser, type Page } from './browser.ts';
+import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -317,6 +318,7 @@ test('scrubber: a stream with no known length (duration Infinity) fills no frame
     window.s = scrubber(v); box.append(s.el);
   })()`);
   await waitFor(page, 'the clip to load', `document.querySelector('.cui-scrub-time').textContent.endsWith('/ 0:08')`);
-  await new Promise((r) => setTimeout(r, 800)); // the capture clip's loadeddata comes after the page's own
+  // The capture clip's loadeddata comes after the page's own, so watch a while (no later event to wait on).
+  await holds('no page error', async () => (await page.eval<string[]>('errs')).length === 0, { ms: 800 });
   assert.deepEqual(await page.eval(`errs`), []);
 });

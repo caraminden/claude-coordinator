@@ -6,7 +6,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD, tempRoot, until } from './helpers.ts';
+import { listeningPort, PASSWORD, tempRoot, until, holds } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -98,13 +98,13 @@ test('a state change pushes to nobody', async () => {
     method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'blocked', note: 'stuck' }),
   });
   assert.equal(res.status, 200);
-  await new Promise((r) => setTimeout(r, 500));
+  await holds('a state change pushes to nobody', () => pushHits === 0, { ms: 500 });
   assert.equal(pushHits, 0);
 });
 
 test('nothing resumes the copied mid-turn minion, and no claude ever ran', async () => {
   // Live, recover() resumes interrupted turns resumeGapMs apart (set to 200 ms here; the first would start by then).
-  await new Promise((r) => setTimeout(r, 1500));
+  await holds('nothing resumes the copied minion', () => !existsSync(marker), { ms: 1500 });
   assert.equal(existsSync(marker), false);
   // And a running ultra review's folder, named in the copy, is left alone (#468 S08-1).
   assert.equal(existsSync(reviewClone), true);

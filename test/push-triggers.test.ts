@@ -6,7 +6,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, until, stopTurns, stopProcs, ok, type Booted } from './helpers.ts';
+import { holds, agentToken, bootServer, until, stopTurns, stopProcs, ok, type Booted } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
 // arrives, and stand-in browsers decrypt it. A stand-in `claude -p` fails any turn whose message
@@ -76,7 +76,8 @@ async function subscribe(who: string, name: string) {
 /** Pushes that arrived since `from`, as { browser: message }, once `count` have. */
 async function pushes(from: number, count: number) {
   await until(`${count} pushes`, () => received.length >= from + count);
-  await new Promise((r) => setTimeout(r, 200)); // and no more than that
+  // timing-ok: a settle window for the rest of a burst that arrives with the counted pushes (more can legitimately come; callers assert who got one)
+  await new Promise((r) => setTimeout(r, 200));
   return Object.fromEntries(received.slice(from).map((r) => [r.path.slice(1), decrypt(r.path.slice(1), r.body)]));
 }
 
@@ -158,12 +159,12 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   await call(`agent:${t.id}`, `/api/tickets/${t.id}`, { method: 'PATCH', body: { state: 'parked', note: 'later' } });
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: 'thanks' } });
   await until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('a parked minion pushes nothing', () => received.length === n, { ms: 300 });
   assert.equal(received.length, n);
   // The message waited for the parked minion (#718); Unpark wakes it, quietly too.
   await call('Cara', `/api/tickets/${t.id}/unpark`, { method: 'POST', body: {} });
   await until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('unpark wakes it quietly', () => received.length === n, { ms: 300 });
   assert.equal(received.length, n);
 
   // A failed turn: everyone, with Claude's own words on what went wrong.
@@ -243,7 +244,7 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   let n = received.length;
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Nobody mail josh@example.com, and @Cara: a note to self' } });
   await idle();
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('nobody is pushed', () => received.length === n, { ms: 300 });
   assert.equal(received.length, n);
   assert.deepEqual(await inbox('Josh'), []);
   assert.deepEqual(await inbox('Cara'), [], 'nor does the sender themself');
@@ -273,7 +274,7 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   // The Taskmaster's words to a minion go through the relay, which never mentions.
   await call(`agent:${coordinator.id}`, `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@Josh and @Cara, a look please' } });
   await idle();
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('an agent mentions no one', () => received.length === n, { ms: 300 });
   assert.equal(received.length, n);
   assert.deepEqual([await inbox('Josh'), await inbox('Cara')], [[], []]);
   const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message').at(-1);

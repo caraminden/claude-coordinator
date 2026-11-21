@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
+import { until } from './wait.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -84,7 +85,7 @@ test('desktop: copies the code exactly through navigator.clipboard, says Copied,
   await page.mouse(5, 690);
   assert.equal(await hoverHides(page, 1), true);
   assert.equal(await hoverHides(page), false, 'the feedback stays visible after the pointer leaves');
-  await page.eval('new Promise((r) => setTimeout(r, 2100))');
+  await until('the Copied feedback to time out', async () => (await page.eval('md.querySelector(".cui-copy").dataset.copied ?? null')) === null);
   assert.equal(await page.eval('md.querySelector(".cui-copy").dataset.copied ?? null'), null);
   assert.equal(await page.eval('getComputedStyle(md.querySelector(".cui-copy"), "::before").content'), '"Copy"');
   await page.eval('document.activeElement.blur()');

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createInterface } from 'node:readline';
-import { SECRET, agentToken, bootServer, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
+import { SECRET, agentToken, bootServer, until, holds, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { hashToken, newToken } from '../src/machines.ts';
@@ -675,7 +675,7 @@ test('Citadel checks a machine as it connects, keeps the result through a reconn
   // Back within the hour: the kept check stands, and isn't run again unasked.
   startAgent(token);
   await until('it to come back', async () => (await find()).online);
-  await new Promise((r) => setTimeout(r, 1500));
+  await holds('the kept check is not run again unasked', async () => (await find()).checked.at === ready.checked.at, { ms: 1500 });
   const back = await find();
   assert.equal(back.checked.at, ready.checked.at);
   assert.equal(back.status, 'ready');

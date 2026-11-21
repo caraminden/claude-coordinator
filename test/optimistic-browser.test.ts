@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
+import { until } from './wait.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -204,7 +205,7 @@ test('onHide runs once, however the toast goes', { skip }, async () => {
   const page = await open();
   // Read in the same eval: a separate look could come after 'two's 50 ms on a loaded box.
   assert.deepEqual(await page.eval(`window.hid = []; toast('one', { onHide: () => hid.push('one') }); toast('two', { onHide: () => hid.push('two'), ms: 50 }); [...hid]`), ['one'], 'a newer toast sends the last away');
-  await page.eval('new Promise((r) => setTimeout(r, 120))');
+  await until('the second toast to time out', async () => (await page.eval<string[]>('[...hid]')).length === 2);
   assert.deepEqual(await page.eval('hid'), ['one', 'two'], 'its time ran out');
   await page.eval(`toast('three')`);
   assert.deepEqual(await page.eval('hid'), ['one', 'two'], 'not again');

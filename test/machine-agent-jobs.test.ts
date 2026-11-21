@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { until } from './wait.ts';
 import { after, before, test } from 'node:test';
 import { jsonLines } from './helpers.ts';
+import { holds } from './holds.ts';
 // @ts-ignore: a plain .mjs the agent's computers download
 import { JobRunner, loadConfig, outFiles, podmanRunArgs } from '../public/machine-agent.mjs';
 
@@ -362,7 +363,7 @@ test('the time limit stops a job, and paused time does not count', async () => {
   assert.equal(container(msg.id).status, 'paused');
   assert.equal(lastState(msg.id)!.held_vram_mb, 5120);
   // Paused for well over the whole limit: still paused.
-  await new Promise((done) => setTimeout(done, 2500));
+  await holds('paused time does not count: still paused', () => lastState(msg.id)!.state === 'paused', { ms: 2500 });
   assert.equal(lastState(msg.id)!.state, 'paused');
   await r.handle({ type: 'job.resume', id: msg.id });
   assert.equal(container(msg.id).status, 'running');

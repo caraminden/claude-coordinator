@@ -14,6 +14,7 @@ import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
+import { holds } from './holds.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
@@ -663,8 +664,7 @@ test('Stop ends a container turn whose claude has not started, and never will (C
     assert.ok(pid > 0);
     process.kill(pid, 'SIGKILL');
     await until('the exec is gone', () => { try { process.kill(pid, 0); return false; } catch { return true; } });
-    // timing-ok: a nothing-happens check, a pause for the exec's failure to reach the runner; a late write would only be missed, never failed
-    await new Promise((res) => setTimeout(res, 300));
+    await holds('nothing is written, said or thrown', () => !existsSync(turnDir) && errors(id).length === 0, { ms: 300 });
     assert.ok(!existsSync(turnDir));
     assert.deepEqual(errors(id), []);
   } finally {
@@ -682,7 +682,7 @@ test('a turn stopped while its container starts never reaches podman exec (C6)',
   r.stop(id);
   await until('!r.isRunning(id)', () => !r.isRunning(id));
   ready();
-  await new Promise((res) => setTimeout(res, 200));
+  await holds('the stopped turn never reaches podman exec', () => jsonLines(calls).slice(before).length === 0, { ms: 200 });
   assert.deepEqual(jsonLines(calls).slice(before), []);
   assert.equal(status(id), 'idle');
 });

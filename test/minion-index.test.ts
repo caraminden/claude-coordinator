@@ -10,7 +10,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ftsQuery, heredocTargets, shortPath } from '../src/minion-index.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'minion-index-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -184,10 +184,11 @@ test('the route and search_minions: the server fills the index itself, and a min
     const get = (project: number, q: string, id: number) => fetch(`${srv.base}/api/projects/${project}/past-minions?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${agentToken(data, id)}` } })
       .then(async (r) => ({ status: r.status, data: await r.json() }));
     let r = await get(A.id, 'seed script', me.id);
-    for (let i = 0; i < 100 && !r.data.hits?.length; i++) {
-      await new Promise((ok) => setTimeout(ok, 100));
+    await until('the index to hold the minion', async () => {
+      if (r.data.hits?.length) return true;
       r = await get(A.id, 'seed script', me.id);
-    }
+      return r.data.hits?.length > 0;
+    }, 10_000);
     assert.equal(r.status, 200);
     assert.deepEqual(r.data.hits.map((h: any) => h.number), [done.number]);
     assert.equal((await get(A.id, 'seed', them.id)).status, 403, "not another scheme's");

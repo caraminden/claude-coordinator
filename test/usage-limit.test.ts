@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
 import { clockTime, parseResetTime } from '../src/pacific.ts';
 import { RETRIES } from '../src/turn-outcome.ts';
-import { lines, releaseFake, stopTurns, testPins } from './helpers.ts';
+import { holds, lines, releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -264,7 +264,7 @@ test("a turn getting through says nothing of another model's limit: a minion on 
   pushes.length = 0;
   // A turn on the plan's default model gets through: Opus's cap is its own, and reviving these would only fail them again, with a push each round.
   await turn(minion(), 'ok');
-  await sleep(200);
+  await holds('no Opus minion ran', () => turnsRun() === before + 1, { ms: 200 });
   assert.equal(turnsRun(), before + 1, 'no Opus minion ran');
   assert.equal(runner.limitWait(gaveUp), null);
   assert.match(store.getTicket(gaveUp)!.note ?? '', /^Usage limit: gave up/);
@@ -286,7 +286,7 @@ test("a Claude turn getting through leaves a minion whose next turn runs on Code
   store.updateTicket(id, { model: 'gpt-6-astra' });
   const at = runner.limitWait(id)!.at;
   await turn(minion(), 'ok');
-  await sleep(100);
+  await holds('it still waits for its own reset', () => runner.limitWait(id)?.at === at, { ms: 100 });
   assert.equal(runner.limitWait(id)?.at, at, 'still waiting for its own reset');
   runner.stop(id);
 });
@@ -331,7 +331,7 @@ test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
   const t = store.getTicket(id)!;
   assert.equal(t.state, 'limited');
   assert.equal(runner.view(t).limit_resume_at, null);
-  await sleep(200);
+  await holds('no more turns', () => turnsRun() - before === 1 + MAX_LIMIT_RESUMES, { ms: 200 });
   assert.equal(turnsRun() - before, 1 + MAX_LIMIT_RESUMES, 'no more turns');
   assert.deepEqual(pushes, [{ ticket: id, text: `Usage limit: gave up after ${MAX_LIMIT_RESUMES} resumes in a row` }], 'giving up is the one push');
   pushes.length = 0;
@@ -519,7 +519,7 @@ test('a limit resume that starts no turn still ends its wait, though it is kept 
   } finally {
     runner.placeFor = undefined;
   }
-  await sleep(100);
+  await holds('the refused resume starts nothing', () => turnsRun() === before, { ms: 100 });
   assert.equal(turnsRun(), before);
   assert.equal(runner.limitWait(id), null);
 });

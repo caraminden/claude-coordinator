@@ -11,7 +11,7 @@ import { ClaudeLink, type ClaudeAccount } from '../src/claude-link.ts';
 import { Containers, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
-import { until } from './helpers.ts';
+import { until, holds } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'claude-link-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -72,7 +72,7 @@ test('a sign-in that shows no link in 60 seconds says so, and the exit after its
   const status = await started;
   assert.match(status.error ?? '', /didn't show a link within 60 seconds/);
   t.mock.timers.reset();
-  await new Promise((r) => setTimeout(r, 200));
+  await holds('the exit after the kill keeps the error', () => /didn't show a link within 60 seconds/.test(link.status(uid).error ?? ''), { ms: 200 });
   assert.match(link.status(uid).error ?? '', /didn't show a link within 60 seconds/);
 });
 

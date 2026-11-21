@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, missingCommits, type PrMerge, startChained } from '../src/wake.ts';
-import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
+import { bootServer, holds, stopTurns, stopProcs, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -584,7 +584,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   const w = new LiveWaiters(store, live.dir, landed, () => {});
   w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: before, since: 0 });
   await startChained(w.claim(id)!, 'Cara started it', { store, runner, waiters: w });
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('the worktree and the brief stay put while its turn runs', () => head() === before && said().length === 1, { ms: 300 });
   assert.equal(head(), before, 'the worktree stays put while its turn runs');
   assert.deepEqual(said(), ['what is this?'], 'the brief waits too');
 
@@ -694,7 +694,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   await idle(later.id);
   await idle(next.data.id);
   await call(`/api/tickets/${next.data.id}/status`, { status: 'closed' });
-  await new Promise((r) => setTimeout(r, 200));
+  await holds('its leader shipping later sends nothing more', async () => (await said(later.id)).length === 2, { ms: 200 });
   assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later'], 'its leader shipping later sends nothing more');
 });
 
@@ -715,7 +715,7 @@ test('a "not merged" answer GitHub gave before forget() is not remembered: the n
   try {
     const lookup = githubPrs();
     const first = lookup.branch(dir, 'work', 'a'.repeat(40));
-    await new Promise((r) => setTimeout(r, 250)); // gh is answering; the PR merges and its minion is dismissed
+    await until('gh is answering', () => existsSync(asked)); // the PR merges and its minion is dismissed
     lookup.forget!();
     assert.equal(await first, null);
     assert.equal((await lookup.branch(dir, 'work', 'a'.repeat(40)))?.number, 7, 'asked again, not answered from the stale "not merged"');

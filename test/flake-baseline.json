@@ -3,10 +3,6 @@
   "shortUntil": {
    "n": 1,
    "ok": 0
-  },
-  "sleep": {
-   "n": 1,
-   "ok": 0
   }
  },
  "agent-task-groups.test.ts": {
@@ -75,7 +71,7 @@
    "ok": 0
   },
   "sleep": {
-   "n": 7,
+   "n": 4,
    "ok": 0
   }
  },
@@ -108,10 +104,6 @@
    "n": 10,
    "ok": 0
   },
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  },
   "elapsed": {
    "n": 2,
    "ok": 0
@@ -129,37 +121,7 @@
    "ok": 0
   }
  },
- "claims.test.ts": {
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "claude-container.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 1
-  }
- },
- "claude-link.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "close-self.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "codex-lock.test.ts": {
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  }
- },
- "cold-mail.test.ts": {
   "sleep": {
    "n": 1,
    "ok": 0
@@ -187,10 +149,6 @@
   "rmTemp": {
    "n": 2,
    "ok": 0
-  },
-  "sleep": {
-   "n": 1,
-   "ok": 0
   }
  },
  "contraptions.test.ts": {
@@ -211,7 +169,7 @@
    "ok": 0
   },
   "sleep": {
-   "n": 4,
+   "n": 3,
    "ok": 0
   }
  },
@@ -257,12 +215,6 @@
    "ok": 0
   }
  },
- "home-gone-browser.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "host-tool-cards.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -276,11 +228,11 @@
   }
  },
  "instant-open-browser.test.ts": {
-  "sleep": {
-   "n": 2,
+  "rmTemp": {
+   "n": 1,
    "ok": 0
   },
-  "rmTemp": {
+  "sleep": {
    "n": 1,
    "ok": 0
   }
@@ -401,18 +353,8 @@
    "ok": 0
   }
  },
- "machine-agent-jobs.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "machine-jobs.test.ts": {
   "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
-  "sleep": {
    "n": 1,
    "ok": 0
   }
@@ -437,10 +379,6 @@
   "shortUntil": {
    "n": 2,
    "ok": 0
-  },
-  "sleep": {
-   "n": 1,
-   "ok": 0
   }
  },
  "make-app.test.ts": {
@@ -451,7 +389,7 @@
  },
  "markdown-copy-browser.test.ts": {
   "sleep": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },
@@ -465,12 +403,6 @@
    "ok": 0
   }
  },
- "media-browser.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "memory-curator-routes.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -478,8 +410,8 @@
   }
  },
  "memory.test.ts": {
-  "sleep": {
-   "n": 2,
+  "shortUntil": {
+   "n": 1,
    "ok": 0
   }
  },
@@ -493,31 +425,15 @@
   "rmTemp": {
    "n": 2,
    "ok": 0
-  },
-  "sleep": {
-   "n": 1,
-   "ok": 0
   }
  },
  "minion-lane.test.ts": {
   "sleep": {
-   "n": 3,
+   "n": 2,
    "ok": 0
   }
  },
  "mockkit-send-browser.test.ts": {
-  "sleep": {
-   "n": 1,
-   "ok": 0
-  }
- },
- "network-resume.test.ts": {
-  "sleep": {
-   "n": 6,
-   "ok": 0
-  }
- },
- "optimistic-browser.test.ts": {
   "sleep": {
    "n": 1,
    "ok": 0
@@ -583,12 +499,6 @@
    "ok": 4
   }
  },
- "person-switch-session.test.ts": {
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "plan-cards.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -608,11 +518,11 @@
   }
  },
  "preview-mode.test.ts": {
-  "sleep": {
-   "n": 3,
+  "shortUntil": {
+   "n": 1,
    "ok": 0
   },
-  "shortUntil": {
+  "sleep": {
    "n": 1,
    "ok": 0
   }
@@ -625,8 +535,8 @@
  },
  "proxy-retry.test.ts": {
   "sleep": {
-   "n": 3,
-   "ok": 0
+   "n": 1,
+   "ok": 1
   }
  },
  "push-triggers.test.ts": {
@@ -635,8 +545,8 @@
    "ok": 0
   },
   "sleep": {
-   "n": 5,
-   "ok": 0
+   "n": 0,
+   "ok": 1
   }
  },
  "question-images.test.ts": {
@@ -715,8 +625,8 @@
  },
  "restart-anywhere.test.ts": {
   "sleep": {
-   "n": 11,
-   "ok": 0
+   "n": 10,
+   "ok": 1
   },
   "shortUntil": {
    "n": 1,
@@ -827,12 +737,6 @@
    "ok": 0
   }
  },
- "send-queue-browser.test.ts": {
-  "sleep": {
-   "n": 2,
-   "ok": 0
-  }
- },
  "settle-question.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -875,7 +779,7 @@
  },
  "status-browser.test.ts": {
   "sleep": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },
@@ -887,8 +791,8 @@
  },
  "steer.test.ts": {
   "sleep": {
-   "n": 5,
-   "ok": 0
+   "n": 0,
+   "ok": 1
   }
  },
  "stop-sigint.test.ts": {
@@ -946,10 +850,6 @@
   }
  },
  "usage-limit.test.ts": {
-  "sleep": {
-   "n": 4,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 3,
    "ok": 0

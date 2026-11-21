@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, stopProcs, stopTurns, testPins } from './helpers.ts';
+import { agentToken, bootServer, holds, stopProcs, stopTurns, testPins } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
 testPins();
 
@@ -120,7 +120,7 @@ test('a SIGHUP with a broken public/ keeps serving the old front end', async () 
   const before = await health();
   writeFileSync(join(app, 'public', 'manifest.webmanifest'), '{ not json');
   server.kill('SIGHUP');
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('the server keeps serving the old front end', async () => server.exitCode === null && (await health()).version === before.version, { ms: 300 });
   assert.equal(server.exitCode, null);
   assert.equal((await health()).version, before.version);
   assert.equal((await fetch(`${base}/`)).status, 200);

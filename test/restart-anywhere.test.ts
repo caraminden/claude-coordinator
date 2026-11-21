@@ -256,6 +256,7 @@ const FLOWS: Flow[] = [
       } },
       { name: 'a wake comes due while it runs', run: async (c) => {
         c.wake('wake: mid-turn', 100);
+        // timing-ok: waits for the wake's 100 ms due time to pass while the turn runs (an elapsed-time requirement)
         await sleep(300);
       } },
       { name: 'the turn ends and the wake\'s turn runs', run: async (c) => {

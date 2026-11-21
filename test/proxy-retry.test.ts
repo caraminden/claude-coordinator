@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createServer, request, type Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { forward } from '../src/proxy.ts';
-import { tempRoot } from './helpers.ts';
+import { tempRoot, holds } from './helpers.ts';
 
 const tmp = tempRoot('proxy-retry-');
 after(() => tmp.teardown());
@@ -110,9 +110,10 @@ test('an asker who leaves before the app answers is no 502', async () => {
     const r = request({ port: portOf(s), host: '127.0.0.1', path: '/x' });
     r.on('error', () => {});
     r.end();
+    // timing-ok: lets the request reach the app before the asker leaves; no signal from the front
     await new Promise((ok) => setTimeout(ok, 100));
     r.destroy();
-    await new Promise((ok) => setTimeout(ok, 400));
+    await holds('an asker who leaves is no 502', () => failed.length === 0, { ms: 400 });
     assert.deepEqual(failed, []);
   } finally {
     await close(s);

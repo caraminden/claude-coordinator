@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { sendIdOf, sendOnce } from '../src/send-ids.ts';
 import { bootServer, until, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { holds } from './holds.ts';
 
 test('a sendId is sent once per chat; a repeat shares the first one\'s outcome; a failed one is forgotten', async () => {
   assert.equal(sendIdOf(''), undefined);
@@ -183,7 +184,7 @@ test('a message the server took after its send was cut off is marked sent, and i
   assert.equal(await page.eval(sending), 0, 'nothing left sending, so the page can reload when idle');
   // The device comes back online: the wait ends with nothing to send again.
   await page.eval(`dispatchEvent(new Event('online'))`);
-  await page.eval('new Promise((r) => setTimeout(r, 300))');
+  await holds('nothing is sent again and no failure shows', async () => (await page.eval('held.length')) === 1 && !(await page.eval('!!document.querySelector(".cui-toast")')), { ms: 300 });
   assert.equal(await page.eval('held.length'), 1, 'not sent again');
   assert.equal(await page.eval('!!document.querySelector(".cui-toast")'), false, 'no failure to report');
   assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length'), 0, 'no second bubble');
@@ -233,7 +234,7 @@ test('a message waiting to send can be taken back to the box, and then never goe
   assert.equal(await page.eval('document.querySelector(".composer textarea").value'), 'never mind');
   assert.equal(await page.eval(`!${bubble('never mind')}`), true, 'its bubble is gone');
   await page.eval(`dispatchEvent(new Event('online'))`);
-  await page.eval('new Promise((r) => setTimeout(r, 300))');
+  await holds('nothing is sent again', async () => (await page.eval('held.length')) === 1, { ms: 300 });
   assert.equal(await page.eval('held.length'), 1, 'not sent again');
   assert.equal(await page.eval(sending), 0);
   assert.equal(await page.eval('!!document.querySelector(".cui-toast")'), false, 'no failure toast');

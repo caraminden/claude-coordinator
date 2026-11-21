@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
-import { lines, tempRoot, testPins } from './helpers.ts';
+import { holds, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -83,7 +83,7 @@ test('a steer reaches the running turn, and nothing is left for a next turn', as
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   assert.equal(store.getTicket(t.id)!.status, 'idle');
-  await new Promise((res) => setTimeout(res, 100));
+  await holds('no second turn', () => !r.isRunning(t.id), { ms: 100 });
   assert.ok(!r.isRunning(t.id), 'no second turn');
 });
 
@@ -92,7 +92,7 @@ test('"Send after this turn" queues, and the queued message starts the next turn
   const r = server();
   await started(r, t);
   r.send(t.id, 'Cara', 'later please');
-  await new Promise((res) => setTimeout(res, 400));
+  await holds('the message is not passed to the running turn and stays queued', () => seen(t.dir).length === 1 && r.queued(t.id) === 1, { ms: 400 });
   assert.equal(seen(t.dir).length, 1, 'not passed to the running turn');
   assert.equal(r.queued(t.id), 1);
   assert.equal(events(t.id, 'user_message')[1].steered, undefined);
@@ -127,6 +127,7 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   writeFileSync(join(t.dir, 'hold'), '');
   writeFileSync(join(t.dir, 'release'), '');
   await until("existsSync(join(t.dir, 'replied'))", () => existsSync(join(t.dir, 'replied')));
+  // timing-ok: lets the wrapper's close of claude's input settle before the late send (an elapsed-time gap, not an absence)
   await new Promise((res) => setTimeout(res, 600));
   r.send(t.id, 'Cara', 'just too late', [], {}, true);
   rmSync(join(t.dir, 'hold'));
@@ -181,7 +182,7 @@ test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster
 
   await started(r, coord);
   r.relay(t.id, coord.id, '#2 T', 'done with it');
-  await new Promise((res) => setTimeout(res, 400));
+  await holds('the relay is queued, not passed to the running turn', () => seen(coord.dir).length === 1 && r.queued(coord.id) === 1, { ms: 400 });
   assert.equal(seen(coord.dir).length, 1);
   assert.equal(r.queued(coord.id), 1);
   for (const x of [t, coord]) writeFileSync(join(x.dir, 'release'), '');
@@ -202,7 +203,7 @@ test('✕ takes back a queued message, which then never reaches claude', async (
   assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'a restart would not bring it back');
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
-  await new Promise((res) => setTimeout(res, 100));
+  await holds('the unqueued message starts no turn', () => !r.isRunning(t.id), { ms: 100 });
   assert.ok(!r.isRunning(t.id));
   assert.equal(seen(t.dir).length, 1);
 });

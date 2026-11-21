@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
+import { holds } from './holds.ts';
 
 // tools/citadel-android (#381): the screen lock and its lease, against a stub adb and a throwaway lock folder.
 const helper = join(import.meta.dirname, '..', 'tools', 'citadel-android');
@@ -160,7 +161,7 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   const s = serve(locks);
   const pid = await emulatorPid();
   try {
-    await new Promise((r) => setTimeout(r, 2000));
+    await holds('the emulator stays up while the step runs', () => alive(pid), { ms: 2000 });
     assert.ok(alive(pid), 'still up while the step runs');
     writeFileSync(release, '');
     await stepDone;
@@ -315,7 +316,7 @@ test('shot of a stopped far emulator says to run up and does not start it', asyn
     const r = await runAsync(['shot', join(root, 'far.png')], { CITADEL_HEAVY_DIR: join(root, 'far-shot'), ADB_STUB_FAR: '1', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /the emulator isn't up; run citadel-android up/);
-    await new Promise((res) => setTimeout(res, 300));
+    await holds('the starter is never asked', () => asked === 0, { ms: 300 });
     assert.equal(asked, 0, 'the starter was never asked');
   } finally {
     starter.close();

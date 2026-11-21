@@ -9,7 +9,7 @@ import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, type Booted } from './helpers.ts';
 
 // Jobs on a person's machine (#857, shared/project/specs/desktop-gpu-jobs.md): the real server, a stand-in `claude -p`
 // that records each turn, and a fake machine agent on the real SSE stream that records the job messages it is sent.
@@ -260,7 +260,7 @@ test('"Always allow" is a standing go for job hours; a changed digest asks again
   assert.equal(now.state, 'needs-go');
   assert.ok((await events('question')).some((q) => q.job === now.id));
   const started = agent.jobs('job.start').length;
-  await new Promise((r) => setTimeout(r, 300));
+  await holds('neither starts outside hours without a run-now', () => agent.jobs('job.start').length === started, { ms: 300 });
   assert.equal(agent.jobs('job.start').length, started, 'neither starts outside hours without a run-now');
   // Run now is the owner's: then it starts.
   await assert.rejects(call('Dana', `/api/jobs/${waits.id}/run-now`, {}), /403/);

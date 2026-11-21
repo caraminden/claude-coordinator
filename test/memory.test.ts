@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Embed } from '../src/memory.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import { agentToken, bootServer, SECRET, tempRoot } from './helpers.ts';
+import { agentToken, bootServer, SECRET, tempRoot, until } from './helpers.ts';
 
 const tmp = tempRoot('memory-');
 const root = tmp.dir;
@@ -258,10 +258,11 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') =>
       fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
     let r = await search(A.id, 'dentist reminders');
-    for (let i = 0; i < 100 && !r.data.hits?.length; i++) {
-      await new Promise((ok) => setTimeout(ok, 100));
+    await until('the index to hold the minion', async () => {
+      if (r.data.hits?.length) return true;
       r = await search(A.id, 'dentist reminders');
-    }
+      return r.data.hits?.length > 0;
+    }, 10_000);
     assert.equal(r.status, 200);
     assert.ok(r.data.hits.length > 0);
     assert.ok(r.data.hits.every((h: any) => h.ticket_id !== b1.id));
@@ -329,10 +330,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     const look = new Store(join(data, 'coordinator.db'));
     const noteOf = (id: number) => (look.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'note' AND data LIKE '%Similar and open%'").get(id) as { data: string } | undefined)?.data;
     let note = noteOf(newId);
-    for (let i = 0; i < 50 && !note; i++) {
-      await new Promise((ok) => setTimeout(ok, 100));
-      note = noteOf(newId);
-    }
+    await until('the twin note', () => ((note ??= noteOf(newId)), note !== undefined), 5_000);
     assert.match(JSON.parse(note ?? '{}').text ?? '', new RegExp(`^Similar and open: .*#${a1.number} 'Dentist reminders', Josh's`));
     assert.ok(!JSON.parse(note!).text.includes(`'Usage bar'`), 'a dismissed minion is no twin');
     look.db.close();

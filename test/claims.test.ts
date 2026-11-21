@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { Claims, claimName } from '../src/claims.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, tempRoot, type Booted } from './helpers.ts';
+import { agentToken, bootServer, tempRoot, until, type Booted } from './helpers.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
 function bare() {
@@ -169,10 +169,11 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   // Its holder's dismissal frees it, and the Taskmaster hears so as held mail.
   // Its first turn (CLAUDE_BIN is /bin/false) has to end before it can be dismissed.
   let dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  for (let i = 0; i < 100 && dismissed.status === 409; i++) {
-    await new Promise((r) => setTimeout(r, 100));
+  await until('its first turn to end so it can be dismissed', async () => {
+    if (dismissed.status !== 409) return true;
     dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  }
+    return dismissed.status !== 409;
+  }, 10_000);
   assert.equal(dismissed.status, 200, JSON.stringify(dismissed.data));
   assert.deepEqual((await call(url, { as: tm })).data.claims, []);
   const { data: tmEvents } = await call(`/api/tickets/${tm}/events?after=0`);
@@ -216,10 +217,11 @@ test('a queued claim passes to the next minion with one chat line when its holde
 
   // Dismissing the holder passes it to the first in line, who hears it once; the Taskmaster gets held mail.
   let dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  for (let i = 0; i < 100 && dismissed.status === 409; i++) {
-    await new Promise((r) => setTimeout(r, 100));
+  await until('its first turn to end so it can be dismissed', async () => {
+    if (dismissed.status !== 409) return true;
     dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  }
+    return dismissed.status !== 409;
+  }, 10_000);
   assert.equal(dismissed.status, 200, JSON.stringify(dismissed.data));
   const now = (await call(url)).data.claims[0];
   assert.equal(now.holder_number, c.number);

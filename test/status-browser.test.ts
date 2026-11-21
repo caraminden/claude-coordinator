@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, type Page, serveUi, skipMessage, type App } from './browser.ts';
+import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -139,7 +140,7 @@ test('a cut-off status shows its whole text in a tip on hover; one that fits sho
   await page.eval(`slot.text('Saved')`);
   c = await page.centre('#slot .cui-status-text');
   await page.mouse(c.x, c.y);
-  await new Promise((r) => setTimeout(r, 350));
+  await holds('no tip opens for the short text', async () => (await tip()) === null, { ms: 350 });
   assert.equal(await tip(), null);
 });
 

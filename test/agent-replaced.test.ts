@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { REPO, tempRoot, until } from './helpers.ts';
+import { REPO, tempRoot, until, holds } from './helpers.ts';
 
 const tmp = tempRoot('agent-replaced-');
 after(() => tmp.teardown());
@@ -36,7 +36,7 @@ async function run(args: string[]) {
   proc.stderr!.on('data', (d) => (out += d));
   await until('it is told', () => /another agent/.test(out), 10_000);
   // Before, it reconnected after 1 s.
-  await new Promise((r) => setTimeout(r, 1600));
+  await holds('it does not reconnect at once', () => app.state.connects === 1, { ms: 1600 });
   return { connects: app.state.connects, out };
 }
 

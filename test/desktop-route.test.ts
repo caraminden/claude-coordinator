@@ -19,6 +19,10 @@ test('other sites, contraption hosts and mail go to the default browser', () => 
   assert.deepEqual(go('https://github.com/x'), { kind: 'browser', url: 'https://github.com/x' });
   assert.deepEqual(go('https://mandate.citadel.zip/'), { kind: 'browser', url: 'https://mandate.citadel.zip/' });
   assert.deepEqual(go('mailto:a@b.c'), { kind: 'browser', url: 'mailto:a@b.c' });
+  assert.deepEqual(go('peek-auras://pair?code=1'), { kind: 'browser', url: 'peek-auras://pair?code=1' });
+  for (const bad of ['ms-msdt:x', 'search-ms:query=a', 'ms-officecmd:x', 'file:///c:/x', 'data:text/html,x', 'vbscript:x', 'javascript:alert(1)', 'other-app://x']) {
+    assert.deepEqual(go(bad), { kind: 'none' }, bad);
+  }
 });
 
 test('a citadel.zip link carrying a login, or over http, is not taken as Citadel\'s', () => {

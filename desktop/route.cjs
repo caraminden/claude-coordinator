@@ -1,11 +1,14 @@
 // Where a link the desktop app's window meets goes (#1186), kept apart from Electron so test/desktop-route.test.ts can run it.
 //   { kind: 'here', url }     Citadel's: load it in the window, on START's host (a citadel.zip link is moved there)
-//   { kind: 'browser', url }  another site's http(s) page, or mailto:: the default browser or mail app
+//   { kind: 'browser', url }  another site's http(s) page, mailto:, or an APP_SCHEMES link: the default browser, mail app or the app registered for it
 //   { kind: 'none' }          anything else (javascript:, file:, a bad address): ignored
+// Contraptions' own app schemes, handed to Windows to open their app (#1410). A fixed list, never every scheme.
+const APP_SCHEMES = new Set(['peek-auras:']);
+
 function route(href, start, aliases = []) {
   let url;
   try { url = new URL(href, start); } catch { return { kind: 'none' }; }
-  if (url.protocol === 'mailto:') return { kind: 'browser', url: url.href };
+  if (url.protocol === 'mailto:' || APP_SCHEMES.has(url.protocol)) return { kind: 'browser', url: url.href };
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return { kind: 'none' };
   if (url.origin === start.origin) return { kind: 'here', url: url.href };
   if (!url.username && !url.password && url.protocol === 'https:' && aliases.includes(url.hostname)) {

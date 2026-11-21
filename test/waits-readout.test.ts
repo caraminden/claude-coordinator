@@ -29,6 +29,7 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   const rows = waitsFor(store, store.getTicket(a.id)!, () => [{ kind: 'chain', chip: '⇢ #9', what: 'x', set_by: 'c', since: null }], NOW);
   assert.deepEqual(rows.slice(1).map((r) => r.chip), [`⇢ #${b.number}`, '⇢ CI', '⇢ #9', '⇢ CI']);
   assert.match(rows[0].chip, /^⏱ (\w{3} )?\d\d:\d\d$/);
+  assert.equal(rows[2].headline, 'Wakes when CI finishes', 'a kind with no words of its own never shows its internal name');
   assert.ok(rows[0].cancellable && !rows[3].cancellable, 'old-key waits have no Cancel');
   assert.equal(rows.at(-1)!.id, gone.id);
   assert.equal(rows.at(-1)!.reason, 'minion dismissed');

@@ -74,7 +74,8 @@ function headlineOf(r: Delivery, other: Ticket | null, now: number): string {
     case 'runners_back': return 'Wakes when CI runners are back';
   }
   if (r.when_kind === 'at') return `Due at ${hhmm(r.due ?? Number(r.when_arg), now)}`;
-  return n ? `Waits on ${n}` : sha(r) ? `Waits until ${sha(r)} ${lands(r)}` : `Waits (${r.kind})`;
+  if (r.when_kind === 'ci') return 'Wakes when CI finishes';
+  return n ? `Waits on ${n}` : sha(r) ? `Waits until ${sha(r)} ${lands(r)}` : 'Waits for an event';
 }
 
 /** The waiter's full words: a relay's text, a wake's note, a chain's reason. */

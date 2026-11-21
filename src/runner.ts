@@ -65,6 +65,7 @@ import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
+import { KILL_HOLD_MAX_MS, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -409,36 +410,11 @@ export const COLD_HOLD_MAX_MS = MSG_DEFAULTS.holdH * 3600_000;
 
 // How a turn ended, and the caps on resuming it, are src/turn-outcome.ts's (#1379); these names stay for the tests.
 export { ACCOUNT_ERROR, isNetworkFailure };
+// The resume waits are src/resumes.ts's (#1476); these names stay for the tests and callers.
+export { KILL_HOLD_MAX_MS, nextLimitResume };
+export type { LimitedAccount };
 /** Usage-limit resumes in a row before a minion waits for a person. */
 export const MAX_LIMIT_RESUMES = RETRIES.limit.cap;
-const LIMIT_RESUMES = 'limit-resumes';
-/** One linked Claude account's limit: `here` is the one this minion's turn hit, `kind` what Claude called it ('weekly', '5-hour'). */
-export interface LimitedAccount { n: number; label: string; until: number; here?: boolean; kind?: string }
-
-/** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
-interface LimitResume {
-  ticket: number;
-  /** When it resumes (ms): a while after the reset, spaced from the others. */
-  at: number;
-  /** Limit resumes in a row this one will be. */
-  tries: number;
-  /** Several accounts all limited (#819): each one's reset, so the banner says which limit is which. */
-  accounts?: LimitedAccount[];
-  /** Its person switched to Codex: it resumes on Codex now (#337). */
-  codex?: true;
-  /** A turn on its plan got through, so the limit is gone: it resumes limitProvenGapMs after the last, not limitGapMs. */
-  proven?: true;
-}
-
-/** The usage-limit wait to resume next, and when: each wait is due at its own time or, if later, its gap after the last resume. */
-export function nextLimitResume(list: LimitResume[], lastResume: number, gap: number, provenGap: number): { wait: LimitResume; due: number } | null {
-  let best: { wait: LimitResume; due: number } | null = null;
-  for (const wait of list) {
-    const due = Math.max(wait.at, lastResume + (wait.proven ? provenGap : gap));
-    if (!best || due < best.due || (due === best.due && wait.at < best.wait.at)) best = { wait, due };
-  }
-  return best;
-}
 const RESUME_ACCOUNT_PROMPT =
   `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
@@ -458,13 +434,6 @@ export function allLimitedText(accounts: LimitedAccount[], at: number): string {
 
 /** Network-outage resumes in a row before a thread is left in error for a person. */
 export const MAX_NET_RESUMES = RETRIES.net.cap;
-const NET_RESUMES = 'net-resumes';
-/** Threads waiting for the network to come back, in the settings table so the wait outlives a restart. */
-interface NetResume {
-  ticket: number;
-  /** Network resumes in a row this one will be. */
-  tries: number;
-}
 /** The minion's note while it waits: cleared by the next turn's start. */
 const NET_NOTE = 'Network outage: resumes once it is back';
 const RESUME_NET_PROMPT =
@@ -472,19 +441,6 @@ const RESUME_NET_PROMPT =
 
 /** A turn killed from outside (out of memory, a container stop, a stray signal) is resumed by the server once (RL1, #1364). */
 export const MAX_KILL_RESUMES = RETRIES.kill.cap;
-const KILL_RESUMES = 'kill-resumes';
-/** Killed turns waiting for their resume, in the settings table so the wait outlives a restart. */
-interface KillResume {
-  ticket: number;
-  /** Kill resumes in a row this one will be. */
-  tries: number;
-  /** The killed turn's restart resumes in a row, carried so the two caps together still end a loop. */
-  resumes: number;
-}
-/** How long the kill line waits for the last resume it started to take its wait before the next goes anyway. */
-const KILL_START_MAX_MS = 2 * 60_000;
-/** The longest the line of kill resumes holds for a starved box before one starts anyway (then the clock starts again). */
-export const KILL_HOLD_MAX_MS = 5 * 60_000;
 const KILL_NOTE = 'Killed: resumes by itself shortly';
 const RESUME_KILL_PROMPT =
   `Your last turn was killed from outside before it finished (out of memory, a container stop or a stray signal), and Citadel resumed it by itself. A command may have half-run when it died (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps, and don't restart whatever heavy job was running without thinking about why the turn was killed.`;
@@ -609,8 +565,6 @@ export class Runner {
   limitProvenGapMs = 5_000;
   /** When Claude's words don't say when the limit resets. */
   limitFallbackMs = 60 * 60 * 1000;
-  private limitTimer?: NodeJS.Timeout;
-  private lastLimitResume = 0;
   /**
    * Limit waits whose resume is under way here (restoring the session, say), each with a token for that one resume:
    * kept saved until a turn takes them, so a restart still resumes. An earlier resume's end can't touch a later one's wait.
@@ -621,22 +575,22 @@ export class Runner {
   /** The first wait before probing, doubling after each failed probe up to netProbeMaxMs. */
   netProbeMs = 30_000;
   netProbeMaxMs = 5 * 60_000;
-  /** The wait before the next probe; null for netProbeMs, a fresh outage's first. */
-  netDelay: number | null = null;
-  private netTimer?: NodeJS.Timeout;
   /**
    * Whether the box is starved, which server.ts gives it: only the line of kill resumes holds for it (#1364). Nothing
    * a person or a Taskmaster starts reads it, so runner.ts never imports the reader (test/held-starts.test.ts).
    */
   killStarved: () => Promise<{ starved: boolean; why: string }> = async () => ({ starved: false, why: '' });
   killHoldMaxMs = KILL_HOLD_MAX_MS;
-  private killTimer?: NodeJS.Timeout;
-  /** When the line of kill resumes began holding for a starved box, or since the last one it let through; null while it moves. */
-  private killHeldSince: number | null = null;
   /** Kill waits whose resume this server has started: the line moves past them; the wait goes once their turn takes it. */
   private killStarted = new Map<number, number>();
   /** Set once detachAll hands the turns to the next server: this one starts no more resumes. */
   private detached = false;
+  /** The usage-limit, network and kill waits (src/resumes.ts). */
+  private resumes: Resumes;
+  /** The waits' timers and probe delay, read by tests. */
+  private get limitTimer() { return this.resumes.limitTimer; }
+  private get netTimer() { return this.resumes.netTimer; }
+  get netDelay() { return this.resumes.netDelay; }
   /** When each account error last pushed: one push per error for everyone, not one per minion. */
   private accountPushes = new Map<string, number>();
   /** Copies a session into the database (src/sessions.ts); tests hold it open to race the next step against it. */
@@ -815,6 +769,25 @@ export class Runner {
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
+    const self = this;
+    this.resumes = new Resumes({
+      store,
+      get resumeGapMs() { return self.resumeGapMs; },
+      get limitDelayMs() { return self.limitDelayMs; },
+      get limitGapMs() { return self.limitGapMs; },
+      get limitProvenGapMs() { return self.limitProvenGapMs; },
+      get netProbe() { return self.netProbe; },
+      get netProbeMs() { return self.netProbeMs; },
+      get netProbeMaxMs() { return self.netProbeMaxMs; },
+      get killStarved() { return self.killStarved; },
+      get killHoldMaxMs() { return self.killHoldMaxMs; },
+      get detached() { return self.detached; },
+      limitStarting: this.limitStarting,
+      killStarted: this.killStarted,
+      isRunning: (id) => self.isRunning(id),
+      resume: (id, via, retries, onCodex) => self.resume(id, via, retries, onCodex),
+      killResumeFailed: (id) => self.killResumeFailed(id),
+    });
     this.broadcast = broadcast;
     // Saved queues and waits from before #1378 move into each minion's one queue on the first boot, never dropped.
     const moved = migrateQueues(store);
@@ -922,8 +895,7 @@ export class Runner {
   /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */
   detachAll() {
     // The next server probes for the threads waiting on the network, and resumes the killed turns waiting for theirs.
-    clearTimeout(this.netTimer);
-    clearTimeout(this.killTimer);
+    this.resumes.stop();
     this.detached = true;
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
@@ -957,7 +929,7 @@ export class Runner {
   view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
     const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
     const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
-    const limit = once(LIMIT_RESUMES, () => this.limitResumes()).find((w) => w.ticket === ticket.id) ?? null;
+    const limit = once('limit-resumes', () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
@@ -1088,9 +1060,9 @@ export class Runner {
    */
   close(ticketId: number, text: string): Promise<void> {
     // A wait's messages stay in the queue: dropQueue below names them.
-    this.cancelLimitWait(ticketId);
-    this.cancelNetWait(ticketId);
-    this.cancelKillWait(ticketId);
+    this.resumes.cancelLimitWait(ticketId);
+    this.resumes.cancelNetWait(ticketId);
+    this.resumes.cancelKillWait(ticketId);
     this.store.deleteSetting(closeCancelledKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
@@ -1662,11 +1634,11 @@ export class Runner {
     }
     later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
     // Minions waiting on the usage limit keep waiting; the messages held for them wait in their queues.
-    this.armLimitTimer();
+    this.resumes.armLimitTimer();
     // Threads waiting on the network keep waiting: the probe starts over (#366).
-    this.armNetProbe();
+    this.resumes.armNetProbe();
     // Killed turns waiting for their resume take their turns in the line again (#1364).
-    this.armKillResumes();
+    this.resumes.armKillResumes();
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
@@ -1799,14 +1771,14 @@ export class Runner {
     const token = this.limitStarting.get(ticketId);
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
     // Someone's message got in first; its turn took the queue, and that is resume enough.
-    if (this.isRunning(ticketId)) return void (ours() && this.cancelLimitWait(ticketId));
+    if (this.isRunning(ticketId)) return void (ours() && this.resumes.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
     // turn still live by then (#1464): as above, that turn is resume enough.
     const ran = this.lanes.run(ticketId, 'resume', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') {
-        if (killLine) this.cancelKillWait(ticketId);
+        if (killLine) this.resumes.cancelKillWait(ticketId);
         return this.queue.owe(ticketId, null);
       }
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
@@ -1819,7 +1791,7 @@ export class Runner {
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
         // A kill wait ends here, as the turn that would have taken it.
-        if (killLine) this.cancelKillWait(ticketId);
+        if (killLine) this.resumes.cancelKillWait(ticketId);
         this.queue.owe(ticketId, null);
         return;
       }
@@ -1829,7 +1801,7 @@ export class Runner {
       return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, retries);
     }));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
-    if (token) void ran.then(() => ours() && this.cancelLimitWait(ticketId));
+    if (token) void ran.then(() => ours() && this.resumes.cancelLimitWait(ticketId));
     return ran;
   }
 
@@ -1885,78 +1857,19 @@ export class Runner {
    */
   private takeQueue(ticketId: number): QueuedMessage[] {
     this.wakeNow.delete(ticketId);
-    this.cancelNetWait(ticketId);
-    this.cancelKillWait(ticketId);
+    this.resumes.cancelNetWait(ticketId);
+    this.resumes.cancelKillWait(ticketId);
     return this.queue.take(ticketId);
-  }
-
-  private netResumes(): NetResume[] {
-    return this.store.getSetting<NetResume[]>(NET_RESUMES) ?? [];
   }
 
   /** The thread's network wait, if it has one. */
   netWait(ticketId: number): NetResume | null {
-    return this.netResumes().find((w) => w.ticket === ticketId) ?? null;
-  }
-
-  /** Wait for the network, the messages queued behind the turn that died held in its queue; one probe loop serves every waiting thread. */
-  private waitForNetwork(ticketId: number, tries: number) {
-    const list = this.netResumes().filter((w) => w.ticket !== ticketId);
-    list.push({ ticket: ticketId, tries });
-    this.store.setSetting(NET_RESUMES, list);
-    this.armNetProbe();
-  }
-
-  /** End the thread's network wait (a resume, a person's message, a stop, a dismissal); returns the wait it had. */
-  private cancelNetWait(ticketId: number): NetResume | null {
-    const list = this.netResumes();
-    const w = list.find((x) => x.ticket === ticketId);
-    if (!w) return null;
-    const rest = list.filter((x) => x !== w);
-    if (rest.length) this.store.setSetting(NET_RESUMES, rest);
-    else this.store.deleteSetting(NET_RESUMES);
-    return w;
-  }
-
-  /** Probe after netDelay, unless a probe is already due or under way, or nobody waits. */
-  private armNetProbe() {
-    if (this.netTimer || !this.netResumes().length) return;
-    this.netTimer = setTimeout(() => this.probeNet(), this.netDelay ?? this.netProbeMs);
-    this.netTimer.unref();
-  }
-
-  /** Still down: wait twice as long, up to netProbeMaxMs. Back: resume every waiting thread, resumeGapMs apart. */
-  private async probeNet() {
-    let up = false;
-    try {
-      up = await this.netProbe();
-    } catch {
-      // A probe that throws is a probe that failed.
-    }
-    this.netTimer = undefined;
-    const waiting = this.netResumes();
-    if (!up && waiting.length) {
-      this.netDelay = Math.min((this.netDelay ?? this.netProbeMs) * 2, this.netProbeMaxMs);
-      return this.armNetProbe();
-    }
-    this.netDelay = null;
-    // Each keeps its place in the list until its own resume's turn starts, so a restart mid-stagger loses none.
-    waiting.forEach((w, i) => setTimeout(() => this.netResume(w.ticket), this.resumeGapMs * i).unref());
-  }
-
-  /** The wait stays saved until the resume's turn takes it (takeQueue), so a restart during the last turn's save still resumes. */
-  private netResume(ticketId: number) {
-    const w = this.netWait(ticketId);
-    if (w) this.resume(ticketId, 'net', { net: w.tries });
-  }
-
-  private killResumes(): KillResume[] {
-    return this.store.getSetting<KillResume[]>(KILL_RESUMES) ?? [];
+    return this.resumes.netWait(ticketId);
   }
 
   /** The minion's wait for its resume after a kill (#1364), if it has one. */
   killWait(ticketId: number): KillResume | null {
-    return this.killResumes().find((w) => w.ticket === ticketId) ?? null;
+    return this.resumes.killWait(ticketId);
   }
 
   /**
@@ -1966,81 +1879,14 @@ export class Runner {
   private waitForKillResume(ticketId: number, live: LiveTurn, retries: Retries, killed: string) {
     // What is left of it goes first: a claude whose wrapper alone was killed (no unit) would race its resume on the session.
     this.signal(live, 'SIGKILL');
-    const list = this.killResumes().filter((w) => w.ticket !== ticketId);
-    list.push({ ticket: ticketId, tries: retries.kill ?? 1, resumes: retries.restart ?? 0 });
-    this.store.setSetting(KILL_RESUMES, list);
-    this.killStarted.delete(ticketId);
+    this.resumes.putKill(ticketId, retries);
     this.emit(ticketId, 'note', { text: `${killed}\nCitadel resumes it by itself in a moment, once: killed again, it stops for good. Messages queued behind it go into that resume.` });
     this.store.updateTicket(ticketId, { note: KILL_NOTE });
-    this.armKillResumes();
+    this.resumes.armKillResumes();
   }
 
-  /** End the minion's kill wait (its resume's turn, a person's message, a stop, a dismissal); returns the wait it had. */
-  private cancelKillWait(ticketId: number): KillResume | null {
-    const list = this.killResumes();
-    const w = list.find((x) => x.ticket === ticketId);
-    this.killStarted.delete(ticketId);
-    if (!w) return null;
-    const rest = list.filter((x) => x !== w);
-    if (rest.length) this.store.setSetting(KILL_RESUMES, rest);
-    else this.store.deleteSetting(KILL_RESUMES);
-    return w;
-  }
-
-  /** The next step of the kill line in resumeGapMs, unless one is due or under way, or nobody waits whose resume hasn't started. */
-  private armKillResumes(wait = this.resumeGapMs) {
-    if (this.killTimer || this.detached || !this.killResumes().some((w) => !this.killStarted.has(w.ticket))) return;
-    this.killTimer = setTimeout(() => void this.killResumeNext(), wait);
-    this.killTimer.unref();
-  }
-
-  /**
-   * One kill resume at a time, resumeGapMs apart, so a wave (16 at once on Nov 20) isn't replayed into the same wall.
-   * The line holds while the box is starved (killStarved), at most killHoldMaxMs before one goes anyway; then the
-   * clock starts again. It limits only these resumes: nothing a person starts waits on it.
-   */
-  private async killResumeNext() {
-    let r = { starved: false, why: '' };
-    try {
-      r = await this.killStarved();
-    } catch {
-      // A reading that fails holds nothing.
-    }
-    this.killTimer = undefined;
-    if (this.detached) return;
-    const list = this.killResumes();
-    const w = list.find((x) => !this.killStarted.has(x.ticket));
-    if (!w) return void (this.killHeldSince = null);
-    // The last one started may still be behind its session save (afterRestore): it goes first, so a slow save can't
-    // bunch the line up; one stuck that long doesn't hold the rest.
-    if (list.some((x) => Date.now() - (this.killStarted.get(x.ticket) ?? 0) < KILL_START_MAX_MS)) return this.armKillResumes(Math.max(this.resumeGapMs, 250));
-    if (r.starved) {
-      if (this.killHeldSince === null) {
-        this.killHeldSince = Date.now();
-        console.log(`[kill-resume] holding the resumes of killed turns: ${r.why}`);
-      }
-      if (Date.now() - this.killHeldSince < this.killHoldMaxMs) return this.armKillResumes(Math.max(this.resumeGapMs, 250));
-      console.log(`[kill-resume] held ${Math.round((Date.now() - this.killHeldSince) / 1000)} s for a starved box (${r.why}): minion ${w.ticket} resumes anyway`);
-      this.killHeldSince = Date.now();
-    } else this.killHeldSince = null;
-    this.killStarted.set(w.ticket, Date.now());
-    let ran: Promise<void> | undefined;
-    try {
-      ran = this.resume(w.ticket, 'kill', { kill: w.tries, ...(w.resumes ? { restart: w.resumes } : {}) });
-    } catch (err: any) {
-      console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${err?.message ?? err}`);
-    }
-    void Promise.resolve(ran).then(() => this.killResumeEnded(w.ticket));
-    this.armKillResumes();
-  }
-
-  /**
-   * A kill resume's start is over. Its turn took the wait (takeQueue), or it bailed and cancelled it; a wait still
-   * there means the start threw, so it stops here with an error, and its held messages run next as a normal turn.
-   */
-  private killResumeEnded(ticketId: number) {
-    if (!this.killStarted.has(ticketId) || this.isRunning(ticketId)) return;
-    if (!this.cancelKillWait(ticketId)) return;
+  /** A kill resume's start threw and its wait is gone: it stops with an error, and its held messages run next as a normal turn. */
+  private killResumeFailed(ticketId: number) {
     const held = this.queue.size(ticketId);
     const text = `Its resume after the kill failed to start, so it stopped: ${held ? 'the messages queued behind it run next.' : 'send a message to carry on.'}`;
     const event = this.emit(ticketId, 'error', { text });
@@ -2048,42 +1894,20 @@ export class Runner {
     this.onTurnError(ticketId, text, event.id);
     // As a message arriving now would: next() leaves them for a busy lane and runs them on a free one.
     if (held) this.next(ticketId);
-    this.armKillResumes();
-  }
-
-  private limitResumes(): LimitResume[] {
-    return this.store.getSetting<LimitResume[]>(LIMIT_RESUMES) ?? [];
   }
 
   /** The minion's usage-limit wait, if it has one. */
   limitWait(ticketId: number): LimitResume | null {
-    return this.limitResumes().find((w) => w.ticket === ticketId) ?? null;
+    return this.resumes.limitWait(ticketId);
   }
 
-  private saveLimitResumes(list: LimitResume[]) {
-    if (list.length) this.store.setSetting(LIMIT_RESUMES, list);
-    else this.store.deleteSetting(LIMIT_RESUMES);
-    this.armLimitTimer();
-  }
-
-  /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
-  private waitForLimit(ticketId: number, resetAt: number, tries: number, accounts?: LimitedAccount[]): number {
-    this.limitStarting.delete(ticketId);
-    const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
-    let at = resetAt + this.limitDelayMs;
-    for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
-    list.push({ ticket: ticketId, at, tries, ...(accounts?.length ? { accounts } : {}) });
-    this.saveLimitResumes(list);
-    return at;
-  }
+  // Tests drive the limit line by hand.
+  private limitResumeNext() { this.resumes.limitResumeNext(); }
+  private armLimitTimer() { this.resumes.armLimitTimer(); }
 
   /** Stop waiting on the usage limit (a stop, a dismissal); true if it was waiting. */
   cancelLimitWait(ticketId: number): boolean {
-    this.limitStarting.delete(ticketId);
-    const list = this.limitResumes();
-    if (!list.some((w) => w.ticket === ticketId)) return false;
-    this.saveLimitResumes(list.filter((w) => w.ticket !== ticketId));
-    return true;
+    return this.resumes.cancelLimitWait(ticketId);
   }
 
   /**
@@ -2095,7 +1919,7 @@ export class Runner {
    * would fail it again, and one that gave up would be revived, fail and push again on every success.
    */
   private limitCleared(payer: number | null, model?: string | null) {
-    const list = this.limitResumes();
+    const list = this.resumes.limit.all();
     const gaveUp = this.store.limitedTickets().filter((t) => t.status === 'error' && t.note?.startsWith('Usage limit: gave up') && !list.some((w) => w.ticket === t.id) && !this.isRunning(t.id));
     if (!list.length && !gaveUp.length) return;
     const onPlan = (id: number) => {
@@ -2111,31 +1935,7 @@ export class Runner {
     const early = list.filter((w) => w.at > now && !w.codex && onPlan(w.ticket));
     for (const w of early) { w.at = now; w.proven = true; }
     const back = gaveUp.filter((t) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1, proven: true as const }));
-    if (early.length || back.length) this.saveLimitResumes([...list, ...back]);
-  }
-
-  /** Time the next usage-limit resume: the earliest due, and never sooner than a gap after the last (limitGapMs, or limitProvenGapMs for waits a turn getting through released). */
-  private armLimitTimer() {
-    clearTimeout(this.limitTimer);
-    const list = this.limitResumes().filter((w) => !this.limitStarting.has(w.ticket));
-    if (!list.length) return;
-    const due = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs)!.due;
-    // setTimeout overflows past 24.8 days; a weekly limit is at most 7.
-    this.limitTimer = setTimeout(() => this.limitResumeNext(), Math.min(Math.max(0, due - Date.now()), 2 ** 31 - 1));
-    this.limitTimer.unref();
-  }
-
-  private limitResumeNext() {
-    const list = this.limitResumes().filter((w) => !this.limitStarting.has(w.ticket));
-    const next = nextLimitResume(list, this.lastLimitResume, this.limitGapMs, this.limitProvenGapMs);
-    const w = next?.wait;
-    if (!w || next.due > Date.now()) return this.armLimitTimer();
-    this.lastLimitResume = Date.now();
-    // The wait and its held messages stay saved until the resume's turn takes them (startTurn ends the wait), as a network
-    // wait does: a restart while the resume restores the session still resumes (A2, #1286).
-    this.limitStarting.set(w.ticket, {});
-    this.armLimitTimer();
-    this.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
+    if (early.length || back.length) this.resumes.saveLimits([...list, ...back]);
   }
 
   /** A cut-off turn's values (OwedResume.carry), back in memory for the resume that carries the turn on (#1452). */
@@ -2226,7 +2026,7 @@ export class Runner {
     const row = line();
     this.heard(ticketId, ticket, msg);
     // A person's own message tries now too: the reset time is only Claude's word, and a reset can come sooner. Still limited, it waits again (#477).
-    if (otherPlan || (limited && person && !extra.from)) this.cancelLimitWait(ticketId);
+    if (otherPlan || (limited && person && !extra.from)) this.resumes.cancelLimitWait(ticketId);
     if (!this.isRunning(ticketId)) {
       // A network or kill wait's held messages go with it, in a turn that starts now.
       this.next(ticketId, true);
@@ -2525,7 +2325,7 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (!live) {
       // Waiting for its resume after a kill (#1364): likewise.
-      if (this.cancelKillWait(ticketId)) {
+      if (this.resumes.cancelKillWait(ticketId)) {
         this.queue.drop(ticketId);
         this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Killed: stopped, send a message to carry on' });
@@ -2534,7 +2334,7 @@ export class Runner {
         return true;
       }
       // Waiting on the network: a stop ends the wait, and as with a turn, its held messages go too.
-      if (this.cancelNetWait(ticketId)) {
+      if (this.resumes.cancelNetWait(ticketId)) {
         this.queue.drop(ticketId);
         this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
@@ -2543,7 +2343,7 @@ export class Runner {
         return true;
       }
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
-      if (!this.cancelLimitWait(ticketId)) return false;
+      if (!this.resumes.cancelLimitWait(ticketId)) return false;
       this.queue.drop(ticketId);
       this.setFailNote(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
       this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
@@ -3183,7 +2983,7 @@ export class Runner {
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
       else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
-      this.cancelLimitWait(ticket.id);
+      this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
       if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
@@ -3824,7 +3624,7 @@ export class Runner {
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
       // Every one of several accounts limited (#779): the first of them to reset.
       const resetAt = allLimited?.resetAt ?? this.limitResetAt(reason, usage, codexReset);
-      const at = this.waitForLimit(ticketId, resetAt, out.retry!.retries.limit!, allLimited?.accounts);
+      const at = this.resumes.waitForLimit(ticketId, resetAt, out.retry!.retries.limit!, allLimited?.accounts);
       const tail = allLimited?.accounts.length ? allLimitedText(allLimited.accounts, at) : `It resumes by itself at ${clockTime(at)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.`;
       this.emit(ticketId, 'note', { text: `${reason}\n${tail}` });
       if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at)}` });
@@ -3842,7 +3642,7 @@ export class Runner {
     }
     // Unreachable network or API: one probe loop waits for it to come back, then resumes (#366). No push: an outage hits everyone at once.
     if (out.kind === 'net' && out.retry) {
-      this.waitForNetwork(ticketId, out.retry.retries.net!);
+      this.resumes.waitForNetwork(ticketId, out.retry.retries.net!);
       this.emit(ticketId, 'note', { text: `${text}\nThe network or the API was unreachable, so it resumes by itself once it's back; messages queued behind this turn go into that resume.` });
       this.store.updateTicket(ticketId, { note: NET_NOTE });
       return;
@@ -4428,8 +4228,8 @@ export class Runner {
       return !!p && this.turnPerson(t!, p, [], true) === uid;
     };
     // Due now, on Codex, spaced limitGapMs apart like any limit resume.
-    const list = this.limitResumes();
-    if (list.some(mine)) this.saveLimitResumes(list.map((w) => (mine(w) ? { ...w, at: Date.now(), tries: 0, codex: true as const } : w)));
+    const list = this.resumes.limit.all();
+    if (list.some(mine)) this.resumes.saveLimits(list.map((w) => (mine(w) ? { ...w, at: Date.now(), tries: 0, codex: true as const } : w)));
     return null;
   }
 

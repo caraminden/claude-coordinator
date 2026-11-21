@@ -510,43 +510,32 @@ SYSTEM task.
 What it doesn't change: Defender already skips these folders (#286), so the new folders get the same exclusion and
 the trial measures the drive alone. Nothing here restarts the PC, touches another scheme's runner, or edits a `.env`.
 
-Every block runs in **PowerShell as administrator** on the desktop. Each one stops on the first error.
+Every step runs `dev-drive.ps1` from this folder in **PowerShell as administrator** on the desktop; open that window
+once and keep it for the whole step. The script knows only Peek's four build runners, so it can't reach another
+scheme's. Its header lists every step. Two things it refuses: running Move, Back or Cleanup within half an hour of a
+boot (Citadel's keep-runners task starts stopped runners then, and could start one mid-copy), and a drive at R: that
+isn't the `ci-runners` ReFS one.
+
+This is the one exception to the hard rules above for Peek's runners: it stops and starts them, on Cara's go.
 
 ### 1. Check the PC can do it (changes nothing)
 
 ```powershell-admin
-$ErrorActionPreference = 'Stop'
-fsutil devdrv query
-if (Test-Path R:\) { throw 'R: is already taken: tell the minion, it picks another letter' }
-$free = [math]::Round((Get-PSDrive C).Free / 1GB)
-$size = [math]::Round(((Get-ChildItem C:\actions-runner-peek-auras-2 -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1GB)
-"C: has $free GB free; runner -2 holds $size GB"
-if ($free -lt $size + 60) { throw 'Not enough room on C: for the trial: tell the minion' }
-Get-Service actions.runner.caraminden-peek-auras.DESKTOP-G248IJ8-2
+iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Check
 ```
 
-`fsutil devdrv query` should say developer volumes are enabled. If it says they aren't supported, Windows is older
-than 22621.2338 and the trial stops here.
+`fsutil devdrv query` should say developer volumes are enabled; if it says they aren't supported, Windows is older than
+22621.2338 and the trial stops here. It should say `R: is free`, and C: needs the free room it names.
 
 ### 2. Make the Dev Drive (once)
 
 ```powershell-admin
-$ErrorActionPreference = 'Stop'
-$vhd = 'C:\DevDrive\ci-runners.vhdx'
-New-Item -ItemType Directory -Force C:\DevDrive | Out-Null
-Set-Content "$env:TEMP\devdrive.txt" "create vdisk file=$vhd maximum=204800 type=expandable`r`nattach vdisk" -Encoding ascii
-diskpart /s "$env:TEMP\devdrive.txt"
-$disk = Get-DiskImage -ImagePath $vhd | Get-Disk
-if ($disk.BusType -ne 'File Backed Virtual' -or $disk.PartitionStyle -ne 'RAW') { throw "disk $($disk.Number) is not the new empty virtual disk: stopping before any format" }
-Initialize-Disk -Number $disk.Number -PartitionStyle GPT
-New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter R | Format-Volume -DevDrive -FileSystemLabel ci-runners -Confirm:$false
-$act = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -Command `"Mount-DiskImage -ImagePath $vhd -ErrorAction SilentlyContinue`""
-Register-ScheduledTask -TaskName 'Attach CI Dev Drive' -Action $act -Trigger (New-ScheduledTaskTrigger -AtStartup) -User SYSTEM -RunLevel Highest | Out-Null
-fsutil devdrv query R:
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do MakeDrive
 ```
 
-The last line should call R: a trusted developer volume. The task attaches the disk again after a power cut, before
-the runner services start (they start delayed).
+The last line should call R: a trusted developer volume. A SYSTEM task, `Attach CI Dev Drive`, attaches the disk again
+at boot, before the runner services start (they start delayed).
 
 ### 3. Move runner -2 onto it
 
@@ -555,93 +544,46 @@ meanwhile), copies, links and starts it again. Copying about 35 GB takes a few m
 seconds between the wait and the stop, that job is cancelled; its ship just runs again.
 
 ```powershell-admin
-$ErrorActionPreference = 'Stop'
-$r = 'C:\actions-runner-peek-auras-2'; $d = 'R:\peek-auras-2'; $svc = 'actions.runner.caraminden-peek-auras.DESKTOP-G248IJ8-2'
-while (Get-CimInstance Win32_Process -Filter "Name='Runner.Worker.exe'" | Where-Object ExecutablePath -like "$r\*") { 'a job is running, waiting'; Start-Sleep 20 }
-Stop-Service $svc
-New-Item -ItemType Directory -Force $d | Out-Null
-icacls $d /grant '*S-1-5-20:(OI)(CI)F' | Out-Null  # NETWORK SERVICE, which the runner runs as
-Add-MpPreference -ExclusionPath $d
-try {
-  foreach ($f in '_work', 'cargo', 'rustup', 'mise') {
-    $i = Get-Item "$r\$f" -Force -ErrorAction SilentlyContinue
-    if (-not $i) { "no $f, skipping"; continue }
-    if ($i.LinkType) { "$f already moved"; continue }
-    robocopy "$r\$f" "$d\$f" /E /COPY:DATO /DCOPY:DAT /SJ /SL /B /MT:16 /R:1 /W:1 /NFL /NDL /NP | Select-Object -Last 12
-    if ($LASTEXITCODE -ge 8) { throw "copying $f failed (robocopy $LASTEXITCODE); $f is untouched" }
-    Rename-Item "$r\$f" "$f.pre-devdrive"
-    New-Item -ItemType Junction -Path "$r\$f" -Target "$d\$f" | Out-Null
-  }
-} finally { Start-Service $svc }  # the runner starts again even when a step above failed
-Get-ChildItem $r -Force | Where-Object LinkType | Format-Table Name, LinkType, Target
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-2
 ```
 
-The table at the end should list the four junctions. Each folder moves on its own and the runner starts again even
-after an error, so a stop halfway leaves it working: what moved points at R:, the rest is where it was. Running the
-block again carries on where it stopped.
+The table at the end should list four junctions. Each folder moves on its own and the runner starts again even after
+an error, so a stop halfway leaves it working: what moved points at R:, the rest is where it was. Running the line
+again carries on where it stopped.
 
 ### 4. Measure (the minion)
 
 After a day, the minion reads every green Test and Build release step of `windows.yml` with `gh` and compares runner
 -2 with the other three, the day before and the day after (each runner's ratio to the others, since their medians
-already differ by up to 15% on the same day). The first run on -2 after the move is left out: it may build cold once.
+already differ by up to 15% on the same day), with how many runs each number comes from. The first run on -2 after
+the move is left out: it may build cold once.
 
 ### 5a. It helped: move the other three
 
-The same move for `DESKTOP-G248IJ8` (folder `C:\actions-runner-peek-auras`), `-3` and `-4`, one at a time, so two
-runners always take jobs:
+One at a time, so at least two runners always take jobs. They need about 110 GB more on C: until the old copies go;
+Check prints the room.
 
 ```powershell-admin
-$ErrorActionPreference = 'Stop'
-$free = [math]::Round((Get-PSDrive C).Free / 1GB); "C: has $free GB free"
-if ($free -lt 130) { throw 'Three more runners need about 110 GB on C: until the old copies go: free some room first' }
-foreach ($n in @(@('C:\actions-runner-peek-auras', 'R:\peek-auras-1', 'DESKTOP-G248IJ8'), @('C:\actions-runner-peek-auras-3', 'R:\peek-auras-3', 'DESKTOP-G248IJ8-3'), @('C:\actions-runner-peek-auras-4', 'R:\peek-auras-4', 'DESKTOP-G248IJ8-4'))) {
-  $r, $d, $svc = $n[0], $n[1], "actions.runner.caraminden-peek-auras.$($n[2])"
-  while (Get-CimInstance Win32_Process -Filter "Name='Runner.Worker.exe'" | Where-Object ExecutablePath -like "$r\*") { "$($n[2]): a job is running, waiting"; Start-Sleep 20 }
-  Stop-Service $svc
-  New-Item -ItemType Directory -Force $d | Out-Null
-  icacls $d /grant '*S-1-5-20:(OI)(CI)F' | Out-Null
-  Add-MpPreference -ExclusionPath $d
-  try {
-    foreach ($f in '_work', 'cargo', 'rustup', 'mise') {
-      $i = Get-Item "$r\$f" -Force -ErrorAction SilentlyContinue
-      if (-not $i) { "no $f, skipping"; continue }
-      if ($i.LinkType) { "$f already moved"; continue }
-      robocopy "$r\$f" "$d\$f" /E /COPY:DATO /DCOPY:DAT /SJ /SL /B /MT:16 /R:1 /W:1 /NFL /NDL /NP | Select-Object -Last 12
-      if ($LASTEXITCODE -ge 8) { throw "$($n[2]): copying $f failed (robocopy $LASTEXITCODE); $f is untouched" }
-      Rename-Item "$r\$f" "$f.pre-devdrive"
-      New-Item -ItemType Junction -Path "$r\$f" -Target "$d\$f" | Out-Null
-    }
-  } finally { Start-Service $svc }
-}
+iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8, DESKTOP-G248IJ8-3, DESKTOP-G248IJ8-4
 ```
 
-Once they've all run green for a day, the old copies can go (about 35 GB each back on C:):
+Once they've all run green for a day, the old copies can go (about 35 GB each back on C:). It deletes a runner's old
+copy only where its junction points at R:, and never follows a link inside it. After this, 5b can't run.
 
 ```powershell-admin
-foreach ($r in 'C:\actions-runner-peek-auras', 'C:\actions-runner-peek-auras-2', 'C:\actions-runner-peek-auras-3', 'C:\actions-runner-peek-auras-4') { Get-ChildItem $r -Directory -Filter *.pre-devdrive | Remove-Item -Recurse -Force }
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8, DESKTOP-G248IJ8-2, DESKTOP-G248IJ8-3, DESKTOP-G248IJ8-4
 ```
 
 ### 5b. It didn't help: move runner -2 back
 
-The old folders come back (a day stale, so its next build recompiles what changed), then the Dev Drive goes.
-`rmdir` on a junction removes only the link, never what it points at.
+Only before any Cleanup. The old folders come back (a day stale, so its next build recompiles what changed), then the
+Dev Drive goes. Removing a junction removes only the link, never what it points at.
 
 ```powershell-admin
-$ErrorActionPreference = 'Stop'
-$r = 'C:\actions-runner-peek-auras-2'; $d = 'R:\peek-auras-2'; $svc = 'actions.runner.caraminden-peek-auras.DESKTOP-G248IJ8-2'
-while (Get-CimInstance Win32_Process -Filter "Name='Runner.Worker.exe'" | Where-Object ExecutablePath -like "$r\*") { 'a job is running, waiting'; Start-Sleep 20 }
-Stop-Service $svc
-foreach ($f in '_work', 'cargo', 'rustup', 'mise') {
-  if ((Get-Item "$r\$f" -Force -ErrorAction SilentlyContinue).LinkType -ne 'Junction') { "$f is not a junction, leaving it"; continue }
-  cmd /c rmdir "$r\$f"
-  Rename-Item "$r\$f.pre-devdrive" $f
-}
-Start-Service $svc
-Remove-MpPreference -ExclusionPath $d
-Unregister-ScheduledTask -TaskName 'Attach CI Dev Drive' -Confirm:$false
-Dismount-DiskImage -ImagePath C:\DevDrive\ci-runners.vhdx | Out-Null
-Remove-Item -Recurse -Force C:\DevDrive
+iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Back -Runner DESKTOP-G248IJ8-2
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do RemoveDrive
 ```
 
 ### If R: is missing
@@ -650,7 +592,8 @@ After a power cut, jobs on a moved runner fail at checkout if the task didn't at
 (nothing else needs doing; the runners pick it up on their next job):
 
 ```powershell-admin
-Mount-DiskImage -ImagePath C:\DevDrive\ci-runners.vhdx; Get-ScheduledTaskInfo -TaskName 'Attach CI Dev Drive'
+iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Attach
 ```
 
 ## Check it

@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { test } from 'node:test';
-import { tempRoot } from './helpers.ts';
 
 // The .ps1 lint (#370): Citadel's runner scripts and the Windows CI kit's own scripts must parse and lint clean, since
 // they first run on Cara's PC. One pwsh run also lints a script with known mistakes, so a lint that went quiet (a rule
@@ -149,17 +148,17 @@ exit $LASTEXITCODE
       answer(200, { scheme: 'Peek Auras', repo: REPO, name: body.name, removed: true });
     });
   });
-  const tmp = tempRoot('ps1-citadel-');
+  await new Promise<void>((r) => citadel.listen(0, '127.0.0.1', r));
   try {
-    const url = `http://127.0.0.1:${await tmp.serve(citadel)}`;
-    const child = tmp.spawn(psRun[0], [...psRun.slice(1), '-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
+    const url = `http://127.0.0.1:${(citadel.address() as any).port}`;
+    const child = spawn(psRun[0], [...psRun.slice(1), '-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
     let out = '';
     child.stdout.on('data', (c) => { out += c; });
     child.stderr.on('data', (c) => { out += c; });
     const status = await new Promise<number | null>((r) => child.on('close', r));
     return { status, out, asked, calls: readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean) };
   } finally {
-    await tmp.teardown();
+    await new Promise((r) => citadel.close(r));
   }
 }
 const root0 = root;

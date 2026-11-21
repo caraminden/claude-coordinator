@@ -255,6 +255,8 @@ export interface FreshState { why: string; summary?: string; compact?: true; aut
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
+/** A claim holder whose work shipped (#1334): its claims pass on as shipped when it is dismissed. */
+const shippedKey = (ticketId: number) => `claim-shipped:${ticketId}`;
 /** A fresh start's idle time for the chat's divider (#1059): "55 m", "1 h 12 m". */
 export const idleText = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? `${m} m` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} m` : ''}`; };
 /** What a fresh start's notes call the chat's agent. */
@@ -901,11 +903,22 @@ export class Runner {
     };
   }
 
+  /**
+   * A claim holder's work shipped (#1334, the land's `landed` hook): when it is dismissed, its claims pass on as shipped,
+   * which the time estimate counts, not as an unshipped dismissal. A setting, so a restart before it goes live keeps it.
+   */
+  holderShipped(ticketId: number) {
+    const t = this.store.getTicket(ticketId);
+    if (t && this.store.claims.list(t.project_id).some((c) => c.holder === ticketId)) this.store.setSetting(shippedKey(ticketId), true);
+  }
+
   /** A dismissed minion's claims (#921) pass to the next in each one's queue, or free themselves (#1334: claimPassed). */
   private freeClaims(ticketId: number) {
     const minion = this.store.getTicket(ticketId);
-    const passed = this.store.claims.releaseHeldBy(ticketId);
-    if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, was dismissed`, `#${minion.number} ${minion.title}`);
+    const shipped = !!this.store.getSetting(shippedKey(ticketId));
+    if (shipped) this.store.deleteSetting(shippedKey(ticketId));
+    const passed = this.store.claims.releaseHeldBy(ticketId, shipped ? 'live' : 'dismissed');
+    if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, ${shipped ? 'shipped and was dismissed' : 'was dismissed'}`, `#${minion.number} ${minion.title}`);
   }
 
   /**
@@ -913,7 +926,7 @@ export class Runner {
    * minion still holding its brief gets the line as a note and starts when its chain does, so it is never woken without
    * its brief. Whoever keeps the scheme's claims hears it as held mail. A scheme's page redraws either way.
    */
-  claimPassed(projectId: number, passed: { from: Claim; to?: Claim }[], why: string, author: string) {
+  claimPassed(projectId: number, passed: ({ from: Claim; to?: Claim } | { from?: undefined; to: Claim })[], why: string, author: string) {
     if (!passed.length) return;
     const keeper = this.store.getOverlord(projectId);
     for (const { from, to } of passed) {
@@ -927,7 +940,7 @@ export class Runner {
         }
       }
       if (keeper && keeper.id !== to?.holder) {
-        this.leaveMail(keeper.id, author, `(nothing to do unless something waits on it) ${from.name} ${next ? `passed to #${next.number} ${next.title}, next in its queue` : 'is free'}: ${why}.`);
+        this.leaveMail(keeper.id, author, `(nothing to do unless something waits on it) ${(from ?? to)!.name} ${next ? `passed to #${next.number} ${next.title}, next in its queue` : 'is free'}: ${why}.`);
       }
     }
     this.broadcast({ type: 'claims', projectId });

@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Claims, claimName } from '../src/claims.ts';
+import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
 import { agentToken, bootServer, stopProcs, stopTurns, type Booted } from './helpers.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
@@ -102,6 +104,29 @@ test('claim names are hyphenated lowercase slugs', () => {
   for (const bad of ['', 'pipeline lane', 'lane;drop', '-lane', 'a'.repeat(41)]) assert.throws(() => claimName(bad), /lowercase words/);
 });
 
+test('a holder whose work shipped passes its claim on as shipped when dismissed, which the estimate counts', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'claims-runner-'));
+  try {
+    const store = new Store(join(dir, 'test.db'));
+    const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+    const p = store.createProject('Shipped', null).id;
+    const mk = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'default', created_by: 'Cara' });
+    const [a, b, other] = [mk('A'), mk('B'), mk('Not a holder')];
+    const how = () => new DatabaseSync(join(dir, 'test.db'), { readOnly: true }).prepare('SELECT holder, how FROM claim_spans ORDER BY rowid').all().map((r: any) => [r.holder, r.how]);
+    store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
+    runner.holderShipped(a.id);
+    runner.holderShipped(other.id);
+    assert.ok(!store.getSetting(`claim-shipped:${other.id}`), 'only a holder is marked');
+    await runner.close(a.id, 'Shipped and live, so the server dismissed this minion.');
+    store.claims.take(p, 'pipeline-lane', b.id, 'Cara');
+    await runner.close(b.id, 'Cara dismissed this minion.');
+    assert.deepEqual(how(), [[a.id, 'live'], [b.id, 'dismissed']]);
+    assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 const root = mkdtempSync(join(tmpdir(), 'claims-api-'));
 const procs: ChildProcess[] = [];
 after(async () => {
@@ -177,10 +202,11 @@ test('a queued claim passes to the next minion with one chat line when its holde
   const url = `/api/projects/${p.id}/claims`;
   const said = async (id: number) => JSON.stringify((await call(`/api/tickets/${id}/events?after=0`)).data).split('You hold the pipeline-lane claim now').length - 1;
 
-  // A queue alone on a free claim: the first in line holds it.
-  const took = await call(url, { method: 'POST', body: { name: 'pipeline-lane', queue: [a.number, b.number] }, as: tm });
+  // A queue alone on a free claim, from a person: the first in line holds it and is told once.
+  const took = await call(url, { method: 'POST', body: { name: 'pipeline-lane', queue: [a.number, b.number] } });
   assert.equal(took.status, 201, JSON.stringify(took.data));
   assert.equal(took.data.claim.holder_number, a.number);
+  assert.equal(await said(a.id), 1, 'the first holder hears it');
   assert.deepEqual(took.data.claim.queue.map((q: any) => q.number), [b.number]);
   assert.deepEqual([took.data.claim.done, took.data.claim.total, took.data.claim.estimate], [0, 2, null], 'no history: no estimate');
   // The page reorders the line; a minion can't.
@@ -198,14 +224,18 @@ test('a queued claim passes to the next minion with one chat line when its holde
   const now = (await call(url)).data.claims[0];
   assert.equal(now.holder_number, c.number);
   assert.deepEqual(now.queue.map((q: any) => [q.number, q.state]), [[a.number, 'done'], [b.number, now.queue[1].state]]);
+  assert.equal(now.queue[0].how, 'dismissed', 'dismissed before it shipped');
   assert.deepEqual([now.done, now.total], [1, 3]);
   assert.equal(await said(c.id), 1, 'the new holder gets one line');
   assert.equal(await said(b.id), 0);
   assert.ok(JSON.stringify((await call(`/api/tickets/${tm}/events?after=0`)).data).includes(`pipeline-lane passed to #${c.number}`));
 
-  // A release passes it on too; with nobody left in line the next release frees it.
-  const rel = await call(`${url}/pipeline-lane`, { method: 'DELETE' });
+  // A release passes it on too; a second click from a page that saw the old holder is refused, not a second pass.
+  const rel = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE' });
   assert.equal(rel.data.claim.holder_number, b.number);
+  const again = await call(`${url}/pipeline-lane?holder=${c.number}`, { method: 'DELETE' });
+  assert.equal(again.status, 409, JSON.stringify(again.data));
+  assert.equal((await call(url)).data.claims[0].holder_number, b.number);
   assert.equal(await said(b.id), 1);
   assert.equal((await call(`${url}/pipeline-lane`, { method: 'DELETE' })).data.claim, undefined);
   assert.deepEqual((await call(url)).data.claims, []);

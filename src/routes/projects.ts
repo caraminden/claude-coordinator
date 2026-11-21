@@ -453,7 +453,7 @@ export function claimView(app: App, c: Claim, now = Date.now()) {
     const q = store.getTicket(r.ticket);
     const done = r.done_at != null;
     const starts = est && !done ? now + left + est.median * ahead++ : null;
-    return { number: q?.number ?? null, title: q?.title ?? '', ...queuedState(app, q, done), done_at: r.done_at, starts_at: starts, starts_text: starts ? pacific(starts) : null };
+    return { number: q?.number ?? null, title: q?.title ?? '', ...queuedState(app, q, done), done_at: r.done_at, how: r.how, starts_at: starts, starts_text: starts ? pacific(starts) : null };
   });
   const waiting = queue.filter((q) => q.state !== 'done').length;
   return {
@@ -1667,22 +1667,24 @@ export const projectRoutes: Route[] = [
         holder = app.store.getTicketByNumber(project.id, Number(body.minion));
         if (!holder || holder.kind === 'coordinator' || holder.status === 'closed') throw new HttpError(400, `No open minion #${Number(body.minion)} in this scheme`);
       }
-      if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number)');
       const held = app.store.claims.get(project.id, name);
-      // Only a queue (#1334): edit the line of a claim someone else holds, or start a free one with the first in line.
-      if (queue && body.minion == null && held && held.holder !== holder.id) {
+      // Only a queue (#1334): edit the line of a claim someone else holds, or start a free one with the first in line, who is told.
+      if (queue && body.minion == null && held && held.holder !== holder?.id) {
         app.store.claims.setQueue(project.id, name, queue, session.name);
         app.broadcast({ type: 'claims', projectId: project.id });
         return json(res, 200, { claim: claimView(app, held) });
       }
-      if (queue?.length && body.minion == null && !held) holder = app.store.getTicket(queue[0])!;
+      const first = queue?.length && body.minion == null && !held;
+      if (first) holder = app.store.getTicket(queue[0])!;
+      if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number), or give a queue');
       const taken = app.store.claims.take(project.id, name, holder.id, session.name, note);
       if (taken.held) {
         const v = claimView(app, taken.held);
         throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${taken.held.note ? ` (${taken.held.note})` : ''}. Release it first if it should move, or add to its queue.`);
       }
       if (queue) app.store.claims.setQueue(project.id, name, queue, session.name);
-      app.broadcast({ type: 'claims', projectId: project.id });
+      if (first) app.runner.claimPassed(project.id, [{ to: taken.claim }], `${session.name} started its queue with you`, session.name);
+      else app.broadcast({ type: 'claims', projectId: project.id });
       const view = claimView(app, taken.claim);
       if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
       return json(res, held ? 200 : 201, { claim: view });
@@ -1704,8 +1706,15 @@ export const projectRoutes: Route[] = [
   {
     // Release: the claim passes to the first in its queue, who hears so (#1334), or is free.
     method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
-    handler({ res, app, session, caller, project, params }) {
-      const passed = app.store.claims.passOn(project.id, claimName(decodeURIComponent(params.name)), 'released');
+    handler({ res, app, session, caller, project, params, url }) {
+      const name = claimName(decodeURIComponent(params.name));
+      // ?holder=<number>: the holder the caller saw, so a second Release click can't pass it on twice.
+      const saw = url.searchParams.get('holder');
+      const now = app.store.claims.get(project.id, name);
+      if (saw != null && now && app.store.getTicket(now.holder)?.number !== Number(saw)) {
+        throw new HttpError(409, `${name} already passed to ${claimView(app, now).holder_name}; nothing was released`);
+      }
+      const passed = app.store.claims.passOn(project.id, name, 'released');
       const view = passed && claimView(app, passed.from);
       if (passed && view) {
         if (passed.to) app.runner.claimPassed(project.id, [passed], `${session.name} released it from ${view.holder_name}`, session.name);

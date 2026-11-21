@@ -10,7 +10,7 @@ import { iconSrc } from './schemes.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
-import { claimsBlock, loadClaims, loadWatch, watchBlock } from './release-extras.js';
+import { claimsBlock, loadClaims, loadWatch, onHolderTicket, watchBlock } from './release-extras.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -47,6 +47,9 @@ function refreshExtras() {
 
 /** A `claims` event: that scheme's claims changed. */
 export function onClaims(msg) { loadClaims(msg.projectId, redraw); }
+
+/** A `ticket` event: a claim holder's stage may have moved (#1334). */
+export function onClaimHolder(ticket) { if (loaded) onHolderTicket(ticket, redraw); }
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {

@@ -176,7 +176,7 @@ b.waits { color: var(--held); }
 .claim-segs > span { flex: 1; min-width: 3px; border-radius: 3px; background: var(--sunk, color-mix(in srgb, var(--ink) 6%, var(--panel))); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
 .claim-segs > span.d { background: var(--held); box-shadow: none; }
 .claim-segs > span.h { box-shadow: inset 0 0 0 1.5px var(--held); }
-.claim-segs > span.h i { display: block; height: 100%; width: var(--p, 0%); background: var(--held); transition: width var(--citadel-motion, 120ms); }
+.claim-segs > span.h i { display: block; height: 100%; background: var(--held); transform: scaleX(var(--f, 0)); transform-origin: left; transition: transform var(--citadel-motion, 120ms); }
 .claim-side { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.82em; font-variant-numeric: tabular-nums; line-height: 1.3; white-space: nowrap; }
 .claim-side b { color: var(--ink); font-weight: 650; }
 .claim-est { color: var(--muted); text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }

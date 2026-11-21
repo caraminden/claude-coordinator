@@ -31,15 +31,27 @@ const STAGE_AT = { working: 0, reviewing: 1, shipping: 2 };
 // A queued minion's chip (src/routes/projects.ts queuedState): [tone, words].
 const QUEUED = { done: ['ok', '✓ Done'], working: ['info', 'Working'], waiting: ['violet', 'Waiting'], new: ['neutral', 'Not started'], gone: ['neutral', 'Dismissed'] };
 
+// A past holder's chip by how its time ended (src/claims.ts SpanEnd).
+const ENDED = { live: ['ok', '✓ Shipped'], released: ['neutral', 'Released'], dismissed: ['neutral', 'Dismissed'] };
+
+/** A holder's minion changed (its plan, state or ship): redraw its claim's stage and time, at most every 5 s per scheme. */
+const holderLoads = new Map();
+export function onHolderTicket(t, redraw) {
+  if (!(claims.get(t.project_id) ?? []).some((c) => c.holder === t.id) || holderLoads.has(t.project_id)) return;
+  holderLoads.set(t.project_id, setTimeout(() => { holderLoads.delete(t.project_id); loadClaims(t.project_id, redraw); }, 5000));
+}
+
 /** "40 min", "3.5 h": a rough time, as the estimate is. */
 function roughly(ms) {
   const min = Math.max(1, Math.round(ms / 60_000));
   return min < 90 ? `${min} min` : `${Math.round(min / 6) / 10} h`;
 }
 
-/** A bar's fill through the CSSOM (the CSP refuses style=""). */
+/** A bar's fill through the CSSOM (the CSP refuses style=""): --p as a percent, --f as a fraction for scaleX. */
 function filled(el, frac) {
-  el.style.setProperty('--p', `${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%`);
+  const f = Math.max(0, Math.min(1, frac));
+  el.style.setProperty('--p', `${(f * 100).toFixed(1)}%`);
+  el.style.setProperty('--f', f.toFixed(3));
   return el;
 }
 
@@ -55,7 +67,7 @@ function claimProgress(c) {
   const holder = h('span', { class: 'h', title: c.holder_name }, filled(h('i'), c.progress ?? 0));
   const segs = [...done.map((q) => h('span', { class: 'd', title: tip(q) })), holder, ...waiting.map((q) => h('span', { title: tip(q) }))];
   const time = c.estimate
-    ? h('span', { class: 'claim-est', title: `Estimate: the median time a holder kept ${c.name}, over its last ${c.estimate.of} holders (${roughly(c.estimate.median_ms)} each)` }, `≈ ${roughly(c.estimate.left_ms)} left`)
+    ? h('span', { class: 'claim-est', tabindex: 0, 'data-tip': `Estimate: the median time a holder kept ${c.name}, over its last ${c.estimate.of} holders (${roughly(c.estimate.median_ms)} each)` }, `≈ ${roughly(c.estimate.left_ms)} left`)
     : h('span', { class: 'muted' }, 'time after 3 holders');
   return h('span', { class: 'claim-prog' }, h('span', { class: 'claim-segs', 'aria-hidden': 'true' }, ...segs),
     h('span', { class: 'claim-side' }, h('b', {}, `${c.done} of ${c.total} done`), time));
@@ -77,11 +89,20 @@ function claimBody(c) {
     h('span', {}, h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)),
     c.stage ? h('span', { class: 'muted num' }, step) : null), c.stage ? stageStrip(c) : null);
   const rows = c.queue.map((q, i) => {
-    const [tone, word] = q.state === 'chained' ? ['warn', `After #${q.after}`] : QUEUED[q.state] ?? QUEUED.waiting;
+    const [tone, word] = q.state === 'chained' ? ['warn', `After #${q.after}`] : q.state === 'done' ? ENDED[q.how] ?? QUEUED.done : QUEUED[q.state] ?? QUEUED.waiting;
     return h('li', { class: `claim-q${q.state === 'done' ? ' d' : ''}` }, h('span', { class: 'pos' }, String(i + 1)),
       h('span', { class: 'nm' }, `#${q.number} ${q.title}`), toneChip(tone, word), h('span', { class: 'eta' }, q.starts_text ?? ''));
   });
   return [box, h('div', {}, h('div', { class: 'claim-sub' }, c.estimate ? 'Queue · expected start' : 'Queue'), h('ol', { class: 'claim-qlist' }, ...rows))];
+}
+
+/** What Release shows at once: the first waiting holds it from now (the server's view replaces this), or the claim is gone. */
+function passedOn(c) {
+  const done = (c.queue ?? []).filter((q) => q.state === 'done');
+  const [next, ...rest] = (c.queue ?? []).filter((q) => q.state !== 'done');
+  if (!next) return [];
+  return [{ ...c, holder: null, holder_number: next.number, holder_name: `#${next.number} ${next.title}`, since_text: 'since now', note: '', stage: 'working', progress: 0, step: null,
+    done: c.done + 1, queue: [...done, { number: c.holder_number, title: c.holder_title, state: 'done', how: 'released' }, ...rest] }];
 }
 
 export function claimsBlock(projectId, redraw) {
@@ -96,8 +117,9 @@ export function claimsBlock(projectId, redraw) {
     ...(queued ? claimBody(c) : []),
     hueRow({ hue: 'held', meta: h('button', { type: 'button', class: 'btn-small', title: queued ? `Pass ${c.name} to the first in its queue, who is told` : `Free ${c.name}; its holder is told nothing`, onclick: () => optimistic({
       key: `claim:${projectId}/${c.name}`,
-      apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).filter((x) => x.name !== c.name)); redraw(); },
-      send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}`, { method: 'DELETE' }),
+      apply: () => { claims.set(projectId, (claims.get(projectId) ?? []).flatMap((x) => (x.name !== c.name ? [x] : passedOn(x)))); redraw(); },
+      // The holder it saw: a second click after it passed on is refused, not a second pass.
+      send: () => api(`api/projects/${projectId}/claims/${encodeURIComponent(c.name)}${c.holder_number != null ? `?holder=${c.holder_number}` : ''}`, { method: 'DELETE' }),
       undo: () => { claims.set(projectId, list); redraw(); },
       label: `release ${c.name}`,
     }) }, 'Release') }, queued ? h('span', { class: 'muted' }, 'Release passes it to the first in line.') : [h('b', {}, c.holder_name), ' ', h('span', { class: 'muted' }, `${c.since_text}${c.note ? ` · ${c.note}` : ''}`)]));

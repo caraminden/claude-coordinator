@@ -19,7 +19,7 @@ import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, onSeenIt
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
-import { loadReleases, onClaims, onReleases } from './releases.js';
+import { loadReleases, onClaimHolder, onClaims, onReleases } from './releases.js';
 import { ciChip } from './ci.js';
 import { statusChip } from './status.js';
 import { inAppHash, jumpParts, showParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
@@ -393,7 +393,10 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'turn') renderCost();
     if (msg.type === 'notify') desktopNotify(msg);
-    if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
+    if (msg.type === 'ticket') {
+      onTicketUpdate(msg.ticket);
+      onClaimHolder(msg.ticket);
+    }
     if (msg.type === 'person_note') onPersonNote(msg);
     if (msg.type === 'ticket_pin') onTicketPin(msg);
     if (msg.type === 'event') {

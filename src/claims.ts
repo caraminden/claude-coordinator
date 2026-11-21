@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS claim_queue (
   added_by TEXT NOT NULL,
   added_at INTEGER NOT NULL,
   done_at INTEGER,
+  how TEXT,
   PRIMARY KEY (project_id, name, ticket)
 );
 -- Each holder's time with a claim once it ends (#1334): the page's time estimate is their median.
@@ -59,9 +60,11 @@ export interface QueueRow {
   added_by: string;
   added_at: number;
   done_at: number | null;
+  /** How a past holder's time ended; null while waiting. */
+  how: SpanEnd | null;
 }
 
-/** How a holder's time ended: its work was live (or it was dismissed), it was released, or it was dismissed unshipped. */
+/** How a holder's time ended: it shipped (and was dismissed for it), it was released, or it was dismissed without shipping. */
 export type SpanEnd = 'live' | 'released' | 'dismissed';
 
 /** Spans the estimate needs before it shows (the brief: hidden when history is thin), and how many recent ones it reads. */
@@ -109,7 +112,7 @@ export class Claims {
 
   /** `name`'s queue: this run's past holders by when they finished, then the waiting in order. */
   queue(projectId: number, name: string): QueueRow[] {
-    return this.db.prepare('SELECT ticket, pos, added_by, added_at, done_at FROM claim_queue WHERE project_id = ? AND name = ? ORDER BY done_at IS NULL, done_at, pos')
+    return this.db.prepare('SELECT ticket, pos, added_by, added_at, done_at, how FROM claim_queue WHERE project_id = ? AND name = ? ORDER BY done_at IS NULL, done_at, pos')
       .all(projectId, name) as unknown as QueueRow[];
   }
 
@@ -160,7 +163,7 @@ export class Claims {
       } else {
         this.db.prepare('UPDATE claims SET holder = ?, note = \'\', since = ? WHERE project_id = ? AND name = ?').run(next, now, projectId, name);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket IN (?, ?)').run(projectId, name, next, from.holder);
-        this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at) VALUES (?, ?, ?, -1, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now);
+        this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at, how) VALUES (?, ?, ?, -1, ?, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now, how);
       }
       this.db.exec('COMMIT');
     } catch (err) {

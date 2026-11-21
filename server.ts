@@ -1277,6 +1277,7 @@ const landHandoffs = new LandHandoffs({
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
   failed: (id, kind) => stallWatch.shipFailed(id, kind),
   landed: (id, commit) => {
+    runner.holderShipped(id);
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
   },

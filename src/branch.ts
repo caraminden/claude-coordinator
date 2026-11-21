@@ -1,5 +1,7 @@
 // Where a ticket's work stands: its GitHub pull request, if it has one, and whether its branch is merged.
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -60,45 +62,97 @@ async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr
   }
 }
 
+// #1463: starting a git process holds the server's thread (the fork itself), and branchStatus used to start 8 to 15
+// of them per call. A question asked only of commit hashes (how many commits A..B, is A in B) has one answer forever,
+// so it is kept here and asked once; the refs are read in one for-each-ref. A call where nothing moved starts at most
+// 3: that read, the worktree's status, and gh when the PR is due a look.
+const SETTLED_MAX = 5000;
+const settled = new Map<string, unknown>();
+/** `ask`'s answer for this key, asked once; null answers (git couldn't tell) aren't kept, so they're asked again. */
+async function once<T>(key: string, ask: () => Promise<T | null>): Promise<T | null> {
+  if (settled.has(key)) return settled.get(key) as T;
+  const v = await ask();
+  if (v !== null) {
+    if (settled.size >= SETTLED_MAX) settled.delete(settled.keys().next().value!);
+    settled.set(key, v);
+  }
+  return v;
+}
+/** For tests: forget the kept answers. */
+export function forgetSettled() {
+  settled.clear();
+}
+
+/** Each named ref that exists, as name → commit, and origin/HEAD's target; one git process. */
+async function readRefs(repoDir: string, names: string[]): Promise<{ sha: Map<string, string>; originHead: string | null }> {
+  const out = await tryGit(['for-each-ref', '--format=%(refname)%09%(objectname)%09%(symref)', '--', ...names], repoDir) ?? '';
+  const sha = new Map<string, string>();
+  let originHead: string | null = null;
+  for (const line of out.split('\n')) {
+    const [ref, obj, sym] = line.split('\t');
+    if (!ref || !obj || !names.includes(ref)) continue; // for-each-ref also matches refs below a name (main/x)
+    sha.set(ref, obj);
+    if (ref === 'refs/remotes/origin/HEAD' && sym) originHead = sym;
+  }
+  return { sha, originHead };
+}
+
 /**
  * Status of a ticket's branch in the project's checkout. Merged means its commits are all in the
  * local default branch or origin's (tickets here are often merged locally rather than through a PR).
  */
 export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null, build: number | null = null, worktree: string | null = null): Promise<BranchStatus | null> {
-  const tip = await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir);
+  const head = `refs/heads/${branch}`;
+  const builds = build ? [`refs/heads/build/${build}`, `refs/remotes/origin/build/${build}`] : [];
+  // origin/HEAD names the default branch; main and master cover nearly every repo, and any other name costs a second read.
+  let refs = await readRefs(repoDir, [head, 'refs/remotes/origin/HEAD', 'refs/heads/main', 'refs/heads/master', ...builds]);
+  const tip = refs.sha.get(head);
   if (!tip) return null;
-  const originHead = await tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
+  const originHead = refs.originHead?.replace(/^refs\/remotes\//, '') ?? null;
   const localDefault = originHead?.replace(/^origin\//, '') ?? 'main';
-  const bases = [];
-  if (await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${localDefault}`], repoDir)) bases.push(localDefault);
-  if (originHead) bases.push(originHead);
-  const empty = await emptyBranch(repoDir, branch, startedAt);
+  if (!['main', 'master'].includes(localDefault)) {
+    const more = await readRefs(repoDir, [`refs/heads/${localDefault}`]);
+    refs = { sha: new Map([...refs.sha, ...more.sha]), originHead: refs.originHead };
+  }
+  const bases: { name: string; sha: string | undefined }[] = [];
+  const localSha = refs.sha.get(`refs/heads/${localDefault}`);
+  if (localSha) bases.push({ name: localDefault, sha: localSha });
+  if (originHead) bases.push({ name: originHead, sha: refs.sha.get('refs/remotes/origin/HEAD') });
+  const empty = await once(`empty\0${repoDir}\0${branch}\0${tip}\0${startedAt}`, () => emptyBranch(repoDir, branch, startedAt, tip)) as boolean;
   let ahead = 0;
   let merged = false;
   for (const base of bases) {
-    const count = Number(await tryGit(['rev-list', '--count', `${base}..${branch}`], repoDir) ?? NaN);
-    if (Number.isNaN(count)) continue;
+    const count = base.sha ? await countBetween(repoDir, base.sha, tip) : null;
+    if (count === null) continue;
     if (base === bases[0]) ahead = count;
     if (count === 0) merged = !empty;
   }
   // In a build with a branch (specs/build-branches.md): whether its work is in build/<n> yet.
-  const buildRef = build ? await buildRefOf(repoDir, build) : null;
+  const buildSha = builds.map((r) => refs.sha.get(r)).find(Boolean);
   return {
     branch,
     tip,
-    base: bases[0] ?? null,
+    base: bases[0]?.name ?? null,
     ahead,
     merged,
     empty,
-    build: buildRef ? {
+    build: buildSha ? {
       n: build!,
-      merged: !empty && await contains(repoDir, buildRef, `refs/heads/${branch}`) === true,
-      ahead: Number(await tryGit(['rev-list', '--count', `${buildRef}..refs/heads/${branch}`], repoDir)) || 0,
+      merged: !empty && await contains(repoDir, buildSha, tip) === true,
+      ahead: (await countBetween(repoDir, buildSha, tip)) ?? 0,
     } : null,
     pr: withPr ? await findPr(repoDir, branch) : null,
-    deploy: merged && live ? await deployed(repoDir, branch, live) : null,
+    deploy: merged && live ? await deployed(repoDir, tip, live) : null,
     uncommitted: worktree ? await uncommittedFiles(worktree) : 0,
   };
+}
+
+/** Commits in `tip` that `base` lacks (both hashes); null when git can't tell. */
+function countBetween(repoDir: string, base: string, tip: string): Promise<number | null> {
+  return once(`count\0${repoDir}\0${base}\0${tip}`, async () => {
+    const n = Number(await tryGit(['rev-list', '--count', `${base}..${tip}`], repoDir) ?? NaN);
+    return Number.isNaN(n) ? null : n;
+  });
 }
 
 /**
@@ -121,10 +175,10 @@ export async function uncommittedFiles(worktree: string): Promise<number> {
  * to a newer main has a new tip but none of its own work, so ask its reflog (madeCommits). With no reflog
  * (they expire), a branch whose newest commit predates the minion is still where it was cut from.
  */
-export async function emptyBranch(repoDir: string, branch: string, startedAt: number): Promise<boolean> {
+export async function emptyBranch(repoDir: string, branch: string, startedAt: number, tip: string = branch): Promise<boolean> {
   const made = await madeCommits(repoDir, branch, Math.floor(startedAt / 1000));
   if (made !== null) return !made;
-  const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', branch], repoDir)) * 1000;
+  const tipTime = Number(await tryGit(['log', '-1', '--format=%ct', tip], repoDir)) * 1000;
   return !tipTime || tipTime < startedAt;
 }
 
@@ -159,8 +213,15 @@ export async function madeCommits(repoDir: string, branch: string, since: number
   return false;
 }
 
-/** Is `ancestor` contained in `commit`? Null when the repo doesn't know one of them. */
+const HASH = /^[0-9a-f]{40,64}$/;
+
+/** Is `ancestor` contained in `commit`? Null when the repo doesn't know one of them. Kept when both are hashes. */
 async function contains(repoDir: string, commit: string, ancestor: string): Promise<boolean | null> {
+  if (HASH.test(commit) && HASH.test(ancestor)) return once(`contains\0${repoDir}\0${commit}\0${ancestor}`, () => isAncestor(repoDir, commit, ancestor));
+  return isAncestor(repoDir, commit, ancestor);
+}
+
+async function isAncestor(repoDir: string, commit: string, ancestor: string): Promise<boolean | null> {
   try {
     await run('git', ['merge-base', '--is-ancestor', ancestor, commit], { cwd: repoDir, timeout: 15_000 });
     return true;
@@ -169,14 +230,31 @@ async function contains(repoDir: string, commit: string, ancestor: string): Prom
   }
 }
 
-/** Whether the live checkout and the running server contain the branch. */
-async function deployed(repoDir: string, branch: string, live: Live): Promise<BranchStatus['deploy']> {
+/** Whether the live checkout and the running server contain the branch's tip. */
+async function deployed(repoDir: string, tip: string, live: Live): Promise<BranchStatus['deploy']> {
   // Another scheme's repo doesn't know the server's commit: its work never deploys here.
-  const isLive = live.head ? await contains(repoDir, live.head, `refs/heads/${branch}`) : null;
+  const isLive = live.head ? await contains(repoDir, live.head, tip) : null;
   if (isLive === null) return null;
-  const checkout = isLive ? null : await tryGit(['rev-parse', 'HEAD'], live.checkoutDir);
-  const pulled = isLive || (!!checkout && (await contains(repoDir, checkout, `refs/heads/${branch}`)) === true);
+  const checkout = isLive ? null : await checkoutHead(live.checkoutDir);
+  const pulled = isLive || (!!checkout && (await contains(repoDir, checkout, tip)) === true);
   return { pulled, live: isLive };
+}
+
+/**
+ * The live checkout's HEAD commit, read from its .git files (no process: #1463), else from git: a detached HEAD
+ * holds the hash, a branch HEAD names a loose ref. A packed ref, a worktree's .git file or anything odd asks git.
+ */
+export async function checkoutHead(dir: string): Promise<string | null> {
+  try {
+    const head = (await readFile(join(dir, '.git', 'HEAD'), 'utf8')).trim();
+    if (HASH.test(head)) return head;
+    const ref = head.match(/^ref: (refs\/[^\s]+)$/)?.[1];
+    if (ref && !ref.includes('..')) {
+      const sha = (await readFile(join(dir, '.git', ref), 'utf8')).trim();
+      if (HASH.test(sha)) return sha;
+    }
+  } catch { /* fall back to git */ }
+  return tryGit(['rev-parse', 'HEAD'], dir);
 }
 
 /**

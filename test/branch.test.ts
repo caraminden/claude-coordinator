@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { branchStatus, shipLine, type BranchStatus } from '../src/branch.ts';
+import { branchStatus, forgetSettled, shipLine, type BranchStatus } from '../src/branch.ts';
 
 // Where a minion's branch stands: merged into main, then pulled into the live checkout, then run by
 // the server. A scheme repo, a live checkout cloned from it, and another scheme's repo, in temp dirs.
@@ -246,4 +246,40 @@ test('uncommitted work takes a finished line back to its branch, rides along wit
   assert.equal(line({ deploy: { pulled: true, live: false } })?.stage, 'deploying');
   assert.equal(line({ deploy: { pulled: false, live: false } })?.stage, 'main');
   assert.equal(shipLine({ ...base, deploy: { pulled: true, live: false } }, 0, 'Deploy failed.')?.stage, 'failed');
+});
+
+// #1463: each git start holds the server's thread for its fork, and branchStatus started 8 to 15 per call. A call
+// where nothing moved now reads its refs in one git and asks hash-only questions once; the live checkout's HEAD
+// comes from its files.
+test('a second look at a branch where nothing moved starts one git, even while it deploys (#1463)', async () => {
+  branch('t/20');
+  merge('t/20');
+  pull(); // pulled, not live yet: the deploy path, the most git there is
+  const bin = join(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const log = join(root, 'git-starts');
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$1" >> '${log}'\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  const starts = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').length : 0); // raw-read-ok: only line counts
+  try {
+    forgetSettled();
+    const first = await status('t/20');
+    const cold = starts();
+    rmSync(log, { force: true });
+    const again = await status('t/20');
+    assert.deepEqual(again, first, 'the same answer');
+    assert.equal(starts(), 1, `only the ref read; the first look started ${cold}`);
+    assert.ok(cold > 1);
+    // The branch moves: it is asked again, and the answer follows.
+    git(repo, 'checkout', '-q', 't/20');
+    commit(repo);
+    git(repo, 'checkout', '-q', 'main');
+    const moved = await status('t/20');
+    assert.equal(moved?.merged, false);
+    assert.equal(moved?.ahead, 1);
+  } finally {
+    process.env.PATH = path;
+  }
 });

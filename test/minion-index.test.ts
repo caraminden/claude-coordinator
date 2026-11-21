@@ -2,7 +2,7 @@
 // search never crosses schemes.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -136,7 +136,7 @@ test('handoffs: in when written, changed when edited, out when deleted', async (
   store.db.close();
 });
 
-test('handoffs (#1463): a pass that finds nothing changed touches no table, a file filed into shipped/ is found, and a fresh index picks up the rows', async () => {
+test('handoffs (#1463): a pass that finds nothing changed touches no table, a file filed into shipped/ is found (in the same mtime tick too, #1483), and a fresh index picks up the rows', async () => {
   const db = join(root, 'three.db');
   const store = new Store(db);
   const A = store.createProject('A', null);
@@ -145,6 +145,8 @@ test('handoffs (#1463): a pass that finds nothing changed touches no table, a fi
   mkdirSync(join(dir, 'shipped'), { recursive: true });
   writeFileSync(join(dir, 'live.md'), '# Handoff: walrus');
   writeFileSync(join(dir, 'shipped', 'old.md'), '# Handoff: narwhal');
+  const minuteAgo = new Date(Date.now() - 60_000);
+  utimesSync(join(dir, 'shipped'), minuteAgo, minuteAgo); // a folder that settled a while ago: its mtime alone says whether it changed
   const has = await store.minionIndex.syncHandoffs(A.id, data);
   assert.ok(has('handoffs/live.md') && has('handoffs/shipped/old.md') && !has('handoffs/old.md'));
   const prepare = store.db.prepare.bind(store.db);
@@ -160,11 +162,17 @@ test('handoffs (#1463): a pass that finds nothing changed touches no table, a fi
   assert.ok(after('handoffs/shipped/live.md') && !after('handoffs/live.md'));
   assert.deepEqual((store.minionIndex.search(A.id, 'walrus') as any[]).map((h) => h.name), ['shipped/live.md']);
   assert.deepEqual((store.minionIndex.search(A.id, 'narwhal') as any[]).map((h) => h.name), ['shipped/old.md']);
+  // #1483: a second file filed in the same mtime tick as that listing (a coarse clock, a 1 s filesystem) leaves the
+  // folder's mtime where the pass saw it; putting it back pins that case. A folder listed moments after a change is listed again.
+  const listed = Math.floor(statSync(join(dir, 'shipped')).mtimeMs) / 1000; // the ms the pass saw (a Date rounds, the pass floors)
+  writeFileSync(join(dir, 'shipped', 'late.md'), '# Handoff: dugong');
+  utimesSync(join(dir, 'shipped'), listed, listed);
+  assert.ok((await store.minionIndex.syncHandoffs(A.id, data))('handoffs/shipped/late.md'), 'filed in the same tick, still found');
   // A restart: the new Store reads the rows once and rewrites none of them.
   store.db.close();
   const again = new Store(db);
   await again.minionIndex.syncHandoffs(A.id, data);
-  assert.equal((again.db.prepare('SELECT count(*) AS n FROM handoff_index').get() as any).n, 2);
+  assert.equal((again.db.prepare('SELECT count(*) AS n FROM handoff_index').get() as any).n, 3);
   again.db.close();
 });
 

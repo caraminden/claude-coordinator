@@ -50,44 +50,42 @@ export function emptyState(title, line, { mark = '✓', tone = 'ok' } = {}) {
 }
 
 /**
- * A row of tabs (div.cui-tabs, role="tablist"). `items` is [key, label | Node] pairs; `onSelect(key)` runs on a click or
- * an arrow key. Returns { element, set(key), current }. `set` changes the picked tab without calling onSelect.
+ * A row of tabs (div.cui-tabs, role="tablist"). `items` is [key, label | Node] pairs; `onSelect(key)` runs on every click
+ * (the picked tab's too) and on an arrow key. Returns { element, set(key), current }. `set` changes the picked tab without
+ * calling onSelect. The picked tab is the one with aria-selected="true", so a page that sets it itself stays in step.
  */
 export function tabs({ items, current, onSelect, label, className = '' }) {
   const box = el('div', `cui-tabs ${className}`.trim());
   box.setAttribute('role', 'tablist');
   if (label) box.setAttribute('aria-label', label);
-  let now = current ?? items[0]?.[0];
   const buttons = items.map(([key, content]) => {
     const b = el('button', 'cui-tab');
     b.type = 'button';
     b.setAttribute('role', 'tab');
     b.dataset.key = key;
     b.append(content instanceof Node ? content : document.createTextNode(content));
-    b.addEventListener('click', () => pick(key, true));
+    b.addEventListener('click', () => { show(key); onSelect?.(key); });
     return b;
   });
-  const draw = () => buttons.forEach((b) => {
-    const on = b.dataset.key === now;
-    b.setAttribute('aria-selected', String(on));
-    b.tabIndex = on ? 0 : -1;
-  });
-  function pick(key, notify) {
-    if (key === now) return;
-    now = key;
-    draw();
-    if (notify) onSelect?.(key);
+  const now = () => buttons.find((b) => b.getAttribute('aria-selected') === 'true')?.dataset.key;
+  function show(key) {
+    for (const b of buttons) {
+      const on = b.dataset.key === key;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+    }
   }
   box.addEventListener('keydown', (e) => {
     const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!d) return;
-    const i = buttons.findIndex((b) => b.dataset.key === now);
+    const i = buttons.findIndex((b) => b.dataset.key === now());
     const next = buttons[(i + d + buttons.length) % buttons.length];
-    pick(next.dataset.key, true);
+    show(next.dataset.key);
+    onSelect?.(next.dataset.key);
     next.focus();
     e.preventDefault();
   });
   box.append(...buttons);
-  draw();
-  return { element: box, set: (key) => pick(key, false), get current() { return now; } };
+  show(current ?? items[0]?.[0]);
+  return { element: box, set: show, get current() { return now(); } };
 }

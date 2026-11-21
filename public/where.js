@@ -5,6 +5,7 @@ import { settingsJump, settingsTabs, settingsTitle } from './settings.js';
 import { costDetail } from './cost.js';
 import { codexWindowsBlock } from './core.js';
 import { modelsSection } from './models.js';
+import { loadingLine } from './ui/state.js';
 
 /** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
 function share(usd, weekUsd) {
@@ -83,7 +84,7 @@ export async function renderWhere(into, range = 'week') {
 
 /** Settings' Usage tab (Cara, 2026-11-17: "Settings → Usage"): where your own spend went. */
 export function usagePage() {
-  const slot = h('div', { class: 'where-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
+  const slot = h('div', { class: 'where-slot loading' }, loadingLine('Loading…'));
   // The range picker (#956): two buttons of one fixed width, so choosing one moves nothing; the page keeps its last pick.
   const pick = h('div', { class: 'range-pick', role: 'group', 'aria-label': 'Range' },
     [['week', 'Last 7 days'], ['all', 'All time']].map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)));
@@ -113,7 +114,7 @@ let pickedRange = 'week';
 
 /** The Models section (#1061), filled once its data arrives; it keeps a reserved height until then. */
 function modelsSlot() {
-  const slot = h('div', { class: 'models-slot loading' }, h('p', { class: 'key' }, 'Loading…'));
+  const slot = h('div', { class: 'models-slot loading' }, loadingLine('Loading…'));
   setTimeout(() => modelsSection(slot));
   return slot;
 }

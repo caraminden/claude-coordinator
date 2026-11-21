@@ -7,6 +7,7 @@ import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 import { briefSkills, briefSummary, groupSchedules } from './schedule-text.js';
+import { loadingLine } from './ui/state.js';
 
 // A chip's tone as the hue of its row's tile and bar (Citadel's look, #1068).
 const HUE = { ok: 'done', warn: 'waiting', danger: 'danger', info: 'running', neutral: 'held' };
@@ -100,7 +101,7 @@ function drawPane() {
     e.currentTarget.closest('.sidebar')?.classList.remove('show-schedules');
   } }, icon('back'), 'Orders');
   const head = h('div', { class: 'schedules-pane-head' }, back, h('b', {}, 'Schedules'));
-  if (!data) return paneEl.replaceChildren(head, h('p', { class: 'muted small' }, 'Loading…'));
+  if (!data) return paneEl.replaceChildren(head, loadingLine('Loading…'));
   if (data.error) return paneEl.replaceChildren(head, h('p', { class: 'error' }, data.error));
   paneEl.replaceChildren(head, auditsCheck(data.audits), scheduleList(data.schedules));
 }
@@ -187,7 +188,7 @@ function drawPage() {
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     current ? h('a', { class: 'schedules-up', href: href(null) }, icon('back'), 'All schedules') : '');
-  const body = !data ? [h('p', { class: 'muted' }, 'Loading…')]
+  const body = !data ? [loadingLine('Loading…')]
     : data.error ? [h('p', { class: 'error' }, data.error)]
     : s ? schedulePage(s)
     : current ? [emptyCard('No such schedule', 'It may have been deleted. Pick another from the list.', { mark: '?', hue: 'muted' })]

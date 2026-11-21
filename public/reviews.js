@@ -13,6 +13,7 @@ import { collapseRuns, diffLines } from './plan-diff.js';
 import { optimistic } from './ui/optimistic.js';
 import { markdownElement } from './ui/markdown.js';
 import { toast } from './ui/status.js';
+import { loadingLine } from './ui/state.js';
 
 const COLUMNS = [['work', 'While working'], ['ship', 'Before ship'], ['ask', 'On ask'], ['schedule', 'On a schedule']];
 const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
@@ -86,7 +87,7 @@ function draw() {
       ...[['scheme', 'This scheme'], ['all', 'Every scheme']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(every.tab === k), onclick: () => setTab(k) }, label))));
   if (every.tab === 'all') return pageEl.replaceChildren(head, everyTable());
   const body = state.error ? [h('p', { class: 'error' }, state.error)]
-    : !state.entries ? [h('p', { class: 'muted' }, 'Loading…')]
+    : !state.entries ? [loadingLine('Loading…')]
       : [h('div', { class: 'rv-boardbox' }, board(), repoGroup()), detail()];
   pageEl.replaceChildren(head, state.entries ? headline() : '', state.entries ? describeBox() : '', h('div', { class: 'rv-body' }, ...body));
 }
@@ -186,7 +187,7 @@ const none = (text = '—') => h('span', { class: 'muted' }, text);
 /** The Every scheme tab (#1094, take A "But with more color"): a row a scheme, each opening its own page. */
 function everyTable() {
   if (every.error) return h('p', { class: 'error' }, every.error);
-  if (!every.rows) return h('p', { class: 'muted' }, 'Loading…');
+  if (!every.rows) return loadingLine('Loading…');
   if (!every.rows.length) return h('p', { class: 'muted' }, "You aren't a member of any scheme yet.");
   const rows = [...every.rows].sort((a, b) => (b.last ?? 0) - (a.last ?? 0) || a.name.localeCompare(b.name));
   const open = (r) => { every.tab = 'scheme'; if (r.id === state.projectId) draw(); else location.hash = `#/p/${r.id}/reviews`; };
@@ -643,7 +644,7 @@ async function loadVersions() {
 }
 
 function history(e) {
-  if (!state.versions) return h('p', { class: 'muted' }, 'Loading its history…');
+  if (!state.versions) return loadingLine('Loading its history…');
   return h('ol', { class: 'rv-history' }, state.versions.map((v) => h('li', {},
     h('span', { class: 'rv-hv' }, `v${v.version}`),
     h('span', { class: 'rv-hnote' }, v.note, h('span', { class: 'muted' }, ` · ${v.by} · `, h('time', { title: pacific(v.at) }, ago(v.at)))),

@@ -36,6 +36,7 @@ import * as help from './help.js';
 import { gloss } from './help-words.js';
 import { toast } from './ui/status.js';
 import { homeOverview, homePanel, refreshHome, startVisit } from './home.js';
+import { tabs } from './ui/state.js';
 
 // The page modules the table of pages (settings-pages.js) names, by file name. A row's `page` is an export of its `module`.
 const PAGE_MODULES = { 'settings.js': settings, 'settings-machines.js': settingsMachines, 'skills.js': skills, 'where.js': where, 'memory.js': memory,
@@ -86,8 +87,16 @@ export async function showTicket(ticketId) {
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
 
-/** A tab in the Minions panel's header; it switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
-const panelTab = (name, ...label) => h('button', { type: 'button', role: 'tab', class: `panel-tab ${name}-tab`, 'data-part': name === 'orders' ? 'orders-tab' : name === 'minions' ? 'minions-tab' : null, onclick: (e) => clickPanelTab(e.currentTarget.closest('.sidebar'), name) }, ...label);
+/** The Minions | Orders tabs in the panel's header; a tab switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
+const panelTabs = (...labels) => {
+  const box = tabs({ items: [['minions', labels[0]], ['orders', labels[1]]], current: 'minions', className: 'label panel-tabs',
+    onSelect: (name) => clickPanelTab(box.element.closest('.sidebar'), name) });
+  box.element.querySelectorAll('button').forEach((b) => {
+    b.classList.add('panel-tab', `${b.dataset.key}-tab`);
+    b.dataset.part = `${b.dataset.key}-tab`;
+  });
+  return box.element;
+};
 
 /** Per scheme, the last chat hash and the last Orders hash you were on, so a tab click goes back to where you were. */
 const lastHash = new Map();
@@ -261,8 +270,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const sidebar = h('details', { class: `sidebar${main.home ? ' home-mode' : ''}`, open: panelOpen('threads') },
     main.home ? h('summary', { title: 'Show or hide Home' }, h('span', { class: 'label' }, 'Home'))
     // Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): Orders swaps the list for its pages.
-    : h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label panel-tabs', role: 'tablist' },
-      panelTab('minions', h('span', { class: 'tab-name' }, gloss('minion', 'Minions'))), panelTab('orders', 'Orders', h('span', { class: 'count props-count', hidden: true })))),
+    : h('summary', { title: 'Show or hide minions' }, panelTabs(h('span', { class: 'tab-name' }, gloss('minion', 'Minions')), (() => { const f = document.createDocumentFragment(); f.append('Orders', h('span', { class: 'count props-count', hidden: true })); return f; })())),
     main.home && !narrowHome ? homePanel() : '',
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),

@@ -6,6 +6,7 @@ import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settin
 import { hideButton, minimizeButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
+import { loadingLine } from './ui/state.js';
 
 function head(title, meta) {
   return h('div', { class: 'ticket-head' },
@@ -306,7 +307,7 @@ const meterText = (u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.week
  * accounts (#779): new and cold turns go to the one whose week resets soonest, or the one pinned (#793).
  */
 function claudeCard() {
-  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
+  const card = h('div', { class: 'account-card' }, loadingLine('Loading Claude…'));
   let poll = null;
   const render = (st) => {
     clearTimeout(poll);
@@ -414,7 +415,7 @@ function claudeCard() {
 
 /** Your own Codex (#330): a second-opinion reviewer on your ChatGPT plan, signed in inside your Claude container. */
 function codexCard() {
-  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Codex…'));
+  const card = h('div', { class: 'account-card' }, loadingLine('Loading Codex…'));
   let poll = null;
   const render = (st) => {
     clearTimeout(poll);
@@ -471,7 +472,7 @@ function codexCard() {
  * never comes back out, not even to you; turns get them as $CITADEL_SECRET_<NAME>, contraptions by name.
  */
 function secretsCard() {
-  const card = h('div', { class: 'account-card secrets-card' }, h('p', { class: 'muted' }, 'Loading secrets…'));
+  const card = h('div', { class: 'account-card secrets-card' }, loadingLine('Loading secrets…'));
   let schemes = [];
   const where = (s) => s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' };
   const valueInput = () => h('input', { type: 'password', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', placeholder: 'The value', required: true, 'aria-label': 'The value' });
@@ -540,7 +541,7 @@ function secretsCard() {
 
 /** Your own OpenRouter key and monthly cap (#717): minions working for you make images and sounds on it, never past the cap. */
 function openrouterCard() {
-  const card = h('div', { class: 'account-card openrouter-card' }, h('p', { class: 'muted' }, 'Loading OpenRouter…'));
+  const card = h('div', { class: 'account-card openrouter-card' }, loadingLine('Loading OpenRouter…'));
   const usd = (n) => `$${Number(n).toFixed(2)}`;
   const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
   const title = (chip, cls = '') => h('h3', {}, 'OpenRouter', h('span', { class: `link-chip ${cls}` }, chip));
@@ -619,7 +620,7 @@ function openrouterCard() {
 
 /** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
 function githubCard() {
-  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading GitHub…'));
+  const card = h('div', { class: 'account-card' }, loadingLine('Loading GitHub…'));
   const render = ({ configured, full, limited, install_url, error, link }) => {
     const title = (chip, cls = '') => h('h3', {}, 'GitHub', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = error ? h('p', { class: 'error', role: 'status' }, error) : '';

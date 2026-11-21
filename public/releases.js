@@ -15,6 +15,7 @@ import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
+import { loadingLine } from './ui/state.js';
 
 /** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
 let schemes = new Map();
@@ -254,7 +255,7 @@ function fillPage() {
   const chip = (s, label) => h('a', { class: `chip${scope === s ? ' on' : ''}`, href: pageHref(s), 'aria-current': scope === s ? 'page' : undefined }, label);
   // The chat header's ‹ › × (thread.js renderTicketHead): its buttons, icons and history, at the end of the pills' line.
   const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
-  const body = !loaded ? [h('p', { class: 'muted' }, 'Loading releases…')]
+  const body = !loaded ? [loadingLine('Loading releases…')]
     : scope === 'all' ? allView(ids)
       : schemeCards(scope, true);
   // On a phone the chips give way to one box naming the scheme you're on, which opens the list of them (#820, Cara

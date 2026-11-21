@@ -6,6 +6,7 @@ import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.j
 import { otherOwner, takeOver } from './payer.js';
 import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
+import { loadingLine } from './ui/state.js';
 
 // ---------- properties (the scheme's property registry) ----------
 
@@ -339,7 +340,7 @@ export function propertiesPage() {
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value.')),
-    h('div', { id: 'props-body', class: 'props-body' }, h('p', { class: 'muted' }, 'Loading…')));
+    h('div', { id: 'props-body', class: 'props-body' }, loadingLine('Loading…')));
   setTimeout(renderPropertiesPage);
   return section;
 }

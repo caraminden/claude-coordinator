@@ -10,6 +10,7 @@ import { emptyCard, hueRow, meter, schemeHue, schemeTag, showFirst, statTiles, t
 import { settingsTabs, settingsTitle } from './settings.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
+import { loadingLine } from './ui/state.js';
 
 const TABS = [['kit', 'Kit skills'], ['scheme', "This scheme's own"], ['agents', 'Grunt types']];
 const PHASES = ['before any edit', 'after edits', 'after an error', 'before a ship'];
@@ -74,7 +75,7 @@ function draw() {
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' }, 'What minions and Grunts know how to do, when each skill is meant to run, and how it ran here in the last two weeks.'));
-  if (!data) return pageEl.replaceChildren(head, h('p', { class: 'muted' }, 'Loading…'));
+  if (!data) return pageEl.replaceChildren(head, loadingLine('Loading…'));
   if (data.error) return pageEl.replaceChildren(head, h('p', { class: 'error' }, data.error));
   const counts = { kit: data.items.filter((i) => i.source === 'kit' && i.kind === 'skill').length, scheme: data.items.filter((i) => i.source === 'scheme').length, agents: data.items.filter((i) => i.source === 'kit' && i.kind === 'agent').length };
   const bar = h('div', { class: 'sk-bar' },

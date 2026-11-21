@@ -505,9 +505,9 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-detail { display: grid; gap: var(--space-3); min-width: 0; align-content: start; }
 .ci-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
 .ci-head h3 { margin: 0; }
-.ci-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); }
-.ci-tabs button { padding: 0.4rem 0.7rem; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
-.ci-tabs button.on { color: var(--ink); font-weight: 650; border-bottom-color: var(--accent); }
+.ci-tabs { gap: 0.25rem; border-bottom: 1px solid var(--line); }
+.ci-tabs button { min-height: 0; padding: 0.4rem 0.7rem; border: 0; border-bottom: 2px solid transparent; margin: 0 0 -1px; border-radius: 0; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.ci-tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--accent); }
 .ci-block { display: grid; gap: var(--space-2); }
 .ci-block h4 { margin: 0; font-size: 0.85em; color: var(--muted); font-weight: 650; }
 .ci-block > p { margin: 0; }

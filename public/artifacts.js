@@ -14,6 +14,7 @@ import { lightbox } from './ui/media.js';
 import { optimistic } from './ui/optimistic.js';
 import { renderFiles } from './files.js';
 import { ARTIFACT_ALLOW, ARTIFACT_SANDBOX } from './frames.js';
+import { loadingLine } from './ui/state.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -623,7 +624,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
   } else if (size > MAX_TEXT_PREVIEW) {
     body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(size)}). Open or download it instead.`));
   } else {
-    body.append(h('p', { class: 'muted' }, 'Loading…'));
+    body.append(loadingLine('Loading…'));
     const show = (el) => body.textLoad === load && body.replaceChildren(el);
     fetch(src).then(async (res) => {
       if (!res.ok) {

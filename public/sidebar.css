@@ -1,8 +1,8 @@
 /* The minions panel: the list's sections and rows, search, filters and saved views, the Needs-you strip, schedules. */
 /* Minions | Orders (#1071, Josh picked "Minions | Orders tabs on the panel"): two tabs in the panel's header; Orders swaps the
    list for its pages, each opening in the main pane. On the Schedules page, the panel lists the schedules in place of the Orders menu (#1083). */
-.sidebar > summary .panel-tabs { display: inline-flex; align-items: center; flex: 1; min-width: 0; gap: 0.15rem; }
-.sidebar > summary .panel-tab { display: inline-flex; align-items: center; gap: 0.35rem; min-height: calc(var(--control-h) - 0.5rem); padding: 0 0.6rem; border: 1px solid transparent;
+.sidebar > summary .panel-tabs { border-bottom: 0; display: inline-flex; align-items: center; flex: 1; min-width: 0; gap: 0.15rem; }
+.sidebar > summary .panel-tab { margin: 0; display: inline-flex; align-items: center; gap: 0.35rem; min-height: calc(var(--control-h) - 0.5rem); padding: 0 0.6rem; border: 1px solid transparent;
   border-radius: var(--radius-pill); background: none; color: var(--muted); font: inherit; font-weight: 650; cursor: pointer; transition: background var(--motion), color var(--motion); }
 .sidebar > summary .panel-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .sidebar > summary .panel-tab[aria-selected='true'] { color: var(--ink); background: var(--panel); border-color: var(--line); }

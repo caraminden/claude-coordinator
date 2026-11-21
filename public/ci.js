@@ -15,6 +15,7 @@ import { scopedPageHash } from './page-scope.js';
 import { usage } from './core.js';
 import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
+import { tabs as uiTabs } from './ui/state.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -292,8 +293,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
-      h('div', { class: 'ci-tabs', role: 'tablist' }, ...tabs.map(([k, label]) =>
-        h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), class: tab === k ? 'on' : '', onclick: () => { tab = k; draw(); if (k === 'health') readTab(s.id); } }, label))),
+      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k) => { tab = k; draw(); if (k === 'health') readTab(s.id); } }).element,
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
         host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },

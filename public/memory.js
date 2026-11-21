@@ -6,6 +6,7 @@ import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsSection, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 import { emptyCard, meter, showFirst, statTiles, toneChip } from './look.js';
+import { loadingLine, tabs } from './ui/state.js';
 
 const kb = (b) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`);
 const day = pacificDate;
@@ -110,8 +111,8 @@ export function memoryPage() {
   const url = `api/projects/${p.id}/memory-files`;
   let folders = null;
   let filterBy = 'all';
-  const meta = h('div', { class: 'meta memory-head' }, 'Loading…');
-  const folderBar = h('div', { class: 'memory-folders', role: 'tablist', 'aria-label': 'Memory folders', hidden: true });
+  const meta = h('div', { class: 'meta memory-head' }, loadingLine());
+  const folderBar = h('div', { class: 'memory-folder-bar', hidden: true });
   const stats = h('div', { class: 'memory-stats', role: 'group', 'aria-label': 'Filter notes' });
   const search = h('input', { type: 'search', placeholder: 'Search memory', 'aria-label': 'Search memory', oninput: () => filter() });
   const list = h('div', { class: 'memory-list' });
@@ -220,8 +221,8 @@ export function memoryPage() {
     const f = current();
     header();
     folderBar.hidden = folders.length < 2;
-    folderBar.replaceChildren(...folders.map((x) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(x === f), class: x === f ? 'on' : '',
-      onclick: () => { pickedFolder = x.id; refresh(); } }, x.reachable ? `${x.label} · ${live(x).length}` : x.label)));
+    folderBar.replaceChildren(tabs({ items: folders.map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]), current: f.id, label: 'Memory folders',
+      className: 'memory-folders', onSelect: (id) => { pickedFolder = id; refresh(); } }).element);
     for (const [id, el] of blocks) el.hidden = id !== f.id;
     const ns = f.reachable ? live(f) : [];
     if (filterBy !== 'all' && filterBy !== 'tidy' && !ns.some((n) => kindOf(n) === filterBy)) filterBy = 'all';

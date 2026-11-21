@@ -19,5 +19,5 @@ export interface Tabs {
   readonly current: string;
 }
 
-/** A row of tabs. `items` is [key, label] pairs (a label may be a Node); `onSelect(key)` runs on a click or an arrow key. */
+/** A row of tabs. `items` is [key, label] pairs (a label may be a Node); `onSelect(key)` runs on every click (the picked tab's too) and on an arrow key. */
 export function tabs(opts: { items: Array<[string, string | Node]>; current?: string; onSelect?: (key: string) => void; label?: string; className?: string }): Tabs;

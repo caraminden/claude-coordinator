@@ -132,6 +132,9 @@ test("a TERM to heavy-unit stops its command too, so a script's `kill $!` doesn'
   await until('the command to start', () => out.includes('.scope'));
   const pid = Number(out.split('\n')[0]);
   assert.notEqual(pid, child.pid, 'a command of its own, not heavy-unit');
+  await until('sh to become sleep', () => readFileSync(`/proc/${pid}/comm`, 'utf8') === 'sleep\n'); // sh ignores QUIT itself while it runs
+  const ignored = BigInt(`0x${readFileSync(`/proc/${pid}/status`, 'utf8').match(/^SigIgn:\s*(\w+)/m)![1]}`);
+  assert.equal(ignored & 0b110n, 0n, 'Ctrl-C and Ctrl-\\ still reach it, though it runs in the background of heavy-unit');
   child.kill('SIGTERM');
   assert.equal(await closed, 143);
   await until('the command to stop', () => !existsSync(`/proc/${pid}`));

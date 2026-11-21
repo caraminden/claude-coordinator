@@ -74,8 +74,9 @@ marker=$(mktemp "${TMPDIR:-/tmp}/heavy-unit.XXXXXX") && rm -f "$marker" || marke
 # No --collect: a scope that failed stays loaded until reset-failed below, so its Result (oom-kill or signal) can be
 # read. One that succeeded is gone at once either way.
 # In the background only so a signal to this script can be passed on: <&0 keeps stdin (bash gives a background
-# command /dev/null otherwise), and without job control it stays in the caller's process group.
-"${run[@]}" "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- /bin/sh -c '[ -z "$0" ] || : >"$0"; exec "$@"' "$marker" "$@" <&0 &
+# command /dev/null otherwise), without job control it stays in the caller's process group, and env gives back the
+# Ctrl-C and Ctrl-\ that bash ignores in a background command (a shell can't undo an ignore it was started with).
+"${run[@]}" "--unit=$unit" "$desc" "${bind[@]}" "${props[@]}" -- env --default-signal=INT,QUIT /bin/sh -c '[ -z "$0" ] || : >"$0"; exec "$@"' "$marker" "$@" <&0 &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM
 trap 'kill -HUP "$child" 2>/dev/null' HUP

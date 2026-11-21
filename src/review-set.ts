@@ -712,9 +712,9 @@ export class ReviewSet {
     if (!e) throw new ReviewError(`No entry named ${slug}`);
     const v = this.db.prepare('SELECT ticket_id FROM review_verdicts WHERE id = ? AND entry_id = ?').get(id, e.id) as { ticket_id: number | null } | undefined;
     if (!v || !this.db.prepare('DELETE FROM review_verdicts WHERE id = ? AND entry_id = ?').run(id, e.id).changes) throw new ReviewError(`No verdict ${id} on ${e.name}`);
-    // The run it turned amber is clean again, unless that minion has another verdict standing on the entry.
+    // The run it turned amber (not always the newest by now) is clean again, unless that minion has another verdict standing on the entry.
     if (v.ticket_id != null && !this.db.prepare('SELECT 1 FROM review_verdicts WHERE entry_id = ? AND ticket_id = ?').get(e.id, v.ticket_id)) {
-      this.db.prepare('UPDATE review_runs SET disagreed = 0 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL)').run(e.id, v.ticket_id);
+      this.db.prepare('UPDATE review_runs SET disagreed = 0 WHERE entry_id = ? AND ticket_id = ? AND source IS NULL').run(e.id, v.ticket_id);
     }
   }
 

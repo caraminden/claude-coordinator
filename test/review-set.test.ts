@@ -649,4 +649,9 @@ test('RV8: removing a person\'s verdict clears "a person disagreed" on its run, 
   assert.deepEqual(amber(), [true], 'Cara\'s verdict still stands');
   set.removeVerdict(3, 'ui', b.id);
   assert.deepEqual(amber(), [false]);
+  // A later run of the same minion doesn't hide which run the verdict marked.
+  const c = set.recordVerdict(3, 'ui', { person: 'Josh', words: 'Still loose', ticketId: 40, minion: '#40' });
+  set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 2, verdict: 'pass' });
+  set.removeVerdict(3, 'ui', c.id);
+  assert.deepEqual(amber(), [false, false]);
 });

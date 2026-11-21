@@ -91,7 +91,7 @@ body.mk {
   margin: 0 calc(-1 * max(1rem, env(safe-area-inset-left))); padding: 1.75rem max(1rem, env(safe-area-inset-left)) 2rem;
   border-radius: 0 0 var(--mk-radius) var(--mk-radius);
 }
-@media (min-width: 1012px) { .mk-head { margin-inline: -1.5rem; padding-inline: 1.5rem; } }
+@media (min-width: 1012px) { .mk-page:not(.wide) > .mk-head { margin-inline: -1.5rem; padding-inline: 1.5rem; } }
 .mk-head::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; border-radius: 0 0 var(--mk-radius) var(--mk-radius);
   background: linear-gradient(90deg, var(--mk-cat-1) 0 16.66%, var(--mk-cat-2) 0 33.33%, var(--mk-cat-3) 0 50%, var(--mk-cat-4) 0 66.66%, var(--mk-cat-5) 0 83.33%, var(--mk-cat-6) 0);
@@ -347,4 +347,7 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
   .mk h1, .mk-head h1 { font-size: 1.6rem; }
   .mk-head, .mk-head::after { border-radius: 0; }
   .mk-boards { gap: 1rem; }
+  /* Touch targets: choice buttons, the note box and contents links are at least 40px tall, centred. */
+  .mk .mk-pickbar button, .mk .mk-pickbar input, .mk-toc a { min-height: 2.5rem; box-sizing: border-box; }
+  .mk-toc a { display: inline-flex; align-items: center; }
 }

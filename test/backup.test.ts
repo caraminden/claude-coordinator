@@ -9,6 +9,7 @@ import { after, test } from 'node:test';
 import { BACKUP_PAGE, BACKUP_WORKER, chatLine } from '../src/backup.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, REPO } from './helpers.ts';
+import { until } from './wait.ts';
 
 const page = readFileSync(BACKUP_PAGE, 'utf8');
 
@@ -120,8 +121,10 @@ test('/backup serves the page and sends to and reads from the Citadel scheme (2)
   // It went to the Taskmaster's own chat, as the main app shows it.
   const events = (await srv.call(`/api/tickets/${opened.coordinator.id}/events?after=0`)).data;
   assert.ok(events.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'The front end is broken, please fix it'));
-  // Polling from the newest line returns nothing new.
-  assert.deepEqual((await srv.call(`/backup/messages?after=${read.data.last}`)).data.lines, []);
+  // Polling from the newest line returns nothing new. The turn (CLAUDE_BIN is /bin/false) ends with its own error line, whenever
+  // the box gets to it: let it land first, so it can't arrive between the two reads.
+  const settled = await until('the turn ends', async () => { const m = await srv.call('/backup/messages'); return m.data.lines.some((l: any) => l.kind === 'error') && m.data; });
+  assert.deepEqual((await srv.call(`/backup/messages?after=${settled.last}`)).data.lines, []);
 
   // Refusals: an empty message, a cross-site post, a body that isn't JSON, an unknown path.
   assert.equal((await srv.call('/backup/send', { text: '   ' })).status, 400);

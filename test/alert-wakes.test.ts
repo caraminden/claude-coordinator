@@ -260,3 +260,36 @@ test('an old key written after boot (the dual read) merges into the waiting row'
   assert.equal(w.store.getSetting('alert-wakes'), null);
   assert.deepEqual(Object.keys(w.store.getSetting<Record<string, string[]>>('alert-told')!).sort(), ['4:a', '4:b']);
 });
+
+test('a row due at 01:59 that a late boot reaches at 02:00 waits until 09:00, and says it was held', async () => {
+  const w = await world();
+  const early = Date.UTC(2026, 10, 18, 9, 58, 30); // 1:58:30 AM PST: due 1:59:30
+  w.wakes.raise({ from: peek, key: 'a', title: 'A failed', link: '/l', person: 'Cara' }, early);
+  assert.equal(w.store.listDeliveries({ kind: 'alert' })[0].due, early + BATCH_MS);
+  // The server was down from 1:59 to 2:00:10.
+  w.outbox.stop();
+  const two = Date.UTC(2026, 10, 18, 10, 0, 10);
+  const nine = Date.UTC(2026, 10, 18, 17, 0);
+  const again = await server(w.store, w.deps, { now: two });
+  assert.deepEqual(w.woken, []);
+  const [row] = w.store.listDeliveries({ kind: 'alert', states: ['waiting'] });
+  assert.equal(row.due, nine);
+  // An alert in the hold merges into it rather than making a second row.
+  again.wakes.raise({ from: peek, key: 'b', title: 'B failed', link: '/l', person: 'Cara' }, two + MIN);
+  assert.equal(w.store.listDeliveries({ kind: 'alert', states: ['waiting'] }).length, 1);
+  await again.tick(nine);
+  assert.equal(w.woken.length, 1);
+  assert.match(w.woken[0][1], /held overnight/);
+  assert.match(w.woken[0][1], /A failed[\s\S]*B failed/);
+});
+
+test('a wake a killed server left mid-send goes again, marked as a possible repeat', async () => {
+  const w = await world();
+  w.wakes.raise({ from: peek, key: 'a', title: 'A failed', link: '/l', person: 'Cara' }, NOON);
+  const [row] = w.store.listDeliveries({ kind: 'alert' });
+  w.store.updateDelivery(row.id, { state: 'sending' });
+  w.outbox.stop();
+  await server(w.store, w.deps, { now: NOON + 2 * MIN });
+  assert.equal(w.woken.length, 1);
+  assert.match(w.woken[0][1], /may repeat/);
+});

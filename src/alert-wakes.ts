@@ -5,8 +5,7 @@
 // until 9. A wake reloads a Taskmaster's whole context, so it's one per alert (not per person who got it), and a burst
 // is one wake per scheme. Scheme 0 is Citadel-wide (CI health, timers with no home scheme): the server sends it to the
 // scheme whose repo the live checkout is.
-// Since #1392 (ADR 0021 step 6) a scheme's batch is an `alert` row in the outbox that new alerts merge into; the outbox's
-// one timer sends it, so the 20 s tick is gone.
+// A scheme's batch is an `alert` row in the outbox (ADR 0021 step 6) that new alerts merge into, sent by the outbox's timer.
 import type { Store } from './db.ts';
 import type { Delivery } from './db/deliveries.ts';
 import type { Outbox } from './outbox.ts';
@@ -37,7 +36,7 @@ export interface Raised {
 }
 interface Queued { sender: string; title: string; link: string; to: string[]; parts: AlertPart[] | null }
 /** An `alert` row's payload. `note`: the line the waits readout shows. */
-interface Batch { first: number; last: number; alerts: Record<string, Queued>; note?: string }
+interface Batch { first: number; last: number; alerts: Record<string, Queued>; note?: string; held?: boolean }
 type Told = Record<string, string[]>;
 
 export interface AlertWakeDeps {
@@ -62,7 +61,7 @@ const noted = (b: Batch): Batch => {
   return { ...b, note: `Explain ${titles.length === 1 ? 'a Mandate alert' : `${titles.length} Mandate alerts`}: ${titles.join('; ')}` };
 };
 /** Two batches for one scheme as one: the newer copy of an alert wins. */
-const fold = (a: Batch, b: Batch): Batch => noted({ first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), alerts: { ...a.alerts, ...b.alerts } });
+const fold = (a: Batch, b: Batch): Batch => noted({ first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), alerts: { ...a.alerts, ...b.alerts }, ...(a.held || b.held ? { held: true } : {}) });
 
 export class AlertWakes {
   private store: Store;
@@ -76,11 +75,18 @@ export class AlertWakes {
       merge: (row, incoming) => fold(row.payload, incoming.payload as Batch),
       due: dueOf,
       describe: (r) => String(r.payload.note ?? 'alert wake'),
-      deliver: (rows) =>
+      deliver: (rows, ctx) =>
         rows.map((r) => {
           const b = r.payload as Batch;
-          const held = quietUntil(b.first) !== null || quietUntil(settled(b)) !== null;
-          if (deps.wake(r.to_id, wakeText(b, held))) return { state: 'accepted' as const };
+          // Due before 2 AM but sent inside the hold (a late boot, a retry, a resend after a kill): it waits for 9 too.
+          const quiet = quietUntil(ctx.now);
+          if (quiet !== null) {
+            this.hold(r, quiet);
+            return { state: 'accepted' as const }; // no-op for the outbox: hold took the row out of `sending`
+          }
+          const held = quietUntil(b.first) !== null || quietUntil(settled(b)) !== null || !!b.held;
+          const again = ctx.repeat(r) ? '\n\n(The server restarted while sending this, so it may repeat an earlier wake.)' : '';
+          if (deps.wake(r.to_id, wakeText(b, held) + again)) return { state: 'accepted' as const };
           console.log(`Alert wakes: scheme ${r.to_id} has no Taskmaster; ${Object.keys(b.alerts).length} alert(s) not explained`);
           return { state: 'drop' as const, reason: 'no Taskmaster to wake' };
         }),
@@ -98,6 +104,18 @@ export class AlertWakes {
 
   private add(scheme: number, b: Batch) {
     this.outbox.add({ project_id: scheme, kind: KIND, to_kind: 'taskmaster', to_id: scheme, when_kind: 'at', set_by: 'citadel', dedupe_key: String(scheme), payload: noted(b) });
+  }
+
+  /** Put a `sending` row back to wait until `until`, or fold it into the scheme's row that started waiting meanwhile. */
+  private hold(r: Delivery, until: number) {
+    const now = this.outbox.clock();
+    this.store.deliveryTransaction(() => {
+      const twin = this.waiting(r.to_id);
+      if (!twin) return void this.store.updateDelivery(r.id, { state: 'waiting', due: until, payload: { ...r.payload, held: true } }, ['sending'], now);
+      const b = fold({ ...r.payload, held: true }, twin.payload);
+      this.store.updateDelivery(twin.id, { payload: b, due: dueOf(b) }, ['waiting'], now);
+      this.store.updateDelivery(r.id, { state: 'dropped', reason: `held overnight in #${twin.id}` }, ['sending'], now);
+    });
   }
 
   /** Take an alert out of its scheme's waiting row, and drop the row once it holds none. */

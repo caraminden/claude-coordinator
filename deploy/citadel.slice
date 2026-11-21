@@ -28,5 +28,7 @@ Description=Citadel and its turns
 
 [Slice]
 MemoryHigh=19G
+# Passes the server's floor down (priority.conf MemoryLow=3G, #1458): a child's floor holds only up to its parent's.
+MemoryLow=3G
 MemoryMax=22G
 MemorySwapMax=12G

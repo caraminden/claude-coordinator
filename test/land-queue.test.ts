@@ -13,7 +13,12 @@ import { until } from './wait.ts';
 test('ten landings started together land in the order they arrived, each told its place in line', async () => {
   const r = setup();
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
-  const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FAKE_DEPLOY_GATE: join(r.dir, 'gate'), DEPLOY_QUEUE_POLL: '0.05' };
+  // Ten lands one after another cost 20 CPU-s with a suite each and nine waiters polling at 0.05 s, past the 60 s limit on a
+  // loaded CI box (#1468). Light lands (no suite) and a 0.2 s poll bring it to 6: the line is what this checks.
+  const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FAKE_DEPLOY_GATE: join(r.dir, 'gate'), DEPLOY_QUEUE_POLL: '0.2' };
+  r.commit(r.source, 'tools/lanes', 'light f*.txt\n');
+  git(r.live, 'pull', '-q', '--ff-only');
+  git(r.wt, 'rebase', '-q', 'main');
   const wts = [r.wt];
   for (let i = 2; i <= 10; i++) git(r.source, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[wts.push(join(r.dir, `wt${i}`)) - 1]);
   wts.forEach((wt, i) => r.commit(wt, `f${i + 1}.txt`, `${i + 1}\n`));
@@ -28,7 +33,7 @@ test('ten landings started together land in the order they arrived, each told it
   writeFileSync(join(r.dir, 'gate'), '');
   const done = await Promise.all(lands);
   done.forEach((d, i) => assert.equal(d.status, 0, `landing ${i + 1}: ${d.stderr}`));
-  assert.deepEqual(git(r.source, 'log', '--reverse', '--format=%s', 'main').split('\n'), ['base', ...done.map((_, i) => `f${i + 1}.txt: ${i + 1}`)]);
+  assert.deepEqual(git(r.source, 'log', '--reverse', '--format=%s', 'main').split('\n'), ['base', 'tools/lanes: light f*.txt', ...done.map((_, i) => `f${i + 1}.txt: ${i + 1}`)]);
   assert.doesNotMatch(done[0].stderr, /in line/, 'the first had nobody to wait for');
   assert.match(done[9].stderr, /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /);
   assert.match(done[9].stderr, /queue: got the deploy lock/);

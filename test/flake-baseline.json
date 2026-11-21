@@ -771,6 +771,12 @@
    "ok": 0
   }
  },
+ "flake-evidence.test.ts": {
+  "rmTemp": {
+   "n": 1,
+   "ok": 0
+  }
+ },
  "flakes.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -1164,6 +1170,12 @@
   }
  },
  "list-tickets.test.ts": {
+  "rmTemp": {
+   "n": 1,
+   "ok": 0
+  }
+ },
+ "long-jobs.test.ts": {
   "rmTemp": {
    "n": 1,
    "ok": 0

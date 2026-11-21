@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
+import { signalTree } from '../src/ship-stop.ts';
 import { git } from './git.ts';
 import { withRealDeploy } from './land-fixture.ts';
 
@@ -838,4 +839,34 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
   assert.deepEqual(s.landings.handoffs(), [1]);
   writeFileSync(gate, '');
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+});
+
+test('a land stopped from the Status page says who stopped it and that nothing landed, not "fix the cause", and counts no failure (#1168)', async () => {
+  const s = setup('stopped');
+  const failed: number[] = [];
+  s.deps.failed = (id) => { failed.push(id); };
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'land: rebasing onto main'\nsleep 300\n`);
+  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  let pid: number | null = null;
+  await until('land.sh runs', () => (pid = s.landings.landPid(1)) !== null);
+  s.landings.markStopped(1, 'Josh', Date.UTC(2026, 10, 20, 21, 5));
+  signalTree(pid!);
+  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  assert.equal(s.landings.get(1)?.code, 143);
+  assert.equal(s.landings.landPid(1), null, 'nothing runs any more');
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /stopped by Josh from the Status page at 1:05 PM PST\. Nothing landed and main is untouched\./);
+  assert.doesNotMatch(s.sent[0], /didn't go through|Fix the cause/);
+  assert.deepEqual(failed, [], 'not counted as a failed ship');
+  assert.equal(s.ticket.note, 'ship stopped');
+  assert.deepEqual(s.landings.handoffs(), [], 'reported');
+});
+
+test('a stop marked on a land that went red by itself, or past main moving, is told as it was (#1168)', async () => {
+  const s = setup('stopped-moved');
+  await s.land('land: main is now at abc1234 "#9"\nland: deploy failed\n', 143);
+  s.landings.markStopped(1, 'Cara', Date.now(), 'by stopping its minion');
+  await s.handoffs.poll();
+  assert.match(s.sent[0], /stopped by Cara by stopping its minion.*main had already moved/s);
 });

@@ -5,7 +5,8 @@
 // CI's opens that tab, its dot the worst verdict it shows.
 import { ago, api, h, view, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
-import { toneChip } from './look.js';
+import { hueRow, schemeTag, toneChip } from './look.js';
+import { optimistic } from './ui/optimistic.js';
 import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
@@ -388,6 +389,72 @@ function appTiles(a, days, ships, redraw) {
   ].filter(Boolean);
 }
 
+const LINES_MS = 3_000;
+
+/**
+ * The ship lines (#1168; Josh picked it 2026-11-19 from #1093's ideas): who holds each line you can see, for how long and
+ * doing what, and who waits behind, read every 3 s while the page is open. "Stop this ship" ends the holder's land.sh
+ * cleanly (it leaves the line and main stays as it was): it shows "Stopping…" at once, and a refusal puts the button back
+ * with a toast and a Retry. The tile is last and wide, so rows coming and going move nothing above it.
+ */
+function shipLinePanel(page) {
+  let lines = null;
+  let failed = null;
+  const stopping = new Set(); // "<projectId>:<seq>" sent and not yet gone from the line
+  const el = h('section', { class: 'st-tile wide st-lines' });
+  const key = (l, r) => `${l.projectId}:${r.seq}`;
+  const stop = (l, r) => optimistic({
+    apply: () => { stopping.add(key(l, r)); draw(); },
+    send: () => api('api/ship-lines/stop', { method: 'POST', body: { projectId: l.projectId, seq: r.seq } }),
+    undo: () => { stopping.delete(key(l, r)); draw(); },
+    label: `stop ${r.name}'s ship`,
+  }).catch(() => {});
+  const row = (l, r) => {
+    const gone = stopping.has(key(l, r));
+    const name = r.ticketId != null ? h('a', { href: `#/t/${r.ticketId}`, 'data-key': `a${key(l, r)}` }, r.name) : h('span', {}, r.name);
+    const time = r.holds ? `held ${shortAgo(r.heldSince)}` : `waiting ${shortAgo(r.since)}`;
+    const act = !r.holds ? null
+      : gone ? h('button', { type: 'button', class: 'cui-btn cui-small', disabled: true }, 'Stopping…')
+        : r.noStop ? h('span', { class: 'muted small st-nostop', title: r.noStop }, 'Ends by itself')
+          : h('button', { type: 'button', class: 'cui-btn cui-small cui-danger', 'data-key': `b${key(l, r)}`, title: 'End this land.sh run: it leaves the line and lets go of the lock, main stays as it was, and its minion is told who stopped it', onclick: () => stop(l, r) }, 'Stop this ship');
+    return hueRow({ hue: r.holds ? 'running' : 'waiting', lead: r.place, meta: h('span', { class: 'st-line-meta' }, h('span', { class: 'muted small' }, time), act) },
+      schemeTag(l.scheme), ' ', name, ' ', h('span', { class: 'muted' }, r.text));
+  };
+  const draw = () => {
+    const all = lines ?? [];
+    const holders = all.flatMap((l) => l.rows.filter((r) => r.holds).map((r) => `${r.name} holds ${l.scheme}'s`));
+    const waiting = all.reduce((n, l) => n + l.rows.filter((r) => !r.holds).length, 0);
+    // The redraw every 3 s would drop the keyboard focus: it goes back to the same link or button.
+    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+    const value = lines === null ? 'Reading…' : !all.length ? 'Nobody is shipping' : holders.length ? `${holders.join(', ')} line` : `${plural(waiting, 'ship')} waiting`;
+    el.replaceChildren(h('h4', {}, 'Ship lines'), h('b', { class: 'st-value' }, value),
+      h('div', { class: 'st-sub muted' }, failed ? `Couldn't read the lines: ${failed}` : `${holders.length && waiting ? `${plural(waiting, 'ship')} waiting behind · ` : ''}Read every 3 s. Any member can stop a ship until it moves main.`),
+      all.length ? h('div', { class: 'hue-rows st-line-rows' }, ...all.flatMap((l) => l.rows.map((r) => row(l, r)))) : h('div', { class: 'st-line-rows' }));
+    if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+  };
+  const load = async () => {
+    if (!page.isConnected && lines !== null) return;
+    if (!document.hidden && (el.isConnected || lines === null)) {
+      try {
+        lines = (await api('api/ship-lines')).lines;
+        failed = null;
+        const there = new Set(lines.flatMap((l) => l.rows.map((r) => key(l, r))));
+        for (const k of stopping) if (!there.has(k)) stopping.delete(k);
+      } catch (err) {
+        failed = err.message;
+      }
+      draw();
+    }
+    setTimeout(load, LINES_MS);
+  };
+  draw();
+  load();
+  return el;
+}
+
+/** "4 min", "1 h 5 min": how long since `ms`. */
+const shortAgo = (ms) => (Date.now() - ms < 60_000 ? `${Math.max(0, Math.round((Date.now() - ms) / 1000))} s` : span(Date.now() - ms));
+
 /** The Status page for scheme `projectId`: Citadel first, then the apps you can see, this scheme's first. */
 /**
  * The Releases page's Status tab (#1423; it was its own page): Citadel's server and the picked scheme's apps as a row of chips
@@ -401,6 +468,7 @@ export function statusPane(onData = () => {}) {
   const pills = h('nav', { class: 'chips st-apps', 'aria-label': 'Citadel and the apps' });
   const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
   const el = h('div', { class: 'st-page' }, pills, detail);
+  const lines = shipLinePanel(el);
   const pill = (key, name, v) => h('button', { type: 'button', class: `chip st-app${picked === key ? ' on' : ''}`, 'aria-pressed': String(picked === key), 'data-key': key, title: v.reasons[0] ?? WORD[v.tone],
     onclick: () => { picked = key; draw(); } },
   h('span', { class: `dot ${DOT[v.tone]}` }), name);
@@ -423,7 +491,7 @@ export function statusPane(onData = () => {}) {
         app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '',
         h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
-      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : citadelTiles(citadel, days, now, shipTimes, draw))));
+      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...citadelTiles(citadel, days, now, shipTimes, draw), lines])));
   };
   let timer = null, busy = false, tried = false;
   const load = async () => {

@@ -595,6 +595,13 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-ask { flex: none; min-width: 7.5em; padding-block: 0.3rem; font-size: inherit; }
 /* Time to ship (#1132): median and p90 lines against the 10 minute line, a button per day, that day's ships as stepped bars. */
 .st-tile.st-ship { grid-template-rows: none; grid-auto-rows: auto; min-height: 0; gap: 0.4rem; }
+.st-tile.st-lines { grid-template-rows: none; grid-auto-rows: auto; gap: 0.4rem; }
+.st-lines .st-sub { display: block; }
+.st-line-rows { min-height: 7.5rem; align-content: start; }
+.st-lines .hue-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-line-meta { display: inline-flex; align-items: center; gap: 0.6rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-line-meta .cui-btn { min-width: 7.5rem; }
+@media (max-width: 480px) { .st-lines .hue-row { flex-wrap: wrap; } .st-lines .hue-row-meta { flex-basis: 100%; } .st-lines .hue-row-text { white-space: normal; } }
 .st-legend { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.78em; align-items: center; }
 .st-legend .s1::before, .st-legend .s2::before { content: ""; display: inline-block; width: 0.7rem; height: 3px; margin-right: 0.35rem; vertical-align: middle; border-radius: 2px; background: var(--running); }
 .st-legend .s2::before { background: var(--accent); }

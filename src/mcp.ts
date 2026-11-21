@@ -764,7 +764,7 @@ const TOOLS = () => ([
   },
   {
     name: 'stop_ticket',
-    description: "Interrupt a minion's running turn and drop its queued messages.",
+    description: "Interrupt a minion's running turn and drop its queued messages. A ship it has running stops too (it leaves the line and main stays as it was), unless it is already deploying; the result says which.",
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   // A Taskmaster's ask_question also asks for everyone (#921).
@@ -2438,8 +2438,8 @@ async function runTool(name: string, args: any): Promise<string> {
         ? 'Handoff saved: your session resets when this turn ends, and your next turn starts from it by itself. Reply in one line and end the turn.'
         : 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
     case 'stop_ticket': {
-      const { stopped } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
-      return stopped ? 'Stopped.' : 'That minion was not running.';
+      const { stopped, ship } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
+      return [stopped ? 'Stopped.' : 'That minion was not running.', ship].filter(Boolean).join(' ');
     }
     default:
       throw new Error(`Unknown tool ${name}`);

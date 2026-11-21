@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
 import { moveShip, REASON_MAX, seqsFor } from '../ship-line.ts';
+import { shipLines, stopShip, StopRefused } from '../ship-stop.ts';
 import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
 
 const MAX_CLIENTS = 100;
@@ -287,6 +288,27 @@ export const appRoutes: Route[] = [
     const seqs = seqsFor(waiting, ship.seq, ahead?.seq);
     const order = moveShip(app, project.id, ship.seq, seqs, { name: `${project.name} Taskmaster`, taskmaster: true }, reason);
     return json(res, 200, { order, said: `Moved ${ship.name}: ${order.indexOf(ship.seq) === 0 ? 'it ships next' : `now ${order.indexOf(ship.seq) + 1} of ${order.length} waiting`}.` });
+  } },
+  // The ship lines on the Status page (#1168): who holds each line the person can see, for how long and doing what, and
+  // who waits behind. Read afresh on every call, so a stuck ship shows within the panel's poll.
+  { method: 'GET', path: '/api/ship-lines', who: ['person'], handler: async ({ res, app, session }) => {
+    return json(res, 200, { lines: shipLines(app, (id) => app.store.canSee(session, id)), at: Date.now() });
+  } },
+  // "Stop this ship" (#1168; Josh picked it 2026-11-19 from #1093's ideas): any member of the scheme ends the land.sh run
+  // that holds (or waits in) its line, cleanly: it leaves the line, lets go of the lock, and main stays as it was.
+  { method: 'POST', path: '/api/ship-lines/stop', who: ['person'], handler: async ({ req, res, app, session }) => {
+    const body = await readJson(req);
+    const projectId = Number(body?.projectId), seq = Number(body?.seq);
+    if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+    if (!Number.isInteger(seq) || seq <= 0) throw new HttpError(400, 'seq must be a line ticket');
+    try {
+      const { name } = stopShip(app, projectId, seq, session.name ?? 'a member');
+      app.releases.poll();
+      return json(res, 200, { stopped: name });
+    } catch (err) {
+      if (err instanceof StopRefused) throw new HttpError(409, err.message);
+      throw err;
+    }
   } },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
   { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {

@@ -494,6 +494,34 @@ mock.boards('#takes', { boards: [
       return route(c, t);
     },
   },
+  'ship-line': {
+    about: "Seeded gets a scratch repo with the kit's land.sh, whose check hangs (sleep 300), and two minions with worktrees: run `bash tools/land.sh` in each worktree it prints (the first holds the line, the second waits) for the Status page's ship line panel and its Stop (#1168). Its stop ends a real land.sh: never press Stop on a copy of the live data, whose lines are the real ones",
+    seed(c) {
+      const repo = join(c.dataDir, 'ship-line-repo');
+      const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+      rmSync(repo, { recursive: true, force: true });
+      mkdirSync(join(repo, 'tools'), { recursive: true });
+      git(repo, 'init', '-q', '-b', 'main');
+      copyFileSync(join(import.meta.dirname, '../kit/skills/scheme-setup/templates/land.sh'), join(repo, 'tools/land.sh'));
+      writeFileSync(join(repo, 'tools/land.local.sh'), "CHECK='sleep 300' # a check that hangs, to stop from the page\nPUSH_MAIN=0\n");
+      writeFileSync(join(repo, 'README.md'), 'A scratch scheme repo for the ship line panel.\n');
+      git(repo, 'add', '-A');
+      git(repo, '-c', 'user.name=Seed', '-c', 'user.email=seed@example.invalid', 'commit', '-qm', 'start');
+      c.store.setProjectRepoDir(c.project.id, repo);
+      const trees = ['Stop a hung ship', 'Wait behind it'].map((title, i) => {
+        const t = minion(c, title);
+        const tree = join(c.dataDir, 'ship-line-trees', String(t.id));
+        rmSync(tree, { recursive: true, force: true });
+        git(repo, 'worktree', 'add', '-q', '-b', t.branch!, tree);
+        writeFileSync(join(tree, `change-${i}.txt`), `${title}\n`);
+        git(tree, 'add', '-A');
+        git(tree, '-c', 'user.name=Seed', '-c', 'user.email=seed@example.invalid', 'commit', '-qm', title);
+        return tree;
+      });
+      console.log(`Run in each, the first before the second:\n${trees.map((t) => `  (cd ${t} && bash tools/land.sh)`).join('\n')}`);
+      return `#/p/${c.project.id}/status`;
+    },
+  },
   'long-chat': {
     about: 'a finished minion with a long chat: markdown headings, lists, a table, code, an image and a file card',
     seed(c) {

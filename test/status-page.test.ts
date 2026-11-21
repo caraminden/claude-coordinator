@@ -154,7 +154,7 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   assert.deepEqual(c.host.series[0].slice(1, 3), [95, 95]);
   assert.equal(c.verdict.tone, 'bad');
   assert.deepEqual(c.verdict.reasons, ['claude-coordinator-prune.timer failed', 'a 6.2 s stall in the last day', 'under 10% of memory free', 'under 10% of disk free']);
-  assert.ok(c.slots.some((s) => s.key === 'line') && !c.slots.some((s) => s.key === 'backups'), 'the backups slot became the real tile');
+  assert.deepEqual(c.slots, [], 'the backups and line slots became real tiles');
   assert.deepEqual(c.backup.problems, []);
 });
 

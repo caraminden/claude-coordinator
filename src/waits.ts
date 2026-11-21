@@ -438,6 +438,11 @@ export class Waits {
     return order;
   }
 
+  /** The line's queue folder, read afresh by the Status page's ship line (#1168); null on a server without one. */
+  get queue(): string | null {
+    return this.d.deployState ? join(this.d.deployState, 'queue') : null;
+  }
+
   /** Labels found to be a minion; a miss is looked up again next time, as its minion may not be there yet. */
   private byLabel = new Map<string, number>();
   ticketFor(label: string): number | null {

@@ -594,7 +594,7 @@ function whyBody(id) {
 
 function stopTurn(t) {
   whyTips?.close();
-  api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => toast(`Couldn't stop #${t.number}: ${e.message}`, { tone: 'warn', ms: 8000 }));
+  api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).then((r) => r?.ship && toast(r.ship, { ms: 8000 }), (e) => toast(`Couldn't stop #${t.number}: ${e.message}`, { tone: 'warn', ms: 8000 }));
 }
 
 /** The server looks at the turn's process (src/quiet.ts checkProcess): no model call, no message to the minion. */

@@ -62,6 +62,7 @@ import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
+import { stopMinionShip } from '../ship-stop.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -1175,13 +1176,15 @@ export const ticketRoutes: Route[] = [
   {
     method: 'POST', path: '/api/tickets/:ticket/stop', who: ['person', 'taskmaster'],
     async handler(ctx) {
-      const { res, app, ticket } = ctx;
+      const { res, app, ticket, session } = ctx;
       const { id } = ticket;
       const { runner } = app;
       const stopped = runner.stop(id);
       // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
       const followed = app.machines.minionStopped(id);
-      return json(res, 200, { stopped: stopped || followed > 0 });
+      // Its running ship stops too (#1168), unless it is past moving main: `ship` says which.
+      const ship = ticket.kind === 'ticket' ? stopMinionShip(app, id, session?.agent !== undefined ? 'the Taskmaster' : session?.name ?? 'a member') : null;
+      return json(res, 200, { stopped: stopped || followed > 0, ship });
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.

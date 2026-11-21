@@ -29,6 +29,7 @@ const KEEP_MS = 14 * 24 * 3600_000;
 export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, or a restart cut it off. Check `git log main`.]';
 
 const HANDOFF = 'handoff.json';
+const STOPPED = 'stopped.json';
 
 /** What the minion says about the change it hands off (hand_off_land), for the shipped line. */
 export interface Handoff {
@@ -216,6 +217,26 @@ export class Landings {
     if (told.includes(key)) return false;
     writeFileSync(f, [...told.filter(Boolean), key, ''].join('\n'));
     return true;
+  }
+
+  /** A person stopped this landing (#1168): its report says who, not "fix the cause". The folder is made afresh at each start. */
+  markStopped(ticketId: number, by: string, at = Date.now(), via = 'from the Status page') {
+    try { writeFileSync(join(this.dir(ticketId), STOPPED), JSON.stringify({ by, at, via })); } catch { /* no landing folder: nothing to report */ }
+  }
+
+  stopped(ticketId: number): { by: string; at: number; via?: string } | null {
+    try { return JSON.parse(readFileSync(join(this.dir(ticketId), STOPPED), 'utf8')); } catch { return null; }
+  }
+
+  /** The pid of the land.sh a minion's running landing started (its wrapper's child), or null when none runs. */
+  landPid(ticketId: number, children = (pid: number) => readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8')): number | null {
+    if (this.get(ticketId)?.code !== null) return null;
+    try {
+      const wrapper = Number(readFileSync(join(this.dir(ticketId), 'pid'), 'utf8'));
+      return Number(children(wrapper).trim().split(/\s+/)[0]) || null;
+    } catch {
+      return null;
+    }
   }
 
   /** Where a landing's whole output is. */
@@ -466,7 +487,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 }
 
 export interface HandoffDeps {
-  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew'>;
+  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew'> & Partial<Pick<Landings, 'stopped'>>;
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
@@ -584,6 +605,16 @@ export class LandHandoffs {
     const r = landResult(run.output, run.code!);
     try { this.d.flakes?.(id, run.output); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
+    const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
+    if (stop) {
+      // A person stopped it, from the Status page or by stopping the minion (#1168): not the minion's red, so no failure count and no "fix the cause".
+      store.updateTicket(id, { state: null, note: 'ship stopped' });
+      runner.broadcastTicket(id);
+      const at = new Date(stop.at).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      const moved = /^land: \S+ is now at [0-9a-f]{7,40} /m.test(run.output);
+      runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`);
+      return;
+    }
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);

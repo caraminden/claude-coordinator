@@ -511,7 +511,7 @@ export function renderTicketHead() {
   }
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
-    actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+    actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).then((r) => r?.ship && toast(r.ship, { ms: 8000 }), (e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
     if (t.session_id && !t.fresh_pending) {

@@ -486,9 +486,7 @@ export class StatusPage {
       desktops,
       backup: { ...backup, problems: backupMissing },
       // Tiles still to come: the minions that build them fill these in (Build 5, lane 3).
-      slots: [
-        { key: 'line', title: 'Ship line', note: 'Who is shipping and who waits: coming with the line panel.' },
-      ],
+      slots: [], // the line slot became the ship line panel (#1168), read by the page from /api/ship-lines
     };
   }
 }

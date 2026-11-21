@@ -171,6 +171,7 @@ test('a held or closed fix row starts no minion while another open minion names 
   const file = 'test/ov.test.ts';
   const other = st.createTicket({ project_id: project.id, title: 'Flaky test: ov.test.ts', permission_mode: 'x', created_by: 'Cara' });
   const old = st.createTicket({ project_id: project.id, title: 'old', permission_mode: 'x', created_by: 'T' });
+  st.updateTicket(old.id, { status: 'closed' }); // so the title match alone is the owner
   st.addFlakeFix(project.id, file, old.id, now - 9e6, { state: 'held', held_at: now - 8e6 });
   for (const h of [3, 2, 1]) st.addFlakeEvents(project.id, null, null, now - h * 1_000_000, [{ file, source: 'in CI', detail: '' }]);
   const started: string[] = [];
@@ -179,4 +180,20 @@ test('a held or closed fix row starts no minion while another open minion names 
   await fx.tick([project]);
   assert.deepEqual(started, [], 'held row, new sightings, but another minion is open on the file');
   assert.equal(st.flakeFix(project.id, file)!.state, 'held', 'the row is left as it was');
+});
+
+test('no fix row yet: an open minion titled with the basename only owns the file', async () => {
+  const dir = mkdtempSync(join(root, 'owner2-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('O2', null);
+  const now = Date.now();
+  const file = 'test/ov.test.ts';
+  const other = st.createTicket({ project_id: project.id, title: 'Flaky test: ov.test.ts', permission_mode: 'x', created_by: 'Cara' });
+  for (const h of [3, 2, 1]) st.addFlakeEvents(project.id, null, null, now - h * 1_000_000, [{ file, source: 'in CI', detail: '' }]);
+  const started: string[] = [];
+  const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [],
+    start: async (_p, b) => { started.push(b.title); return { id: 1 }; } });
+  await fx.tick([project]);
+  assert.deepEqual(started, []);
+  assert.equal(st.flakeFix(project.id, file)!.ticket_id, other.id);
 });

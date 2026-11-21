@@ -114,7 +114,7 @@ export class FlakeFixes {
       const base = file.split('/').pop()!;
       const open = (t: { kind: string; status: string }) => t.kind !== 'coordinator' && t.status !== 'closed';
       const own = fix?.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
-      const owner = own && open(own) ? own : store.listTickets(project.id).find((t) => open(t) && t.title.includes(base));
+      const owner = own && open(own) ? own : store.listTickets(project.id).find((t) => open(t) && [' ', '/', ':'].some((c) => t.title.includes(c + base)));
       if (fix && owner) continue;
       if (!fix) {
         if (sights.length < FLAKE_REPEAT) continue;

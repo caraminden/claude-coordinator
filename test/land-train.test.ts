@@ -121,12 +121,14 @@ test('a red train whose real failure maps to one ship: only it is refused, the n
   l.done();
 });
 
-// (split, so test/pipeline-files.test.ts doesn't read it as this file importing x.ts)
-const importX = "import { existsSync } from 'node:fs'; if (existsSync(new URL('../x.ts', import.meta.url))) await imp" + "ort('../x.ts');";
+// A fixture test that imports <file> once it exists, so it passes on main and red-on-main (#1430) stays out of the
+// way (split, so test/pipeline-files.test.ts doesn't read it as this file importing the fixture).
+const importIf = (file: string) => `import { existsSync } from 'node:fs'; if (existsSync(new URL('../${file}', import.meta.url))) await imp` + `ort('../${file}');`;
+const importX = importIf('x.ts');
 test("a suspect found through what the failing test imports is refused, and a ship stacked on it stays out of the refill rather than bring its change back", async () => {
   // Ship 1 adds the test, importing x.ts once it exists (so it passes on main, #1430); ship 4 adds x.ts, which turns CI red;
-  // ship 5 starts from ship 4's branch.
-  const l = await line([{ change: ['test/real.test.ts', `${importX}\n`] }, {}, {}, { change: ['x.ts', 'x\n'] }, { on: 4 }, {}, {}], { FAKE_RED_PATH: 'x.ts', LAND_TRAIN_MAX: '3' });
+  // ship 5 starts from ship 4's branch. x.ts passes run alone (CI's red is the fake's), so the files decide, not perigee.
+  const l = await line([{ change: ['test/real.test.ts', `${importX}\n`] }, {}, {}, { change: ['x.ts', 'export {};\n'] }, { on: 4 }, {}, {}], { FAKE_RED_PATH: 'x.ts', LAND_TRAIN_MAX: '3' });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
   assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed, so it is likely the cause.*Look into it: fix it if it is yours, re-test, commit, then run this again/s);
@@ -195,7 +197,7 @@ test('a files guess that names two ships holds neither: a green run without both
   // test/real.test.ts imports a.ts and b.ts; ship 3 changes a.ts, ship 4 adds b.ts, which is what turns CI red.
   const l = await line([{}, {}, { change: ['a.ts', 'export const a = 2;\n'] }, { change: ['b.ts', 'export const b = 1;\n'] }, {}], { FAKE_RED_PATH: 'b.ts' }, (r) => {
     writeFileSync(join(r.source, 'a.ts'), 'export const a = 1;\n');
-    r.commit(r.source, 'test/real.test.ts', "import '../a.ts';\nimport '../b.ts';\n");
+    r.commit(r.source, 'test/real.test.ts', `import '../a.ts';\n${importIf('b.ts')}\n`); // b.ts once it exists: green on main (#1430)
   });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: the files name more than one ship \(#3, #4\) for test\/real\.test\.ts/);

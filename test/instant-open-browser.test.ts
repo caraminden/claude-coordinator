@@ -49,7 +49,11 @@ async function openOnce(srv: Booted, hash: string, width = 1280) {
     window.hellos = 0;
     const ES = window.EventSource;
     window.EventSource = class extends ES {
-      set onmessage(f) { super.onmessage = (e) => { f(e); if (JSON.parse(e.data).type === 'hello') window.hellos++; }; }
+      constructor(...a) {
+        super(...a);
+        // Counted a task later, so the page's own handlers (however it adds them) have drawn this hello first.
+        this.addEventListener('message', (e) => { if (JSON.parse(e.data).type === 'hello') setTimeout(() => window.hellos++); });
+      }
     };
   })()` });
   await page.send('Page.navigate', { url: `${srv.base}/c/${hash}` });

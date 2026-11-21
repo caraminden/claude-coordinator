@@ -993,6 +993,8 @@ export class Runner {
       properties: list?.properties ?? this.store.props.forTarget('minion', ticket.id),
       // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
       touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket, list?.properties) : [],
+      // Whose its cards are (#1449: the owner's once its assignee left the scheme), as push and Needs you count it; null for anyone's.
+      assignee: ticket.kind === 'ticket' ? this.store.getUser(this.store.minionPerson(ticket) ?? -1)?.name ?? null : null,
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       wait: closed ? null : this.wait(ticket.id),

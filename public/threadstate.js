@@ -65,8 +65,8 @@ export function serverLabel(w) {
 /** The rank of a row for a person to look at (ready, try it, done): after the answers owed (0), before working (1). */
 export const LOOK = 0.5;
 
-/** Whose answer a card waits on (#1121): its `to`, else the minion's assignee; '' for anyone's, which is yours. */
-const cardFor = (c, t) => String(c?.to || t.properties?.assigned || '').trim();
+/** Whose answer a card waits on (#1121): its `to`, else whose the server says the minion is (#1449), else its assignee; '' for anyone's, which is yours. */
+const cardFor = (c, t) => String(c?.to || (t.assignee !== undefined ? t.assignee : t.properties?.assigned) || '').trim();
 const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
 /** The minion's open cards that wait on you, oldest first. */
 export const cardsYours = (t) => (t.open_cards ?? []).filter((c) => isYou(cardFor(c, t)));

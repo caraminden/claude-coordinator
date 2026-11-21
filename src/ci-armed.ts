@@ -79,7 +79,9 @@ export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urg
   const asked = notice ? undefined : store.getTicket(store.getSetting<number>(replyToKey(ticket.id)) ?? 0);
   if (!notice) store.deleteSetting(replyToKey(ticket.id));
   const owner = store.ownerCoordinator(ticket)!;
-  const coordinator = asked?.kind === 'coordinator' && asked.project_id === ticket.project_id ? asked : owner;
+  // Not to a Taskmaster whose person has since left the scheme or been disabled (#1449).
+  const live = asked?.coordinator_of == null || store.hearsScheme(asked.coordinator_of, ticket.project_id);
+  const coordinator = asked?.kind === 'coordinator' && asked.project_id === ticket.project_id && live ? asked : owner;
   const author = `#${ticket.number} ${ticket.title}`;
   const held = runner.relay(ticket.id, coordinator.id, author, text, urgent, wake, need);
   if (held !== true) {

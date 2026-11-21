@@ -62,6 +62,9 @@ test('rowState: amber only for a card or replies of yours; another person\'s say
     assert.equal(rowState(t({ ...age, open_cards: [card({ to: 'Cara' })] }), null, NOW).label, 'Waiting on Cara');
     assert.equal(rowState(t({ ...age, open_cards: [card()] }), null, NOW).label, 'Answer needed');
     assert.deepEqual(pill({ replies: ['Go'], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's go");
+    // Whose the server says it is wins over the raw assignee (#1449): a gone assignee's minion is the owner's.
+    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: 'Josh', properties: { assigned: 'Olive' } }), [0, 'you', 'answer 1h'], "Olive left: it's yours");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: null, properties: { assigned: 'Olive' } }), [0, 'you', 'answer 1h'], "no one's: anyone's");
     assert.equal(rowState(t({}), null, NOW).label, 'Idle');
     assert.equal(rowState(t({ state: 'try' }), null, NOW).label, 'Ready to try');
     // An approval is the assignee's, as the server counts it; the badge and the popover link go by whose card it is.

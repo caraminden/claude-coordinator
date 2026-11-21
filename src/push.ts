@@ -243,8 +243,7 @@ export class Pusher {
    */
   private inScheme(name: string, projectId: number): boolean {
     const user = this.store.findUser('name', name);
-    return !!user && !user.disabled_at && this.store.memberSchemes(user.id).has(projectId)
-      && !this.store.hiddenProjects(user.id).has(projectId);
+    return !!user && this.store.hearsScheme(user.id, projectId) && !this.store.hiddenProjects(user.id).has(projectId);
   }
 
   /** Send one message (a desktop app's through its page); a subscription the push service says is gone (404, 410) is deleted. */

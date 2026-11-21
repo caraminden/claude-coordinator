@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { messagePerson, turnPayer, turnRefusal } from '../src/access.ts';
 import { Approvals } from '../src/approvals.ts';
+import { replyToKey, tellTaskmaster } from '../src/ci-armed.ts';
 import { Store, type Ticket } from '../src/db.ts';
 import { inboxItems } from '../src/inbox.ts';
 import { loadVapidKeys, Pusher } from '../src/push.ts';
@@ -77,6 +78,12 @@ test('a minion whose assignee left the scheme, or was disabled, is its owner\'s 
     await pusher.notify(t, { kind: 'question', questions: [{ question: 'Which wick?' }] });
     return sent.map((u) => u.split('/').pop()).sort();
   };
+  const told = async (t: Ticket) => {
+    const out = { to: 0, mail: [] as number[] };
+    const runner = { relay: (_f: number, to: number) => ((out.to = to), false), leaveMail: (to: number) => out.mail.push(to), emit: () => {} };
+    await tellTaskmaster({ store, runner } as never, t, 'Done', false);
+    return out;
+  };
   const needsYou = (t: Ticket) => ['Cara', 'Josh', 'Olive'].filter((name) => inboxItems(store, approvals, p, name).some((i) => i.ticketId === t.id && i.kind === 'question'));
   // Josh has his own Taskmaster (the scheme is split), so his minion reports to it.
   store.createTicket({ project_id: p, title: 'Coordinator', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
@@ -101,8 +108,20 @@ test('a minion whose assignee left the scheme, or was disabled, is its owner\'s 
     assert.deepEqual(needsYou(t), ['Cara'], `Needs-you, ${how}`);
     assert.equal(store.minionOwner(t), cara.id, `owner, ${how}`);
     assert.equal(store.ownerCoordinator(t)?.id, caraTm.id, `Taskmaster, ${how}`);
+    // Nor does its message_coordinator leave held mail in his Taskmaster, or reply to it because it last wrote.
+    assert.deepEqual(store.touchedBy(t), [], `touched, ${how}`);
+    store.setSetting(replyToKey(t.id), joshTm.id);
+    assert.deepEqual(await told(t), { to: caraTm.id, mail: [] }, `message_coordinator, ${how}`);
     back();
   }
+  // Hiding a scheme doesn't take him out of it (#226): it stays his, only his devices go quiet.
+  store.setProjectHidden(josh.id, p, true);
+  assert.deepEqual(await pinged(t), []);
+  assert.deepEqual(needsYou(t), ['Josh']);
+  assert.equal(store.ownerCoordinator(t)?.id, joshTm.id);
+  store.setProjectHidden(josh.id, p, false);
+  store.setSetting(replyToKey(t.id), caraTm.id);
+  assert.deepEqual(await told(t), { to: caraTm.id, mail: [joshTm.id] }, 'a live Taskmaster that last wrote still gets the reply');
   // Back in the scheme, it is his again.
   assert.deepEqual(await pinged(t), ['Josh']);
   assert.equal(store.ownerCoordinator(t)?.id, joshTm.id);

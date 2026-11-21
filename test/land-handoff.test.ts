@@ -873,3 +873,11 @@ test('a stop marked on a land that went red by itself, or past main moving, is t
   await s.handoffs.poll();
   assert.match(s.sent[0], /stopped by Cara by stopping its minion.*main had already moved/s);
 });
+
+test('a ship that kept its place after reds of flakes only says how many in its shipped line (#1419 part 2)', async () => {
+  const s = setup('live');
+  const keep = (n: number) => `land: refused on flakes only (test/a.test.ts, then test/a.test.ts on the fresh run), not your change: keeping its place in line and riding the next train (${n} of 2)\n`;
+  await s.land(LIVE.replace('\n', `\n${keep(1)}${keep(2)}`));
+  await s.handoffs.poll();
+  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Kept its place in line after 2 reds of flakes only. Live now.']);
+});

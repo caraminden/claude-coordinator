@@ -660,7 +660,8 @@ export class LandHandoffs {
     const deploys = apps.length ? await deployApps(id, apps, r.commit, this.d.deployOps!) : [];
     const failed = deploys.filter((d) => !d.ok);
     const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
-    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
+    const flakeKept = (run.output.match(/^land: refused on flakes only .*not your change: keeping its place in line/gm) ?? []).length; // #1419 part 2
+    runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` });
     this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`);
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

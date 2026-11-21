@@ -359,7 +359,9 @@ test('a red of flakes only whose fresh run is red again refuses, whatever its la
   r.commit(r.wt, 'b.txt', 'mine\n');
   const main = git(r.source, 'rev-parse', 'main');
   const shared = join(r.dir, 'shared');
-  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared }); // both runs red, both of flakes only
+  // Both runs red, both of flakes only, on a hand-off that already kept its place twice (#1419 part 2: before that it would
+  // keep its place again; test/land-known-flakes.test.ts has those).
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared, LAND_FLAKE_KEPT: '2' });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /running CI once more.*the red test's output \(run 8\).*tests failed on the rebased branch in CI again \(https:\/\/ci\/8\), on the one fresh run after a red of flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/s);
   assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'two runs, never three');

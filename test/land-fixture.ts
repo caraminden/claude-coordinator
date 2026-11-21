@@ -93,7 +93,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
-// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline); FAKE_LEAK: it also has the leak guard's line (#1419)
+// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
 // file not rerun because a real failure already made the run red).
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
@@ -170,6 +170,7 @@ case "$*" in
       printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b run-tests: the tests ran past 300s and were stopped: a test hung (the hung file is the one with no results above).\\n' "$p" "$p" "$p"
       exit 0
     fi
+    [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
     echo "not ok 1 - the red test's output (run $3)"
     p="$p run-tests:"
     case \${FAKE_LOG:-mixed} in

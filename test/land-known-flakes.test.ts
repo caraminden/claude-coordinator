@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ci, git, seen, setup } from './land-fixture.ts';
+import { ci, git, issued, seen, setup } from './land-fixture.ts';
 import { gitAt } from './git.ts';
 
 const landLog = (shared: string) => readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
@@ -42,7 +42,8 @@ test('one failed file seen for the first time gets the one fresh run, as before,
   const main = git(r.source, 'rev-parse', 'main');
   const shared = join(r.dir, 'shared');
   seen(shared, ['test/slow.test.ts']);
-  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  // The fresh run's red has a real failure: a second red of flakes only would keep its place (part 2, below).
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', FAKE_LOG_RERUN: 'mixed', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /test\/busy\.test\.ts \(not seen on another branch in 14 days, and no minion is fixing it\) is no known flake/);
   assert.match(res.stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more on \w+, the land needs a fully green run/);
@@ -149,4 +150,56 @@ test('an open fix minion makes a file known with no other sighting, and the reas
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /^land: shipped past known flakes test\/busy\.test\.ts \(fix #40\), test\/slow\.test\.ts \(fix #41\)$/m);
   assert.equal(pushes(c), 1, 'no fresh run');
+});
+
+// Part 2 (Taskmaster, 2026-11-21, after Cara: "I thought they were supposed to keep their spot not?"): a red of flakes
+// only on the fresh run too keeps the ship's place in line, up to twice a hand-off, instead of going back to its minion.
+const keeps = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · flake keep · '));
+
+test('a second red of flakes only keeps its place in line, goes again on the same ticket, and ships on a green', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const state = join(r.dir, 'ci-state');
+  writeFileSync(state, 'red');
+  let flipped = false;
+  const res = await c.runAsync({ FAKE_CI_FILE: state, FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared }, (s) => {
+    if (!flipped && /keeping its place in line/.test(s)) { flipped = true; writeFileSync(state, 'green'); }
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /refused on flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts, then test\/busy\.test\.ts, test\/slow\.test\.ts on the fresh run\), not your change: keeping its place in line and riding the next train \(1 of 2\)/);
+  assert.match(res.stderr, /back at the front after its retry in place/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(issued(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy')), 1, 'the same ticket, not a new one at the back');
+  assert.equal(keeps(shared).length, 1);
+});
+
+test('reds of flakes only keep its place twice at most, then it is refused back to its minion', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /\(2 of 2\)/);
+  assert.doesNotMatch(res.stderr, /\(3 of 2\)/);
+  assert.match(res.stderr, /only flakes failed again \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but it has kept its place 2 times already, so it is refused this time/);
+  assert.match(res.stderr, /on the one fresh run after a red of flakes only/);
+  assert.equal(keeps(shared).length, 2);
+  assert.equal(pushes(c), 6, 'two runs a go, three goes');
+});
+
+test('a second red with a real failure, or a flake the ship changed, goes back to its minion at once', () => {
+  for (const how of ['real', 'touched'] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, how === 'touched' ? 'test/slow.test.ts' : 'b.txt', 'mine\n');
+    const shared = join(r.dir, 'shared');
+    const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...(how === 'real' ? { FAKE_LOG_RERUN: 'mixed' } : {}), COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 1, how);
+    assert.doesNotMatch(res.stderr, /keeping its place/, how);
+    assert.match(res.stderr, /on the one fresh run after a red of flakes only/, how);
+    assert.equal(pushes(c), 2, how);
+  }
 });

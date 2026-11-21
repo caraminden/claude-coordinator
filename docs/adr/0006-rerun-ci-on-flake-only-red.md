@@ -78,3 +78,16 @@ red again on flakes and were refused, and 1 got no answer.
   log line. The `flake` sightings are still written, so the Test health tab keeps counting and the automatic fix minions keep coming.
 - Citadel only: the kit's `templates/land.sh` is still unchanged, for the reason above: a scheme's own `CHECK` gives no "passed alone"
   signal to know a flake by.
+
+## Amendment, 2026-11-21: a second red of flakes only keeps the ship's place (#1419 part 2)
+
+Cara, 2026-11-21, about 1:40 AM PST, on #1366 going to the back of the line after three flake refusals: "I thought they
+were supposed to keep their spot not?" The Taskmaster's brief: keep its place, re-queued by the server, with a cap.
+
+- When the one fresh run is red again and every failed file passed alone again, none of them changed by a ship on the
+  train or importing what one changed, a plain land keeps its ticket (#1360's retry in place) instead of being refused:
+  `refused on flakes only (…), not your change: keeping its place in line and riding the next train (N of 2)`.
+- At most twice a hand-off (`FLAKE_KEEP_MAX`), counted apart from #1360's one pipeline retry; past that it is refused
+  to its minion as before. A real failure or a touched file on the second red refuses at once, as before.
+- The ship keeps its queue ticket, so a person's placement in the ship line stays. The shipped line says
+  `Kept its place in line after N reds of flakes only.`, and each keep writes a `flake keep` retro log line.

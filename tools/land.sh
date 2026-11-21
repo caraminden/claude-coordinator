@@ -122,6 +122,7 @@ land_timing() (
 check=
 [ "${1:-}" != --check ] || { check=1; shift; }
 args=("$@") # for the rebased copy (the execs below)
+flake_kept=${LAND_FLAKE_KEPT:-0} # how many times this hand-off kept its place after a CI red of flakes only (flake_keep below)
 retried=${LAND_RETRIED:-} # why it was refused by the pipeline once already (retry_in_place below), in the copy that goes again
 mode=land build='' files=()
 case ${1:-} in
@@ -375,7 +376,7 @@ if [ "$mode" = build ]; then
   ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
 fi
 now_again=${LAND_RETRY_NOW:-}
-unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW LAND_RETRIED
+unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW LAND_RETRIED LAND_FLAKE_KEPT
 if [ -n "$check" ]; then
   under=$(under_of)
   case $mode in
@@ -941,14 +942,21 @@ quiet() {
 # and takes this one on its train as the first rider; with no train (a pipeline change, CI down) this goes right after
 # it. Back at the front, it starts over from its rebase. Only a fully green run ships it, as ever (ADR 0006).
 # <why>: returns when it can't (a second time, or not a plain land), and the caller refuses as before.
+# <why> flake: flake_keep's, which doesn't count as the one pipeline retry and says how many it has used.
 retry_in_place() {
-  [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
+  [ -n "${2:-}" ] || [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
   [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
-  say "refused by the pipeline ($1), not your change: keeping its place in line and riding the next train, once"
+  if [ -n "${2:-}" ]; then
+    flake_kept=$((flake_kept + 1))
+    say "refused on flakes only ($1), not your change: keeping its place in line and riding the next train ($flake_kept of $FLAKE_KEEP_MAX)"
+    retro_log "flake keep · $branch · $1 · $flake_kept of $FLAKE_KEEP_MAX"
+  else
+    say "refused by the pipeline ($1), not your change: keeping its place in line and riding the next train, once"
+    retried=$1
+  fi
   train_drop
   top_done
   ci_done
-  retried=$1
   trap 'land_timing $? || true; queue_done' EXIT
   queue_wait_check() { { train_verdict && prep_check; } || true; }
   flock -u 9
@@ -956,7 +964,23 @@ retry_in_place() {
   unset -f queue_wait_check
   train_verdict held
   say "back at the front after its retry in place: starting over from the rebase"
-  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_RETRIED=$retried exec bash "$tools/land.sh" "${args[@]}"
+  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
+}
+# A CI red of flakes only on the one fresh run too (#1419 part 2, Taskmaster 2026-11-21, after Cara: "I thought they
+# were supposed to keep their spot not?"): when every failed file passed alone again and no ship on the train changed
+# one or what it imports, the ship keeps its place (retry_in_place) instead of going back to its minion, at most
+# FLAKE_KEEP_MAX times a hand-off; past that it is refused as before, so a ship that really breaks something can't circle.
+FLAKE_KEEP_MAX=2
+flake_keep() {
+  local again f hits=() chg=()
+  again=$(flake_only) || return 0
+  train_chg
+  for f in ${again//, / }; do
+    mapfile -t hits < <(train_suspects_of "$f")
+    [ ${#hits[@]} = 0 ] || return 0
+  done
+  [ "$flake_kept" -lt "$FLAKE_KEEP_MAX" ] || { say "only flakes failed again ($again), but it has kept its place $flake_kept times already, so it is refused this time"; return 0; }
+  retry_in_place "$reran, then $again on the fresh run" flake
 }
 # Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
 # The busy time adds up only from one call to the next (#1361): ci_gate clears busy_last while a runner is online and CI
@@ -1545,6 +1569,7 @@ elif [ "$rc" = 0 ]; then
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"
+  [ -z "$reran" ] || flake_keep
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else

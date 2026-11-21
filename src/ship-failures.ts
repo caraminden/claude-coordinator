@@ -56,17 +56,19 @@ export function failureDetail(output: string, code: number | null): FailureDetai
     ...[...output.matchAll(/✖ \S+\.test\.ts(?::\d+)? › (.+?)(?: \(\d+(?:\.\d+)?ms\))?\s*$/gm)].map((m) => m[1]), // the smoke check's, no time
   ]);
   const files = uniq([...output.matchAll(/^(?:.*\t)?run-tests: (\S+\.test\.ts): /gm)].map((m) => m[1]));
+  const broken = uniq([...output.matchAll(/^land: broken test, not a flake: (\S+) red in /gm)].map((m) => m[1]));
   const kind = cls === 'conflict' || conflicts.length ? 'merge conflict'
     : code === 75 || /^land: .*(gave no verdict|timed out waiting for CI)/m.test(output) ? 'CI timeout'
     : cls === 'parse' ? 'parse error'
     : cls === 'ci' ? 'CI or runner problem'
     : cls === 'boot-copy' ? 'boot check'
     : /^land: smoke: .*, before the line/m.test(output) ? 'smoke check'
+    : broken.length ? 'broken test, not a flake' // #1487: red too often to be a flake
     : cls === 'passed-alone' ? 'failed together, passed alone'
     : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output) ? 'tests failed'
     : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output) ? 'deploy or boot'
     : 'failed';
-  const all = kind === 'merge conflict' ? conflicts : tests.length ? tests : files;
+  const all = kind === 'merge conflict' ? conflicts : kind === 'broken test, not a flake' ? broken : tests.length ? tests : files;
   const runs = output.split('\n').filter((l) => /\/actions\/runs\/\d+/.test(l));
   // The run named where it failed, else any run not named as a pass (a green CI before a failed deploy isn't the cause).
   const line = runs.filter((l) => /fail|\bred\b|refus|cancel|timed out|no verdict/i.test(l)).pop() ?? runs.filter((l) => !/pass|green/i.test(l)).pop();

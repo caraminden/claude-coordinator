@@ -80,6 +80,8 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
   assert.deepEqual(at("land: CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to 3 min 0 s more for them instead of falling back at 360s (https://ci/9)",
     "land: SHIPPING THROUGH MAIN'S RED: test/clock.test.ts fails run alone on main's tip 0123abc here too, and it is the only real failure of this train's CI run (https://ci/9): no ship on it changed test/clock.test.ts or what it imports"),
   [{ tone: 'warn', text: "Red only on main's own red test (clock): shipping through it; main still needs a fix" }], '#1478: and the reruns\' warning goes');
+  assert.deepEqual(at('land: broken test, not a flake: test/review-set-api.test.ts red in 4 of 10 runs in the last 6 h'),
+    [{ tone: 'bad', text: 'review-set-api is a broken test, not a flake: red in 4 of 10 runs in the last 6 h' }], '#1487');
   assert.deepEqual(at('land: CI FALLBACK: no runner took the run. Running the full suite on perigee instead.'),
     [{ tone: 'warn', text: 'CI fallback: the full suite runs on perigee (no runner took the run)' }]);
   const slow = "land: waiting for CI or a quiet perigee: CI: CI didn't finish within 360s, but perigee is busy";

@@ -85,3 +85,22 @@ export function seqsFor(line: LineEntry[], ship: number, before?: number): numbe
   if (i < 0) throw new HttpError(409, 'The ship to go ahead of is not waiting in line, or can not move');
   return [...rest.slice(0, i), ship, ...rest.slice(i)];
 }
+
+/**
+ * Minion `ticketId`'s waiting ship to the front of its scheme's line (#1487: the fix of a broken test, so every ship behind it
+ * stops paying for that test's reds), as a Taskmaster's move: a ship a person placed stays put, and it doesn't go past one.
+ * The order written, or null when it isn't waiting, can't move, is already first, or a person's pin is in the way.
+ */
+export function shipFirst(app: Pick<App, 'store' | 'releases' | 'waits'>, projectId: number, ticketId: number, by: Mover, reason: string): number[] | null {
+  app.releases.poll();
+  const line = app.releases.view((id) => id === projectId)[0]?.targets.flatMap((t) => t.line) ?? [];
+  const waiting = line.filter((e) => !e.holds && e.movable);
+  const e = waiting.find((x) => x.ticketId === ticketId);
+  if (!e || waiting[0] === e) return null;
+  try {
+    return moveShip(app, projectId, e.seq, seqsFor(line, e.seq), { ...by, taskmaster: true }, reason);
+  } catch (err) {
+    if (err instanceof HttpError) return null;
+    throw err;
+  }
+}

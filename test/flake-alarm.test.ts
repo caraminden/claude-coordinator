@@ -80,3 +80,21 @@ test('one alarm per test until a day passes or the file changes on main', async 
   await day.fixes.alarm(day.project, at('06:00:00') + 25 * 3_600_000);
   assert.equal(day.woke.length, 1, 'a day later, with no new sightings, nothing new to say');
 });
+
+test("#1487: a broken-test line moves its open fix minion's ship to the front for 6 h; no fix, no move", async () => {
+  const dir = mkdtempSync(join(root, 'b-'));
+  const store = new Store(join(dir, 'c.db'));
+  const project = store.createProject('P', null);
+  const fix = store.createTicket({ project_id: project.id, title: 'Fix the flaky test/review-set-api.test.ts', permission_mode: 'default', created_by: 'x' });
+  store.addFlakeFix(project.id, F, fix.id, at('04:00:00'));
+  mkdirSync(join(dir, 'shared', 'retro-log', '2026-11-20'), { recursive: true });
+  writeFileSync(join(dir, 'shared', 'retro-log', '2026-11-20', 'land.md'), [
+    `- 05:48:23Z · broken test · ${F} · red in 15 of 43 runs in the last 6 h · ticket/1061-models`,
+    '- 05:50:00Z · broken test · test/nobody.test.ts · red in 3 of 9 runs in the last 6 h · ticket/1061-models',
+  ].join('\n') + '\n');
+  const moved: [number, string][] = [];
+  const fixes = new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: (_p, id, why) => (moved.push([id, why]), true) });
+  assert.equal(await fixes.broken(project, at('06:00:00')), 1);
+  assert.deepEqual(moved, [[fix.id, `it fixes ${F}, a broken test, not a flake: red in 15 of 43 runs in the last 6 h`]]);
+  assert.equal(await fixes.broken(project, at('11:49:00')), 0, 'past 6 h the line no longer moves it');
+});

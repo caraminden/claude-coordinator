@@ -21,6 +21,8 @@ const MAX_STARTS_PER_PASS = 2;
 const MAX_EVIDENCE_PER_PASS = 10;
 const EVIDENCE_MAX_AGE_MS = 6 * 3_600_000;
 const SAME_SIGHTING_MS = 30 * 60_000;
+/** A broken-test line (tools/known-flakes.ts, #1487) moves its file's fix to the front of the line for this long: its window. */
+const BROKEN_FRONT_MS = 6 * 3_600_000;
 
 export interface FlakeFixDeps {
   store: Store;
@@ -39,6 +41,8 @@ export interface FlakeFixDeps {
   shippedAt?: (project: Project, branch: string) => Promise<number | null | undefined>;
   /** The commits most likely to have brought the flake (default: git in the scheme's repo). */
   suspect?: (project: Project, file: string, firstAt: number) => Promise<string | null>;
+  /** Move minion `ticketId`'s waiting ship to the front of the line (#1487; src/ship-line.ts shipFirst); true when it moved. */
+  front?: (project: Project, ticketId: number, reason: string) => boolean;
   /** The failing test's name and error from the CI run behind a flake line (#1438); null when the log can't say. server.ts reads the scheme's GitHub repo with gh; without it no row keeps one. */
   evidence?: (project: Project, branch: string, file: string, at: number) => Promise<{ name: string; message: string } | null>;
   now?: () => number;
@@ -120,6 +124,44 @@ export class FlakeFixes {
     return woke;
   }
 
+  /** A live minion already on the file owns it, whatever its title or the fix row's state (#1373 started beside #1349 through the held branch). */
+  private owner(project: Project, file: string, fix: FlakeFix | undefined) {
+    const { store } = this.d;
+    const base = file.split('/').pop()!;
+    const open = (t: { kind: string; status: string }) => t.kind !== 'coordinator' && t.status !== 'closed';
+    const own = fix?.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
+    return own && open(own) ? own : store.listTickets(project.id).find((t) => open(t) && [' ', '/', ':'].some((c) => t.title.includes(c + base)));
+  }
+
+  /**
+   * A broken test (#1487: tools/known-flakes.ts's verdict, a `broken test` line in the retro log) reddens a big share of every
+   * ship's runs, so its fix minion's ship goes to the front of the line once it waits there, for BROKEN_FRONT_MS after the line.
+   * How many it moved.
+   */
+  async broken(project: Project, now: number): Promise<number> {
+    const dir = this.d.sharedDir(project.id);
+    if (!dir || !this.d.front) return 0;
+    const root = join(dir, 'retro-log');
+    let days: string[];
+    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    const why = new Map<string, string>(); // file -> its newest line's "red in N of M runs in the last 6 h"
+    for (const day of days) {
+      if (Date.parse(`${day}T23:59:59Z`) < now - BROKEN_FRONT_MS) continue;
+      let md: string;
+      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · broken test · (\S+) · (.+?) · \S+$/gm)) {
+        const at = Date.parse(`${day}T${m[1]}Z`);
+        if (at >= now - BROKEN_FRONT_MS && at <= now + 60_000) why.set(m[2], m[3]);
+      }
+    }
+    let moved = 0;
+    for (const [file, red] of why) {
+      const owner = this.owner(project, file, this.d.store.flakeFix(project.id, file));
+      if (owner && this.d.front(project, owner.id, `it fixes ${file}, a broken test, not a flake: ${red}`)) moved++;
+    }
+    return moved;
+  }
+
   /** The Test health tab's and the escalation's rules; the minions it starts. */
   async escalate(project: Project, now: number): Promise<number> {
     const { store } = this.d;
@@ -129,11 +171,7 @@ export class FlakeFixes {
       const fix = store.flakeFix(project.id, file);
       const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS);
       let id: number | null = null;
-      // A live minion already on the file owns it, whatever its title or the fix row's state (#1373 started beside #1349 through the held branch).
-      const base = file.split('/').pop()!;
-      const open = (t: { kind: string; status: string }) => t.kind !== 'coordinator' && t.status !== 'closed';
-      const own = fix?.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
-      const owner = own && open(own) ? own : store.listTickets(project.id).find((t) => open(t) && [' ', '/', ':'].some((c) => t.title.includes(c + base)));
+      const owner = this.owner(project, file, fix);
       if (fix && owner) continue;
       if (!fix) {
         if (sights.length < FLAKE_REPEAT) continue;
@@ -203,6 +241,7 @@ export class FlakeFixes {
           await this.ingest(p, now);
           await this.alarm(p, now);
           await this.escalate(p, now);
+          await this.broken(p, now);
           await this.prove(p, now);
         } catch (err: any) {
           console.error(`Flake fixes of ${p.name} failed: ${err?.message ?? err}`);

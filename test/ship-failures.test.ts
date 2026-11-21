@@ -30,6 +30,8 @@ test('a failed ship sums up as its kind, the first three names and "+N more", an
   assert.equal(failureDetail('land: smoke: src/x.ts fails its test, before the line (12 s), so nothing landed', 1).kind, 'smoke check');
   assert.equal(failureDetail('land: waiting for CI on abc', 75).kind, 'CI timeout');
   assert.equal(failureDetail('land: main is now at abc "x"\ndeploy: boot check failed: /api/health never answered', 1).kind, 'deploy or boot');
+  assert.deepEqual(failureDetail('land: broken test, not a flake: test/x.test.ts red in 4 of 10 runs in the last 6 h\nland: failed in the full run but passed alone (test/x.test.ts)\n✖ x breaks (3ms)', 1),
+    { kind: 'broken test, not a flake', names: ['test/x.test.ts'], more: 0, ci: null }, '#1487');
   assert.deepEqual(failureDetail('something odd', 1), { kind: 'failed', names: [], more: 0, ci: null });
   // The smoke check names its test with no time; a green CI run before a failed deploy isn't the try's CI run.
   assert.deepEqual(failureDetail('land: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed', 1),

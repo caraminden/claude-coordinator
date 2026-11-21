@@ -135,6 +135,7 @@ import { HostJobs, jobLost } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes } from './src/flake-fixes.ts';
+import { shipFirst } from './src/ship-line.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -1414,6 +1415,7 @@ const flakeFixes = new FlakeFixes({
   wake: judged('flake-counter', 'wake', (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); }, () => true, judgeNote((p) => p.id)),
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
+  front: (p, ticketId, reason) => !!shipFirst({ store, releases, waits }, p.id, ticketId, { name: 'The broken-test rule', taskmaster: true }, reason),
   evidence: async (p, branch, file, at) => { const slug = repoSlug(p.repo_url); return slug && p.repo_dir ? ciEvidence(slug, githubOf(p.repo_dir), branch, file, at) : null; },
 });
 if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir)));

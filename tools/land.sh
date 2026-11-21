@@ -1523,8 +1523,23 @@ train_imports() {
 }
 # <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
 train_suspects_of() {
-  local f=$1 text reach lvl m c hits
+  local f=$1 text reach lvl m c hits named
   text=$(git show "$tip:$f" 2>/dev/null) || text=''
+  # A guard's failure message names the file behind it ("loop-lag.test.ts:22 … 5 sleep hits", #1451): the ship that
+  # changed that file is the suspect, before any guess from what the guard reads or imports.
+  named=$({ grep -oE '[A-Za-z0-9_./-]+\.test\.ts:[0-9]+' <<<"$failed" || true; } | sed 's/:[0-9]*$//' | sort -u | while read -r c; do
+    [[ $c == */* ]] || c=test/$c
+    [ "$c" = "$f" ] || echo "$c"
+  done)
+  if [ -n "$named" ]; then
+    hits=$(for ((m = 0; m < ${#chg[@]}; m++)); do
+      while read -r c; do
+        [ -n "$c" ] || continue
+        if grep -qxF -- "$c" <<<"$named"; then echo "$m"; break; fi
+      done <<<"${chg[$m]}"
+    done)
+    [ -z "$hits" ] || { echo "$hits"; return 0; }
+  fi
   reach=$f
   for lvl in 0 1 2; do
     [ "$lvl" = 0 ] || reach=$(while read -r c; do [ -z "$c" ] || train_imports "$c"; done <<<"$reach" | sort -u)

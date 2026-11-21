@@ -166,6 +166,9 @@ test('a ship reaches an open app out of sight: a visible page stays, the next na
   const version = `document.querySelector('meta[name="citadel-version"]').content`;
   await waitFor(page, 'the page', `!!document.querySelector('.topbar')`);
   const v1 = await page.eval(version);
+  // The worker's first install fetches every shell file from a server that has just booted: wait for it to be done, as
+  // openOnce does, not on a 10 s poll (under load the install alone took longer: #1473).
+  await page.eval(`navigator.serviceWorker.ready.then(() => undefined)`);
   await waitFor(page, 'the kept files', `caches.keys().then((k) => k.join() === 'shell-${v1}')`);
   await page.eval('window.beforeTheShip = true');
 

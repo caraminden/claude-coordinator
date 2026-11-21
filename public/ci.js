@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-import { ago, api, h, view, pacificStamp } from './base.js';
+import { ago, api, h, icon, view, pacificStamp } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -16,7 +16,10 @@ import { scopedPageHash } from './page-scope.js';
 import { usage } from './core.js';
 import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
-import { tabs as uiTabs } from './ui/state.js';
+import { loadingLine, tabs as uiTabs } from './ui/state.js';
+import { canBack, canForward, goBack, goForward } from './navstack.js';
+import { allSchemes, closeReleases, opening, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage, targetNames } from './releases.js';
+import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD } from './status.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -231,126 +234,263 @@ function overview(s, pcs, now, ui) {
   return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
-/** The page: `projectId` is the scheme it opened from, selected first. */
-export function ciPage(projectId, startTab = 'overview', all = false) {
-  let picked = projectId;
-  // Runs is History and Runners joined Overview (#1019), so their old links land where those now are.
-  let tab = startTab === 'runs' || startTab === 'history' ? 'history' : startTab === 'health' || startTab === 'numbers' ? startTab : 'overview';
+// ---------- the Releases page (#1423) ----------
+
+/**
+ * Which problems hold up deploys (the Releases button's dot) and which are CI's own (the CI button's), Cara 2026-11-21: "the
+ * releases status indicator would show if there is an issue with test failures or other things stopping deployments, CI
+ * indicates issues with runners being down or overworked". A red on the branch and a still ship line hold up deploys; stuck,
+ * hung or unstarted jobs and a ship gate fallen back to perigee are CI's, as is any kind not named here (docs/adr/0023).
+ */
+export const holdsDeploys = (x) => x.key.startsWith('red:') || x.key === 'land:slow';
+const ciSide = (s) => ({ ...s, problems: s.problems.filter((x) => !holdsDeploys(x)) });
+
+const TABS = [['releases', 'Releases'], ['overview', 'Overview'], ['history', 'History'], ['health', 'Test health'], ['numbers', 'Numbers'], ['status', 'Status']];
+const CI_TABS = new Set(['overview', 'history', 'health', 'numbers']);
+/** The tab an address names: Runs is History and Runners joined Overview (#1019), so their old links land where those now are. */
+export const tabOf = (t) => (t === 'runs' ? 'history' : t === 'runners' ? 'overview' : TABS.some(([k]) => k === t) ? t : 'releases');
+/** The page's address for `scope` and `tab`: what a click on its list or tabs goes to, so Back steps through them. */
+export const releasesHash = (projectId, scope, tab = 'releases') => `#/p/${projectId}/releases/${scope}${tab === 'releases' ? '' : `/${tab}`}`;
+
+let ciRead = null; // the last /api/ci read, the page's or the chips', so a page opened again draws at once
+let hostRead = null;
+let shell = null; // the open page
+let pending = null; // where the next page built opens
+
+/** Point the page at `scope` (a scheme's id or 'all') on `tab`: the open one when it's this scheme's (true), else the next one built. */
+export function goReleases(projectId, { scope, tab = 'releases', hl = null }) {
+  pending = { projectId, scope, tab, hl };
+  setReleasesPage(scope, hl);
+  if (!shell?.el.isConnected || shell.projectId !== projectId) return false;
+  shell.go(pending);
+  return true;
+}
+
+/**
+ * The Releases page (#1423; Cara, 2026-11-21: "combine Releases and CI into one button ... the all schemes with their CI status on
+ * the left ... then the tabs of CI on the right, but the main page would be the page we currently call releases", and Status as a
+ * tab too): the list of schemes on the left on every tab, each row's dot that tab's signal; on the right Releases, the CI tabs and
+ * Status for the scheme picked. It opens on the scheme it was opened from; only Home's links open All (#1282).
+ */
+export function releasesShell() {
+  const o = pending ?? { projectId: view.projectId, scope: view.projectId, tab: 'releases' };
+  pending = null;
+  const projectId = o.projectId;
+  let scope = o.scope, tab = o.tab, pc = null; // pc: a desktop picked in the list, its load in place of the tabs
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
   const numbers = new Map(); // scheme id -> its Numbers read (#1369), kept the same way
   const read = (cache, fetch) => async (id) => { try { cache.set(id, await fetch(id)); } catch { cache.set(id, { error: true }); } draw(); };
   const readers = { health: read(health, readHealth), numbers: read(numbers, readNumbers) };
-  const readTab = (id) => readers[tab]?.(id);
+  const readTab = () => typeof scope === 'number' && readers[tab]?.(scope);
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
-  let data = null;
-  let host = null; // citadel-heavy's slots and waits (#1060)
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
   const queueOpen = new Set(); // the queue's groups opened by a click
-  const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes with CI' });
-  const detail = h('div', { class: 'ci-detail' }, h('p', { class: 'muted' }, 'Reading CI…'));
-  const el = h('section', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail));
-  const draw = () => {
-    const now = data.now;
-    // From a scheme the list is that scheme alone (Cara, 2026-11-20); Home's link, `/ci/all`, lists every one. A scheme with no CI shows them all.
-    const mine = all ? [] : data.schemes.filter((x) => x.id === projectId);
-    const schemes = mine.length ? mine : data.schemes;
-    const scoped = mine.length > 0;
-    if (!schemes.length) {
-      list.replaceChildren();
-      detail.replaceChildren(h('p', { class: 'muted' }, 'No scheme you can see has CI on GitHub yet.'), hostLoadBlock(host));
-      return;
+  let statusData = null; // the Status tab's last read, for the list's dots on that tab
+  const relEl = releasesPage(); // kept: Releases' own redraws fill it, and a drag in its land line survives the list's
+  const holdsEl = h('div', { class: 'rel-holds' });
+  const statusEl = statusPane((d) => { statusData = d; if (tab === 'status') drawList(); });
+  const go = (to, t = tab) => { location.hash = releasesHash(projectId, to, t); };
+  const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closeReleases }, icon(name));
+  const title = h('span', { class: 'wide-only' });
+  const head = h('div', { class: 'ticket-head rel-head' },
+    h('div', { class: 'row' }, close('narrow-only', 'back'), h('h2', {}, 'Releases', title),
+      h('span', { class: 'spacer' }),
+      h('span', { class: 'head-nav' },
+        h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
+        h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
+        close('wide-only', 'close'))));
+  const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes' });
+  const tabsEl = h('div');
+  const body = h('div', { class: 'rel-tab' });
+  const detail = h('div', { class: 'ci-detail' }, tabsEl, body);
+  const el = h('section', { class: 'releases-main', onkeydown: (e) => { if (e.key === 'Escape' && !e.defaultPrevented) closeReleases(); } },
+    head, h('div', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail)));
+
+  const nameOf = (id) => ciRead?.schemes.find((x) => x.id === id)?.name ?? view?.projects?.find((p) => p.id === id)?.name ?? `Scheme ${id}`;
+  /** Every scheme the list shows: CI's in its order, then any that ships or has an app without CI, and the one opened. */
+  const ids = () => {
+    const out = (ciRead?.schemes ?? []).map((x) => x.id);
+    for (const id of [...allSchemes(), ...(statusData?.apps ?? []).map((a) => a.scheme), projectId]) if (typeof id === 'number' && !out.includes(id)) out.push(id);
+    return out;
+  };
+  /** A row's dot and line on the open tab: Releases' holds, CI's own problems, or the worst of its Status pane. */
+  const rowOf = (id) => {
+    const s = ciRead?.schemes.find((x) => x.id === id);
+    const words = (st, n, noun = 'problem') => (n ? `${n} ${noun}${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]);
+    if (tab === 'status') {
+      if (!statusData) return { st: 'none', line: '' };
+      const apps = statusData.apps.filter((a) => a.scheme === id);
+      const v = [statusData.citadel.verdict, ...apps.map((a) => a.verdict)].reduce((w, x) => (STATUS_RANK[x.tone] > STATUS_RANK[w.tone] ? x : w));
+      return { st: STATUS_DOT[v.tone], line: apps.length ? `${apps.length} app${apps.length === 1 ? '' : 's'} · ${STATUS_WORD[v.tone]}` : `no app · ${STATUS_WORD[v.tone]}` };
     }
-    const pcPicked = typeof picked === 'string' ? data.pcs.find((pc) => `pc:${pc.host}` === picked) : null;
-    const s = pcPicked ? null : schemes.find((x) => x.id === picked) ?? schemes[0];
-    const rows = schemes.map((x) => {
-      const st = stateOf(x, now);
-      const n = x.problems.length;
-      return h('button', { type: 'button', class: `ci-li${x === s ? ' on' : ''}`, 'data-state': st, 'aria-current': x === s ? 'true' : null, onclick: () => { picked = x.id; draw(); readTab(x.id); } },
-        h('span', { class: `dot ${st}` }), h('span', { class: 'ci-li-name' }, x.name),
-        h('span', { class: 'ci-li-state muted' }, n ? `${n} problem${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]));
-    });
-    // The toggle (phones only, by CSS) lists the hidden all-clear names, so every scheme stays in view.
-    const hidden = schemes.filter((x) => x !== s && stateOf(x, now) === 'ready');
+    if (CI_TABS.has(tab)) {
+      if (!s) return { st: 'none', line: 'no CI' };
+      const c = ciSide(s), st = stateOf(c, ciRead.now);
+      return { st, line: words(st, c.problems.length) };
+    }
+    const held = s ? s.problems.filter(holdsDeploys) : [];
+    const more = releaseTrouble(id);
+    const st = held.some((x) => !x.quiet) ? 'down' : held.length || more.length ? 'fix' : 'ready';
+    return { st, line: held.length + more.length ? words(st, held.length + more.length, 'hold') : targetNames(id) || 'all clear' };
+  };
+  const worst = (sts) => sts.reduce((w, x) => (RANK[x] > (RANK[w] ?? -1) ? x : w), 'ready');
+
+  const drawList = () => {
+    const shown = ids().map((id) => ({ id, ...rowOf(id) }));
+    const pick = (to) => () => { pc = null; if (to === scope) draw(); else go(to, to === 'all' && CI_TABS.has(tab) ? 'releases' : tab); };
+    const row = ({ id, st, line }) => h('button', { type: 'button', class: `ci-li${id === scope && !pc ? ' on' : ''}`, 'data-state': st, 'data-scheme': id, 'aria-current': id === scope && !pc ? 'true' : null, onclick: pick(id) },
+      h('span', { class: `dot ${st}` }), h('span', { class: 'ci-li-name' }, nameOf(id)), h('span', { class: 'ci-li-state muted' }, line));
+    // All (Home's view, #1282): one row at the top, its dot the worst below it.
+    const allRow = h('button', { type: 'button', class: `ci-li ci-all${scope === 'all' && !pc ? ' on' : ''}`, 'data-state': worst(shown.map((x) => x.st)), 'aria-current': scope === 'all' && !pc ? 'true' : null, onclick: pick('all') },
+      h('span', { class: `dot ${worst(shown.map((x) => x.st))}` }), h('span', { class: 'ci-li-name' }, 'All schemes'), h('span', { class: 'ci-li-state muted' }, `${shown.length} schemes`));
+    // Phones: the all-clear schemes and ones with nothing on this tab sit behind a toggle row that names them.
+    const hidden = shown.filter((x) => x.id !== scope && (x.st === 'ready' || x.st === 'none'));
     list.classList.toggle('greens-open', greensOpen);
-    // What turns the chip yellow or red besides a scheme's own problems: a desktop in trouble. Its words are the chip tooltip's.
-    const why = data.pcs.filter(trouble).map((pc) => h('button', { type: 'button', class: 'ci-li ci-why', 'data-tone': 'warn', title: pc.verdict.text,
-      onclick: () => { picked = `pc:${pc.host}`; draw(); } },
-    h('span', { class: 'dot fix' }), h('span', { class: 'ci-li-name' }, troubleLine(pc)),
-    h('span', { class: 'ci-li-state ci-why-text' }, pc.verdict.text)));
+    // A desktop in trouble turns the CI dot yellow: it leads the list, its words the chip tooltip's.
+    const pcs = ciRead?.pcs ?? [];
+    const why = pcs.filter(trouble).map((x) => h('button', { type: 'button', class: 'ci-li ci-why', 'data-tone': 'warn', title: x.verdict.text, onclick: () => { pc = x.host; draw(); } },
+      h('span', { class: 'dot fix' }), h('span', { class: 'ci-li-name' }, troubleLine(x)), h('span', { class: 'ci-li-state ci-why-text' }, x.verdict.text)));
     // The desktops at the list's bottom: a toned word each, the load view in the right pane (Josh, 2026-11-19).
-    const pcRows = data.pcs.length ? [h('div', { class: 'ci-list-head' }, 'Desktops'), ...data.pcs.map((pc) => {
-      const [tone, word] = pcWord(pc);
-      return h('button', { type: 'button', class: `ci-li ci-pc${pc === pcPicked ? ' on' : ''}`, 'data-host': pc.host, 'aria-current': pc === pcPicked ? 'true' : null, onclick: () => { picked = `pc:${pc.host}`; draw(); } },
-        h('span', { class: `dot ${DOT_OF[tone]}` }), h('span', { class: 'ci-li-name' }, pc.host), h('span', { class: 'ci-li-state' }, toneChip(tone, word)));
+    const pcRows = pcs.length ? [h('div', { class: 'ci-list-head' }, 'Desktops'), ...pcs.map((x) => {
+      const [tone, word] = pcWord(x);
+      return h('button', { type: 'button', class: `ci-li ci-pc${x.host === pc ? ' on' : ''}`, 'data-host': x.host, 'aria-current': x.host === pc ? 'true' : null, onclick: () => { pc = x.host; draw(); } },
+        h('span', { class: `dot ${DOT_OF[tone]}` }), h('span', { class: 'ci-li-name' }, x.host), h('span', { class: 'ci-li-state' }, toneChip(tone, word)));
     })] : [];
-    list.replaceChildren(...why, ...rows, hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; draw(); list.querySelector('.ci-more')?.focus(); } },
-      h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide all clear' : `${hidden.length} all clear`),
-      h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => x.name).join(', '))) : '', ...pcRows);
-    if (scoped) list.prepend(h('a', { class: 'ci-li ci-all-link', href: `#/p/${projectId}/ci/all` }, h('span', { class: 'ci-li-name' }, 'All schemes')));
-    if (pcPicked) {
-      detail.replaceChildren(
-        h('div', { class: 'ci-head' }, h('h3', {}, pcPicked.host), h('span', { class: 'muted small' }, 'CI desktop load')),
-        h('div', { class: 'ci-block ci-desktops' }, pcCard(pcPicked)), hostLoadBlock(host));
+    list.replaceChildren(...why, allRow, ...shown.map(row), hidden.length ? h('button', { type: 'button', class: 'ci-more', 'aria-expanded': String(greensOpen), onclick: () => { greensOpen = !greensOpen; drawList(); list.querySelector('.ci-more')?.focus(); } },
+      h('span', { class: 'dot ready' }), h('span', { class: 'ci-li-name' }, greensOpen ? 'Hide' : `${hidden.length} more`),
+      h('span', { class: 'ci-li-state muted' }, greensOpen ? '' : hidden.map((x) => nameOf(x.id)).join(', '))) : '', ...pcRows);
+  };
+
+  /** Releases' own holds above its cards: CI's reds and a still ship line, and changes stuck or failed, so its dot's why is on its tab. */
+  const holds = () => {
+    const s = typeof scope === 'number' ? ciRead?.schemes.find((x) => x.id === scope) : null;
+    const held = s ? s.problems.filter(holdsDeploys) : [];
+    const more = typeof scope === 'number' ? releaseTrouble(scope) : [];
+    if (!held.length && !more.length) return [];
+    return [held.length ? problemsBlock({ ...s, problems: held }) : '',
+      more.length ? block('Held up', 'held', 'rel-held', h('div', { class: 'hue-rows' }, ...more.map((t) => hueRow({ hue: 'held', lead: 'held' }, t)))) : ''];
+  };
+
+  const draw = () => {
+    title.textContent = ` · ${scope === 'all' ? 'All schemes' : nameOf(scope)}`;
+    drawList();
+    const s = typeof scope === 'number' ? ciRead?.schemes.find((x) => x.id === scope) : null;
+    if (pc) {
+      const x = ciRead?.pcs.find((y) => y.host === pc);
+      tabsEl.replaceChildren();
+      body.replaceChildren(h('div', { class: 'ci-head' }, h('h3', {}, pc), h('span', { class: 'muted small' }, 'CI desktop load')),
+        x ? h('div', { class: 'ci-block ci-desktops' }, pcCard(x)) : '', hostLoadBlock(hostRead));
       return;
     }
-    const tabs = [['overview', 'Overview'], ['history', 'History'], ['health', 'Test health'], ['numbers', 'Numbers']];
-    detail.replaceChildren(
+    // All has no one CI: its tabs are Releases' board and every app's Status. A scheme without CI keeps the CI tabs, each saying so.
+    const items = scope === 'all' ? TABS.filter(([k]) => !CI_TABS.has(k)) : TABS;
+    if (!items.some(([k]) => k === tab)) tab = 'releases';
+    tabsEl.replaceChildren(uiTabs({ items, current: tab, className: 'ci-tabs', onSelect: (k) => go(scope, k) }).element);
+    if (tab === 'releases') {
+      if (body.firstChild !== holdsEl) body.replaceChildren(holdsEl, relEl);
+      holdsEl.replaceChildren(...holds());
+      return;
+    }
+    if (tab === 'status') {
+      if (body.firstChild !== statusEl) body.replaceChildren(statusEl);
+      statusEl.show(scope);
+      return;
+    }
+    if (!ciRead) return void body.replaceChildren(loadingLine('Reading CI…'));
+    if (!s) return void body.replaceChildren(emptyCard(`${nameOf(scope)} has no CI here`, 'A scheme whose repo runs GitHub Actions shows its runs, runners and test health here.', { mark: '·', hue: 'muted' }));
+    body.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
-      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k, how) => { tab = k; draw(); if (how?.keyboard) detail.querySelector('.ci-tabs [aria-selected="true"]')?.focus(); readTab(s.id); } }).element,
-      ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
-        host: host,
-        queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
-        hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); detail.querySelector('.ci-now-more')?.focus(); },
-        openPc: (host) => { picked = `pc:${host}`; draw(); },
+      ...(tab === 'overview' ? overview(s, ciRead.pcs, Date.now(), {
+        host: hostRead,
+        queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); body.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },
+        hostedOpen, toggleHosted: () => { hostedOpen = !hostedOpen; draw(); body.querySelector('.ci-now-more')?.focus(); },
+        openPc: (host) => { pc = host; draw(); },
       })
-        : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, () => readTab(s.id))
-        : tab === 'numbers' ? numbersTab(s, numbers.get(s.id) ?? null, () => readTab(s.id))
+        : tab === 'health' ? testHealth(s, health.get(s.id) ?? null, readTab)
+        : tab === 'numbers' ? numbersTab(s, numbers.get(s.id) ?? null, readTab)
         : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]));
+  };
+
+  shell = {
+    el, projectId, drawList,
+    go: (to) => {
+      const moved = to.scope !== scope || to.tab !== tab;
+      scope = to.scope; tab = to.tab; pc = null;
+      draw();
+      if (moved) readTab();
+    },
   };
   let tried = false;
   const load = async () => {
     if (tried && !el.isConnected) return;
     tried = true;
     try {
-      data = await api('api/ci');
-      host = await api('api/host-load').catch(() => host);
+      ciRead = await api('api/ci');
+      hostRead = await api('api/host-load').catch(() => hostRead);
+      paintChips();
       draw();
-      readTab((data.schemes.find((x) => x.id === picked) ?? data.schemes[0])?.id);
     } catch (err) {
-      if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
+      if (!ciRead && CI_TABS.has(tab)) body.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
     }
     setTimeout(load, REFRESH_MS);
   };
+  draw();
+  readTab();
   load();
   return el;
 }
 
-// The chips (the overview's and the top bar's) share one read a minute.
+// The chips (the shelf's and the top bar's): Releases and CI share one /api/ci read a minute, each dot its own side of it.
 const chips = new Set();
 let chipTimer = null, chipBusy = false; // a chip made while a read runs or is due takes its answer: no second read
-// What the last read said, drawn on a new chip at once: a chip that waits for its own read pops in beside the usage bar (#989).
-let chipRead = null;
-const paintChip = (c, { hidden, title, worst }) => {
-  c.hidden = hidden;
+const plainCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Each chip's dot and words from the last read: CI's runners and desktops, or what holds up deploys (holdsDeploys and the releases' own). */
+function chipLook(kind) {
+  const r = ciRead;
+  if (kind === 'ci') {
+    if (!r) return null;
+    const { schemes, pcs, now } = r;
+    const own = schemes.map(ciSide);
+    const worst = own.reduce((w, s) => (RANK[stateOf(s, now)] > RANK[w] ? stateOf(s, now) : w), pcs.some(trouble) ? 'fix' : 'ready');
+    const ringing = own.reduce((n, s) => n + s.problems.filter((x) => !x.quiet).length, 0);
+    const quiet = own.reduce((n, s) => n + s.problems.filter((x) => x.quiet).length, 0);
+    const title = schemes.length ? `CI: ${ringing ? `${ringing} need${ringing === 1 ? 's' : ''} a person` : 'nothing needs a person'}${quiet ? `, ${quiet} being handled` : ''}${pcs.some(trouble) ? `; ${pcs.filter(trouble).map(troubleLine).join('; ')}` : ''}` : '';
+    return { hidden: !schemes.length, title, worst };
+  }
+  if (!r && !releasesLoaded()) return null;
+  const held = (r?.schemes ?? []).flatMap((s) => s.problems.filter(holdsDeploys));
+  const more = allSchemes().flatMap((id) => releaseTrouble(id));
+  const ringing = held.filter((x) => !x.quiet).length;
+  const worst = ringing ? 'down' : held.length || more.length ? 'fix' : 'ready';
+  const n = held.length + more.length;
+  return { hidden: false, worst, title: n ? `Releases: ${plainCount(n, 'thing holds', 'things hold')} up deploys${ringing ? `, ${ringing} need${ringing === 1 ? 's' : ''} a person` : ''}` : 'Releases: nothing holds up deploys' };
+}
+const paintChip = (c) => {
+  const look = chipLook(c.dataset.kind);
+  if (!look) return;
+  c.hidden = look.hidden;
   c.dataset.placed = '1';
-  c.title = title;
-  c.setAttribute('aria-label', title || 'CI');
-  c.querySelector('.dot').className = `dot ${worst}`;
+  c.title = look.title;
+  c.setAttribute('aria-label', look.title || c.dataset.kind);
+  c.querySelector('.dot').className = `dot ${look.worst}`;
 };
+function paintChips() {
+  for (const c of chips) if (c.dataset.placed && !c.isConnected) chips.delete(c);
+  for (const c of chips) paintChip(c);
+}
+// Releases arriving move the Releases dot and the page's list at once, between reads.
+onReleasesRedraw(() => { paintChips(); if (shell?.el.isConnected) shell.drawList(); });
+
 async function readChips() {
   chipTimer = null;
-  for (const c of chips) if (c.dataset.placed && !c.isConnected) chips.delete(c);
+  paintChips();
   if (!chips.size) return;
   chipBusy = true;
   try {
-    const { schemes, pcs, now } = await api('api/ci');
-    const worst = schemes.reduce((w, s) => (RANK[stateOf(s, now)] > RANK[w] ? stateOf(s, now) : w), pcs.some(trouble) ? 'fix' : 'ready');
-    const ringing = schemes.reduce((n, s) => n + s.problems.filter((x) => !x.quiet).length, 0);
-    const quiet = schemes.reduce((n, s) => n + s.problems.filter((x) => x.quiet).length, 0);
-    const title = schemes.length ? `CI: ${ringing ? `${ringing} need${ringing === 1 ? 's' : ''} a person` : 'nothing needs a person'}${quiet ? `, ${quiet} being handled` : ''}${pcs.some(trouble) ? `; ${pcs.filter(trouble).map(troubleLine).join('; ')}` : ''}` : '';
-    chipRead = { hidden: !schemes.length, title, worst };
-    for (const c of chips) paintChip(c, chipRead);
+    ciRead = await api('api/ci');
+    paintChips();
   } catch {
     // The last colour stays: the next minute asks again.
   }
@@ -358,14 +498,19 @@ async function readChips() {
   chipTimer = setTimeout(readChips, 60_000);
 }
 
-/** The CI chip: a dot and "CI", opening the page for the scheme on screen (or `projectId`). Hidden until a scheme with CI is there. */
-export function ciChip(projectId = null) {
-  const c = h('a', { class: 'ci-chip', hidden: true, href: projectId ? `#/p/${projectId}/ci` : '#/',
-    onclick: () => { c.href = scopedPageHash('ci', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
-  h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'CI'));
+function chip(kind, label, page, projectId) {
+  const c = h('a', { class: `ci-chip ${kind}-chip`, 'data-kind': kind, hidden: kind === 'ci', href: projectId ? `#/p/${projectId}/${page}` : '#/',
+    onclick: () => { opening(); c.href = scopedPageHash(page, projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
+  h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, label));
   chips.add(c);
-  if (chipRead) paintChip(c, chipRead);
+  paintChip(c);
   if (projectId === null) c.dataset.placed = '1';
   if (!chipTimer && !chipBusy) chipTimer = setTimeout(readChips, 0);
   return c;
 }
+
+/** The CI chip: a dot and "CI", opening the Releases page's Overview for the scheme on screen (or `projectId`). Hidden until a scheme with CI is there. */
+export const ciChip = (projectId = null) => chip('ci', 'CI', 'ci', projectId);
+
+/** The Releases chip (#1423): a dot and "Releases", opening the Releases page on its Releases tab; its dot is what holds up deploys. */
+export const releasesChip = (projectId = null) => chip('releases', 'Releases', 'releases', projectId);

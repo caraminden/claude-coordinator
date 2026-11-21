@@ -1,8 +1,7 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
-import { ciPage } from './ci.js';
-import { statusPage } from './status.js';
+import { goReleases, releasesShell } from './ci.js';
 import * as settings from './settings.js';
 import { ordersMenu, projectTitle, renderGithubStrip, settingsHome } from './settings.js';
 import * as settingsMachines from './settings-machines.js';
@@ -30,7 +29,6 @@ import * as people from './people.js';
 import * as contraptions from './contraptions.js';
 import * as units from './units.js';
 import * as unused from './unused.js';
-import { releasesPage, setReleasesPage } from './releases.js';
 import * as reviews from './reviews.js';
 import * as help from './help.js';
 import { gloss } from './help-words.js';
@@ -60,8 +58,9 @@ const getApp = () => offersApp()
   ? h('a', { class: 'get-app', href: DESKTOP_APP, download: '', title: 'Download the Citadel app: Citadel in its own window on this PC. Unzip it and run citadel.exe', 'aria-label': 'Download the Citadel app' }, 'Get app')
   : null;
 
-export async function showReleases(projectId, scope, hl) {
-  setReleasesPage(scope, hl);
+/** The Releases page (#1423: Releases, CI and Status as its tabs) on `to` = { scope, tab, hl }: an open one switches in place. */
+export async function showReleases(projectId, to) {
+  if (goReleases(projectId, to) && view?.main === 'releases') return;
   if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
   const { kind, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
@@ -69,7 +68,7 @@ export async function showReleases(projectId, scope, hl) {
     artifactId: null, file: null, ...chatView(null, null),
   });
   renderCrumbs({ kind: 'releases' });
-  document.querySelector('#app .split').lastElementChild.replaceWith(releasesPage());
+  document.querySelector('#app .split').lastElementChild.replaceWith(releasesShell());
   // On phones the panels sit above the page; collapse them away as switchChat does.
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
   renderShelf();
@@ -148,8 +147,6 @@ function renderCrumbs(main) {
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
       : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
-      : main.kind === 'ci' ? [projectLink, ' / ', 'CI']
-      : main.kind === 'status' ? [projectLink, ' / ', 'Status']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
@@ -303,10 +300,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'settings' ? settingsHome()
     : main.kind === 'orders' ? settingsHome(true)
     : pageRow(main.kind) && !pageRow(main.kind).own ? pageFn(main.kind)()
-    : main.kind === 'releases' ? releasesPage()
+    : main.kind === 'releases' ? releasesShell()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
-    : main.kind === 'ci' ? ciPage(projectId, main.tab, main.all)
-    : main.kind === 'status' ? statusPage(projectId, main.all)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

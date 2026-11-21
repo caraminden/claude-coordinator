@@ -16,9 +16,12 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   const [, page, rest] = m;
   if (page === 'status') return rest === 'all' ? `${home}/status/all` : `${home}/status`;
   if (page === 'ci' && rest === 'all') return `${home}/ci/all`;
-  if (page === 'ci') return /^(overview|history|runs|runners)$/.test(rest ?? '') ? `${home}/ci/${rest}` : `${home}/ci`;
-  // Releases open on the scheme you switch to; only Citadel's opens on All.
-  if (page === 'releases') return `${home}/releases/${Number(id) === 2 ? 'all' : id}`;
+  if (page === 'ci') return /^(overview|history|runs|runners|health|numbers)$/.test(rest ?? '') ? `${home}/ci/${rest}` : `${home}/ci`;
+  // The Releases page (#1423) opens on the scheme you switch to, on the tab you were on.
+  if (page === 'releases') {
+    const tab = (rest ?? '').split('/')[1];
+    return `${home}/releases/${id}${/^(overview|history|health|numbers|status)$/.test(tab ?? '') ? `/${tab}` : ''}`;
+  }
   // A schedule's page opens the other scheme's Schedules list: its schedules are its own.
   if (page === 'schedules') return `${home}/schedules`;
   // A page tied to one item (a memory file) opens the other scheme's list for that page.

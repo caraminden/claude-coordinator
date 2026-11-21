@@ -126,7 +126,6 @@ function pageName() {
   if (!view) return 'Citadel';
   if (view.main === 'chat') return view.id === view.coordinator?.id ? `${taskmasterName()}'s chat` : `#${view.ticket?.number ?? view.id}'s chat`;
   const main = typeof view.main === 'string' ? view.main : view.kind;
-  if (main === 'ci') return 'CI page';
   return `${String(main ?? 'Citadel').replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase())} page`;
 }
 

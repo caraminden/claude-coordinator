@@ -68,7 +68,12 @@ export function onReleases(msg) {
   return rowsChanged();
 }
 
+/** Others drawn from the releases (the Releases button's dot and the page's list), told on each redraw. */
+const redrawn = new Set();
+export const onReleasesRedraw = (fn) => redrawn.add(fn);
+
 function redraw() {
+  for (const fn of redrawn) fn();
   // Not under a row being dragged in the land line: it would drop the row from the finger. Again once it's let go.
   if (pageEl?.querySelector('.rel-changes.reorder-active')) return void setTimeout(redraw, 250);
   for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
@@ -153,7 +158,7 @@ function estimate(next) {
 
 /** Remember where the page was opened from, for its ×. */
 export function opening() {
-  if (!/^#\/p\/\d+\/(releases|ci)(\/|$)/.test(location.hash)) returnTo = location.hash;
+  if (!/^#\/p\/\d+\/(releases|ci|status)(\/|$)/.test(location.hash)) returnTo = location.hash;
 }
 
 /**
@@ -249,11 +254,30 @@ export function allSchemes() {
 
 function fillPage() {
   const scope = page?.scope ?? 'all';
-  pageEl.replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? [allView(allSchemes())] : [schemeCards(scope, true)].flat()));
+  pageEl.replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? allView(allSchemes()) : schemeCards(scope, true)));
   // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
   const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');
   if (hl) { page.shown = true; hl.scrollIntoView({ block: 'nearest' }); }
 }
+
+/**
+ * What holds up a scheme's deploys, as its releases show it (#1423, the Releases button's dot): a change stuck past 30 min
+ * (a refused ship, a deploy that didn't go live) and a failed ship try of the last 12 hours that hasn't shipped, been tried
+ * again or closed. One line each; CI's own reds and a still ship line come from /api/ci.
+ */
+export function releaseTrouble(id, now = Date.now()) {
+  const out = [];
+  for (const tv of schemes.get(id)?.targets ?? []) {
+    const n = tv.next;
+    if (n && [n, ...n.changes].some((p) => stuckFor(p, now))) out.push(`${tv.target.name} is stuck: ${n.waitingOn ?? stageName(n.stage)}`);
+    const open = tv.recent.filter((r) => ['fixing', 'idle'].includes(r.failure?.next.kind) && now - (r.started ?? 0) < 12 * 3_600_000).length;
+    if (open) out.push(`${tv.target.name}: ${open} failed ship tr${open === 1 ? 'y' : 'ies'} not shipped since`);
+  }
+  return out;
+}
+
+/** True once the first read is in, for a dot that would otherwise say "all clear" before it knows. */
+export const releasesLoaded = () => loaded;
 
 /** A scheme's target names, for its line in the page's list when it has no CI. */
 export const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');

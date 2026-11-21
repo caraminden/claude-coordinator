@@ -1,22 +1,23 @@
-// The Status page (#1123; Josh, 2026-11-19: app vitals "alongside CI in a new "Status" page", the Citadel page "Combine
-// with A4", and layout "B · List and detail, like the CI page"): Citadel and each app you can see on the left, its
-// tiles on the right, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
+// Status (#1123; Josh, 2026-11-19: app vitals "alongside CI in a new "Status" page", the Citadel page "Combine
+// with A4"), since #1423 the Releases page's Status tab: Citadel and the picked scheme's apps, the one picked showing its
+// tiles, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
-// CI's opens it, its dot the worst verdict it shows.
+// CI's opens that tab, its dot the worst verdict it shows.
 import { ago, api, h, view, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
 import { toneChip } from './look.js';
 import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
+import { opening } from './releases.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
 const dayLabel = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
-const DOT = { ok: 'ready', warn: 'fix', bad: 'down' };
+export const DOT = { ok: 'ready', warn: 'fix', bad: 'down' };
 const CHIP = { ok: 'ok', warn: 'warn', bad: 'danger' };
-const WORD = { ok: 'OK', warn: 'Worth a look', bad: 'Needs a person' };
-const RANK = { ok: 0, warn: 1, bad: 2 };
+export const WORD = { ok: 'OK', warn: 'Worth a look', bad: 'Needs a person' };
+export const RANK = { ok: 0, warn: 1, bad: 2 };
 const SVG = 'http://www.w3.org/2000/svg';
 
 const svg = (tag, attrs = {}, ...kids) => {
@@ -388,25 +389,28 @@ function appTiles(a, days, ships, redraw) {
 }
 
 /** The Status page for scheme `projectId`: Citadel first, then the apps you can see, this scheme's first. */
-export function statusPage(projectId) {
+/**
+ * The Releases page's Status tab (#1423; it was its own page): Citadel's server and the picked scheme's apps as a row of chips
+ * (every app on All), the one picked showing its tiles. The page's list picks the scheme, so other schemes' apps are a click
+ * there. `onData` gets each read, for the list's dots on this tab; `show` points it at a scheme.
+ */
+export function statusPane(onData = () => {}) {
+  let scope = null;
   let picked = 'citadel';
   let data = null;
-  const list = h('nav', { class: 'ci-list st-list-nav', 'aria-label': 'Citadel and your apps' });
-  const detail = h('div', { class: 'ci-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
-  const el = h('section', { class: 'ci-page st-page' }, h('div', { class: 'ci-split' }, list, detail));
-  const row = (key, name, v, sub) => h('button', { type: 'button', class: `ci-li${picked === key ? ' on' : ''}`, 'aria-current': picked === key ? 'true' : null, 'data-key': key,
+  const pills = h('nav', { class: 'chips st-apps', 'aria-label': 'Citadel and the apps' });
+  const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
+  const el = h('div', { class: 'st-page' }, pills, detail);
+  const pill = (key, name, v) => h('button', { type: 'button', class: `chip st-app${picked === key ? ' on' : ''}`, 'aria-pressed': String(picked === key), 'data-key': key, title: v.reasons[0] ?? WORD[v.tone],
     onclick: () => { picked = key; draw(); } },
-  h('span', { class: `dot ${DOT[v.tone]}` }), h('span', { class: 'ci-li-name' }, name), h('span', { class: 'ci-li-state muted' }, sub ?? (v.reasons[0] ?? WORD[v.tone])));
+  h('span', { class: `dot ${DOT[v.tone]}` }), name);
   const draw = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
-    const mine = apps.filter((a) => a.scheme === projectId).sort((x, y) => x.title.localeCompare(y.title));
-    const others = apps.filter((a) => a.scheme !== projectId).sort((x, y) => x.title.localeCompare(y.title));
-    const app = [...mine, ...others].find((a) => `app:${a.name}` === picked);
+    const mine = apps.filter((a) => scope === 'all' || a.scheme === scope).sort((x, y) => x.title.localeCompare(y.title));
+    const app = mine.find((a) => `app:${a.name}` === picked);
     if (!app) picked = 'citadel';
-    list.replaceChildren(row('citadel', 'Citadel', citadel.verdict),
-      h('div', { class: 'ci-list-head' }, 'This scheme\'s apps'),
-      ...(mine.length ? mine.map((a) => row(`app:${a.name}`, a.title, a.verdict)) : [h('p', { class: 'muted small st-none' }, 'No app in this scheme.')]),
-      ...(others.length ? [h('div', { class: 'ci-list-head' }, 'Other schemes\' apps'), ...others.map((a) => row(`app:${a.name}`, a.title, a.verdict))] : []));
+    pills.replaceChildren(pill('citadel', 'Citadel', citadel.verdict), ...mine.map((a) => pill(`app:${a.name}`, a.title, a.verdict)),
+      mine.length ? '' : h('span', { class: 'muted small st-none' }, 'No app in this scheme.'));
     const v = app ? app.verdict : citadel.verdict;
     ix = { target: app ? `app:${app.name}` : 'citadel', looks: (app ?? citadel).looks ?? {}, verdict: v, ask: !!app || citadel.canInvestigate !== false };
     // Each reason names the minion on its tile (#1273), the way the CI page names a red's fix minion.
@@ -421,20 +425,26 @@ export function statusPage(projectId) {
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : citadelTiles(citadel, days, now, shipTimes, draw))));
   };
-  let tried = false;
+  let timer = null, busy = false;
   const load = async () => {
-    if (tried && !el.isConnected) return;
-    tried = true;
+    timer = null;
+    if (!el.isConnected) return; // read again once the tab shows again
+    busy = true;
     try {
       data = await api('api/status');
-      if (data) draw();
+      if (data) { draw(); onData(data); }
       else detail.replaceChildren(h('p', { class: 'muted' }, 'This server keeps no status.'));
     } catch (err) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read status: ${err.message}`));
     }
-    setTimeout(load, REFRESH_MS);
+    busy = false;
+    timer = setTimeout(load, REFRESH_MS);
   };
-  load();
+  /** Show it for `to` (a scheme's id or 'all'), once it's on the page: the first call reads, and the reads go on while it shows. */
+  el.show = (to) => {
+    if (to !== scope) { scope = to; picked = 'citadel'; if (data) draw(); }
+    if (!timer && !busy) load();
+  };
   return el;
 }
 
@@ -474,7 +484,7 @@ async function readChips() {
 /** The Status chip: a dot and "Status", opening the page for the scheme on screen (or `projectId`). */
 export function statusChip(projectId = null) {
   const c = h('a', { class: 'ci-chip status-chip', href: projectId ? `#/p/${projectId}/status` : '#/',
-    onclick: () => { c.href = scopedPageHash('status', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
+    onclick: () => { opening(); c.href = scopedPageHash('status', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'Status'));
   c.dataset.placed = '1';
   chips.add(c);

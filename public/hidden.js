@@ -10,14 +10,15 @@ import { rememberHomeLine } from './home.js';
 import { openNewScheme } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
-import { releaseRows, releasesLink } from './releases.js';
-import { ciChip } from './ci.js';
+import { releaseRows } from './releases.js';
+import { ciChip, releasesChip } from './ci.js';
 import { statusChip } from './status.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
 let othersOpen = false; // the same for its Other schemes section
 let schemesChip = null; // the CI chip beside Releases
 let statusChipEl = null; // the Status chip beside it (#1123)
+let releasesChipEl = null; // and the Releases chip (#1423): three doors to one page's tabs
 
 // Your schemes: ones you own or were added to and haven't hidden. Admin reach (the flag, or the Citadel scheme) opens the
 // rest too, but they sit apart under Other schemes, never mixed into yours (#674). A list from before #674 has no flag: yours.
@@ -137,12 +138,13 @@ export function renderSchemesShelf() {
   // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
+  if (!releasesChipEl?.isConnected) releasesChipEl = releasesChip();
   // Home (#1140): everything waiting on you across your schemes, for someone in two or more. No pill (Josh, 2026-11-20: "and the orange badge, its all duplicate honestly"; "you can just go home if you want to only see the actionables").
   const home = shown.length >= 2 ? h('div', { class: 'home-shelf' },
     h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' },
       h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'))) : null;
   rememberHomeLine(!!home);
-  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesLink()),
+  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), releasesChipEl, schemesChip, statusChipEl),
     home,
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),

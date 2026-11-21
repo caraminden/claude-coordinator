@@ -20,7 +20,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
 import { loadReleases, onClaimHolder, onClaims, onReleases } from './releases.js';
-import { ciChip } from './ci.js';
+import { ciChip, releasesChip, tabOf } from './ci.js';
 import { statusChip } from './status.js';
 import { inAppHash, jumpParts, showParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
@@ -1012,10 +1012,15 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|orders)$/))) await showProject(Number(m[1]), matchMedia('(max-width: 800px)').matches ? { kind: m[2] } : m[2] === 'settings' ? { kind: 'members' } : { kind: 'instructions', orders: true });
     else if ((m = hash.match(PAGE_ROUTE))) await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showProject(Number(m[1]), { kind: 'status', all: !!m[2] });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health|numbers|all))?$/))) await showProject(Number(m[1]), { kind: 'ci', tab: m[2] === 'all' ? undefined : m[2], all: m[2] === 'all' });
+    // Releases, CI and Status are one page's tabs (#1423): their old addresses open it on their tab. CI's All (Home's) opens the
+    // last scheme's Overview beside every scheme's dot, since All has no one CI; Status's All lists every app.
+    else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showReleases(Number(m[1]), { scope: m[2] ? 'all' : Number(m[1]), tab: 'status' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health|numbers|all))?$/))) await showReleases(Number(m[1]), { scope: Number(m[1]), tab: tabOf(!m[2] || m[2] === 'all' ? 'overview' : m[2]) });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/releases\/(all|\d+)(?:\/(\d+))?$/))) await showReleases(Number(m[1]), m[2] === 'all' ? 'all' : Number(m[2]), m[3] ? Number(m[3]) : null);
+    else if ((m = hash.match(/^#\/p\/(\d+)\/releases(?:\/(all|\d+)(?:\/(\d+|overview|history|health|numbers|status))?)?$/))) {
+      const hl = /^\d+$/.test(m[3] ?? '') ? Number(m[3]) : null; // a change to highlight, else a tab's name
+      await showReleases(Number(m[1]), { scope: m[2] === 'all' ? 'all' : Number(m[2] ?? m[1]), tab: hl == null && m[3] ? m[3] : 'releases', hl });
+    }
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
@@ -1202,9 +1207,10 @@ export function start(who) {
   meEl.replaceChildren(me, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
   loadPrs();
-  // The top bar's CI chip (#968), beside its usage meter: the one phones see.
+  // The top bar's Releases, CI and Status chips (#968, #1423), beside its usage meter: the ones phones see.
   const meters = document.querySelector('.topbar .meters');
-  if (!meters.querySelector('.ci-chip:not(.status-chip)')) meters.append(ciChip());
+  if (!meters.querySelector('.releases-chip')) meters.append(releasesChip());
+  if (!meters.querySelector('.ci-chip[data-kind="ci"]')) meters.append(ciChip());
   if (!meters.querySelector('.status-chip')) meters.append(statusChip());
   const routed = route();
   showRail();

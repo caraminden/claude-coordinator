@@ -308,7 +308,6 @@ const FLOWS: Flow[] = [
     steps: [
       { name: 'the minion is held on another\'s work', run: async (c) => {
         c.store.updateTicket(c.id, { state: 'parked', note: 'waits on #9' });
-        await sleep(30);
       } },
       { name: 'Cara asks the held minion something', run: async (c) => {
         setRelease(null);
@@ -317,7 +316,6 @@ const FLOWS: Flow[] = [
       } },
       { name: 'the turn sets its own state', run: async (c) => {
         c.store.updateTicket(c.id, { state: 'ready', note: 'answered' });
-        await sleep(30);
       } },
       { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
         await crash(c.runner, c.id);

@@ -279,7 +279,7 @@ createServer((req, res) => {
 test('stopping a preview waits for its process to exit before deleting its copy', async () => {
   // A preview that ignores SIGTERM and keeps writing into its folder, as a shutting-down server does
   // (its exit handler removes run/mcp-<pid>, which made a delete racing it leave the folder behind).
-  const d3 = join(root, 'data-cap');
+  const d3 = join(root, 'data3');
   mkdirSync(d3);
   const s3 = new Store(join(d3, 'coordinator.db'));
   const t = s3.createTicket({ project_id: s3.createProject('Three', null).id, title: 'Stubborn', permission_mode: 'default', created_by: 'Cara' });

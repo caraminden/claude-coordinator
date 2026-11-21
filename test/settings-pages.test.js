@@ -33,10 +33,10 @@ test('kinds are unique and project.js can reach every named module', () => {
   for (const r of PAGES.filter((p) => !p.own)) assert.ok(project.includes(`'${r.module}':`), `project.js's PAGE_MODULES lacks ${r.module}`);
 });
 
-test('the table keeps its 21 pages, Orders and Settings apart', () => {
-  assert.equal(PAGES.length, 21);
+test('the table keeps its 22 pages, Orders and Settings apart', () => {
+  assert.equal(PAGES.length, 22);
   assert.equal(ORDERS_GROUPS.flatMap(([, , r]) => r).length, 9);
-  assert.equal(SETTINGS_GROUPS.flatMap(([, , r]) => r).length, 12);
+  assert.equal(SETTINGS_GROUPS.flatMap(([, , r]) => r).length, 13);
   assert.ok(isOrdersPage('memory') && !isOrdersPage('members') && !isOrdersPage('orders'));
   assert.ok(!plainKinds().includes('schedules') && !plainKinds().includes('orders') && plainKinds().includes('machines'));
 });

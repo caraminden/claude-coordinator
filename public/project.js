@@ -29,6 +29,7 @@ import * as ideas from './ideas.js';
 import * as people from './people.js';
 import * as contraptions from './contraptions.js';
 import * as units from './units.js';
+import * as unused from './unused.js';
 import { releasesPage, setReleasesPage } from './releases.js';
 import * as reviews from './reviews.js';
 import * as help from './help.js';
@@ -38,7 +39,7 @@ import { homeOverview, homePanel, refreshHome, startVisit } from './home.js';
 
 // The page modules the table of pages (settings-pages.js) names, by file name. A row's `page` is an export of its `module`.
 const PAGE_MODULES = { 'settings.js': settings, 'settings-machines.js': settingsMachines, 'skills.js': skills, 'where.js': where, 'memory.js': memory,
-  'decisions.js': decisions, 'ideas.js': ideas, 'people.js': people, 'contraptions.js': contraptions, 'units.js': units, 'reviews.js': reviews,
+  'decisions.js': decisions, 'ideas.js': ideas, 'people.js': people, 'contraptions.js': contraptions, 'units.js': units, 'unused.js': unused, 'reviews.js': reviews,
   'help.js': help, 'properties.js': properties };
 /** The function that draws a Settings or Orders page, from its row. */
 const pageFn = (kind) => PAGE_MODULES[pageRow(kind).module][pageRow(kind).page];

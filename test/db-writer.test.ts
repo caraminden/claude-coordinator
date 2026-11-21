@@ -234,6 +234,8 @@ const STAYS_ON_THREAD: Record<string, string> = {
   ...Object.fromEntries(['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds',
     'shippingFromRules', 'lendingLists', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed'].map((m) => [m, 'boot'])),
   // Helpers that run inside a listed write, with it.
+  // The usage ledger batches counts in memory and flushes on the server's thread on a timer (#1306).
+  'usage.flush': 'the ledger\'s own timer', 'usage.prune': 'the ledger\'s own timer', 'usage.rows': 'an admin read that flushes first',
   dropAudit: 'inside sweepTurnAudit and deleteTurnAudit',
   'props.insertValue': 'inside props.registerValues and props.review',
   'props.putStage': 'inside props.statusChanged',

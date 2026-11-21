@@ -357,7 +357,9 @@ export function landResult(output: string, code: number): LandResult {
   }
   // land.sh's smoke refusal (#1012), or the kit template's: "land: smoke: <what>, before the line (<n> s), so nothing landed".
   if (code !== 0) return /^land: smoke: .*, before the line \(\d+ s\), so nothing landed/m.test(output) ? { kind: 'failed', smoke: true } : { kind: 'failed' };
-  const at = [...output.matchAll(/main is now at ([0-9a-f]{7,40}) "(.*)"/g)].pop();
+  // "<default branch> is now at": main, or master and the like in a scheme on the kit's land.sh (KT2, #1519). A merge
+  // into a build says "build/<n> is now at", which isn't the commit main moved to.
+  const at = [...output.matchAll(/^land: (?!build\/)\S+ is now at ([0-9a-f]{7,40}) "(.*)"/gm)].pop();
   const commit = at ? { commit: at[1], subject: at[2] } : {};
   // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
   // already runs" (live already), "restart queued" / "a restart is already queued" / "not live yet" (waiting on it).
@@ -365,6 +367,29 @@ export function landResult(output: string, code: number): LandResult {
   if (/^deploy: (live now:|nothing to deploy: the server already runs)/m.test(output)) return { kind: 'live', ...commit };
   if (/^deploy: (restart queued|a restart is already queued|not live yet)/m.test(output)) return { kind: 'restart', ...commit };
   return { kind: 'landed', ...commit };
+}
+
+/**
+ * Whether a failed push of the default branch will fail the same way again (KT1, #1519): a login or access problem, or
+ * origin's branch moved on its own. Anything else (the network, GitHub's 5xx, the 60 s timeout's empty output) passes.
+ */
+export function lastingPushFailure(error: string): 'access' | 'moved' | null {
+  if (/\[rejected\]|non-fast-forward|fetch first|GH006|protected branch|hook declined/i.test(error)) return 'moved';
+  if (/repository not found|permission denied|permission to \S+ denied|denied to|error: 40[13]\b|\b40[13]\b.*(forbidden|unauthori[sz]ed)|authentication failed|could not read (username|password)|invalid username or password|not authori[sz]ed|write access|bad credentials|access denied/i.test(error)) return 'access';
+  return null;
+}
+
+/** The wake for a land that moved the default branch locally, then failed to push it (#911, KT1). */
+function unpushedWake(r: LandResult, what: string, apps: string[], tail: string): string {
+  const b = r.branch!;
+  const lasting = lastingPushFailure(r.error ?? '');
+  const head = `Your handed-off land merged, but isn't on GitHub: ${b} moved locally to ${what}, and the push to origin failed:\n\`\`\`\n${r.error || '(no output: the push timed out after 60 s)'}\n\`\`\``;
+  const own = `Don't push ${b} yourself: the scheme's guard, its pre-push hook and the tripwire all refuse it, and land.sh is its one route.`;
+  const again = `hand it off again with hand_off_land: nothing new merges, it re-checks the branch and pushes ${b}${apps.length ? `, and the scheme's apps (${apps.join(', ')}), not deployed for it yet, deploy once it's pushed` : ''}`;
+  const body = lasting
+    ? `That won't clear by itself (${lasting === 'access' ? "the GitHub login this scheme's ships push with can't reach or write to the repo" : `origin's ${b} moved on its own, so a person merges it into the local ${b} first`}), so shipping again now fails the same way. Tell a person in your reply, quoting the error, and stay open. Never try another login. ${own} Once they say it's fixed, ${again}.`
+    : `That looks like a passing failure (the network or GitHub), so ${again}. ${own} If it fails the same way again, tell a person in your reply, quoting the error.`;
+  return `${head}\n\n${body}\n\n${tail}`;
 }
 
 /** The test files tools/always-tests.txt adds to every run: a red in one is a repo-wide snapshot or budget, not the change's own test. */
@@ -702,13 +727,14 @@ export class LandHandoffs {
       try { await once('learned', () => this.d.learned?.(id, h)); } catch (err: any) { console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`); }
     }
     if (r.kind === 'unpushed') {
-      // It landed: the minion pushes it (its turn runs as its person's GitHub login) rather than landing it again.
+      // It landed, but only locally. The minion can't push the default branch itself (the kit's guard.sh, pre-push and
+      // the tripwire all refuse it, KT1 #1519): a passing failure ships again, a lasting one goes to a person.
       const what = r.commit ? `${r.commit} "${r.subject}"` : `the branch's new tip`;
       const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
       store.updateTicket(id, { state: null, note: 'shipped locally; push to origin failed' });
       runner.broadcastTicket(id);
       await once('noted', () => runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Shipped locally, not pushed to origin: the push failed.` }));
-      await once('told', () => runner.send(id, from, `Your handed-off land merged, but isn't on GitHub: ${r.branch} moved locally to ${what}, and the push to origin failed: ${r.error}\n\nDon't hand it off again: nothing is left to land. Push it from your worktree with \`git push origin ${r.branch}\` (branches are shared with the main checkout; the next land retries it too). "Repository not found" or a 403 means the GitHub login can't reach the repo: tell the person, never try another login. If origin's ${r.branch} moved on its own (non-fast-forward), a person merges it first. close_self once it's pushed.${apps.length ? ` The scheme's apps (${apps.join(', ')}) weren't deployed for it: deploy_contraption once it's pushed.` : ''}\n\n${tail()}`));
+      await once('told', () => runner.send(id, from, unpushedWake(r, what, apps, tail())));
       return;
     }
     if (r.kind === 'no-ci') {

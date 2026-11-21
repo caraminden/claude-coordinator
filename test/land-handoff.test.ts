@@ -8,6 +8,8 @@ import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult
 import { agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
 import { git } from './git.ts';
+import { spawnSync } from 'node:child_process';
+import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { withRealDeploy } from './land-fixture.ts';
 
 // #706: a minion hands its land to the server and ends its turn. The server runs land.sh, and on a clean land posts
@@ -242,15 +244,103 @@ test('a land whose branch moved but whose push to origin failed says it landed l
   await s.land(out, 1);
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1, 'woken once');
-  assert.doesNotMatch(s.sent[0], /didn't go through|hand it off again with hand_off_land/);
+  assert.doesNotMatch(s.sent[0], /didn't go through|so hand it off again/, 'not a failure, and not "ship again now": it would fail the same way');
+  assert.match(s.sent[0], /Once they say it's fixed, hand it off again with hand_off_land/);
   assert.match(s.sent[0], /master moved locally to d1a5c2f "#15: seed the tree"/);
   assert.match(s.sent[0], /push to origin failed: remote: Repository not found\.\nfatal: repository 'https:\/\/github\.com\/o\/r\.git\/' not found/);
-  assert.match(s.sent[0], /git push origin master/, 'says how to push it now');
+  assert.doesNotMatch(s.sent[0], /git push/, "never tells it to push the main branch: the guard, pre-push and the tripwire refuse that (KT1)");
+  assert.match(s.sent[0], /tell a person/i, 'a lasting failure goes to a person');
+  assert.match(s.sent[0], /fails the same way/, 'says shipping again would not help');
   assert.ok(s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)), 'the shipped line says it landed but is not pushed');
   assert.equal(s.ticket.state, null, 'left open for the minion to push');
   assert.ok(!s.did.some((d) => d.startsWith('close')), 'not dismissed');
   assert.equal(landResult('land: master moved, but the push to origin failed: error: one\n\nhint: two\n', 1).error, 'error: one\n\nhint: two', "a blank line in git's output doesn't cut it short");
   assert.deepEqual(landResult(out, 1), { kind: 'unpushed', commit: 'd1a5c2f', subject: '#15: seed the tree', branch: 'master', error: "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found" });
+});
+
+test('a passing push failure says to hand it off again; a lasting one (login, access, non-fast-forward) says to tell a person (KT1)', async () => {
+  const at = 'land: CI passed on d1a5c2f6\nland: master is now at d1a5c2f "#15: seed the tree"\n';
+  const passing = [
+    "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com",
+    'error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502',
+    '', // timeout 60 killed it: no output
+  ];
+  const lasting = [
+    "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found",
+    "remote: Permission to o/r.git denied to someone.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403",
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    " ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/o/r.git'",
+  ];
+  for (const [i, err] of [...passing, ...lasting].entries()) {
+    const s = setup(`unpushed-kind-${i}`);
+    await s.land(`${at}land: master moved, but the push to origin failed: ${err}\nland: the next landing retries it\n`, 1);
+    await s.handoffs.poll();
+    assert.equal(s.sent.length, 1, err);
+    assert.doesNotMatch(s.sent[0], /git push/, err);
+    if (passing.includes(err)) {
+      assert.match(s.sent[0], /hand it off again with hand_off_land/, `passing: ${err}`);
+      assert.doesNotMatch(s.sent[0], /won't clear by itself/, `passing: ${err}`);
+    } else {
+      assert.match(s.sent[0], /won't clear by itself/, `lasting: ${err}`);
+      assert.match(s.sent[0], /tell a person/i, `lasting: ${err}`);
+    }
+    if (err) assert.ok(s.sent[0].includes(err.split('\n')[0]), `quotes the error: ${err}`);
+  }
+});
+
+// The class behind KT1 (#1519): a wake that quotes a command the guards refuse strands the minion. Every command any
+// ship wake quotes in backticks must get past Citadel's tripwire and the kit's guard.sh (the hook kit schemes run).
+test('every command a ship wake quotes gets past the tripwire and the kit guard (KT1)', async () => {
+  const fail = 'land: conflict\n';
+  const unpushed = (err: string) => `land: master is now at d1a5c2f "#15"\nland: master moved, but the push to origin failed: ${err}\n`;
+  const ends: [string, Parameters<typeof setup>[1], string, number][] = [
+    ['q-failed', {}, fail, 1],
+    ['q-smoke', {}, 'land: smoke: tests failed, before the line (3 s), so nothing landed\n', 1],
+    ['q-no-ci-none', { runners: false }, 'land: CI gave no verdict\n', 75],
+    ['q-unpushed-passing', {}, unpushed('fatal: unable to access: Could not resolve host: github.com'), 1],
+    ['q-unpushed-lasting', {}, unpushed('remote: Repository not found.'), 1],
+    ['q-unpushed-nff', {}, unpushed(' ! [rejected] master -> master (non-fast-forward)'), 1],
+  ];
+  const texts: string[] = [];
+  for (const [name, opts, out, code] of ends) {
+    const s = setup(name, opts);
+    await s.land(out, code);
+    await s.handoffs.poll();
+    texts.push(...s.sent);
+  }
+  // A stopped ship's wake, which names git commands too.
+  const st = setup('q-stopped');
+  st.landings.stopped = () => ({ by: 'Cara', at: Date.now(), via: 'from the Status page' }) as any;
+  await st.land('land: master is now at d1a5c2f "#15"\n', 1);
+  await st.handoffs.poll();
+  texts.push(...st.sent);
+  const commands = new Set<string>();
+  for (const t of texts) for (const m of t.matchAll(/`([^`\n]+)`/g)) if (/^(git|tools\/|bash|npm|node)\b/.test(m[1])) commands.add(m[1]);
+  assert.ok(commands.size >= 2, `found the quoted commands: ${[...commands].join(' | ')}`);
+  const home = '/home/u', data = `${home}/.local/share/claude-coordinator`;
+  const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false, env: { TMPDIR: `${data}/projects/2/tmp/9`, PATH: '/usr/bin:/bin' } };
+  const worktree = `${data}/projects/2/tickets/9`;
+  const guard = join(process.cwd(), 'kit/skills/scheme-setup/templates/guard.sh');
+  const repo = mkdtempSync(join(root, 'guard-repo-'));
+  git(repo, 'init', '-q', '-b', 'ticket/9-x');
+  for (const command of commands) {
+    assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command, description: '' }, cwd: worktree }, cfg)?.reason ?? null, null, `the tripwire blocks a command a wake quotes: ${command}`);
+    const r = spawnSync('bash', [guard, '--hook', 'bash'], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: repo }), cwd: repo, env: { ...process.env, CLAUDE_PROJECT_DIR: repo }, encoding: 'utf8' });
+    assert.equal(r.status, 0, `the kit's guard.sh blocks a command a wake quotes: ${command}\n${r.stderr}`);
+  }
+  // The check can fail: the old wake's push of main is refused by both.
+  assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'git push origin master', description: '' }, cwd: worktree }, cfg), 'the tripwire refuses a push of master');
+  const old = spawnSync('bash', [guard, '--hook', 'bash'], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin master' }, cwd: repo }), cwd: repo, env: { ...process.env, CLAUDE_PROJECT_DIR: repo }, encoding: 'utf8' });
+  assert.equal(old.status, 2, "the kit's guard.sh refuses a push of master");
+});
+
+test('the ship note finds the commit on any default branch, not only main (KT2)', () => {
+  assert.deepEqual(landResult('land: CI passed\nland: master is now at d1a5c2f "#15: seed the tree"\nland: pushed master to origin\n', 0), { kind: 'landed', commit: 'd1a5c2f', subject: '#15: seed the tree' });
+  assert.deepEqual(landResult('land: trunk is now at abc1234 "#2: x"\n', 0), { kind: 'landed', commit: 'abc1234', subject: '#2: x' });
+  assert.deepEqual(landResult(LIVE, 0), { kind: 'live', commit: 'abc1234', subject: '#9: usage bar' });
+  assert.deepEqual(landResult('land: main is now at abc1234 "#9: x", in ticket/3-y\'s ship train\n', 0), { kind: 'landed', commit: 'abc1234', subject: '#9: x' }, "Citadel's train line");
+  // A merge into a build names the build, not the default branch: no commit for the shipped line (it says "into build/3").
+  assert.deepEqual(landResult('land: build/3 is now at abc1234 "#9: x"; master is untouched\n', 0), { kind: 'landed' });
 });
 
 test('exit 75 (no CI verdict) parks the minion until the runners are back, or wakes it when there are none to watch', async () => {

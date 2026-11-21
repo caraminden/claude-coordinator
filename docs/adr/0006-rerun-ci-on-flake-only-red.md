@@ -23,7 +23,7 @@ never read as the answer.
 
 - If the scratch branch can't be deleted, no fresh run starts and the red refuses as usual: pushing a commit the branch
   already has starts nothing, and waiting on it would read as CI being down.
-- Only a fully green second run lands. A second red refuses whatever its labels say. One fresh run per land, never more.
+- Only a fully green second run lands. A second red refuses whatever its labels say, unless it was cut off before any test failed (below). One fresh run per land, never more.
 - If the second run gets no answer (no runner, a timeout, GitHub down), it falls back to the full suite on perigee, like
   any unanswered run. That run never turns red into green either.
 - It is no flake when any failed file failed again alone, hung, or wasn't rerun, and also when the run never got that far:

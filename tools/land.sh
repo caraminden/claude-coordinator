@@ -712,8 +712,9 @@ bad_check() {
 # instead: no runner online, GitHub not answering, a job no runner starts within LAND_CI_START seconds or a run not
 # done within LAND_CI_TIMEOUT (LAND_CI_RERUN more for a run rerunning its failed files alone, ADR 0022) all fall back,
 # loudly, to the run on perigee (also LAND_CI=0, for when CI itself is broken). A red run refuses, and never falls
-# back, with one exception (#769): a red in which every failed test file passed when run-tests.sh reran it alone gets
-# one fresh CI run of the same commit, and only a fully green one lands.
+# back, with two exceptions. #769: a red in which every failed test file passed when run-tests.sh reran it alone gets
+# one fresh CI run of the same commit, and only a fully green one lands. #1377: a run cut off before any test failed
+# gets the same one fresh run, and cut off again it is no answer.
 # That reverses Cara's 2026-11-10 "Keep failing, log it" for CI: she picked "2 Rerun CI on flake-only red" on #767's
 # card, 2026-11-15 (docs/adr/0006-rerun-ci-on-flake-only-red.md).
 tip=$(git rev-parse HEAD)

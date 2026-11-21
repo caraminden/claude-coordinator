@@ -338,6 +338,7 @@ export class AppProxy {
     return {
       what: row.title,
       maxBody: MAX_BODY,
+      files: true,
       // A contraption may set its own cookies, never a login, nor one for a wider domain (Citadel's, or the other apps').
       answer: (h) => {
         this.restarts.running(row.name);

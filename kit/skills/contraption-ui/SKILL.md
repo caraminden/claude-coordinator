@@ -44,6 +44,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/media.js` (+ `.d.ts`) | Pictures and clips: `lightbox()` (one at a time, ‹ › and ←/→, a filmstrip; a dialog or inside your own box), `scrubber()` (a clip's frame strip, seek bar and Start/End pins) and `panner()` (a panorama that pans, with a mini-map). The lightbox shows every picture whole unless you opt in to panning: `lightbox(items, { pan: true })`, or `pan`/`onPan` on an item; only real panoramas should. They store nothing: pins and pan directions come in as options and go out through callbacks, and `update()` rolls a failed save back. `scrubber` options: `order: 'refuse'` + `onRefuse` (a crossing pin is turned down, not dropping the other), `stopAtEnd: false`, `pinKeys` (move or drop S/E, the tooltip follows), `onUser(play\|pause\|seek)` (a person's, not the app's own calls). `panner` options: `once` + `onLeg`/`onProgress`, `onPause(paused)` (a person's), `onFit(fits)` and `.fits`, and `.overlay` (`.cui-pan-over`, over the picture above the bar, presses pass through). Use these, never a second viewer | ES module import, needs base.css; types and options in `media.d.ts`; live demo in the design-system home |
 | `ui/optimistic.js` (+ `.d.ts`) | `optimistic()`: a click shows its result at once and sends behind it; a failure rolls back that item with a Retry toast (rule 23) | ES module import, needs base.css; [references/status.md](references/status.md#optimistic-actions) |
 | `ui/upload.js` (+ `.d.ts`) | `mountUpload()`: big files and folders into your `DATA_DIR`, any size, in resumable chunks, with progress, pause and resume; `startUpload()` for one file | ES module import, needs base.css; [references/upload.md](references/upload.md) |
+| `ui/visible.js` (+ `.d.ts`) | `pollWhileVisible(fn, ms)`: `setInterval` that rests while the tab is hidden and refreshes once at once when it is shown (rule 26) | ES module import |
 | `ui/update.js` (+ `.d.ts`) | `mountUpdate()`: a Capacitor app's "Update the app" banner when Citadel has published a newer APK | ES module import, needs base.css; the `citadel:android-app` skill, Delivery |
 | Not a file: a section that opens and shuts, a number that changes | `<details>`/`<summary>`; `font-variant-numeric: tabular-nums` and a `min-width` in `ch` | [references/component-checks.md](references/component-checks.md#disclosure-a-section-that-opens-and-shuts); [references/status.md](references/status.md) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
@@ -260,6 +261,13 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
     cookie, so it gets a 401 ("File wasn't available on site"); a load in the frame keeps it and
     streams any size. `<a download>` is
     only for a `blob:` URL your page made. [references/api.md](references/api.md#downloads).
+26. **A hidden tab doesn't poll.** Cara, 2026-11-20 (Peek Auras' rollout notes: "Hidden tabs keep polling").
+    A page that refreshes on a timer (a status, a list, a counter fed by your server) uses `pollWhileVisible(fn, ms)`
+    from `ui/visible.js`, never a bare `setInterval` or a `setTimeout` chain that fetches: it stops while the tab is
+    hidden and runs `fn` once at once when it is shown again. Keep your interval; call `fn` yourself for the first
+    load. Streams (SSE, websockets) are your server's to idle; a purely local clock or animation needs no server and is
+    not a poll. Citadel also gzips your plain static files and gives them an ETag with `no-cache` (answered by your
+    server with no `Cache-Control` or `ETag` of its own: set yours and Citadel leaves them alone).
 
 26. **Live updates: a plain `EventSource`.** #1376, 2026-11-20. Citadel's proxy keeps it alive
     across your app's restarts and Citadel's (it never answers a stream with a 502), so write no

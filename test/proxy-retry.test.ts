@@ -120,3 +120,61 @@ test('an asker who leaves before the app answers is no 502', async () => {
     await close(app);
   }
 });
+
+// A contraption's static files (#1394): gzipped when the browser accepts it, revalidated by ETag, and the app's own say kept.
+async function files(app: Server, headers: Record<string, string>, path = '/x') {
+  const s = await listen(createServer((req, res) => forward(req, res, portOf(app), path, { ...req.headers }, { what: 'App', files: true })));
+  const got = await new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((ok, fail) => {
+    request({ port: portOf(s), host: '127.0.0.1', path: '/x', headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (d) => chunks.push(d)).on('end', () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+    }).on('error', fail).end();
+  });
+  await close(s);
+  return got;
+}
+const big = 'function f() { return 1; }\n'.repeat(200);
+
+test('a plain script is gzipped for a browser that accepts it, with an ETag and no-cache', async () => {
+  const app = await listen(createServer((_q, res) => res.writeHead(200, { 'content-type': 'text/javascript', 'content-length': Buffer.byteLength(big) }).end(big)));
+  try {
+    const r = await files(app, { 'accept-encoding': 'gzip' });
+    assert.equal(r.headers['content-encoding'], 'gzip');
+    assert.match(String(r.headers['vary']), /Accept-Encoding/);
+    assert.equal(r.headers['cache-control'], 'no-cache');
+    assert.ok(r.headers['etag']);
+    assert.equal((await import('node:zlib')).gunzipSync(r.body).toString(), big);
+    assert.equal(r.headers['content-length'], String(r.body.length));
+    assert.ok(r.body.length < big.length / 4);
+    const again = await files(app, { 'accept-encoding': 'gzip', 'if-none-match': String(r.headers['etag']) });
+    assert.equal(again.status, 304);
+    const plain = await files(app, {});
+    assert.equal(plain.headers['content-encoding'], undefined);
+    assert.equal(plain.body.toString(), big);
+  } finally {
+    await close(app);
+  }
+});
+
+test('an app that already compresses or sets its own cache headers keeps them; API replies and streams are left alone', async () => {
+  const own = await listen(createServer((_q, res) => res.writeHead(200, { 'content-type': 'text/css', 'content-length': Buffer.byteLength(big), 'cache-control': 'max-age=3600', etag: '"mine"' }).end(big)));
+  const gz = await listen(createServer((_q, res) => res.writeHead(200, { 'content-type': 'text/css', 'content-encoding': 'br', 'content-length': 3 }).end('abc')));
+  const stream = await listen(createServer((_q, res) => (res.writeHead(200, { 'content-type': 'text/event-stream' }), res.write('data: 1\n\n'))));
+  const noLen = await listen(createServer((_q, res) => { res.writeHead(200, { 'content-type': 'text/javascript' }); res.write(big); res.end(); }));
+  try {
+    const a = await files(own, { 'accept-encoding': 'gzip' });
+    assert.equal(a.headers['cache-control'], 'max-age=3600');
+    assert.match(String(a.headers['etag']), /mine/);
+    assert.equal((await import('node:zlib')).gunzipSync(a.body).toString(), big);
+    const b = await files(gz, { 'accept-encoding': 'gzip' });
+    assert.equal(b.headers['content-encoding'], 'br');
+    assert.equal(b.body.toString(), 'abc');
+    const c = await new Promise<string>((ok) => request({ port: portOf(stream), host: '127.0.0.1', path: '/' }, (r) => ok(String(r.headers['content-type']))).end());
+    assert.equal(c, 'text/event-stream');
+    const d = await files(noLen, { 'accept-encoding': 'gzip' });
+    assert.equal(d.headers['content-encoding'], undefined);
+    assert.equal(d.body.toString(), big);
+  } finally {
+    for (const s of [own, gz, stream, noLen]) await close(s);
+  }
+});

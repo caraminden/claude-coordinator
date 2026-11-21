@@ -2,7 +2,9 @@
 // and contraptions (src/apps.ts). Answers stream as they come (event streams arrive event by event), a
 // closed tab ends the upstream request, and websocket upgrades are tunnelled both ways.
 import { request, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import type { Duplex } from 'node:stream';
+import { gzip } from 'node:zlib';
 
 export interface ForwardOptions {
   /** Shown when the service doesn't answer. */
@@ -19,6 +21,60 @@ export interface ForwardOptions {
   streamHoldMs?: number;
   /** Answered (503) when the service doesn't answer, in place of a bare 502: set only for a browser's page load (#1376). */
   downPage?: string;
+  /** A contraption's static files (#1394): see `treatFile`. Off for previews and anything else that streams. */
+  files?: boolean;
+}
+
+const COMPRESSIBLE = /^(text\/(html|css|plain|javascript|xml)|application\/(javascript|json|manifest\+json|xml)|image\/svg\+xml)\s*(;|$)/i;
+const STATIC = /^(text\/(html|css|javascript)|application\/(javascript|manifest\+json|wasm)|image\/(svg\+xml|png|jpeg|webp|gif|x-icon)|font\/[\w-]+)\s*(;|$)/i;
+/** Files bigger than this go through as they are: treating one means holding it in memory. */
+export const FILE_MAX = 5 * 1024 * 1024;
+/** Smaller than this isn't worth a gzip header. */
+const FILE_MIN = 1024;
+
+/**
+ * A contraption's static file answered by an app that sent it plain and uncached (#1394): gzip it when the browser accepts
+ * it, and give it an ETag and `no-cache` so a reload asks and gets a 304 (never stale: the browser always asks). An app that
+ * sets its own Cache-Control, ETag or Content-Encoding keeps its way. Returns false when the answer isn't one (a stream, an
+ * API reply, a range, no length up front), and it then goes through as it is.
+ */
+function treatFile(req: IncomingMessage, res: ServerResponse, up: IncomingMessage, out: IncomingHttpHeaders): boolean {
+  const type = String(out['content-type'] ?? '');
+  const length = Number(out['content-length'] ?? NaN);
+  if (req.method !== 'GET' || up.statusCode !== 200 || out['content-encoding'] || out['content-range'] || !(length <= FILE_MAX)) return false;
+  const gz = COMPRESSIBLE.test(type) && length >= FILE_MIN && /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+  const tag = STATIC.test(type) && !out['etag'] && !out['cache-control'];
+  if (!gz && !tag) return false;
+  const chunks: Buffer[] = [];
+  up.on('data', (c: Buffer) => chunks.push(c));
+  up.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const headers: IncomingHttpHeaders = { ...out };
+    if (tag) {
+      headers['etag'] = `"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
+      headers['cache-control'] = 'no-cache';
+      if (req.headers['if-none-match'] === headers['etag']) {
+        delete headers['content-length'];
+        delete headers['content-type'];
+        return void res.writeHead(304, headers).end();
+      }
+    }
+    const send = (data: Buffer, encoded: boolean) => {
+      if (encoded) {
+        headers['content-encoding'] = 'gzip';
+        const vary = String(headers['vary'] ?? '');
+        if (!/\baccept-encoding\b/i.test(vary)) headers['vary'] = vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding';
+        if (headers['etag'] && !/^W\//.test(String(headers['etag'])) && !tag) headers['etag'] = `W/${headers['etag']}`;
+      }
+      headers['content-length'] = String(data.length);
+      res.writeHead(200, headers).end(data);
+    };
+    if (!gz) return send(body, false);
+    gzip(body, { level: 6 }, (err, zipped) => (err || zipped.length >= body.length ? send(body, false) : send(zipped, true)));
+  });
+  up.on('error', () => res.destroy());
+  up.on('close', () => up.complete || res.destroy());
+  return true;
 }
 
 /** How long a GET or HEAD keeps asking an app that refuses or drops it, as a restart does (#1173). */
@@ -55,6 +111,7 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
       }
       const out = { ...up.headers };
       opts.answer?.(out);
+      if (opts.files && treatFile(req, res, up, out)) return;
       res.writeHead(up.statusCode ?? 502, out);
       if ((up.statusCode ?? 502) >= 500) opts.failed?.(up.statusCode ?? 502);
       // An event stream's headers go out now, not with its first event.

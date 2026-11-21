@@ -70,6 +70,9 @@
       "mountUpload",
       "startUpload"
     ],
+    "visible.js": [
+      "pollWhileVisible"
+    ],
     "media.js": [
       "clock",
       "lightbox",

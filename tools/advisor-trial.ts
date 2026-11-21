@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { attachEventsIfThere } from '../src/events-db.ts';
 
 export const ADVISED = 'claude-sonnet-5-5+opus-advisor';
 const SONNET = 'claude-sonnet-5-5';
@@ -71,7 +72,9 @@ export function trialNumbers(db: DatabaseSync, since: number) {
 if (import.meta.main) {
   const { values } = parseArgs({ options: { since: { type: 'string', default: '2026-11-16' }, db: { type: 'string' } } });
   const dataDir = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
-  const db = new DatabaseSync(values.db ?? join(dataDir, 'coordinator.db'), { readOnly: true });
+  const dbFile = values.db ?? join(dataDir, 'coordinator.db');
+  const db = new DatabaseSync(dbFile, { readOnly: true });
+  attachEventsIfThere(db, dbFile);
   // Midnight Pacific on the day given (PST is UTC-8; the trial runs in November).
   const since = Date.parse(`${values.since}T08:00:00Z`);
   if (Number.isNaN(since)) throw new Error(`--since wants a date like 2026-11-16, not ${values.since}`);

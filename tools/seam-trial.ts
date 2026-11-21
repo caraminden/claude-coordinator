@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { SEAM_TRIAL_KEY, SEAM_WHY, type Arm, type Enrolled, type SeamTrial } from '../src/seam-trial.ts';
+import { attachEventsIfThere } from '../src/events-db.ts';
 
 /** A person telling a minion it already had the answer: "I already said", "as I told you", "you asked me that". */
 export const ALREADY = /\b(already|just) (said|told|asked|answered|gave|decided|picked|explained)\b|\bas I (said|told you|mentioned)\b|\byou (already )?asked (me )?(that|this) (before|already)\b|\bI told you\b/i;
@@ -120,6 +121,7 @@ if (import.meta.main) {
   const dbPath = values.db ?? join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'coordinator.db');
   if (!existsSync(dbPath)) { console.error(`No database at ${dbPath}: run this on the host, or pass --db.`); process.exit(1); }
   const db = new DatabaseSync(dbPath, { readOnly: true });
+  attachEventsIfThere(db, dbPath);
   const raw = db.prepare('SELECT value FROM settings WHERE key = ?').get(SEAM_TRIAL_KEY) as { value: string } | undefined;
   if (!raw) { console.error('No trial yet: nobody has been enrolled.'); process.exit(1); }
   const trial = JSON.parse(raw.value) as SeamTrial;

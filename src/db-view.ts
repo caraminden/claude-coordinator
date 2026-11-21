@@ -2,6 +2,7 @@
 // person's container can't open the live file, and a raw mount would hand it the credentials table.
 // Run as a child (src/host-check.ts), so a slow query never stalls the server: `node db-view.ts <db file>`, the SQL on stdin.
 import { constants, DatabaseSync } from 'node:sqlite';
+import { attachEventsIfThere } from './events-db.ts';
 
 /** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, saved secrets, push keys. */
 export const SECRET: Record<string, string[]> = {
@@ -31,6 +32,7 @@ export const MAX_ROWS = 1000;
  */
 export function openMasked(file: string): DatabaseSync {
   const db = new DatabaseSync(file, { readOnly: true });
+  attachEventsIfThere(db, file); // the chat log's own file (#1169), so joins of events to the rest still work
   for (const table of [...Object.keys(SECRET), 'settings']) {
     const cols = (db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as { name: string }[]).map((c) => c.name);
     if (!cols.length) continue;

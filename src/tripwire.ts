@@ -286,7 +286,8 @@ function searchRoots(args: Word[]): Word[] {
   return given ? plain : plain.slice(1);
 }
 
-const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal', 'state.db', 'state.db-wal', 'state.db-shm', 'state.db-journal'];
+const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal', 'state.db', 'state.db-wal', 'state.db-shm', 'state.db-journal',
+  'events.db', 'events.db-wal', 'events.db-shm', 'events.db-journal']; // the chat log, in its own file since #1169
 
 /** Whether a person may approve this write once, rather than it being a hard block. */
 function askable(p: string, cmd: string, cfg: TripwireConfig): boolean {

@@ -32,6 +32,8 @@ const BLOCKED: [string, string?][] = [
   ['mv ~/.local/share/claude-coordinator/coordinator.db /tmp/'],
   ['rm ~/.local/share/claude-coordinator/state.db'],
   ['cp /tmp/old.db ~/.local/share/claude-coordinator/state.db-wal'],
+  ['rm ~/.local/share/claude-coordinator/events.db'],
+  ['mv ~/.local/share/claude-coordinator/events.db-wal /tmp/'],
   ['sqlite3 ~/.local/share/claude-coordinator/coordinator.db < fix.sql'],
   ['sqlite3 ~/.local/share/claude-coordinator/coordinator.db ".read fix.sql"'],
   ['rm -rf ~/.local/share/claude-coordinator/*'],

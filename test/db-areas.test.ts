@@ -10,11 +10,13 @@ const src = join(import.meta.dirname, '..', 'src');
 
 /** Setup, migrations and settings: these stay in src/db.ts. */
 const STAYS = `
+attachEvents
 attachState
 autoCheckpoint
 closedAtFromNotes
 deleteSetting
 dropEarlyPeekAurasBuilds
+eventsPath
 getSetting
 groupByType
 keyRange

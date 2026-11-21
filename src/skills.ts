@@ -10,6 +10,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import { frontmatter } from './catalogue.ts';
 import type { Project, SkillEvent, SkillTicket, SkillTimeline, Store } from './db.ts';
 import { every } from './every.ts';
+import { attachEventsIfThere } from './events-db.ts';
 
 /** The kit's plugin name (kit/.claude-plugin/plugin.json): its skills and agents are `citadel:<name>` in a turn. */
 export const KIT_PLUGIN = 'citadel';
@@ -477,6 +478,7 @@ export function warmUsage(store: Store): void {
 if (!isMainThread && workerData?.skillUsage) {
   const { path, since, prev, keys, now } = workerData.skillUsage as { path: string; since: number; prev: SkillScan | null; keys: string[]; now: number };
   const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+  attachEventsIfThere(db, path);
   try {
     parentPort!.postMessage(refresh(db, since, prev, keys, now));
   } finally {

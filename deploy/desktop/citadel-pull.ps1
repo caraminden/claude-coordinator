@@ -33,6 +33,9 @@ $sshArgs = @('-i', $Key, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o',
 $daily = '^coordinator-(\d{4}-\d{2}-\d{2})\.db$'
 $weekly = '^coordinator-weekly-\d{4}-W\d{2}\.db$'
 $state = '^state-\d{4}-\d{2}-\d{2}\.db$'
+# The chat log, in its own file since #1169: kept like the coordinator copies.
+$events = '^events-\d{4}-\d{2}-\d{2}\.db$'
+$eventsWeekly = '^events-weekly-\d{4}-W\d{2}\.db$'
 # The same rule as offbox-serve.sh: apps/<contraption>/<day>/<file>, plain names, no `..`. Checked case-sensitively.
 $app = '^apps/[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'
 # An Android app's release key or its password file (#837), as offbox-serve.sh allows.
@@ -56,7 +59,7 @@ try {
     $hash = $Matches[1]; $name = $Matches[2]
     $isApp = $name -cmatch $app -and $name -notlike '*..*'
     $isKey = $name -cmatch $releaseKey
-    if ($name -notmatch $daily -and $name -notmatch $weekly -and $name -notmatch $state -and -not $isApp -and -not $isKey) { Log "Skipping unexpected name $name"; continue }
+    if ($name -notmatch $daily -and $name -notmatch $weekly -and $name -notmatch $state -and $name -notmatch $events -and $name -notmatch $eventsWeekly -and -not $isApp -and -not $isKey) { Log "Skipping unexpected name $name"; continue }
     $offered++
     $target = Join-Path $Dest ($name -replace '/', [IO.Path]::DirectorySeparatorChar)
     if ($isApp -or $isKey) { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null }
@@ -93,6 +96,8 @@ try {
   Prune $daily $Dailies
   Prune $weekly $Weeklies
   Prune $state $States
+  Prune $events $Dailies
+  Prune $eventsWeekly $Weeklies
   # Each app keeps its newest $Dailies days. An app gone from perigee keeps what it has here. keys\ is never pruned.
   $apps = Join-Path $Dest 'apps'
   if (Test-Path -LiteralPath $apps) {

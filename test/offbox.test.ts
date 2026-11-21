@@ -116,6 +116,26 @@ test('a backup re-run the same day replaces its off-box copy, and the weekly fol
   assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(daily)}  coordinator-${day}`));
 });
 
+test('once the chat log has its own file, it is backed up daily and weekly and goes off-box as hard links (#1169)', () => {
+  assert.ok(existsSync(join(root, 'events.db')), 'the Store made an empty events.db, which the earlier runs skipped');
+  const db = new DatabaseSync(join(root, 'events.db'));
+  db.exec("CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL); INSERT INTO events VALUES (1, 1, 'note', 'a-chat-line', 0)");
+  db.close();
+  assert.match(run('backup.sh'), /chat log to events-\d{4}-\d\d-\d\d\.db/);
+  const daily = join(backups, `events-${day}.db`);
+  assert.equal(count(daily, 'events'), 1);
+  assert.equal((statSync(daily).mode & 0o777).toString(8), '600');
+  const weekly = readdirSync(backups).find((f) => f.startsWith('events-weekly-'))!;
+  assert.equal(statSync(join(backups, weekly)).ino, statSync(daily).ino, 'the weekly is a link to the daily');
+  for (const name of [`events-${day}.db`, weekly]) {
+    assert.equal(statSync(join(offbox, name)).ino, statSync(daily).ino, `${name} goes off-box as a link`);
+    assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(daily)}  ${name}`));
+    const got = serve(`get ${name}`);
+    assert.equal(got.status, 0, name);
+    assert.ok(got.stdout.equals(readFileSync(daily)), name);
+  }
+});
+
 test('the backup key can list the set and fetch a file from it, and nothing else', () => {
   const list = serve('list');
   assert.equal(list.status, 0);

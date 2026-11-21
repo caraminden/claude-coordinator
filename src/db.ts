@@ -27,6 +27,7 @@ import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 import { copyRow, inScope, scoped } from './read-scope.ts';
+import { CHAT, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -722,26 +723,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS events (
-  id INTEGER PRIMARY KEY,
-  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
-  kind TEXT NOT NULL,
-  data TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
--- A minion's events of one kind without reading its whole history: its open cards (openCardsWhere, #527).
-CREATE INDEX IF NOT EXISTS events_ticket_kind ON events(ticket_id, kind, id);
--- A scheme's cards without a seek into every minion's events (recentCards, #759): partial, so no other query's plan can change.
-CREATE INDEX IF NOT EXISTS events_cards ON events(ticket_id, kind) WHERE kind IN ('question', 'plan', 'approval');
--- Error events by time, for the post-deploy watch's turnOutcomes (#1178): partial, so it holds only the few error rows and no other query's plan can change.
-CREATE INDEX IF NOT EXISTS events_errors ON events(created_at) WHERE kind = 'error';
--- Notes and people's messages by id (#1251), partial like events_errors: Home's ship notes walked every claude row since a
--- visit (13.6 s of the loop), and the memory indexer seeked into every minion of a scheme for new messages (23 s on a busy disk).
-CREATE INDEX IF NOT EXISTS events_notes ON events(id) WHERE kind = 'note';
-CREATE INDEX IF NOT EXISTS events_asks ON events(id, ticket_id) WHERE kind = 'user_message';
--- What recentCards found of each card, kept across restarts (#762): the first person's reply after it, an approval's result,
--- and the newest event looked at. The card's minion and own id are kept to tell it from a later card that took a deleted id.
+-- events: the chat log, set up by src/events-db.ts (in the main file until a database is moved, then in events.db).
 CREATE TABLE IF NOT EXISTS card_fates (
   card_id INTEGER PRIMARY KEY,
   ticket_id INTEGER NOT NULL,
@@ -750,11 +732,7 @@ CREATE TABLE IF NOT EXISTS card_fates (
   result TEXT,
   up_to INTEGER NOT NULL
 );
--- Any deleted event drops every saved fate, whichever release deletes it (after a rollback an older one does, and the
--- ids it frees get reused): the fates are read again from the chats.
-CREATE TRIGGER IF NOT EXISTS card_fates_events_deleted AFTER DELETE ON events
-WHEN EXISTS (SELECT 1 FROM card_fates LIMIT 1)
-BEGIN DELETE FROM card_fates; END;
+-- card_fates_events_deleted: src/events-db.ts.
 CREATE TABLE IF NOT EXISTS artifacts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -1851,6 +1829,9 @@ export class Store {
     if (opts.writer) {
       this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath);
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
+      this.db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(this.eventsPath);
+      this.db.exec(`PRAGMA ${CHAT}.synchronous = NORMAL; PRAGMA ${CHAT}.journal_size_limit = 16777216;`);
+      if (eventsHome(this.db) === CHAT) this.db.exec(cardFatesTrigger(CHAT)); // a TEMP trigger is this connection's own
       this.props = new Registry(this.db);
       this.schedules = new Schedules(this.db);
       this.reviews = new ReviewSet(this.db);
@@ -1865,7 +1846,8 @@ export class Store {
     }
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} ${MINION_INDEX_SCHEMA} COMMIT;`);
+    const events = this.attachEvents();
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} ${MEMORY_PROPOSALS_SCHEMA} ${MINION_INDEX_SCHEMA} ${eventsSchema(events)} ${cardFatesTrigger(events)} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
     this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
@@ -1900,6 +1882,20 @@ export class Store {
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();
+  }
+
+  /**
+   * Attach events.db, the chat log's own file (#1169), and say where the events table is: the main file until the
+   * database is moved, events.db after. A new database keeps them in the main file for now. One marked moved whose
+   * events.db has no events refuses to open: starting on an empty chat log would bury the real one.
+   */
+  private attachEvents(): 'main' | typeof CHAT {
+    this.db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(this.eventsPath ?? ':memory:');
+    this.db.exec(`PRAGMA ${CHAT}.journal_mode = WAL; PRAGMA ${CHAT}.synchronous = NORMAL; PRAGMA ${CHAT}.journal_size_limit = 16777216;`);
+    const home = eventsHome(this.db);
+    if (home) return home;
+    if (eventsMoved(this.db)) throw new Error(`This database's chat log moved to ${this.eventsPath}, which has no events table: put events.db back from backups/ (events-<day>.db or the pre-deploy copy) before starting.`);
+    return 'main';
   }
 
   /**
@@ -2855,6 +2851,11 @@ export class Store {
 
   putClaudeState(row: Required<ClaudeStateRow>) {
     this.db.prepare(PUT_CLAUDE_STATE).run(row.path, row.project_id, row.ticket_id, row.size, row.mtime, row.data);
+  }
+
+  /** events.db, the chat log's own file (src/events-db.ts); null for an in-memory store. */
+  get eventsPath(): string | null {
+    return eventsPath(this.path);
   }
 
   /** state.db's file, for a second connection to it (StateDb); null for an in-memory store. */

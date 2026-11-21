@@ -36,7 +36,7 @@ export function walFrames(dbPath: string): number | null {
 }
 
 /**
- * From now on the store's connection never checkpoints: a worker with its own connections to coordinator.db and
+ * From now on the store's connection never checkpoints: a worker with its own connections to coordinator.db, events.db and
  * state.db does, PASSIVE so it never waits on or blocks a writer. Every `everyMs` it fsyncs each WAL (a power cut
  * still loses only the last few seconds, #470) and checkpoints one that has reached `walPages` or waited
  * `maxWaitMs`. If the worker stops, the connection goes back to checkpointing itself. Null for an in-memory store.
@@ -45,7 +45,7 @@ export function checkpointOffThread(store: Store, everyMs = CHECKPOINT_MS, walPa
   if (!store.statePath) return null;
   // 1 while a round is fsyncing or checkpointing, for settled() (src/settled.ts).
   const busy = new Int32Array(new SharedArrayBuffer(4));
-  const worker = new Worker(new URL(import.meta.url), { workerData: { checkpoint: { paths: [store.path, store.statePath], everyMs, walPages, maxWaitMs, busy } } });
+  const worker = new Worker(new URL(import.meta.url), { workerData: { checkpoint: { paths: [store.path, store.statePath, store.eventsPath!], everyMs, walPages, maxWaitMs, busy } } });
   worker.unref();
   store.autoCheckpoint(false);
   const unlist = busySource(() => (Atomics.load(busy, 0) ? ['a WAL checkpoint round'] : []));

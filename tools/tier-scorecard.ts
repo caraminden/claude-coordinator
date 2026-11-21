@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { attachEventsIfThere } from '../src/events-db.ts';
 
 export interface Column { name: string; note: string; sql: string }
 
@@ -113,6 +114,7 @@ if (import.meta.main) {
   const dbPath = values.db ?? join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'coordinator.db');
   if (!existsSync(dbPath)) { console.error(`No database at ${dbPath}: run this on the host, or pass --db.`); process.exit(1); }
   const db = new DatabaseSync(dbPath, { readOnly: true });
+  attachEventsIfThere(db, dbPath);
   const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
   const md = render(collect(db, Date.now() - days * 86400_000), date, days);
   const out = values.out ?? join(homedir(), '.local/share/claude-coordinator/projects/2/shared/project/reports', `tier-scorecard-${date}.md`);

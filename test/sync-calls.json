@@ -30,6 +30,7 @@
  "src/db-nocow.ts": 32,
  "src/decisions-load.ts": 5,
  "src/emulator-lease.ts": 4,
+ "src/events-db.ts": 1,
  "src/exec.ts": 3,
  "src/fast-mode.ts": 4,
  "src/fcm.ts": 2,

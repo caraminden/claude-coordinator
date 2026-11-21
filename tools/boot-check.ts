@@ -64,7 +64,7 @@ try {
 
   begin('copying the database');
   const copy = join(root, 'coordinator.db');
-  await copyDb(db, copy);
+  await copyDb(db, copy, { events: 'open' }); // the open chats are what a turn reads; the closed ones were most of the bytes (#1169)
   copied = true;
   arm();
 

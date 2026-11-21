@@ -10,6 +10,7 @@ import { findBriefs } from '../public/briefs.js';
 import { handoffIn } from '../src/ideas.ts';
 import { spokenText } from '../src/memory.ts';
 import { isLoose, markedNotPicked, moveFile, NOT_PICKED, SHIPPED } from '../src/handoff-tidy.ts';
+import { attachEventsIfThere } from '../src/events-db.ts';
 
 const DAY = 86_400_000;
 
@@ -59,6 +60,7 @@ if (import.meta.main) {
     for (const n of readdirSync(args[i + 1])) if (n.endsWith('.md')) memory.push(readFileSync(join(args[i + 1], n), 'utf8'));
   });
   const db = new DatabaseSync(dbPath, { readOnly: true });
+  attachEventsIfThere(db, dbPath);
   const plan = planSweep(db, project, shared, memory);
   const sample = (l: string[]) => l.slice(0, 8).map((x) => `    ${x}`).join('\n');
   console.log(`handoffs/ holds ${plan.total} loose files.\n  move to shipped/: ${plan.shipped.length}\n${sample(plan.shipped)}\n  move to not-picked/: ${plan.notPicked.length}\n${sample(plan.notPicked)}\n  stay (pinned, named by an open brief or memory, briefs unstarted): ${plan.keep.length}\n${sample(plan.keep.map((k) => `${k.rel} (${k.why})`))}\n  unmatched and older than 14 days, listed for a person: ${plan.listed.length}\n${sample(plan.listed)}\n  left alone (unmatched, newer): ${plan.total - plan.shipped.length - plan.notPicked.length - plan.keep.length - plan.listed.length}`);

@@ -32,7 +32,9 @@ Open the source that matches the question first; the others only when a line is 
     scheme, `project_id`); `state`, `note`, `status`, `branch`, `model`, `effort`, `created_at`,
     `updated_at`, `closed_at`. Map #N to `id` first: `SELECT id FROM tickets WHERE project_id=<scheme> AND number=<N>`
     (your own scheme's id is in the worktree path, `projects/<id>/`).
-  - `events`: the chat and turn stream, `ticket_id` is the internal id, `kind` is `claude`
+  - `events`: the chat and turn stream, in its own file beside it, `events.db`: add
+    `-cmd "ATTACH '$HOME/.local/share/claude-coordinator/events.db' AS chat"` before the database to
+    join it to the rest (`host_check` attaches it for you). `ticket_id` is the internal id, `kind` is `claude`
     (the model's raw messages, tool calls and results as JSON in `data`), `note`, `user_message`,
     `question`, `question_result`, `plan`, `plan_result`, `approval`, `approval_result`, `error`,
     `replaced`, `fresh`, `strike`. Cut `data` with `substr(data,1,300)`; a `claude` event is

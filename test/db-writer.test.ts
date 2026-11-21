@@ -251,7 +251,7 @@ test('writes still queued when the process exits are written first, and writes m
 // slow disk. Every method whose source runs a statement is in WRITES, VALUE_WRITES or here, with why.
 const STAYS_ON_THREAD: Record<string, string> = {
   // The constructor's one-time migrations: they run before the writer starts.
-  ...Object.fromEntries(['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds',
+  ...Object.fromEntries(['attachState', 'attachEvents', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds',
     'shippingFromRules', 'lendingLists', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed'].map((m) => [m, 'boot'])),
   // Helpers that run inside a listed write, with it.
   // The usage ledger batches counts in memory and flushes on the server's thread on a timer (#1306).

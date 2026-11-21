@@ -4,7 +4,8 @@
 # Takes an online copy with `VACUUM INTO` (one read transaction, safe while the server is writing; a
 # stepped `.backup` restarts on every write and can run for minutes, #497), proves it restores, then
 # keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600. Session state
-# (state.db) gets its own state-<day>.db, 3 dailies and no weeklies. Hand-made copies
+# (state.db) gets its own state-<day>.db, 3 dailies and no weeklies. The chat log (events.db, #1169) gets
+# events-<day>.db and events-weekly-<week>.db, kept like the main ones. Hand-made copies
 # there (coordinator-before-<what>.db, taken before a risky change) go once they are 7 days old, when
 # the dailies cover the same days. deploy.sh keeps its own pre-deploy-*.db copies.
 # Then offbox.sh refreshes $DATA_DIR/offbox, which Cara's desktop pulls each night (#252).
@@ -65,6 +66,32 @@ prune 'coordinator-[0-9]*.db' "$DAILIES"
 prune 'coordinator-weekly-*.db' "$WEEKLIES"
 find "$DIR" -maxdepth 1 -name 'coordinator-before-*' -mmin +$((DAILIES * 1440)) -delete
 
+# The chat log (events.db, #1169): its own copy, kept like the main file's, once the events have moved there.
+# A separate read transaction from the main copy's, so the two can be a few events apart.
+events=$DATA_DIR/events.db
+events_note=""
+# The server makes the file before the move fills it, so only a file with the table is copied. A probe that errors fails the backup.
+has_events=0
+[[ -f $events ]] && has_events=$(sqlite3 "$events" ".timeout 30000" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'events'")
+if [[ $has_events == 1 ]]; then
+  eout=$DIR/events-$day.db
+  tmp=$DIR/.events-$day.db.tmp
+  rm -f "$tmp"
+  trap 'rm -f "$tmp"' EXIT
+  sqlite3 "$events" ".timeout 30000" "VACUUM INTO '$tmp'"
+  sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null
+  echeck=$(sqlite3 "$tmp" "PRAGMA quick_check;" "SELECT 'rows', count(*) FROM events;")
+  [[ $echeck == ok$'\n'rows\|* ]] || { echo "Chat log backup failed its check: $echeck" >&2; exit 1; }
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$eout"
+  trap - EXIT
+  eweekly=$DIR/events-weekly-$week.db
+  if [[ ! -e $eweekly || $(date +%u) == 7 ]]; then ln -f "$eout" "$eweekly"; fi
+  prune 'events-[0-9]*.db' "$DAILIES"
+  prune 'events-weekly-*.db' "$WEEKLIES"
+  events_note=", chat log to $(basename "$eout") ($(du -h "$eout" | cut -f1))"
+fi
+
 # Session state (state.db): big, and only recent minions need it, so a few dailies and no weeklies.
 state=$DATA_DIR/state.db
 state_note=""
@@ -84,7 +111,7 @@ if [[ -f $state ]]; then
   state_note=", sessions to $(basename "$sout") ($(du -h "$sout" | cut -f1))"
 fi
 
-echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")$state_note"
+echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")$events_note$state_note"
 
 # The copy set Cara's desktop pulls, with people's linked-account secrets stripped (#252).
 "$(dirname "$0")/offbox.sh"

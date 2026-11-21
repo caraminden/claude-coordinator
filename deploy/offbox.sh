@@ -9,6 +9,8 @@
 #   then VACUUMed so the deleted rows leave no bytes behind. A weekly links to its stripped daily.
 # - only the newest state-<day>.db, as a hard link (claude_state holds transcripts, memory and task
 #   lists, no logins).
+# - every chat log daily and weekly (events-<day>.db, events-weekly-<week>.db, #1169), as hard links: the chat log
+#   always went off-box inside the coordinator copies, unstripped, and holds no logins.
 # - SHA256SUMS, the list the desktop reads and checks each download against.
 # - every registered contraption's newest nightly backups, as hard links under apps/ (#828, below).
 # - every Android app's release key and its password file, as hard links under keys/ (#837, below).
@@ -80,6 +82,12 @@ if ((${#states[@]})); then
   want+=("$(basename "$newest")")
   [[ $OUT/$(basename "$newest") -ef $newest ]] || ln -f "$newest" "$OUT/$(basename "$newest")"
 fi
+
+for f in "$SRC"/events-[0-9]*.db "$SRC"/events-weekly-*.db; do
+  name=$(basename "$f")
+  want+=("$name")
+  [[ $OUT/$name -ef $f ]] || ln -f "$f" "$OUT/$name"
+done
 
 for f in "$OUT"/*.db; do
   name=$(basename "$f")

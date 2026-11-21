@@ -13,6 +13,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import type { Store } from './db.ts';
 import { nextRun } from './schedules.ts';
 import { ZONE } from './pacific.ts';
+import { attachEventsIfThere } from './events-db.ts';
 
 /** One broken promise. `key` names it across runs (check, minion, subject), so one stays one health row. */
 export interface Finding {
@@ -463,6 +464,7 @@ export class StandingChecks {
 if (!isMainThread && workerData?.standingChecks) {
   const { path, dataDir, now, snap, integrity } = workerData.standingChecks as { path: string; dataDir: string; now: number; snap: Snapshot; integrity: boolean };
   const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+  attachEventsIfThere(db, path);
   try {
     parentPort!.postMessage(runChecks({ db, dataDir, now, snap, integrity }));
   } finally {

@@ -386,7 +386,8 @@ fi
 #                                                branch moves to its train commit now, so the release row lists it
 #   back <train commit> <tip it took> <front>    the train went without it, or didn't ship: back to waiting, as it was
 #   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped
-#   refused <front> <the red CI run>            the bisect found it the first ship that turned the train red; the
+#   refused <front> <the red CI run> [likely <tests>]   the bisect found it the first ship that turned the train red, or
+#                                                with likely: the real failures in <tests> (comma-separated) map to its change (#1346); the
 #                                                failure's last lines follow
 # No file: on no train. <held>: this holds the lock now, so a riding is what a front that was killed left, and so is a
 # moving whose front is gone. A moving whose front still runs is its restart being judged, after deploy.sh let go of
@@ -454,6 +455,7 @@ train_verdict() {
       [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
       queue_done
       land_timing 1 || true
+      [ "$c" != likely ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect), and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Look into it: fix it if it is yours, re-test, commit, then run this again"
       refuse "tests failed in CI on $a's ship train ($b), and its bisect found $branch the first ship that turned it red, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
     *)
       rm -f "$f"
@@ -988,8 +990,10 @@ train_others() {
 }
 # <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
 train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
+# [<ticket>...]: those first, in that order, then the rest of the line in its order (a refill after suspects, #1346).
 train_build() {
   local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x
+  local -A tried=()
   [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] || return 0
   [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
   [ ! -s "$state/bad" ] && [ ! -s "$state/refusing" ] || return 0
@@ -1004,8 +1008,9 @@ train_build() {
   find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read
   while read -r x t <&4; do # not on stdin, which git and perl below may read
     [ ${#train_n[@]} -lt "$max" ] || break
-    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [ "$x" = moving ] && continue # still on the train before this one
+    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
+    tried[${t##*/}]=1
+    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
     [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
     b=${l[2]:-}
@@ -1036,7 +1041,7 @@ train_build() {
     train_n+=("${t##*/}") train_br+=("$b") train_tip+=("$c") train_was+=("$r")
     train_say $((${#train_n[@]} - 1)) "riding $branch"
     cur=$c
-  done 4< <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
+  done 4< <(for t in "$@"; do printf '%s %s\n' - "$q/$t"; done; for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
   [ -z "$wt" ] || git worktree remove --force "$wt" >/dev/null 2>&1 || true
   [ ${#train_n[@]} -gt 0 ] || return 0
   tip=$cur short=$(git rev-parse --short "$cur")
@@ -1075,6 +1080,109 @@ gate() {
   fi
   [ "$rc" != 0 ] || greens="$greens$1 "
   return "$rc"
+}
+# Suspects first (#1346, Cara 2026-11-20: "we pull out the minions that touched the failing tests as they are vastly
+# more likely to be the culprit"): before a bisect, a red train's real failures (run-tests.sh's labels: not the
+# flakes) are pinned on the ships whose change touched each failing test file; failing that, a file it imports by a
+# relative path or names by its path; failing that, a file those import. If every real failure has a suspect, the
+# suspects are refused with the failure, and the train is built again from the others plus the next ships in line, for
+# one more CI run. Red again on any of the same tests: the guess was wrong, and the bisect takes over on that train. Red
+# on new tests only: another round, up to 3. 0: done (rc as gate's, 1 only for this one alone or a suspect itself), 1:
+# the bisect looks, on the train as it now is (its top red, its log in $failed).
+suspect_tests=''
+# The real failures in $failed, one test file a line; fails when there are none, or the log doesn't label every file.
+train_real() {
+  local at n out
+  at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
+  [[ $at =~ ^[0-9]+$ ]] || return 1
+  n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
+  out=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\).*/\2 \1/p' | sort -u -k2)
+  [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] || return 1
+  out=$(grep -v '^failed in the full run, passed alone ' <<<"$out" | sed 's/.* //')
+  [ -n "$out" ] && echo "$out"
+}
+# <file>: the repo paths it imports by a relative path, as the train's top has it.
+train_imports() {
+  local p
+  git show "$tip:$1" 2>/dev/null | grep -oE "(from|import|require)[[:space:]]*\(?[[:space:]]*['\"]\.\.?/[^'\"]+['\"]" |
+    sed -E "s/.*['\"](\.[^'\"]+)['\"]$/\1/" | while read -r p; do realpath -ms --relative-to="$PWD" "$PWD/$(dirname "$1")/$p"; done | sort -u
+}
+# <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
+train_suspects_of() {
+  local f=$1 text reach lvl m c hits
+  text=$(git show "$tip:$f" 2>/dev/null) || text=''
+  reach=$f
+  for lvl in 0 1 2; do
+    [ "$lvl" = 0 ] || reach=$(while read -r c; do [ -z "$c" ] || train_imports "$c"; done <<<"$reach" | sort -u)
+    hits=$(for ((m = 0; m < ${#chg[@]}; m++)); do
+      while read -r c; do
+        [ -n "$c" ] || continue
+        if grep -qxF -- "$c" <<<"$reach" || { [ "$lvl" = 1 ] && grep -qF -- "$c" <<<"$text"; }; then echo "$m"; break; fi
+      done <<<"${chg[$m]}"
+    done)
+    [ -z "$hits" ] || { echo "$hits"; return 0; }
+  done
+}
+train_suspects() {
+  local round prev=' ' f m i t v line real=() hits=() keep=() was=() chg=()
+  local -A sus=()
+  for ((round = 1; round <= 3; round++)); do
+    mapfile -t real < <(train_real) || true
+    if [ ${#real[@]} = 0 ]; then
+      say "suspects: CI's log doesn't name the tests that really failed, so the bisect looks for the ship"
+      return 1
+    fi
+    for f in "${real[@]}"; do
+      [[ $prev != *" $f "* ]] || { say "red again on $f with the likely causes off the train, so the guess was wrong: the bisect looks for the ship"; return 1; }
+    done
+    chg=() sus=()
+    for ((m = 0; m <= ${#train_n[@]}; m++)); do
+      if [ "$m" = 0 ]; then chg[0]=$(git diff --no-renames --name-only "$old" "$own"); else chg[m]=$(git diff --no-renames --name-only "$(train_at $((m - 1)))" "$(train_at "$m")"); fi
+    done
+    for f in "${real[@]}"; do
+      mapfile -t hits < <(train_suspects_of "$f")
+      if [ ${#hits[@]} = 0 ]; then
+        say "suspects: no ship on the train touched $f or what it imports, so the bisect looks for the ship"
+        return 1
+      fi
+      for m in "${hits[@]}"; do sus[$m]+="${sus[$m]:+, }$f"; done
+    done
+    line=''
+    for m in $(printf '%s\n' "${!sus[@]}" | sort -n); do
+      if [ "$m" = 0 ]; then t=$branch; else t=${train_br[$((m - 1))]}; fi
+      [[ ! $t =~ ^ticket/([0-9]+)- ]] || t="#${BASH_REMATCH[1]}"
+      line+="${line:+, }$t (${sus[$m]})"
+    done
+    say "suspects: $line: CI is red on the ship train ($ci_url) in tests only their changes touched, so they are likely the cause: they go back to their minions with the failure, and the next ships in line take their places"
+    retro_log "ship train suspects · $label · $line · $ci_url"
+    prev+="${real[*]} "
+    keep=()
+    for ((i = 0; i < ${#train_n[@]}; i++)); do
+      if [ -n "${sus[$((i + 1))]:-}" ]; then
+        v=${sus[$((i + 1))]}
+        train_say "$i" "refused $branch $ci_url likely ${v//, /,}" "$(tail -n 40 <<<"$failed")"
+      else keep+=("${train_n[$i]}"); fi
+    done
+    if [ -n "${sus[0]:-}" ]; then # this one is a suspect too: the others go back in line, and this one is refused below
+      suspect_tests=${sus[0]}
+      train_drop
+      rc=1
+      return 0
+    fi
+    queue_phase "testing the train again without its likely causes"
+    was=("${train_n[@]}")
+    train_tip=() train_br=() train_n=() train_was=()
+    tip=$own short=$(git rev-parse --short "$own")
+    train_build "${keep[@]}"
+    for t in "${was[@]}"; do # a rider the train no longer takes (it no longer rebases onto it, say): back in line
+      [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
+    done
+    rc=0
+    gate "$tip" || rc=$?
+    [ "$rc" = 1 ] && [ ${#train_n[@]} -gt 0 ] || return 0
+  done
+  say "still red after 3 rounds of suspects, so the bisect looks for the ship"
+  return 1
 }
 # A red train: which ship turned it red, by bisecting its prefixes (each assumed green below the first red one). The
 # green part ships, the first red ship is refused with its own failure, and the ships after it go back in line. This
@@ -1118,7 +1226,7 @@ if [ "$lane" = light ]; then
 else
   train_build
   gate "$tip" || rc=$?
-  [ "$rc" != 1 ] || [ ${#train_n[@]} = 0 ] || train_bisect
+  [ "$rc" != 1 ] || [ ${#train_n[@]} = 0 ] || train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect
   if [ "$rc" = 2 ] && [ ${#train_n[@]} -gt 0 ]; then
     say "the ship train goes back in line, since CI gave no answer ($why): $branch goes on alone"
     train_drop
@@ -1141,6 +1249,7 @@ elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
+  [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else

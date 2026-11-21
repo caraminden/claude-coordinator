@@ -82,6 +82,7 @@ test("a red train is bisected: the ship that turned it red is refused with its o
   assert.match(done[3].stderr, /land: tests failed in CI on ticket\/2-x's ship train \(https:\/\/ci\/\d+\), and its bisect found ticket\/4-x the first ship that turned it red/);
   assert.match(done[3].stderr, /not ok 1 - the red test's output/, 'its own failure, on its own stderr');
   assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the red ship is as it was');
+  assert.match(done[1].stderr, /suspects: no ship on the train touched test\/real\.test\.ts or what it imports, so the bisect looks for the ship/, 'the real failure maps to no ship (#1346)');
   assert.match(done[1].stderr, /the bisect found ticket\/4-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
   for (const i of [1, 2, 3, 5, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
@@ -91,6 +92,57 @@ test("a red train is bisected: the ship that turned it red is refused with its o
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5', 'f6.txt: 6']);
   assert.equal(l.runs(), 5, "ship 1's, the train's, two for the bisect, and the next train's");
   assert.equal(l.deployed().length, 3);
+  l.done();
+});
+
+// Suspects first (#1346): a real failure (the fake's log says test/real.test.ts failed again alone) is pinned on the ships
+// whose change touched that test or what it imports; they are refused, and the train runs again without them.
+test('a red train whose real failure maps to one ship: only it is refused, the next in line takes its place, and the rest ship on one more CI run', async () => {
+  const l = await line([{}, {}, {}, { change: ['test/real.test.ts', 'red\n'] }, {}, {}, {}], { FAKE_RED_PATH: 'test/real.test.ts', LAND_TRAIN_MAX: '3' });
+  const done = await l.go();
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /land: tests failed in CI on ticket\/2-x's ship train \(https:\/\/ci\/\d+\) in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed, so it is likely the cause/);
+  assert.match(done[3].stderr, /not ok 1 - the red test's output/, 'the failure, on its own stderr');
+  assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the suspect is as it was');
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
+  assert.match(done[1].stderr, /ship train: ticket\/2-x takes the 3 ships waiting behind it \(ticket\/3-x ticket\/5-x ticket\/6-x\)/, 'ship 6 takes its place');
+  assert.doesNotMatch(done[1].stderr, /bisect/);
+  for (const i of [1, 2, 3, 5, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  for (const i of [3, 5, 6]) shipped(l, done[i - 1], i, 2, 4);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5', 'f6.txt: 6', 'f7.txt: 7']);
+  assert.equal(l.runs(), 4, "ship 1's, the red train's, the refilled train's, and ship 7's");
+  assert.equal(l.deployed().length, 3);
+  l.done();
+});
+
+test('a refilled train red again on the same test: the guess was wrong, so the bisect finds the ship', async () => {
+  // Ship 4 touched the failing test, but ship 5 is what turns CI red.
+  const l = await line([{}, {}, {}, { change: ['test/real.test.ts', 'x\n'] }, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '3' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
+  assert.match(done[3].stderr, /so it is likely the cause/, 'the innocent suspect is bounced: the accepted cost');
+  assert.match(done[1].stderr, /red again on test\/real\.test\.ts with the likely causes off the train, so the guess was wrong: the bisect looks for the ship/);
+  assert.match(done[1].stderr, /the bisect found ticket\/5-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
+  assert.equal(done[4].status, 1, done[4].stderr);
+  assert.match(done[4].stderr, /its bisect found ticket\/5-x the first ship that turned it red/);
+  for (const i of [1, 2, 3, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  shipped(l, done[2], 3, 2, 2);
+  shipped(l, done[6], 7, 6, 2);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f6.txt: 6', 'f7.txt: 7']);
+  assert.equal(l.runs(), 6, "ship 1's, the red train's, the refilled train's, two for the bisect, and the next train's");
+  l.done();
+});
+
+test("a train's red of flakes only is unchanged: one fresh run, and a ship that touched the flaky test still rides", async () => {
+  const l = await line([{}, {}, { change: ['test/slow.test.ts', 'x\n'] }, {}], { FAKE_FLAKY_PATH: 'test/slow.test.ts', FAKE_LOG: 'flakes' });
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /only flakes failed \(test\/busy\.test\.ts, test\/slow\.test\.ts\); running CI once more/);
+  assert.doesNotMatch(done[1].stderr, /suspects|bisect/);
+  shipped(l, done[2], 3, 2, 3);
+  shipped(l, done[3], 4, 2, 3);
+  assert.equal(l.runs(), 2, "ship 1's and the train's, run twice");
+  assert.equal(l.deployed().length, 2);
   l.done();
 });
 

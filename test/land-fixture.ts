@@ -95,7 +95,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
 // after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
-// FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166);
+// FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
+// a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
@@ -118,6 +119,7 @@ case "$*" in
     [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
     # (a commit GitHub hasn't got yet has no run)
     if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
+    if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi
     [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
       case $st in
@@ -133,6 +135,7 @@ case "$*" in
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
+    [ -z "\${FAKE_FLAKY_PATH:-}" ] || : >"${calls}.flaky"
     echo "not ok 1 - the red test's output (run $3)"
     p='test\\tthe full suite\\t2026 run-tests:'
     case \${FAKE_LOG:-mixed} in

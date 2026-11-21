@@ -70,7 +70,7 @@ poll=${CITADEL_HEAVY_POLL:-2}
 
 ci=("$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts")
 if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
-  started=$(date +%s) since=$SECONDS t0=$(us)
+  started=$(date +%s) t0=$(us)
   # One job per repo on CI at a time: this waits for the repo's turn, then holds fd 5 while its job runs there.
   # shortcut: this wait writes no wait-* file, so Citadel shows the minion as running, not waiting; add one if people ask.
   key=${slug//\//-} n=${CITADEL_HEAVY_CI_SLOTS:-1} cislot=

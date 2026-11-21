@@ -35,15 +35,17 @@ const bin = join(root, 'bin');
 mkdirSync(bin);
 writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh
 echo "$*" >> "${bin}/calls"
-scope=
+scope= expand=1
 while [ $# -gt 0 ]; do case $1 in
   --) shift; break;;
   --scope) scope=1;;
+  --expand-environment=no) expand=;;
   -p|-E) shift;;
   -*) ;;
   *) break;;
 esac; shift; done
-if [ -n "$scope" ]; then [ -f "${bin}/no-scope" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
+# The real one turns a command's \$\$ into \$ unless told not to.
+if [ -n "$scope" ]; then [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
 `);
 writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "systemctl $*" >> "${bin}/calls"\n`);
@@ -144,6 +146,8 @@ test('a host turn runs in the shared supervisor, in a scope of its own named as 
   const unit = (r as any).turns.get(t.id).unit;
   assert.ok(mine.some((c) => c.includes('--scope') && c.includes(`--unit=${unit}`)), mine.join('\n'));
   assert.ok(!mine.some((c) => c.includes('turn-wrapper.mjs')), 'no wrapper unit started');
+  assert.doesNotMatch(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group/, 'it ran in its scope');
+  assert.ok(Number.isInteger(p.wrapper), JSON.stringify(p));
   await finished(r, t);
   assert.ok(texts(t.id).some((d) => d.includes('got [Cara]: build it')));
   assert.ok(texts(t.id).some((d) => d.includes('"type":"result"') && d.includes('"is_error":false')));

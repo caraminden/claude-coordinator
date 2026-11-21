@@ -68,7 +68,8 @@ function failed(t, command, err) {
 function start(t, spec, scope) {
   const dir = t.dir;
   const shell = ['/bin/sh', '-c', SHIM, dir, String(process.pid), spec.command, ...spec.args];
-  const argv = scope.length ? ['systemd-run', ...scope, '--', ...shell] : shell;
+  // Unexpanded: systemd-run reads `$$` and `${...}` in a command as its own (the shell's `$$` would arrive as `$`).
+  const argv = scope.length ? ['systemd-run', ...scope, '--expand-environment=no', '--', ...shell] : shell;
   let out = -1;
   let err = -1;
   /** @type {import('node:child_process').ChildProcessWithoutNullStreams} */

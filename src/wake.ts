@@ -228,6 +228,22 @@ export async function fixShipped(repo: string, branch: string, since: number, sh
   return tip && (await within(repo, sha, tip)) ? tip : null;
 }
 
+/**
+ * #1491: the commits on `branch` (the clone's own, and its origin copy where there is one) made since `since` (ms) that touch
+ * one of `files`, newest first, at most 10, each with its subject and the files of `files` it touched.
+ */
+export async function touchedSince(repo: string, branch: string, files: string[], since: number): Promise<{ sha: string; subject: string; files: string[] }[]> {
+  const refs: string[] = [];
+  for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) if ((await git(repo, ['rev-parse', '-q', '--verify', `${ref}^{commit}`])) !== null) refs.push(ref);
+  if (!refs.length || !files.length) return [];
+  const out = await git(repo, ['log', '--no-merges', '-n', '10', `--since=@${Math.floor(since / 1000)}`, '--format=%x00%H%x09%s', '--name-only', ...refs, '--', ...files]);
+  return (out ?? '').split('\0').filter(Boolean).map((c) => {
+    const [head, ...names] = c.split('\n');
+    const [sha, subject = ''] = head.split('\t');
+    return { sha, subject, files: names.filter((n) => files.includes(n)) };
+  });
+}
+
 /** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
 async function runs(repo: string | null, head: string | null): Promise<boolean> {
   return !!repo && !!head && (await git(repo, ['cat-file', '-e', `${head}^{commit}`])) !== null;

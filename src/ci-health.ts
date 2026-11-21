@@ -51,6 +51,7 @@ import type { GreenRun } from './last-green.ts';
 import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
+import { failuresIn, ghText } from './flake-evidence.ts';
 
 import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
@@ -291,6 +292,10 @@ export interface CiHealthDeps {
   post?: (path: string, as: GithubEnv, fields?: Record<string, string>) => Promise<{ status: number }>;
   /** #1074: the fix minion's branch tip when its work is in `sha` (the default branch's tip on GitHub), else null; none, and no re-run starts. */
   shipped?: (project: Project, ticket: Ticket, sha: string) => Promise<string | null>;
+  /** #1491: a CI job's raw log, or null; gh by default. */
+  log?: (slug: string, jobId: number, as: GithubEnv) => Promise<string | null>;
+  /** #1491: the commits on the scheme's default `branch` since `since` (ms) touching one of `files`, newest first; none, and no minion is credited by its shipped fix. */
+  touched?: (project: Project, branch: string, files: string[], since: number) => Promise<{ sha: string; subject: string; files: string[] }[]>;
   /** Show a held fix minion as waiting on its re-run (`note`), or (null) clear that as it is woken. */
   held?: (ticketId: number, note: string | null) => void;
   /** Dismiss a fix minion whose re-run went green, the way a live deploy does. */
@@ -771,6 +776,7 @@ export class CiHealth {
       const fix = was.rerun?.ticket ?? this.heldFix(p, was);
       if (fix != null) this.dismissFix(fix, `${workflowFile(green)} is green on ${branch} again (${runUrl(slug, green)}, on ${short(green.head_sha)}), so it dismissed this fix minion.`);
     }
+    for (const [w, mark] of Object.entries(red)) await this.noteRed(p, slug, branch, mark, onMain.get(Number(w)) ?? [], as, save);
     for (const [w, mark] of Object.entries(red)) await this.rerun(p, slug, branch, Number(w), mark, onMain.get(Number(w)) ?? [], as, now, save);
     if (pruned) save();
     const out: Problem[] = [];
@@ -787,20 +793,83 @@ export class CiHealth {
     return out;
   }
 
-  /** The minion fixing a red: the one its re-run is for (#1074), else of the scheme's made since its Taskmaster heard whose title or brief names the run, the first open one, else the newest. */
+  /**
+   * The minion fixing a red: the one its re-run is for (#1074), else of the scheme's made since its Taskmaster heard whose title
+   * or brief names a run of the streak, the first open one, else the newest; else (#1491) the one credited by its shipped fix.
+   */
   private fixMinion(p: Project, mark: RedMark): Fix | null {
     const t = this.fixTicket(p, mark);
-    return t ? { number: t.number!, closedAt: t.status === 'closed' ? t.updated_at : null } : null;
+    if (t) return { number: t.number!, closedAt: t.status === 'closed' ? t.updated_at : null };
+    const c = mark.fixer ? this.store.getTicket(mark.fixer.ticket) : null;
+    return c && c.project_id === p.id && c.number != null
+      ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
   }
+  /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
   private fixTicket(p: Project, mark: RedMark): Ticket | null {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
     if (held && held.project_id === p.id && held.number != null) return held;
-    const id = String(mark.run);
+    // #1491: any red run of the streak, not only its first: a minion started later names the newest.
+    const ids = [mark.run, ...(mark.runs ?? [])].map(String);
     // The first open one, else the newest (Josh, 2026-11-19): a second fix after the first closed is the one at work, and a
     // later minion that only quotes the run (a review) can't take the hold from the open one.
     const named = this.store.listTickets(p.id).filter((x) => x.number != null && x.created_at >= (mark.told ?? 0) - 60_000).sort((a, b) => a.created_at - b.created_at)
-      .filter((x) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id));
+      .filter((x) => { const brief = this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? ''; return ids.some((id) => x.title.includes(id) || brief.includes(id)); });
     return named.find((x) => x.status !== 'closed') ?? named.at(-1) ?? null;
+  }
+
+  /**
+   * #1491 (Cara, 2026-11-21, "Credit the real fixer"): what a red needs to find its fixer: the streak's later red runs, its
+   * failing tests (read once), and, while no minion names a run, the first minion after the red whose shipped commit touched
+   * one of those test files: by its "#N" subject, else as the commit a land of the scheme's moved the branch to.
+   * shortcut: a land of several commits with no "#N" subjects is only seen when the touching commit is its last; read the land's range if one is missed.
+   */
+  private async noteRed(p: Project, slug: string, branch: string, mark: RedMark, runs: Run[], as: GithubEnv, save: () => void) {
+    const later = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && r.id !== mark.run && at(r.created_at) > at(mark.at) && !mark.runs?.includes(r.id))
+      .sort((a, b) => at(a.created_at) - at(b.created_at)).map((r) => r.id);
+    if (later.length) {
+      mark.runs = [...(mark.runs ?? []), ...later].slice(-20);
+      save();
+    }
+    if (!mark.failures) {
+      const failures = await this.failuresOf(slug, runs.find((r) => r.id === mark.run) ?? ({ id: mark.run } as Run), as);
+      if (!failures) return; // GitHub didn't answer: the next poll tries again
+      mark.failures = failures;
+      save();
+    }
+    if (mark.fixer || !this.deps.touched || this.fixTicket(p, mark)) return;
+    const files = [...new Set(mark.failures.map((f) => f.file))];
+    if (!files.length) return;
+    const commits = await this.deps.touched(p, branch, files, at(mark.at));
+    if (!commits.length) return;
+    const mine = this.store.listTickets(p.id).filter((t) => t.number != null);
+    const ships = this.store.shippedSince(at(mark.at)).filter((s) => mine.some((t) => t.id === s.ticket_id));
+    for (const c of [...commits].reverse()) {
+      const n = Number(/^#(\d+)\b/.exec(c.subject)?.[1]);
+      const t = mine.find((x) => x.number === n) ?? mine.find((x) => ships.some((s) => s.ticket_id === x.id && c.sha.startsWith(s.commit)));
+      if (!t) continue;
+      mark.fixer = { ticket: t.id, sha: c.sha, file: c.files[0] ?? files[0] };
+      save();
+      return;
+    }
+  }
+
+  /** #1491: a failed run's failing tests from its failed jobs' logs (at most 10), with the test files its run name gives (flake-proof's input) when no log names one; null when GitHub didn't answer. */
+  private async failuresOf(slug: string, r: Run, as: GithubEnv): Promise<RedMark['failures'] | null> {
+    let jobs: Job[];
+    try {
+      jobs = (await this.jobs(slug, r, as)).filter((j) => j.conclusion === 'failure');
+    } catch (err) {
+      if (err instanceof RateLimited) throw err;
+      return null;
+    }
+    const out: NonNullable<RedMark['failures']> = [];
+    for (const j of jobs.slice(0, 5)) {
+      const log = await (this.deps.log ?? ((s: string, id: number, a: GithubEnv) => ghText(a)(`repos/${s}/actions/jobs/${id}/logs`)))(slug, j.id, as);
+      if (log) out.push(...failuresIn(log));
+    }
+    // shortcut: only node's test runner's failures are read; another runner's red names its files only through its run name.
+    if (!out.length) for (const file of new Set(r.display_title?.match(/[\w./-]+\.test\.[cm]?[jt]sx?\b/g) ?? [])) out.push({ file, name: '', message: '' });
+    return out.slice(0, 10);
   }
 
   /**

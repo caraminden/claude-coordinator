@@ -194,6 +194,12 @@ export interface RedMark {
   where?: string;
   /** The re-run of the workflow on main after its fix minion's fix went live (#1074), once Citadel has one. */
   rerun?: Rerun;
+  /** #1491: the streak's later red runs on the branch (a fix minion may name any of them), newest last, at most 20. */
+  runs?: number[];
+  /** #1491: the first red run's failing tests, read once from its failed jobs' logs ([] when none named one): the fixer match and the Investigate brief. */
+  failures?: { file: string; name: string; message: string }[];
+  /** #1491: the minion credited as the fixer when none names the run: the first after the red whose shipped commit touched a failing test file. */
+  fixer?: { ticket: number; sha: string; file: string };
 }
 /**
  * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at
@@ -216,6 +222,8 @@ export interface Rerun {
 export interface Fix {
   number: number;
   closedAt: number | null;
+  /** #1491: credited by its shipped commit, not named: "shipped 768d6ce touching test/x.test.ts". */
+  via?: string;
 }
 
 /**
@@ -269,7 +277,7 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
   }
   if (fix) {
     return { key, quiet: true, title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,
-      why: `the newest ${file} verdict on ${branch} is red`, fix: `#${fix.number} is on it; this clears when ${file} is back to green` };
+      why: `the newest ${file} verdict on ${branch} is red${fix.via ? `; #${fix.number} ${fix.via}` : ''}`, fix: `#${fix.number} is on it; this clears when ${file} is back to green` };
   }
   const late = now - told >= RED_FIX_MS;
   return { key, quiet: !late, title: `${what}${late ? ': no fix minion started' : ''}`,

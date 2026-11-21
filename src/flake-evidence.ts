@@ -37,12 +37,19 @@ const WORKDIR = /(?:file:\/\/)?\/[^\s()]*?\/_work\/[^/\s]+\/[^/\s]+\//g;
 
 /** The first failing test of `file` in a CI job's raw log: its name and the first lines of its error (no stack frames), capped and scrubbed; null when the log doesn't name it. */
 export function failureIn(rawLog: string, file: string): { name: string; message: string } | null {
+  const f = failuresIn(rawLog).find((x) => x.file === file);
+  return f ? { name: f.name, message: f.message } : null;
+}
+
+/** Every failing test in a CI job's raw log (node's "✖ failing tests:" block), in order: its file, name and the first lines of its error, capped and scrubbed. */
+export function failuresIn(rawLog: string): { file: string; name: string; message: string }[] {
   const lines = rawLog.split('\n').map((l) => l.replace(STAMP, '').replace(ESC, '').replace(WORKDIR, '').trimEnd());
   const at = lines.findLastIndex((l) => /^✖ failing tests:\s*$/.test(l));
-  if (at < 0) return null;
+  const out: { file: string; name: string; message: string }[] = [];
+  if (at < 0) return out;
   for (let i = at + 1; i < lines.length; i++) {
     const head = /^test at (\S+?):\d+:\d+$/.exec(lines[i]);
-    if (!head || head[1] !== file) continue;
+    if (!head) continue;
     let name = '';
     const body: string[] = [];
     for (let j = i + 1; j < lines.length && !/^test at /.test(lines[j]); j++) {
@@ -53,13 +60,13 @@ export function failureIn(rawLog: string, file: string): { name: string; message
     }
     while (body.length && !body[0].trim()) body.shift();
     const message = scrubSecrets(body.slice(0, 8).join('\n').trim()).slice(0, MESSAGE_MAX);
-    return { name: scrubSecrets(name).slice(0, 200), message: message || scrubSecrets(name).slice(0, MESSAGE_MAX) };
+    out.push({ file: head[1], name: scrubSecrets(name).slice(0, 200), message: message || scrubSecrets(name).slice(0, MESSAGE_MAX) });
   }
-  return null;
+  return out;
 }
 
 type Gh = (path: string) => Promise<string | null>;
-const ghText: (as: GithubEnv) => Gh = (as) => async (path) => {
+export const ghText: (as: GithubEnv) => Gh = (as) => async (path) => {
   try { return (await run('gh', ['api', '--allow-escape-sequences', path], { env: asEnv(as), timeout: 60_000, maxBuffer: 32 * 1024 * 1024 })).stdout; } catch { return null; }
 };
 

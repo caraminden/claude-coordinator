@@ -49,7 +49,7 @@ import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, chainedStep, fixShipped, githubPrs, LiveWaiters, missingCommits, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { type Chain, chainedStep, fixShipped, githubPrs, touchedSince, LiveWaiters, missingCommits, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { Outbox } from './src/outbox.ts';
 import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
@@ -1338,6 +1338,8 @@ const ciHealth = new CiHealth(store, {
   // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
   // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.
   shipped: (p, t, sha) => (p.repo_dir && t.branch ? fixShipped(p.repo_dir, t.branch, Math.floor(t.created_at / 1000), sha) : Promise.resolve(null)),
+  // #1491: a red's fixer by its shipped commit; the same clone, so a PR-merging scheme is seen once its clone has fetched.
+  touched: (p, branch, files, since) => (p.repo_dir ? touchedSince(p.repo_dir, branch, files, since) : Promise.resolve([])),
   held: (id, note) => {
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;

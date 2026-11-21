@@ -1007,6 +1007,85 @@ test("a red whose first fix minion closed names the open one fixing it now (the 
   assert.match(item('ci.open')!, new RegExp(`still red after fix minion #${review.number} closed`));
 });
 
+// #1336's case (Cara, 2026-11-21, "Credit the real fixer"): flake-proof run 44907507834 went red on machine-jobs.test.ts;
+// #1336, started earlier for a tests.yml red (run 44841937686), shipped 768d6ce0 fixing that test, and the alert still rang.
+const FLAKE_LOG = [
+  '2026-11-21T14:50:52.5397287Z burn-in: test/machine-jobs.test.ts, copy 8 of 10 (its output from the failing tests on):',
+  '2026-11-21T14:50:52.5421000Z ✖ failing tests:',
+  '2026-11-21T14:50:52.5421500Z ',
+  '2026-11-21T14:50:52.5422164Z test at test/machine-jobs.test.ts:272:1',
+  "2026-11-21T14:50:52.5422671Z ✖ only the owner (or an admin) pauses, resumes and stops; paused time is the owner's (711.147143ms)",
+  '2026-11-21T14:50:52.5422900Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:',
+  "2026-11-21T14:50:52.5423100Z   -   'ended'",
+  '2026-11-21T14:50:52.5423300Z       at TestContext.<anonymous> (test/machine-jobs.test.ts:285:10)',
+].join('\n');
+
+test("a red credits the minion whose shipped fix touched its failing test file, though its brief named another run (#1491, #1336's case)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const logs: number[] = [];
+  const asked: [string[], number][] = [];
+  let commits: { sha: string; subject: string; files: string[] }[] = [];
+  const deps = {
+    ...w.outside, tell: () => true,
+    log: async (_slug: string, jobId: number) => (logs.push(jobId), FLAKE_LOG),
+    touched: async (_p: unknown, _branch: string, files: string[], since: number) => (asked.push([files, since]), commits),
+  };
+  const health = new CiHealth(w.store, deps);
+  const fixer = w.minion(w.peek.id, 'ticket/1336-main-red');
+  w.store.addEvent(fixer.id, 'user_message', { text: "Main went red: tests.yml run 44841937686 failed; get main back to green" });
+  w.store.updateTicket(fixer.id, { status: 'closed' });
+  const failed = job({ run_id: 44907507834, name: 'proof', conclusion: 'failure', steps: [{ name: '10 clean runs (1 of 5)', conclusion: 'failure' }] });
+  w.gh.jobs.set(44907507834, [failed]);
+  w.gh.mainRuns = [runOf({ id: 44907507834, event: 'workflow_dispatch', name: 'flake-proof', display_title: 'flake-proof test/machine-jobs.test.ts', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: '43e5e17423', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  assert.deepEqual(logs, [failed.id], 'the failed job\'s log is read once, for its failing tests');
+  assert.deepEqual(asked.at(-1), [['test/machine-jobs.test.ts'], Date.parse(iso(30 * MIN))], 'commits since the red touching its failing test file');
+
+  // Nobody yet: an hour on it rings, as before.
+  await health.tick(NOW + RED_FIX_MS);
+  assert.match(item('ci.open')!, /no fix minion started/);
+
+  // #1336's fix ships (and a later sweep touches the file too): the first one after the red is credited, and the ring stops.
+  commits = [
+    { sha: '4357c1e5f2', subject: '#1474 batch 1: absence sleeps onto until in 31 test files', files: ['test/machine-jobs.test.ts'] },
+    { sha: '768d6ce0ff', subject: `#${fixer.number}: machine-jobs test waits for the job's ended card`, files: ['test/machine-jobs.test.ts'] },
+  ];
+  await health.tick(NOW + RED_FIX_MS + 5 * MIN);
+  assert.equal(item('ci.open'), null, 'a credited fixer stops the ring');
+  assert.match(item()!, new RegExp(`fix minion #${fixer.number} closed, waiting on the next run.*shipped 768d6ce touching test/machine-jobs\\.test\\.ts`));
+  assert.equal(health.hold(fixer.id), null, 'a credited fixer is not held open: it only touched the file');
+  assert.deepEqual(logs, [failed.id], 'not read again');
+
+  // The clearing rule is unchanged: only a newer green clears it.
+  w.gh.mainRuns = [{ ...w.gh.mainRuns[0], id: 44907507999, conclusion: 'success', created_at: iso(-HOUR) }, ...w.gh.mainRuns];
+  await health.tick(NOW + 2 * HOUR);
+  assert.equal(item(), null);
+});
+
+test("a red credits a minion that names a later run of the same red streak, not only its first (#1491)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  const red = (id: number, msAgo: number) => runOf({ id, event: 'schedule', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: `${id}abcdef`, conclusion: 'failure', created_at: iso(msAgo), updated_at: iso(msAgo - MIN) });
+  w.gh.mainRuns = [red(9701, 30 * MIN)];
+  await health.tick(NOW);
+  w.gh.mainRuns = [red(9702, 10 * MIN), ...w.gh.mainRuns];
+  await health.tick(NOW + 5 * MIN);
+  const fix = w.minion(w.peek.id, 'ticket/3-fix');
+  w.store.addEvent(fix.id, 'user_message', { text: 'Fix the red desktop run 9702 on main' });
+  await health.tick(NOW + RED_FIX_MS);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  assert.equal(item('ci.open') ?? null, null, 'no ring: a fix minion names a run of the streak');
+  assert.match(item()!, new RegExp(`\\(run 9701\\): fix minion #${fix.number} started\\.`));
+  assert.match(health.hold(fix.id)!, /run 9701/, 'a named fix minion is held as before');
+  // A red run of the workflow from before the streak began isn't this red's.
+  const other = w.minion(w.peek.id, 'ticket/4-old');
+  w.store.addEvent(other.id, 'user_message', { text: 'Look at run 9600' });
+  assert.equal(health.hold(other.id), null);
+});
+
 test("a red's fix minion is held open; once its fix is on main the workflow is dispatched once per fix, and green dismisses it (#1074)", async () => {
   const w = outsideWorld();
   w.quietDelve();

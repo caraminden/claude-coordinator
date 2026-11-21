@@ -426,6 +426,7 @@ async function record(flow: Flow) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   store.updateTicket(t.id, { status: 'idle' });
+  const leader = store.createTicket({ project_id: project.id, title: 'L', permission_mode: 'default', created_by: 'Cara' }); // a chain's (made before the recorder watches)
   const rec = new Recorder(store, t.id, dir);
   const watch = (r: Runner) => {
     const start = (r as any).startTurn.bind(r);
@@ -440,7 +441,6 @@ async function record(flow: Flow) {
   const outboxes: Outbox[] = [];
   let wakes: TimedWakes | null = null;
   let waiters: LiveWaiters | null = null;
-  const leader = store.createTicket({ project_id: project.id, title: 'L', permission_mode: 'default', created_by: 'Cara' });
   const withOutbox = (r: Runner) => {
     if (!flow.outbox) return r;
     outboxes.at(-1)?.stop();

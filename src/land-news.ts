@@ -72,7 +72,7 @@ export function landNews(output: string, name: (branch: string) => string): News
     } else if (/^CI passed on /.test(s)) slow = null;
     else if ((m = s.match(/^CI is red on the ship train/))) {
       const d = failureDetail(lines.slice(since, i).join('\n'), 1);
-      const names = d.names.length ? `: ${d.names.map(clip).join(', ')}${d.more ? ` +${d.more} more` : ''}` : '';
+      const names = d.names.length ? `: ${d.names.map(clip).join(' · ')}${d.more ? ` +${d.more} more` : ''}` : '';
       news.push({ tone: 'bad', text: `CI red on the train${names}` });
       bisect = { tone: 'warn', text: 'Finding the ship that turned the train red' };
       ciRuns = 0;

@@ -37,7 +37,7 @@ test('a train: who stayed in line (grouped by why), only its last try, CI red wi
   const n = landNews([...front, ...red].join('\n'), name);
   assert.deepEqual(n, [
     { tone: 'info', text: "Stayed in line: #1325, #1355 (doesn't rebase cleanly onto the train); #1337 (changes the ship pipeline, which ships alone)" },
-    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one…, checks run one at a time" },
+    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time" },
     { tone: 'warn', text: 'Finding the ship that turned the train red' },
   ], 'the old train it rode before its own rebase is left out');
 });
@@ -55,7 +55,7 @@ test('the bisect counts its CI runs, or says land.sh\'s K of N; flakes run once 
     `land: the bisect found ticket/1331-e the first ship that turned the train red (${url}/3): it is refused, and the 1 before it ship`,
   ];
   assert.deepEqual(landNews(lines.join('\n'), name).slice(1), [
-    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one…, checks run one at a time" },
+    { tone: 'bad', text: "CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time" },
     { tone: 'warn', text: 'Only flakes failed (memory, minion-index, overlord +1 more): one fresh CI run' },
     { tone: 'bad', text: '#1331 dropped: it turned the train red; back in line: #1351, #1350' },
   ]);

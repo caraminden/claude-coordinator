@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -562,7 +562,7 @@ const drawnWaits = new Map();
 function waitBody(id) {
   const rows = drawnWaits.get(id);
   if (!rows) return null;
-  const clock = (ms) => ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }) : '';
+  const clock = (ms) => (ms ? pacificWeekdayClock(ms) : '');
   return h('div', { class: 'why' }, rows.map((w) => h('div', { class: `wait-line${w.state === 'dropped' || w.state === 'failed' ? ' gone' : ''}` },
     h('b', { class: 'why-title' }, `${w.chip} ${w.kind.replaceAll('_', ' ')}`),
     h('p', {}, w.what),

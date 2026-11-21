@@ -58,7 +58,7 @@ export function missingCritics(entries: ReviewEntry[], ran: Set<number>, files: 
 export function missingText(missing: Missing[]): string {
   const one = (m: Missing) => {
     const files = m.files.length > 3 ? `${m.files.slice(0, 3).join(', ')} and ${m.files.length - 3} more` : m.files.join(', ');
-    return `${m.name} (\`${m.slug}\`, ${m.lines} lines in ${files})`;
+    return `${m.name} (\`${m.slug}\`, ${m.lines} ${m.lines === 1 ? "line" : "lines"} in ${files})`;
   };
   const slugs = missing.map((m) => m.slug);
   const block = missing.filter((m) => m.block).map((m) => m.slug);

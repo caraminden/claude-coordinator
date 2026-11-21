@@ -249,6 +249,25 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   assert.equal(held.status, 400);
   assert.match((await held.json()).error, /^Not handed off: Look \(`look`, last verdict fail\) blocks this ship\./);
 
+  // The critic gate (#1504): a critic whose diff: globs this branch matches, with no run from this minion, refuses the ship first.
+  assert.equal((await call(url, { method: 'POST', body: { slug: 'shots', when: 'diff: glade/**', body: '# Shots' }, as: tm })).status, 201);
+  await call(`${url}/shots`, { method: 'PATCH', body: { trial: false } });
+  // The test's worktree is a plain folder: make it a branch off main that adds one CSS file.
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: t.cwd, stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'base');
+  git('checkout', '-qb', 'ticket/glow');
+  mkdirSync(join(t.cwd, 'glade'), { recursive: true });
+  writeFileSync(join(t.cwd, 'glade', 'glow.css'), '.glow{}\n');
+  git('add', 'glade');
+  git('commit', '-qm', 'glow');
+  const unjudged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }) });
+  assert.equal(unjudged.status, 400);
+  assert.match((await unjudged.json()).error, /^Not handed off: this change matches Shots \(`shots`, 1 line in glade\/glow\.css\)/, "a person's go doesn't stand in for the critic's run");
+  assert.equal((await call(`${url}/shots/runs`, { method: 'POST', body: { round: 1, verdict: 'fail' }, as: minion.id })).status, 201);
+  const judged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }) });
+  assert.doesNotMatch((await judged.json()).error ?? '', /matches Shots/, 'an advisory critic with any verdict lets it through');
+
   // A person disagrees in chat; the minion records it, and the run turns amber.
   assert.equal((await call(`${url}/look/verdicts`, { method: 'POST', body: { person: 'Josh', words: 'x' } })).status, 403, 'no Add box for people (Q13)');
   const v = await call(`${url}/look/verdicts`, { method: 'POST', body: { person: 'Josh', words: 'The glow is meant to be faint.' }, as: minion.id });

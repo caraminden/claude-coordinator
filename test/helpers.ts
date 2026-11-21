@@ -146,6 +146,10 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // A CI runner that is itself a systemd service sets INVOCATION_ID, which turns the shared tool server on (#1259):
       // test turns keep their own helpers unless a test asks for the pool.
       TURN_POOL: '0',
+      // The background passes (indexers, sweeps) skip while the box's CPU or memory pressure is high (#1301): a test
+      // server reads a pressure file that isn't there (no reading, so never starved), or the full suite's own load would
+      // hold back the index a test waits on (overlord.test.ts, #1349). A test of the gate passes its own file.
+      CITADEL_PSI_CPU: join(root, 'no-psi-cpu'), CITADEL_PSI_MEMORY: join(root, 'no-psi-memory'),
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

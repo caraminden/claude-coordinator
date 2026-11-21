@@ -475,7 +475,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 /* The CI page (#968, layout B): schemes with CI on the left, the picked one's detail on the right. */
 .ci-page { min-width: 0; padding: var(--space-3); }
 .ci-split { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: var(--space-4); align-items: start; }
-.ci-list { display: grid; gap: 2px; position: sticky; top: calc(var(--topbar-h, 0px) + var(--space-3)); }
+.ci-list { display: grid; gap: 2px; position: sticky; top: calc(var(--topbar-h, 0px) + var(--rel-head-h, 3.5rem) + var(--space-3)); }
 .ci-li { display: grid; grid-template-columns: 0.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.6rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .ci-li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ci-li.on { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }

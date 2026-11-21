@@ -302,6 +302,8 @@ export function releasesShell() {
         h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
         close('wide-only', 'close'))));
   const list = h('nav', { class: 'ci-list', 'aria-label': 'Schemes' });
+  // The page header is sticky too: the list sticks just below it, never under it.
+  new ResizeObserver(() => el.style.setProperty('--rel-head-h', `${head.getBoundingClientRect().height}px`)).observe(head);
   const tabsEl = h('div');
   const body = h('div', { class: 'rel-tab' });
   const detail = h('div', { class: 'ci-detail' }, tabsEl, body);

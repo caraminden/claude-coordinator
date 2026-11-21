@@ -856,7 +856,7 @@ test('a land stopped from the Status page says who stopped it and that nothing l
   assert.equal(s.landings.landPid(1), null, 'nothing runs any more');
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1);
-  assert.match(s.sent[0], /stopped by Josh from the Status page at 1:05 PM PST\. Nothing landed and main is untouched\./);
+  assert.match(s.sent[0], /stopped by Josh from the Status page at \w{3} \d+, 1:05 PM PST\. Nothing landed and main is untouched\./);
   assert.doesNotMatch(s.sent[0], /didn't go through|Fix the cause/);
   assert.deepEqual(failed, [], 'not counted as a failed ship');
   assert.equal(s.ticket.note, 'ship stopped');

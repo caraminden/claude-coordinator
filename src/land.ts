@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { HostJobs } from './host-job.ts';
+import { pacificStamp } from './pacific.ts';
 
 export interface Landing {
   /** The tail of what land.sh printed so far. */
@@ -610,7 +611,7 @@ export class LandHandoffs {
       // A person stopped it, from the Status page or by stopping the minion (#1168): not the minion's red, so no failure count and no "fix the cause".
       store.updateTicket(id, { state: null, note: 'ship stopped' });
       runner.broadcastTicket(id);
-      const at = new Date(stop.at).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      const at = pacificStamp(stop.at);
       const moved = /^land: \S+ is now at [0-9a-f]{7,40} /m.test(run.output);
       runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`);
       return;

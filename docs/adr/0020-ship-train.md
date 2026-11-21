@@ -83,6 +83,11 @@ Who is passed over (each keeps its place, and ships on its own when it reaches t
 - a ship landed with `LAND_TRAIN=0`, or by a land.sh older than the train (its queue ticket has no `train` line);
 - merges into a build, `--full` and `--build` runs.
 
+The guard tests (`guards()`, #1240) run on the train's top too, before its CI run (#1479, after the Nov 21 03:46 PST
+incident cost 6 CI runs on one rider's guard break). Red there: the train's prefixes are bisected with them, the first
+red rider is refused with their output, and the train is built again without it. A red train's CI bisect runs them on
+each step first, and a guard red is that step's answer with no CI run.
+
 No train forms when CI can't answer (no remote, `LAND_CI=0`, a recent ci-down note), while deploys are refusing or
 rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all perigee should take on. A train keeps its
 riders while it waits, for a busy runner or for a quiet perigee (#1361, Cara 2026-11-20, "Wait for a busy desktop"):

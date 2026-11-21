@@ -373,8 +373,9 @@ export function landResult(output: string, code: number): LandResult {
  * Whether a failed push of the default branch will fail the same way again (KT1, #1519): a login or access problem, or
  * origin's branch moved on its own. Anything else (the network, GitHub's 5xx, the 60 s timeout's empty output) passes.
  */
-export function lastingPushFailure(error: string): 'access' | 'moved' | null {
-  if (/\[rejected\]|non-fast-forward|fetch first|GH006|protected branch|hook declined/i.test(error)) return 'moved';
+export function lastingPushFailure(error: string): 'access' | 'moved' | 'refused' | null {
+  if (/GH006|protected branch|hook declined|pre-receive hook/i.test(error)) return 'refused';
+  if (/\[rejected\]|non-fast-forward|fetch first/i.test(error)) return 'moved';
   if (/repository not found|permission denied|permission to \S+ denied|denied to|error: 40[13]\b|\b40[13]\b.*(forbidden|unauthori[sz]ed)|authentication failed|could not read (username|password)|invalid username or password|not authori[sz]ed|write access|bad credentials|access denied/i.test(error)) return 'access';
   return null;
 }
@@ -387,7 +388,7 @@ function unpushedWake(r: LandResult, what: string, apps: string[], tail: string)
   const own = `Don't push ${b} yourself: the scheme's guard, its pre-push hook and the tripwire all refuse it, and land.sh is its one route.`;
   const again = `hand it off again with hand_off_land: nothing new merges, it re-checks the branch and pushes ${b}${apps.length ? `, and the scheme's apps (${apps.join(', ')}), not deployed for it yet, deploy once it's pushed` : ''}`;
   const body = lasting
-    ? `That won't clear by itself (${lasting === 'access' ? "the GitHub login this scheme's ships push with can't reach or write to the repo" : `origin's ${b} moved on its own, so a person merges it into the local ${b} first`}), so shipping again now fails the same way. Tell a person in your reply, quoting the error, and stay open. Never try another login. ${own} Once they say it's fixed, ${again}.`
+    ? `That won't clear by itself (${lasting === 'access' ? "the GitHub login this scheme's ships push with can't reach or write to the repo" : lasting === 'refused' ? `origin refuses pushes to ${b}: a protected branch or a server hook, which a person changes on GitHub` : `origin's ${b} moved on its own, so a person merges it into the local ${b} first`}), so shipping again now fails the same way. Tell a person in your reply, quoting the error, and stay open. Never try another login. ${own} Once they say it's fixed, ${again}.`
     : `That looks like a passing failure (the network or GitHub), so ${again}. ${own} If it fails the same way again, tell a person in your reply, quoting the error.`;
   return `${head}\n\n${body}\n\n${tail}`;
 }
@@ -433,7 +434,7 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
 const PHASES: [RegExp, string][] = [
-  [/^(deploy: |land: main is now at )/, 'deploying'],
+  [/^(deploy: |land: (?!build\/)\S+ is now at )/, 'deploying'],
   [/^land: waiting for CI or a quiet perigee/, 'waiting for CI or a quiet perigee'],
   [/^land: (waiting for CI|failed in the full run but passed alone.*running CI once more)/, 'waiting on CI'],
   [/^land: (running |CI FALLBACK)/, 'running tests'],

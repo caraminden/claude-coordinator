@@ -270,6 +270,7 @@ test('a passing push failure says to hand it off again; a lasting one (login, ac
     "remote: Permission to o/r.git denied to someone.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403",
     "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
     " ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/o/r.git'",
+    'remote: error: GH006: Protected branch update failed for refs/heads/master.',
   ];
   for (const [i, err] of [...passing, ...lasting].entries()) {
     const s = setup(`unpushed-kind-${i}`);
@@ -807,6 +808,8 @@ test("a feeder's merge into a build wakes the build's parked owner with one mess
 test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase(''), 'landing: starting');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12 "x")\n'), 'landing: in line');
+  assert.equal(landPhase('land: CI passed\nland: master is now at d1a5c2f "x"\n'), 'landing: deploying', 'any default branch (KT2)');
+  assert.equal(landPhase('land: waiting for CI on abc\nland: build/3 is now at d1a5c2f "x"; master is untouched\n'), 'landing: waiting on CI', 'a build merge is not a deploy');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
   assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
   assert.equal(landPhase('land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara\'s desktop (at most 6 min, then it runs here)\n'), 'landing: waiting on CI');

@@ -19,16 +19,18 @@ address. It holds an `<app>/` folder: the launcher as `<app>.exe`, `launcher.jso
 On every start the launcher:
 
 1. Starts the current build at once, then reads `feed.json` in the background.
-2. Downloads a build the feed names that it doesn't have and that never failed on this PC. It checks the
+2. Downloads a build the feed names that it doesn't have and that this PC hasn't refused. It checks the
    size and SHA-256 against the feed, throws away a mismatch and keeps nothing half-written.
 3. On the next start it tries that build. The build must say it started within 30 s (below). If it
    crashes or stays silent, the launcher kills it and starts the old build.
 4. A build that started is current but on probation: the launcher stays and watches it for 10 minutes.
-   Running that long, or closing with exit code 0 first, makes it good. A non-zero exit inside the 10
-   minutes is a crash: the launcher starts the last good build again by itself and shows one line on
+   Running that long, or closing with exit code 0 first, makes it good; a clean exit within 30 s of the
+   start proves nothing (it may have handed off to a copy already running), so the build stays on
+   probation and the next start watches it again. A non-zero exit inside the 10 minutes is a crash: the launcher starts the last good build again by itself and shows one line on
    top ("My App build 7 crashed, so it went back to build 6. Build 7 gets one more try next time.").
    Windows shutting down or logging off isn't a crash, and a watch cut short (the launcher was closed)
-   starts over on the next start.
+   starts over on the next start. The feed is read beside the watch, so a download never holds up a roll
+   back. A first build with nothing older to go back to stays current, on probation, after a crash.
 5. A failed start or a crash on probation counts against the build: it gets one more try on the next
    start, and a second failure refuses it on this PC for good. A newer build in the feed is tried in
    place of the second go. The last good build stays on disk until the new one is good.
@@ -46,7 +48,9 @@ its current build is good and the builds it refused stay refused.
 - **Start signal.** The launcher sets `CITADEL_STARTED_FILE` (and `CITADEL_BUILD`) for the app. Once
   its window is up and it got past its own setup, the app writes any text to that file. That is
   `started: "file"`, the default. On probation, a non-zero exit code is a crash, so quit with exit
-  code 0 when the person closes the app. An app you can't change uses `started: "alive"`: still running (or
+  code 0 when the person closes the app, `started: "alive"` apps too. The feed's `exe` must be the app's
+  own process: an exe that starts another and exits is never watched, so its build stays on probation
+  and its crashes aren't caught. An app you can't change uses `started: "alive"`: still running (or
   exited 0) after 30 s counts as started. That is weaker: a build that hangs at a blank window passes.
 - **Read-only build folder.** Each build lives in its own `versions\<n>\` folder, which goes away two
   builds later. Keep settings and saves elsewhere (`%APPDATA%\<app>`).
@@ -84,4 +88,5 @@ test there. A new source file goes in `Launcher.csproj` and `LAUNCHER_SOURCES` i
 perigee's .NET SDK (`~/.dotnet/dotnet build`), keyed by the source's hash. Once the change is live,
 every feed offers it. Prove a change on real Windows first (`citadel:run-on-windows`). The kit's test
 app (`kit/desktop-launcher/testapp`, broken on purpose when a `broken.txt` sits beside it) is the app
-to try it with. A dev copy only reaches the test box on ports 8000-8999 of perigee's tailnet address.
+to try it with (`crash-after.txt` holding seconds makes it crash that long after it started), and
+`run-on-windows`' `scripts/desktop-launcher/trial.ps1` runs the trial rules on the test box. A dev copy only reaches the test box on ports 8000-8999 of perigee's tailnet address.

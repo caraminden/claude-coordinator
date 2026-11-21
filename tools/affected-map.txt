@@ -42,6 +42,8 @@ tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/run
 tools/land.sh: test/ci-runner-choice.test.ts
 tools/win-test-box/**: test/ps1-lint.test.ts
 kit/skills/**: test/ps1-lint.test.ts test/skill-evals.test.ts
+# The kit desktop launcher: its trial rules on .NET 8, and the feed that builds it from these sources.
+kit/desktop-launcher/**: test/desktop-launcher-trial.test.ts test/desktop-feed.test.ts
 tools/skill-evals/**: test/skill-evals.test.ts
 
 # Test code: the guards over every test file.

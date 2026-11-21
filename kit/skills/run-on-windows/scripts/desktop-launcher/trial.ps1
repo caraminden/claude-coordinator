@@ -134,13 +134,20 @@ $s = Get-State $d
 Test-That 'broken: 8 refused' (-not $s.pending -and $s.failed -contains 8 -and $s.current.id -eq 6)
 Show-Install $d
 
-# 4. A clean exit inside probation makes the build good.
+# 4. A clean exit inside probation makes the build good, but not one within the 30 s start grace (a hand-off proves nothing).
 $d = New-Install 'clean' ($good6 + ',"pending":{"id":9,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 9 = 'good' }
 $l = Start-Launcher $d
 Test-That 'clean: build 9 on probation' (Wait-Log $d 'build 9 started: it is now current, on probation' 45)
 Start-Sleep -Seconds 3
 Close-App $d
-Test-That 'clean: closing it passes probation' (Wait-Log $d 'build 9 passed probation \(exited cleanly' 20)
+Test-That 'clean: closing it 3 s in leaves it on probation' (Wait-Log $d 'build 9 exited cleanly \d+ s after it started, too soon' 20)
+Test-That 'clean: the launcher leaves after the early close' ($l.WaitForExit(10000))
+Test-That 'clean: 9 still on probation' ((Get-State $d).probation -eq 9)
+$l = Start-Launcher $d
+Test-That 'clean: the next start watches 9 again' (Wait-Log $d 'starting build 9: still on probation' 30)
+Start-Sleep -Seconds 32
+Close-App $d
+Test-That 'clean: closing it after the grace passes probation' (Wait-Log $d 'build 9 passed probation \(exited with code 0' 20)
 Test-That 'clean: the launcher leaves' ($l.WaitForExit(10000))
 $s = Get-State $d
 Test-That 'clean: 9 current and good, 6 kept to go back to' ($s.current.id -eq 9 -and -not $s.probation -and $s.previous.id -eq 6)
@@ -157,7 +164,7 @@ $s = Get-State $d
 Test-That 'cut: still on probation after the launcher was closed' ($s.current.id -eq 10 -and $s.probation -eq 10 -and $s.previous.id -eq 6)
 $l = Start-Launcher $d
 Test-That 'cut: the next start watches it again' (Wait-Log $d 'starting build 10: still on probation' 30)
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 32
 Close-App $d
 Test-That 'cut: closing it passes probation' (Wait-Log $d 'build 10 passed probation' 20)
 Show-Install $d

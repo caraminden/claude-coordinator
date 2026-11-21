@@ -104,8 +104,7 @@ namespace Citadel.Desktop
 
     public class Launcher
     {
-        /// <summary>How long a new build has to say it started (Peek Auras' START_GRACE).</summary>
-        public static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
+        public static readonly TimeSpan Grace = Trial.Grace;
         const long MaxDownload = 4L * 1024 * 1024 * 1024;
 
         readonly string dir;
@@ -130,7 +129,6 @@ namespace Citadel.Desktop
         {
             ReadConfig();
             bool mine;
-            string notice = null;
             using (var mutex = new Mutex(false, "Local\\citadel-launcher-" + config.App))
             {
                 try { mine = mutex.WaitOne(0); } catch (AbandonedMutexException) { mine = true; }
@@ -150,19 +148,25 @@ namespace Citadel.Desktop
                         CheckForUpdates(state, false);
                         if (state.Pending == null) throw new Exception("Couldn't download " + Title + " from " + config.Feed + ": see launcher.log.");
                     }
-                    var started = state.Pending != null ? TryPending(state, ref notice) : StartCurrent(state);
+                    var started = state.Pending != null ? TryPending(state) : StartCurrent(state);
                     EndLauncherTrial();
                     Cleanup(state);
-                    CheckForUpdates(state, true);
-                    // The launcher stays to watch a build on probation; another start meanwhile runs it without a watch.
-                    if (started != null) notice = WatchProbation(state, started) ?? notice;
+                    if (started == null) CheckForUpdates(state, true);
+                    else
+                    {
+                        // The launcher stays to watch a build on probation, with the feed read beside it so a long download
+                        // can't hold up a roll back. Another start meanwhile runs the current build without a watch.
+                        var updates = new Thread(() => CheckForUpdates(state, true)) { IsBackground = true };
+                        updates.Start();
+                        WatchProbation(state, started);
+                        updates.Join();
+                    }
                 }
                 finally
                 {
                     if (mine) mutex.ReleaseMutex();
                 }
             }
-            if (notice != null) Notify(notice);
             return 0;
         }
 
@@ -186,9 +190,9 @@ namespace Citadel.Desktop
         }
 
         /// <summary>Save, but a full disk mustn't keep the app from starting: the state on disk is then a step behind and the next start picks up from it.</summary>
-        void TrySave(State s)
+        bool TrySave(State s)
         {
-            try { Save(s); } catch (Exception e) { Log("couldn't save state.json: " + e.Message); }
+            try { Save(s); return true; } catch (Exception e) { Log("couldn't save state.json: " + e.Message); return false; }
         }
 
         // ---- Starting the app ----
@@ -226,7 +230,7 @@ namespace Citadel.Desktop
         }
 
         /// <summary>Start the pending build on trial. Once it says it started it is current, on probation; else it is stopped and the current one starts.</summary>
-        Started TryPending(State state, ref string notice)
+        Started TryPending(State state)
         {
             var b = state.Pending;
             string started = P("started-" + b.Id);
@@ -255,59 +259,71 @@ namespace Citadel.Desktop
             }
             if (ok)
             {
-                Trial.Started(state);
-                Log("build " + b.Id + " started: it is now current, on probation for " + Trial.Probation.TotalMinutes + " min");
-                TrySave(state);
+                lock (state)
+                {
+                    Trial.Started(state);
+                    Log("build " + b.Id + " started: it is now current, on probation for " + Trial.Probation.TotalMinutes + " min");
+                    TrySave(state);
+                }
                 return new Started { Process = p, At = at };
             }
             if (p != null) p.Dispose();
             var r = Trial.StartFailed(state);
             Log("build " + b.Id + " failed its start (" + why + "): " + (r.Refused ? "its second failure, so it is refused" : "it gets one more try on the next start")
                 + "; rolling back to " + (state.Current == null ? "nothing" : "build " + state.Current.Id));
-            TrySave(state);
-            if (r.Refused) TryDeleteDir(P("versions", b.Id.ToString()));
+            // A refused build's folder goes only once state.json says so: else the next start would try a build with no files.
+            if (TrySave(state) && r.Refused) TryDeleteDir(P("versions", b.Id.ToString()));
             if (state.Current == null) throw new Exception(Title + "'s first build didn't start (" + why + "): see launcher.log.");
-            notice = r.Notice(Title);
+            Notify(r.Notice(Title));
             return StartCurrent(state);
         }
 
-        /// <summary>Wait out the current build's probation. It passes once it has run Trial.Probation or exits cleanly; a crash goes back to the last good build. Returns the line for the person, if any.</summary>
-        string WatchProbation(State state, Started started)
+        /// <summary>Wait out the current build's probation. It passes once it has run Trial.Probation or exits cleanly; a crash goes back to the last good build, with one line for the person.</summary>
+        void WatchProbation(State state, Started started)
         {
             var b = state.Current;
             int? code;
+            TimeSpan ran;
             using (var p = started.Process)
             {
                 var left = Trial.Probation - (DateTime.UtcNow - started.At);
                 if (left > TimeSpan.Zero) p.WaitForExit((int)Math.Ceiling(left.TotalMilliseconds));
                 code = p.HasExited ? p.ExitCode : (int?)null;
+                ran = (code == null ? DateTime.UtcNow : p.ExitTime.ToUniversalTime()) - started.At;
             }
-            var ran = DateTime.UtcNow - started.At;
             var verdict = Trial.Judge(ran, code);
             if (verdict == Verdict.Crashed && ShuttingDown())
             {
                 Log("build " + b.Id + " was stopped by Windows shutting down: still on probation");
-                return null;
+                return;
             }
-            if (verdict != Verdict.Crashed)
+            if (verdict == Verdict.Running)
             {
-                Trial.Passed(state);
-                TrySave(state);
-                Log("build " + b.Id + " passed probation (" + (code == null ? "ran " + Trial.Probation.TotalMinutes + " min" : "exited cleanly after " + (int)ran.TotalSeconds + " s") + "): it is good");
-                return null;
+                Log("build " + b.Id + " exited cleanly " + (int)ran.TotalSeconds + " s after it started, too soon to prove anything (did it hand off to a copy already running?): still on probation");
+                return;
             }
-            var r = Trial.Crashed(state);
-            if (r == null)
+            Rollback r;
+            lock (state)
             {
-                Log("build " + b.Id + " crashed on probation (exit code " + code + ") after " + (int)ran.TotalSeconds + " s, and there's no older build to go back to");
-                return null;
+                if (verdict == Verdict.Passed)
+                {
+                    Trial.Passed(state);
+                    TrySave(state);
+                    Log("build " + b.Id + " passed probation (" + (code == null ? "ran " + Trial.Probation.TotalMinutes + " min" : "exited with code " + code + " after " + (int)ran.TotalSeconds + " s") + "): it is good");
+                    return;
+                }
+                r = Trial.Crashed(state);
+                if (r == null)
+                {
+                    Log("build " + b.Id + " crashed on probation (exit code " + code + ") after " + (int)ran.TotalSeconds + " s, and there's no older build to go back to: it stays current, on probation");
+                    return;
+                }
+                Log("build " + b.Id + " crashed on probation (exit code " + code + ") after " + (int)ran.TotalSeconds + " s: " + (r.Refused ? "its second failure, so it is refused" : "it gets one more try on the next start")
+                    + "; rolling back to build " + state.Current.Id);
+                if (TrySave(state) && r.Refused) TryDeleteDir(P("versions", b.Id.ToString()));
             }
-            Log("build " + b.Id + " crashed on probation (exit code " + code + ") after " + (int)ran.TotalSeconds + " s: " + (r.Refused ? "its second failure, so it is refused" : "it gets one more try on the next start")
-                + "; rolling back to build " + state.Current.Id);
-            TrySave(state);
-            if (r.Refused) TryDeleteDir(P("versions", b.Id.ToString()));
             StartPlain(state.Current);
-            return r.Notice(Title);
+            Notify(r.Notice(Title));
         }
 
         [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
@@ -316,10 +332,16 @@ namespace Citadel.Desktop
         /// <summary>Windows is logging off or shutting down (SM_SHUTTINGDOWN): an app stopped by it didn't crash.</summary>
         static bool ShuttingDown() { try { return GetSystemMetrics(0x2000) != 0; } catch { return false; } }
 
-        /// <summary>One line for the person, on top of the app that started instead (MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST).</summary>
+        /// <summary>
+        /// One line for the person, on top of the app that started instead (MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST).
+        /// On its own thread, so it shows at once while the launcher carries on; the launcher's process stays until it is closed.
+        /// </summary>
         void Notify(string line)
         {
-            try { MessageBoxW(IntPtr.Zero, line, Title, 0x40 | 0x10000 | 0x40000); } catch (Exception e) { Log("couldn't show: " + line + " (" + e.Message + ")"); }
+            new Thread(() =>
+            {
+                try { MessageBoxW(IntPtr.Zero, line, Title, 0x40 | 0x10000 | 0x40000); } catch (Exception e) { Log("couldn't show: " + line + " (" + e.Message + ")"); }
+            }).Start();
         }
 
         void Cleanup(State state)
@@ -351,10 +373,16 @@ namespace Citadel.Desktop
             {
                 try
                 {
-                    var old = state.Pending;
-                    state.Pending = Stage(f);
-                    Save(state);
-                    if (old != null) TryDeleteDir(P("versions", old.Id.ToString()));
+                    var staged = Stage(f);
+                    Build old;
+                    // The probation watch may have changed the state meanwhile (it runs beside this).
+                    lock (state)
+                    {
+                        old = state.Pending;
+                        state.Pending = staged;
+                        Save(state);
+                    }
+                    if (old != null && old.Id != staged.Id) TryDeleteDir(P("versions", old.Id.ToString()));
                     Log("build " + f.Build + " is ready: it is tried on the next start");
                 }
                 catch (Exception e)
@@ -579,9 +607,12 @@ namespace Citadel.Desktop
         static void TryDelete(string f) { try { if (File.Exists(f)) File.Delete(f); } catch { } }
         static void TryDeleteDir(string d) { try { if (Directory.Exists(d)) Directory.Delete(d, true); } catch { } }
 
+        readonly object logLock = new object();
+
+        /// <summary>The probation watch and the feed read log from two threads, so one writes at a time.</summary>
         public void Log(string line)
         {
-            try
+            lock (logLock) try
             {
                 string log = P("launcher.log");
                 if (File.Exists(log) && new FileInfo(log).Length > 512 * 1024) { TryDelete(log + ".1"); File.Move(log, log + ".1"); }

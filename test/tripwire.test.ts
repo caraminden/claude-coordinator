@@ -729,6 +729,8 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     for (const move of ['git checkout -f', 'git checkout --force', 'git checkout -qf']) assert.match(at(move) ?? '', /^Commit first: .* \(a\.txt\)/, move);
     // Committing earlier in the same call is the normal way to move.
     assert.equal(at('git add -A && git commit -qm wip && git checkout other'), null);
+    // -f on a new branch still resets the tree, so -b/-B/--orphan only skip the check without it.
+    for (const move of ['git checkout -f -b x', 'git checkout --force -B x', 'git checkout -f --orphan x']) assert.match(at(move) ?? '', /^Commit first: .* \(a\.txt\)/, move);
     for (const ok of ['git checkout -b x', 'git reset a.txt', 'git merge --abort', 'git rebase --continue', 'git commit -am wip && git status']) assert.equal(at(ok), null, ok);
     // An unknown folder lets it through.
     assert.equal(at('git merge other', null), null);
@@ -812,6 +814,10 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Write', { file_path: `${home}/claude-coordinator/src/x.ts` }));
   assert.ok(t('Edit', { file_path: `${home}/.config/claude-coordinator/env` }));
   assert.ok(t('MultiEdit', { file_path: `${data}/projects/1/tickets/3/a.ts` }));
+  // Each of these is refused for its own reason, so dropping one rule can't hide behind another.
+  // Every write path read-checks the folder first, so the write rule at tripwire.ts:65 can't be told apart from the read rule (t06 is equivalent); these pin that the folder stays refused.
+  for (const cmd of ['cp /tmp/x ~/.config/claude-coordinator/env', 'rm ~/.config/claude-coordinator/env', 'mv /tmp/x ~/.config/claude-coordinator/env']) assert.match(bash(cmd) ?? '', /\.config\/claude-coordinator .*env file/, cmd);
+  assert.match(tripwire({ tool_name: 'Write', tool_input: { file_path: `${data}/turns/9-1/hooks.json` }, cwd: worktree }, { ...cfg, turnDir: `${data}/turns/9-1` })?.reason ?? '', /this turn's own folder/);
   assert.ok(t('NotebookEdit', { notebook_path: `${home}/.config/systemd/user/x.service` }));
   assert.ok(t('Write', { file_path: '../../../../coordinator.db' }));
   assert.ok(t('Read', { file_path: `${home}/.ssh/id_ed25519` }));

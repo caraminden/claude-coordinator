@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -19,6 +19,8 @@ const calls = join(dir, 'calls');
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 const run = (...args: string[]) =>
   spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir } });
+const runTwo = (...args: string[]) =>
+  spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir, TWO: '1' } });
 
 test('before setup it says to run setup', () => {
   const r = run('/bin/true');
@@ -34,20 +36,41 @@ test('routes dynamic binaries through the generic loader and static ones directl
 printf '%s\\n' "$*" >> '${calls}'
 for a; do case $a in --log-file=*) log=\${a#--log-file=};; esac; done
 printf '==1== Events    : Ir\\n==1== Collected : 1234\\n' > "$log"
+[ -z "$TWO" ] || printf '==2== Collected : 66\\n' >> "$log"
 `);
   chmodSync(join(vgBin, 'valgrind'), 0o755);
   const script = join(dir, 'static-ish');
   writeFileSync(script, '#!/bin/sh\n');
   chmodSync(script, 0o755);
 
-  const dyn = run('--dump-instr=yes', '/bin/true', 'arg1');
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  copyFileSync('/bin/true', join(bin, 'true'));
+  chmodSync(join(bin, 'true'), 0o755);
+  const dyn = run('--dump-instr=yes', join(bin, 'true'), 'arg1');
   assert.equal(dyn.status, 0, dyn.stderr);
   assert.match(dyn.stdout, /^Ir 1234$/m);
+  assert.deepEqual(readdirSync(bin), ['true'], 'the copy beside it is removed');
+  // A folder it can't write to (root writes anywhere, so there it runs from beside the original too).
+  const ro = join(dir, 'ro');
+  mkdirSync(ro);
+  copyFileSync('/bin/true', join(ro, 'true'));
+  chmodSync(join(ro, 'true'), 0o755);
+  chmodSync(ro, 0o555);
+  const readOnlyDir = run(join(ro, 'true'));
+  chmodSync(ro, 0o755);
+  assert.equal(readOnlyDir.status, 0, readOnlyDir.stderr);
+  const root = process.getuid?.() === 0;
+  if (!root) assert.match(readOnlyDir.stderr, /can't write beside \S+\/ro\/true/);
   const notDynamic = run('--tool=cachegrind', '--', script);
   assert.equal(notDynamic.status, 0, notDynamic.stderr);
+  const children = runTwo('--trace-children=yes', script);
+  assert.match(children.stdout, /^Ir 1300$/m);
+  assert.match(children.stderr, /2 processes; Ir is their sum/);
 
-  const [first, second] = readFileSync(calls, 'utf8').trim().split('\n');
-  assert.match(first, /^--tool=callgrind --dump-instr=yes --callgrind-out-file=\S+\/callgrind\.out\.\d+ --log-file=\S+ \S+\/ld-linux-x86-64\.so\.2 --library-path \S+ \S+\/true arg1$/);
-  assert.ok(!first.includes(' /bin/true'), 'runs a copy, not the original');
-  assert.match(second, new RegExp(`^--tool=cachegrind --log-file=\\S+ ${script}$`));
+  const [first, second, third] = readFileSync(calls, 'utf8').trim().split('\n');
+  // The copy runs beside the original (so $ORIGIN still works), through the generic loader.
+  assert.match(first, new RegExp(`^--tool=callgrind --dump-instr=yes --callgrind-out-file=\\S+/callgrind\\.out\\.\\d+\\.%p --log-file=\\S+ \\S+/ld-linux-x86-64\\.so\\.2 --library-path \\S+ ${bin}/\\.citadel-callgrind\\.\\w{6} arg1$`));
+  assert.match(second, root ? /\/ro\/\.citadel-callgrind\.\w{6}$/ : /--library-path \S+ \S+\/citadel-callgrind\.\w+\/true$/);
+  assert.match(third, new RegExp(`^--tool=cachegrind --log-file=\\S+ ${script}$`));
 });

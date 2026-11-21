@@ -172,7 +172,7 @@ Tool preference:
 **Tag every debug log** with a unique prefix, e.g. `[DEBUG-a4f2]`. Cleanup at the end becomes a single grep. Untagged logs survive; tagged logs die.
 
 **Perf branch.** For performance regressions, logs are usually wrong. Instead: establish a baseline measurement (timing harness, `performance.now()`, profiler, query plan), then bisect. Measure first, fix second.
-On perigee, a small slowdown hides in timing noise: count instructions instead with `citadel-callgrind <binary> [args]` (on every turn's PATH; `citadel-callgrind setup` once per account, `--help`). The count repeats exactly run to run; build the bench without `-march=native` / `target-cpu=native`, and for Rust prefer `--target x86_64-unknown-linux-musl`.
+On perigee, a small slowdown hides in timing noise: count instructions instead with `citadel-callgrind <binary> [args]` (on every turn's PATH; `citadel-callgrind setup` once per account, `--help`). A single-threaded bench repeats its count exactly; with threads, run the baseline a few times first to see its spread. Build the bench without `-march=native` / `target-cpu=native`, and for Rust prefer `--target x86_64-unknown-linux-musl`.
 
 ## Phase 5: Fix + regression test
 

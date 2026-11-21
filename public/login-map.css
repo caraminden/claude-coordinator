@@ -1,0 +1,204 @@
+/* The sign-in map (#1500): Cara's picked map behind the sign-in and invite cards, and the cold-open splash.
+   The scene rules below the layout are the mock's (shared folder, mockups/login-background/, scenes*.css), cut to
+   what this one map uses and scoped under .login-map; the mock's `.dark` frame is the dark media query here. */
+.login-map { position: fixed; inset: var(--login-map-top, 0px) 0 0; z-index: 0; pointer-events: none; }
+/* The card sits over the map, below the CITADEL banner. */
+.login-map ~ .login { position: relative; z-index: 1; margin-top: calc(92px - 1.25rem); box-shadow: 0 1px 2px rgb(0 0 0 / .08), 0 12px 40px rgb(20 8 40 / .22); }
+@media (max-aspect-ratio: 1/1) { .login-map ~ .login { margin-top: calc(84px - 1.25rem); } }
+@media (prefers-color-scheme: dark) { .login-map ~ .login { box-shadow: 0 0 0 1px rgb(255 255 255 / .04), 0 16px 48px rgb(0 0 0 / .55); } }
+/* The map reaches the window's edge: no empty scrollbar gutter beside it. */
+html:has(#app > .login-map), html:has(#splash) { scrollbar-gutter: auto; }
+
+/* The splash on every cold open: the map with Citadel's mark, over everything, lifted by login-map-art.js. */
+#splash { --login-map-top: 0px; z-index: 100; transition: opacity .5s ease, visibility 0s .5s; }
+#splash.gone { opacity: 0; visibility: hidden; }
+#splash .splash-mark { position: absolute; left: 50%; top: 36%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent); color: var(--ink); box-shadow: 0 12px 40px rgb(20 8 40 / .25); font: 600 30px/1.2 var(--font, system-ui, sans-serif); letter-spacing: .02em; white-space: nowrap; }
+#splash .splash-mark svg { width: 34px; height: 34px; fill: var(--accent); animation: splash-pulse 1.1s ease-in-out both; }
+@keyframes splash-pulse { 0% { transform: scale(.7); opacity: 0; } 40% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { #splash { transition: none; } #splash .splash-mark svg { animation: none; } }
+
+/* ---- the scene (generated from the mock's CSS) ---- */
+.login-map .scene { position: absolute; inset: 0px; overflow: hidden; container-type: size; }
+.login-map .scene > svg { position: absolute; bottom: 0px; left: 50%; width: max(100cqw, 177.78cqh); height: auto; transform: translateX(calc(-1 * var(--fx, 50%))); display: block; }
+@container (max-aspect-ratio: 1 / 1) {
+  .login-map .scene > svg { width: 200cqw; transform: translateX(calc(-1 * var(--fx-narrow, 50%))); }
+}
+.login-map .scene { background: var(--top, transparent); }
+.login-map .scene .flag { fill: var(--a-flag, var(--b-flag)); }
+@media (prefers-reduced-motion: reduce) {
+  .login-map .scene * { animation-play-state: paused !important; transition: none !important; }
+}
+.login-map .sc-m.st-parchment { --m-paper: #f3e9d2; --m-edge: #d9c196; --m-ink: #5a3e2b; --m-soft: rgb(90 62 43 / .5); --m-fill: #e8d6b0; --m-route: #a0522d; --m-sea: #cfdcd3; --m-pawn: #6b21a8; --m-lava: #e8590c; --m-label: #4a3222; --m-grid: rgb(90 62 43 / .07); --m-red: #9b2c1c; --m-ripple: rgb(90 62 43 / .35); }
+@media (prefers-color-scheme: dark) {
+  :root .login-map .sc-m.st-parchment { --m-paper: #16142a; --m-edge: #0a0914; --m-ink: #b7a8e6; --m-soft: rgb(183 168 230 / .45); --m-fill: #221f3d; --m-route: #f5b840; --m-sea: #121a2c; --m-pawn: #c084fc; --m-lava: #ff8a3d; --m-label: #e9dcc0; --m-grid: rgb(183 168 230 / .07); --m-red: #ff8a5c; --m-ripple: rgb(183 168 230 / .3); }
+}
+.login-map .scene-m:has(.st-parchment) { --top: #f3e9d2; }
+@media (prefers-color-scheme: dark) {
+  :root .login-map .scene-m:has(.st-parchment) { --top: #16142a; }
+}
+.login-map .sc-m .grid { fill: none; stroke: var(--m-grid); stroke-width: 1; }
+.login-map .sc-m .ink { stroke: var(--m-ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.login-map .sc-m .mtn { stroke: var(--m-ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.login-map .sc-m .coast { stroke: var(--m-ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.login-map .sc-m .river { stroke: var(--m-ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.login-map .sc-m .thin { stroke-width: 1.4; }
+.login-map .sc-m .coast { stroke-width: 2.4; }
+.login-map .sc-m .mtn { fill: var(--m-fill); }
+.login-map .sc-m .mtn-sh { fill: var(--m-soft); opacity: 0.5; }
+.login-map .sc-m .fillk { fill: var(--m-ink); stroke: var(--m-ink); }
+.login-map .sc-m .fillp { fill: var(--m-fill); }
+.login-map .sc-m .nofill { fill: none; }
+.login-map .sc-m .tree { fill: var(--m-fill); stroke: var(--m-ink); stroke-width: 1.6; }
+.login-map .sc-m .sea { fill: var(--m-sea); }
+.login-map .sc-m .hatch { stroke: var(--m-soft); stroke-width: 1; opacity: 0.5; }
+.login-map .sc-m .ripple { fill: none; stroke: var(--m-ripple); stroke-width: 1.3; stroke-linecap: round; }
+.login-map .sc-m .river { stroke-width: 2.6; stroke: var(--m-soft); }
+.login-map .sc-m .lake { fill: var(--m-sea); stroke: var(--m-ink); stroke-width: 1.6; }
+.login-map .sc-m .route { fill: none; stroke: var(--m-route); stroke-width: 2; stroke-dasharray: 2, 7; stroke-linecap: round; opacity: 0.8; }
+.login-map .sc-m .lbl { fill: var(--m-label); font: italic 15px "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; text-anchor: middle; paint-order: stroke; stroke: var(--m-paper); stroke-width: 4px; stroke-linejoin: round; }
+.login-map .sc-m .lbl.big { font-style: normal; font-weight: 700; letter-spacing: 0.2em; font-size: 15px; }
+.login-map .sc-m .lbl.note { font-size: 17px; }
+.login-map .sc-m .lava { fill: var(--m-lava); }
+.login-map .sc-m .smoke { opacity: 0.7; }
+.login-map .sc-m .glyph-ink { fill: var(--m-pawn); }
+.login-map .sc-m .pawn circle { fill: var(--m-pawn); stroke: var(--m-paper); stroke-width: 2; }
+.login-map .sc-m .pawn path { fill: var(--m-pawn); }
+.login-map .sc-m .pawn.carry circle { stroke: var(--m-route); }
+.login-map .sc-m .pawn circle.pe { fill: var(--m-paper); stroke: none; }
+.login-map .sc-m .pawn .pn { fill: var(--m-route); stroke: var(--m-ink); stroke-width: 1; }
+.login-map .sc-m .pawn .sack { fill: var(--m-fill); stroke: var(--m-ink); stroke-width: 1; }
+.login-map .sc-m .serp .hull { fill: var(--m-ink); }
+.login-map .sc-m .serp .sail { fill: var(--m-paper); stroke: var(--m-ink); stroke-width: 1.4; }
+.login-map .sc-m .mine { fill: var(--m-ink); }
+.login-map .sc-m .frame { fill: none; stroke: var(--m-ink); stroke-width: 2.5; }
+.login-map .sc-m .frame.thin { stroke-width: 1; }
+.login-map .sc-m .serp .body-o { fill: none; stroke: var(--m-ink); stroke-width: 24; stroke-linecap: round; }
+.login-map .sc-m .serp .body { fill: none; stroke: var(--m-fill); stroke-width: 19; stroke-linecap: round; }
+.login-map .sc-m .serp .head { fill: var(--m-fill); stroke: var(--m-ink); stroke-width: 2; stroke-linejoin: round; }
+.login-map .sc-m .serp .eye { fill: var(--m-lava); }
+.login-map .sc-m .serp .tongue { fill: none; stroke: var(--m-lava); stroke-width: 1.8; stroke-linecap: round; }
+.login-map .sc-m .serp .crew { fill: var(--m-pawn); }
+.login-map .sc-m .ship-held { animation: 2.4s ease-in-out 0s infinite alternate none running cc2-rock; transform-box: fill-box; transform-origin: 50% 100%; }
+.login-map .sc-m .lm .lbl { transition: fill 0.2s; }
+@container (max-aspect-ratio: 1 / 1) {
+  .login-map .sc-m .frame-g { display: none; }
+  .login-map .sc-m .inner-clip { y: 0; height: 900px; }
+}
+.login-map .sc-m .pawn .pb { fill: var(--m-pawn); stroke: var(--m-paper); stroke-width: 1.3; stroke-linejoin: round; }
+.login-map .sc-m .flag { fill: var(--m-red); stroke: var(--m-ink); stroke-width: 1; stroke-linejoin: round; }
+.login-map .sc-m .tm-robe { fill: var(--m-red); stroke: var(--m-ink); stroke-width: 1.4; stroke-linejoin: round; }
+.login-map .sc-m .tm-hood { fill: var(--m-red); stroke: var(--m-ink); stroke-width: 1.4; stroke-linejoin: round; }
+.login-map .sc-m .tm-hood { filter: brightness(0.82); }
+.login-map .sc-m .tm-face { fill: rgb(29, 16, 34); }
+.login-map .sc-m .tm-eye { fill: rgb(255, 179, 71); }
+.login-map .sc-m .tm-staff { stroke: var(--m-ink); stroke-width: 2; stroke-linecap: round; }
+.login-map .sc-m .bark rect { fill: var(--m-paper); stroke: var(--m-ink); stroke-width: 1.4; }
+.login-map .sc-m .bark-tail { fill: var(--m-paper); stroke: var(--m-ink); stroke-width: 1.4; stroke-linejoin: round; }
+.login-map .sc-m .bark-t { fill: var(--m-red); font: 700 13px "Palatino Linotype", Palatino, Georgia, serif; text-anchor: middle; letter-spacing: 0.04em; }
+.login-map .sc-m { --m5-steam: rgb(255 252 244 / .95); --m5-steam-edge: rgb(90 62 43 / .35); --m5-glow2: #ffd166; }
+@media (prefers-color-scheme: dark) {
+  :root .login-map .sc-m { --m5-steam: rgb(214 208 230 / .55); --m5-steam-edge: rgb(214 208 230 / .2); --m5-glow2: #ffb347; }
+}
+.login-map .sc-m .vent-glow { fill: var(--m-lava); animation: 2.6s ease-in-out 0s infinite alternate none running m5-vent; }
+.login-map .sc-m .steam .puff { fill: var(--m5-steam); stroke: var(--m5-steam-edge); stroke-width: 1; transform-box: fill-box; transform-origin: center center; animation: 4.2s ease-out 0s infinite normal none running m5-steam; opacity: 0; }
+.login-map .sc-m .mark-float { animation: 4s ease-in-out 0s infinite normal none running m5-bob; }
+.login-map .scene .m6-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: min(340px, 78vw); z-index: 1; pointer-events: none; filter: drop-shadow(rgba(40, 20, 10, 0.22) 0px 2px 3px); }
+.login-map .scene .m6-banner svg { display: block; width: 100%; height: auto; }
+.login-map .m6-banner .ban-body { fill: var(--m-fill); stroke: var(--m-ink); stroke-width: 1.6; }
+.login-map .m6-banner .ban-tail { fill: var(--m-edge); stroke: var(--m-ink); stroke-width: 1.4; stroke-linejoin: round; }
+.login-map .m6-banner .roll { fill: var(--m-edge); stroke: var(--m-ink); stroke-width: 1.4; }
+.login-map .m6-banner .lbl.ban-t { font-size: 34px; letter-spacing: 0.26em; text-anchor: middle; stroke-width: 0; }
+.login-map .sc-m .steam.smoke .puff { fill: var(--m-soft); stroke: none; }
+.login-map .sc-m .steam.chim .puff { fill: var(--m5-steam); stroke: var(--m5-steam-edge); stroke-width: 0.8; }
+.login-map .sc-m .ember { fill: var(--m-lava); transform-box: fill-box; transform-origin: center center; animation: 1.9s ease-out 0s infinite normal none running m6-ember; opacity: 0; }
+.login-map .sc-m .flutter { transform-box: fill-box; transform-origin: 0px 50%; animation: 0.8s ease-in-out 0s infinite alternate none running m6-flut; }
+.login-map .sc-m .raven path { fill: var(--m-ink); }
+.login-map .sc-m .raven ellipse { fill: var(--m-ink); }
+.login-map .sc-m .raven .wings { animation: 0.42s ease-in-out 0s infinite alternate none running m6-flap; transform-box: fill-box; transform-origin: center center; }
+.login-map .sc-m { --m7-pupil: #1c0d08; --m7-hot: #fff2b0; }
+.login-map .sc-m { --m8-beam: var(--m-lava); --m8-hot: #ffd8a8; }
+@media (prefers-color-scheme: dark) {
+  :root .login-map .sc-m { --m8-hot: #ffe2bd; }
+}
+.login-map .sc-m .logo { color: var(--m-pawn); }
+.login-map .sc-m .logo-halo { opacity: calc(.7 + var(--flare, 0) * .3); animation: 4s ease-in-out 0s infinite normal none running m8-halo; transform-box: fill-box; transform-origin: center center; }
+.login-map .sc-m .logo-back { fill: var(--m-paper); opacity: 0.85; }
+.login-map .sc-m .logo-glyph { fill: var(--m-pawn); stroke: var(--m-ink); stroke-width: 0.5; stroke-linejoin: round; }
+.login-map .sc-m .logo-shine { fill: rgb(255, 255, 255); opacity: 0.2; }
+.login-map .sc-m .logo-ray { fill: var(--m8-beam); opacity: 0.2; }
+.login-map .sc-m .logo-core { fill: var(--m8-hot); opacity: 0.32; animation: 1.6s ease-in-out 0s infinite alternate none running m8-flicker; }
+@media (prefers-color-scheme: dark) {
+  :root .login-map .sc-m .logo-ray { opacity: 0.3; }
+}
+.login-map .sc-m .pawn.seen > g { filter: drop-shadow(0 0 2.5px var(--m8-beam)) drop-shadow(0 0 1px var(--m8-beam)); }
+.login-map .sc-m .neck-up { transform-origin: 52px 6px; animation: 9s ease-in-out 0s infinite normal none running m9-neck; }
+.login-map .sc-m .head-look { transform-origin: -8px -108px; animation: 9s ease-in-out 0s infinite normal none running m9-head; }
+.login-map .sc-m .neck-up .tongue { transform-box: fill-box; transform-origin: 100% 0px; animation: 1.5s steps(1) 0s infinite normal none running m9-tongue; }
+.login-map .sc-m .bark9 .bark-t { font-size: 19px; }
+.login-map .sc-m .bark9 rect { stroke-width: 1.8; }
+.login-map .sc-m .bark9 .bark-tail { stroke-width: 1.8; }
+.login-map .sc-m .bark9 { filter: drop-shadow(rgba(40, 20, 10, 0.2) 0px 2px 2px); }
+
+@keyframes cc2-rock { 
+  0% { rotate: -4deg; }
+  100% { rotate: 4deg; }
+}
+@keyframes m5-vent { 
+  0% { fill: var(--m-lava); opacity: 0.85; }
+  100% { fill: var(--m5-glow2); opacity: 1; }
+}
+@keyframes m5-steam { 
+  0% { transform: translate(0px, 0px) scale(0.5); opacity: 0; }
+  15% { opacity: 0.95; }
+  100% { transform: translate(var(--dx), var(--h)) scale(2.3); opacity: 0; }
+}
+@keyframes m5-bob { 
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes m6-ember { 
+  0% { transform: translate(0px, 0px); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--h)); opacity: 0; }
+}
+@keyframes m6-flut { 
+  0% { transform: scaleX(1) skewY(0deg); }
+  100% { transform: scaleX(0.78) skewY(9deg); }
+}
+@keyframes m6-flap { 
+  0% { transform: scaleY(1); }
+  100% { transform: scaleY(0.3); }
+}
+@keyframes m8-halo { 
+  0%, 100% { transform: scale(0.92); }
+  50% { transform: scale(1.1); }
+}
+@keyframes m8-flicker { 
+  0% { opacity: 0.22; }
+  100% { opacity: 0.4; }
+}
+@keyframes m9-neck { 
+  0%, 100% { transform: rotate(0deg); }
+  18% { transform: rotate(-4deg); }
+  30% { transform: rotate(-9deg) translateX(-4px); }
+  34% { transform: rotate(-2deg); }
+  55% { transform: rotate(3deg); }
+  78% { transform: rotate(-1deg); }
+}
+@keyframes m9-head { 
+  0%, 8% { transform: rotate(0deg); }
+  14%, 22% { transform: rotate(-14deg); }
+  30% { transform: rotate(10deg); }
+  34% { transform: rotate(4deg); }
+  46%, 56% { transform: rotate(22deg) scaleX(-1); }
+  64%, 72% { transform: rotate(-6deg); }
+  84%, 100% { transform: rotate(0deg); }
+}
+@keyframes m9-tongue { 
+  0% { transform: scale(1); }
+  20% { transform: scale(0.2); }
+  40% { transform: scale(1); }
+  60% { transform: scale(0.2); }
+  80% { transform: scale(1); }
+}

@@ -41,6 +41,7 @@ import { showPart } from './show-part.js';
 import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
+import { mountLoginMap } from './login-map.js';
 
 /** Every Settings and Orders page's route, built from the one table of pages (settings-pages.js). */
 const PAGE_ROUTE = new RegExp(`^#/p/(\\d+)/(${plainKinds().join('|')})$`);
@@ -1186,6 +1187,7 @@ function renderLogin() {
   meEl.replaceChildren();
   clearTopbarMeters();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
+  mountLoginMap(app);
   const form = document.getElementById('login-form');
   // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
   try { const saved = localStorage.getItem('cc-login') || ''; form.login.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
@@ -1213,6 +1215,7 @@ export function renderInvite(token) {
   meEl.replaceChildren();
   clearTopbarMeters();
   app.replaceChildren(document.getElementById('invite-tpl').content.cloneNode(true));
+  mountLoginMap(app);
   const form = document.getElementById('invite-form');
   const who = document.getElementById('invite-who');
   const err = document.getElementById('invite-error');

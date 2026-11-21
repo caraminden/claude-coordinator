@@ -25,6 +25,7 @@
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="ui/base.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="login-map.css">
   <!-- One file per part, in this order: rules of equal weight win by it. -->
   <link rel="stylesheet" href="thread.css">
   <link rel="stylesheet" href="composer.css">
@@ -43,6 +44,9 @@
   <link rel="stylesheet" href="skills.css">
 </head>
 <body>
+  <!-- The cold-open splash (#1500): the sign-in map with Citadel's mark; login-map-art.js draws it, then lifts it once the app has drawn and 1 s has passed. -->
+  <div id="splash" class="login-map" aria-hidden="true"><div class="scene scene-m"></div><div class="splash-mark"><svg viewBox="-17 -17 34 34"><path d="M0 -15.2 L15.2 0 L3 12.2 V3 L6 0 L0 -6 L-6 0 L-3 3 V12.2 L-15.2 0 Z"/></svg><span>%APP_NAME%</span></div></div>
+  <script src="login-map-art.js"></script>
   <header class="topbar">
     <div class="meters meter-row"><a id="usage" class="usage" data-part="usage-meter" href="#/" hidden><span class="label"></span><span class="track"><span class="fill"></span></span></a></div>
     <nav id="crumbs"></nav>

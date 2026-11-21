@@ -10,6 +10,7 @@ import { openDialog } from './ui/dialog.js';
 import { lightbox } from './ui/media.js';
 import { annotator } from './annotate.js';
 import { optimistic } from './ui/optimistic.js';
+import { toast } from './ui/status.js';
 import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
@@ -185,8 +186,6 @@ export function composer(chatId, ticket) {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
     canSend: (text) => {
-      if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.'), false;
-      if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
       // Slash commands (#937): Citadel's own run here; one the chat's turns load goes as text; any other is refused.
       const cmd = parseCommand(text);
       // `/btw <question>` asks on the side (#932), as the button does; it never goes to the minion.
@@ -212,10 +211,12 @@ export function composer(chatId, ticket) {
         },
         sendAnyway: () => { sendAnyway = true; form.requestSubmit(); },
       }), false;
-      return !!text || attachments.items.length > 0;
+      return !!text || attachments.items.length > 0 || attachments.busy > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
     send: (text) => {
+      // A file still uploading or an image still being prepared: the message shows at once as waiting on it, and goes when it's done.
+      if (attachments.busy || attachments.uploading) return holdForUploads(text, after, unparkWith);
       const sent = attachments.items.slice();
       attachments.remove(sent);
       send(text, sent, after, unparkWith);
@@ -239,6 +240,38 @@ export function composer(chatId, ticket) {
     api(`api/projects/${ticket.project_id}/members`).then((list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase()))).catch(() => {});
     mentionMenu(form, textarea, () => people);
   }
+  /**
+   * Send pressed while attachments are still uploading (Cara, 2026-11-08: "assume things will work instantly"): a waiting bubble
+   * stands in the chat, and when the strip is idle the message goes with what's in it. If an upload failed meanwhile, the text
+   * comes back to the box with a note and a toast, and sending again is the retry.
+   */
+  const holds = [];
+  const holdForUploads = (text, queue, unpark) => {
+    const el = userBubble(me, text, [], null, null, []);
+    el.classList.add('pending');
+    el.querySelector('.who')?.append(h('span', { class: 'msg-tag unsent-tag waiting-tag' }, 'waiting on the upload'));
+    if (chatOpen(chatId)) {
+      document.getElementById('log')?.append(el);
+      scrollToBottom();
+    }
+    const failedAtStart = attachments.failures;
+    holds.push({ el, text, queue, unpark, failedAtStart });
+    if (holds.length > 1) return;
+    attachments.whenIdle(function release() {
+      const batch = holds.splice(0);
+      for (const hold of batch) hold.el.remove();
+      if (attachments.failures > batch[0].failedAtStart) {
+        const back = batch.map((x) => x.text).filter(Boolean).join('\n\n');
+        box.value = box.value.trim() ? `${back}\n${box.value}` : back;
+        alertNote('An upload failed, so your message was not sent. It is back in the box: send it again.');
+        toast('Upload failed: your message is back in the box', { tone: 'warn', ms: 8000, action: { label: 'Send again', run: () => form.requestSubmit() } });
+        return;
+      }
+      const sent = attachments.items.slice();
+      attachments.remove(sent);
+      batch.forEach((hold, i) => send(hold.text, i === 0 ? sent : [], hold.queue, hold.unpark));
+    });
+  };
   /** /fresh (#937): a fresh Claude session, Taskmaster or minion, after it writes its handoff. */
   const startFresh = () => {
     const who = minion ? 'this minion' : 'the Taskmaster';
@@ -645,7 +678,7 @@ export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new Fi
 /** What a person pointed at (#1141, pick.js): its chip, then its crop if there is one, in the chat's message box. */
 export function pointAt(chatId, crop, note) {
   const attachments = chatAttachments(chatId);
-  attachments.addNote(note);
+  if (note) attachments.addNote(note);
   if (crop) attachments.add([new File([crop], 'pointed.png', { type: crop.type })], true);
   if (chatOpen(chatId)) document.querySelector('.composer textarea')?.focus();
 }
@@ -665,7 +698,15 @@ function createAttachments(chatId, onChange) {
   const state = {
     el, items: [], busy: 0,
     get uploading() { return state.items.some((i) => i.upload && !i.upload.name); },
+    failures: 0,
   };
+  const idleWaiters = [];
+  // Waiters run once nothing is being prepared or uploaded (a microtask later, so an image's original has started by then).
+  const settle = () => queueMicrotask(() => {
+    if (state.busy || state.uploading) return;
+    for (const f of idleWaiters.splice(0)) f();
+  });
+  state.whenIdle = (f) => { idleWaiters.push(f); settle(); };
   const removeButton = (item) => h('button', { type: 'button', class: 'remove', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
     onChange(state.items.filter((i) => i.data || i.upload?.name || i.note).map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { mediaType, data })));
@@ -694,10 +735,13 @@ function createAttachments(chatId, onChange) {
       delete item.file;
       delete item.xhr;
       render();
+      settle();
     } catch (err) {
-      if (!state.items.includes(item)) return; // removed while uploading
+      if (!state.items.includes(item)) return settle(); // removed while uploading
       state.items.splice(state.items.indexOf(item), 1);
+      state.failures++;
       render();
+      settle();
       alertNote(`Could not attach ${file.name}: ${err.message}`);
     }
   };
@@ -716,6 +760,7 @@ function createAttachments(chatId, onChange) {
       blob = null;
     } finally {
       state.busy--;
+      settle();
     }
     // Shrunk or converted, or not drawable at all: send the untouched original too, so art isn't lost.
     // A picture marked here has no original worth keeping (Cara, 2026-11-17: "Only the marked copy").
@@ -742,6 +787,7 @@ function createAttachments(chatId, onChange) {
     }
     state.items = state.items.filter((item) => !items.includes(item));
     render();
+    settle();
   };
   /** Bring back images and uploaded files saved with a draft (already prepared and encoded, or uploaded). */
   /** Put saved attachments back in front; returns the items it added, for remove(). */

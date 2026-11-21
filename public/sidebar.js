@@ -2,7 +2,7 @@
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
 import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
-import { app, crumbs, openHash, usage } from './core.js';
+import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
@@ -19,6 +19,7 @@ import { replaceHash } from './navstack.js';
 import { openDialog } from './ui/dialog.js';
 import { mountTips } from './ui/tip.js';
 import { toast } from './ui/status.js';
+import { optimistic } from './ui/optimistic.js';
 
 // ---------- projects ----------
 
@@ -572,8 +573,15 @@ export function waitBody(id) {
   }));
 }
 function cancelWait(id, w) {
-  waitTips.tips?.close();
-  api(`api/tickets/${id}/waits/${w.id}/cancel`, { method: 'POST', body: {} }).catch((e) => toast(`Couldn't cancel the wait: ${e.message}`, { tone: 'warn', ms: 8000 }));
+  const was = { state: w.state, reason: w.reason, cancellable: w.cancellable };
+  const redraw = () => { if (waitTips.tips?.open) waitTips.tips.refresh(); };
+  optimistic({
+    sets: `wait:${w.id}`,
+    apply: () => { Object.assign(w, { state: 'dropped', reason: 'cancelled', cancellable: false }); redraw(); },
+    send: () => api(`api/tickets/${id}/waits/${w.id}/cancel`, { method: 'POST', body: {} }),
+    undo: () => { Object.assign(w, was); redraw(); },
+    label: 'cancel the wait',
+  }).catch(() => {});
 }
 
 function whyBody(id) {
@@ -587,14 +595,13 @@ function whyBody(id) {
     why.more ? h('p', { class: 'why-more' }, why.more) : '',
     check ? h('p', { class: `why-check${check.busy ? ' busy' : ''}` }, check.busy ? 'Checking the turn\'s process…' : check.text) : '',
     why.quiet ? h('div', { class: 'why-acts' },
-      h('button', { type: 'button', class: 'secondary act-stop', onclick: () => stopTurn(t) }, 'Stop'),
+      h('button', { type: 'button', class: 'secondary act-stop', disabled: stoppingIds.has(t.id), onclick: () => stopTurn(t) }, stoppingIds.has(t.id) ? 'Stopping…' : 'Stop'),
       h('button', { type: 'button', class: 'secondary', disabled: !!check?.busy, onclick: () => checkTurn(t) }, 'Is this still going?')) : '',
     why.link ? h('a', { href: why.link.href, onclick: () => whyTips?.close() }, why.link.text) : '');
 }
 
 function stopTurn(t) {
-  whyTips?.close();
-  api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).then((r) => r?.ship && toast(r.ship, { ms: 8000 }), (e) => toast(`Couldn't stop #${t.number}: ${e.message}`, { tone: 'warn', ms: 8000 }));
+  stopChat(t, () => { if (whyTips?.open) whyTips.refresh(); renderSidebar(); });
 }
 
 /** The server looks at the turn's process (src/quiet.ts checkProcess): no model call, no message to the minion. */

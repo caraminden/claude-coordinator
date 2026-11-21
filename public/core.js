@@ -35,6 +35,7 @@ import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { appSrc } from './extlinks.js';
 import { toast } from './ui/status.js';
+import { optimistic } from './ui/optimistic.js';
 import { showPart } from './show-part.js';
 import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
@@ -476,7 +477,7 @@ export async function reloadNow() {
   // Only a ship waits on the worker; a ↻ reloads at once (the stream's hello catches a ship it missed).
   if (typeof reloadPending === 'string') {
     await freshShell(reloadPending).catch(() => {});
-    if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it
+    if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it (the dim comes off)
   }
   location.reload();
 }
@@ -515,7 +516,13 @@ export function reloadWhenIdle() {
 /** The next navigation opens its target with a full load, so it comes up on the new version. */
 function reloadOnNavigate() {
   if (!shouldReload({ pending: !!reloadPending, hidden: document.hidden, navigating: true, unsent: !!(reloadPending && unsentWork()) })) return false;
-  reloadNow();
+  // The click answers at once: the page dims as it does for any navigation, and the target opens after the reload.
+  document.body.classList.add('navigating');
+  reloadNow().then(() => {
+    if (reloading) return;
+    document.body.classList.remove('navigating');
+    route(); // held back by unsent work: open what was clicked on this version
+  });
   return true;
 }
 
@@ -899,6 +906,12 @@ function onPersonNote({ projectId, ticketId, note }) {
 const seenTimers = new Map();
 /** Record that you have looked at a thread as it is now (shortly, so a burst of updates sends one). */
 export function markSeen(ticketId) {
+  // The unread mark goes at once (Cara, 2026-11-08: "assume things will work instantly"); the server's time replaces ours when it answers.
+  const t = view?.kind === 'project' ? (view.tickets?.get(ticketId) ?? (view.coordinator?.id === ticketId ? view.coordinator : null)) : null;
+  if (t && view.seen && (view.seen[ticketId] ?? 0) < t.updated_at) {
+    view.seen[ticketId] = t.updated_at;
+    renderSidebar();
+  }
   if (seenTimers.has(ticketId)) return;
   seenTimers.set(ticketId, setTimeout(async () => {
     seenTimers.delete(ticketId);
@@ -1280,3 +1293,20 @@ document.addEventListener('click', (e) => {
     }),
   });
 });
+
+/** Minions whose Stop was clicked and that haven't stopped yet: the head and the row's menu say "Stopping…" until the status moves on (a stop takes up to 15 s on the server). */
+export const stoppingIds = new Set();
+/** Stop shows "Stopping…" at once (`redraw` draws it) and the request runs behind it; a refusal (nothing to stop) or an error puts the button back with a toast and a Retry. */
+export function stopChat(t, redraw = () => {}) {
+  return optimistic({
+    sets: `stop:${t.id}`,
+    apply: () => { stoppingIds.add(t.id); redraw(); },
+    send: async () => {
+      const r = await api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} });
+      if (r?.stopped === false) throw new Error('nothing was running');
+      if (r?.ship) toast(r.ship, { ms: 8000 });
+    },
+    undo: () => { stoppingIds.delete(t.id); redraw(); },
+    label: `stop #${t.number ?? t.id}`,
+  }).catch(() => {});
+}

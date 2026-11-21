@@ -4,7 +4,7 @@ import { gloss } from './help-words.js';
 import { account, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView, TM_VIEW } from './mine.js';
 import { toast } from './ui/status.js';
-import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
+import { stopChat, stoppingIds, cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, outbox, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
@@ -509,9 +509,11 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
+  if (t.status !== 'running' && !t.limit_resume_at) stoppingIds.delete(t.id); // it has stopped
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
-    actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).then((r) => r?.ship && toast(r.ship, { ms: 8000 }), (e) => alertNote(e.message)) }, 'Stop'));
+    const stopping = stoppingIds.has(t.id);
+    actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
     if (t.session_id && !t.fresh_pending) {

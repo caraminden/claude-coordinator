@@ -81,10 +81,12 @@ export function startPick() {
 }
 
 async function deliver(el, chatId, coordinator) {
-  const crop = await cropPart(el);
-  const note = describe(el);
-  pointAt(chatId, crop, note);
+  // The note is in the message box at once; the crop (a screenshot of the part, which takes a moment) joins it when ready.
+  const cropping = cropPart(el); // started before anything moves, so it sees the page as it was picked
+  pointAt(chatId, null, describe(el));
   if (coordinator && !(view?.main === 'chat' && view.id === chatId)) location.hash = threadHref(coordinator);
+  const crop = await cropping;
+  if (crop) pointAt(chatId, crop, null);
 }
 
 /** The chip's short label and the text the message carries: page, part, screen size, theme. */

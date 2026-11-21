@@ -25,11 +25,12 @@ export function replayStore(path: string, shadow: string[], seed: Record<string,
 
 /**
  * The scheme's minions as they were at `now()`: none made later, and one closed later still open. `extra` are the ones the
- * replay itself started, always open. Each scheme's list is read once per `now`: a judge may list them per file it checks.
+ * replay itself started, always open; `hide` are the ones the judge really started, which the replay's own stand in for.
+ * Each scheme's list is read once per `now`: a judge may list them per file it checks.
  */
-export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = []) {
+export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = [], hide = new Set<number>()) {
   const then = (t: Ticket): Ticket | undefined =>
-    t.created_at > now() ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t;
+    t.created_at > now() || hide.has(t.id) ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t;
   const list = store.listTickets.bind(store);
   const get = store.getTicket.bind(store);
   const read = new Map<number, { at: number; rows: Ticket[] }>();

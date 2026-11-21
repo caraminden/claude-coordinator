@@ -27,12 +27,20 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   const dataDir = dirname(ctx.db);
   const store = replayStore(ctx.db, ['settings', 'flake_events', 'flake_fixes'], { flake_fixes: `started_at < ${start}` });
   store.db.exec(`INSERT INTO temp.flake_events (${COLS}) SELECT ${COLS} FROM main.flake_events WHERE at < ${start}`);
+  // A held fix reopened inside the window shows only its reopen (reopen overwrites started_at): it goes in held as of the
+  // window's start, so its first sighting reopens it, as the real one did.
+  store.db.exec(`INSERT INTO temp.flake_fixes (id, project_id, file, ticket_id, state, started_at, clean_runs, held_at, reopened, proof_run)
+    SELECT id, project_id, file, NULL, 'held', ${start - 1}, 0, ${start - 1}, reopened - 1, NULL FROM main.flake_fixes WHERE started_at >= ${start} AND reopened > 0`);
   const projects = store.listProjects().filter((p) => p.repo_dir && (ctx.scheme == null || p.id === ctx.scheme));
   let now = start;
   let warm = true;
   // The minions it starts get negative ids and stay open.
   const started: Ticket[] = [];
-  minionsAsOf(store, () => now, started);
+  const ids = projects.map((p) => p.id);
+  const realStarts = (store.db.prepare("SELECT e.created_at AS at, t.id, t.title, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{\"text\":\"Started by the flaky-test rule%'")
+    .all(store.eventIdAt(start)) as { at: number; id: number; title: string; project_id: number }[]).filter((r) => r.at >= start && ids.includes(r.project_id));
+  // The fix minions the rule really started in the window would block the replay's own starts for their files: its own stand in.
+  minionsAsOf(store, () => now, started, new Set(realStarts.map((r) => r.id)));
   const hits: Act[] = [];
   const history = new Map<number, Map<string, number[]>>();
   const commitsOf = (p: Project) => {
@@ -71,12 +79,8 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     }
     warm = false;
   }
-  const ids = projects.map((p) => p.id);
   const real: Act[] = [
-    ...(store.db.prepare("SELECT e.created_at AS at, t.title, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{\"text\":\"Started by the flaky-test rule%'")
-      .all(store.eventIdAt(start)) as { at: number; title: string; project_id: number }[])
-      .filter((r) => r.at >= start && ids.includes(r.project_id))
-      .map((r) => ({ at: r.at, key: `start:${flakeKey(r.title)}`, text: r.title })),
+    ...realStarts.map((r) => ({ at: r.at, key: `start:${flakeKey(r.title)}`, text: r.title })),
     ...(store.db.prepare("SELECT e.created_at AS at, e.data, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'user_message' AND e.data LIKE '{\"author\":\"Citadel\",\"text\":\"Same-flake alarm:%'")
       .all(store.eventIdAt(start)) as { at: number; data: string; project_id: number }[])
       .filter((r) => ids.includes(r.project_id))
@@ -88,6 +92,7 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     limits: [
       "a fix's proof runs (GitHub's flake-proof results) aren't replayed, so a fix that went held inside the window stays open in the replay",
       'fixes started before the window are seeded as they are now, not as they were then',
+      'a fix reopened inside the window is seeded held at its start, though it may have been made inside the window too',
       'real starts are matched by the title the flaky-test rule gave them',
     ],
   };

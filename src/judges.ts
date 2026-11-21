@@ -65,6 +65,13 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'src/ci-land-gate.ts', symbols: ['LAND_STREAK', 'LAND_SLOW_MS', 'landStep', 'landProblems'] }],
   },
   {
+    id: 'ci-numbers', name: 'CI numbers: a step up that held (#1369)', mode: 'act',
+    replay: { notYet: 'the stored ci_numbers rows could drive it; not built in #1503' },
+    acts: "wakes the scheme's Taskmaster",
+    callers: ['src/ci-numbers.ts'],
+    pins: [{ path: 'src/ci-numbers.ts', symbols: ['STEP', 'stepUp', 'CiNumbers.check'] }],
+  },
+  {
     id: 'land-verdicts', name: "land.sh's blame rules", mode: 'act',
     replay: { notYet: "#1484 builds their bench and the would-refuse shadow switch; land.sh is the pipeline lane's" },
     acts: 'refuses a ship, or blames it for a red', pins: [],

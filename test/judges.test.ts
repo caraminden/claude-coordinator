@@ -14,18 +14,29 @@ import { minionsAsOf, replayStore } from '../tools/judge-replays/store.ts';
 const ROOT = join(import.meta.dirname, '..');
 
 /** The calls a judge acts through: a Taskmaster's wake or mail, a Mandate alert, a refusal, a kill. */
-const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\.refuse\(|process\.kill\(/g;
+const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send\(|\.refuse\(|process\.kill\(/g;
 
 /**
  * Files with act calls that aren't judges, each with why and its count of act calls. A new act call in one of them is red:
  * if it decides on real inputs, register its judge in src/judges.ts (callers), new judges log-only; if not, bump the count.
  */
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 25 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 38 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
-  'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes", calls: 5 },
-  'src/routes/projects.ts': { why: 'tells the Taskmaster a person started a minion', calls: 1 },
-  'src/outbox.ts': { why: "the delivery queue's own interface, and a dropped-delivery note", calls: 2 },
+  'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes", calls: 10 },
+  'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },
+  'src/outbox.ts': { why: "the delivery queue's own interface, and a dropped-delivery note", calls: 4 },
+  'src/land.ts': { why: "tells a minion how its hand_off_land went; land.sh's own verdicts are the land-verdicts judge", calls: 7 },
+  'src/backup.ts': { why: "a person's typed message from the backup chat", calls: 1 },
+  'src/held-starts.ts': { why: 'delivers a brief held for the box', calls: 1 },
+  'src/wake.ts': { why: 'delivers a chained start once its leader is done', calls: 2 },
+  'src/schedules.ts': { why: "a schedule's run brief, on the clock a person set", calls: 1 },
+  'src/host-tool-ship.ts': { why: "tells the asking minion a person approved its host tool", calls: 1 },
+  'src/make-app.ts': { why: "a new app minion's brief, from a person's make-app", calls: 1 },
+  'src/relay.ts': { why: 'relays a Mandate event a person made', calls: 1 },
+  'src/routes/contraptions.ts': { why: "an app's deploy notes and a person's ask from an app", calls: 4 },
+  'src/routes/files.ts': { why: "a person's comment on a file", calls: 1 },
+  'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
   'src/exec.ts': { why: "stops its own child on its own timeout", calls: 2 },
   'src/contraption-turns.ts': { why: "stops its own turn's process", calls: 1 },
@@ -43,7 +54,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
 };
 
 /** The judges as they were at #1503: any other id starts log-only, until a recorded replay says it judges well. */
-const AT_1503 = ['deploy-watch', 'flake-counter', 'ci-red', 'ci-runners', 'ci-land-gate', 'land-verdicts', 'tripwire', 'standing-checks', 'stall-signals', 'repeat-bugs', 'decision-copies', 'turn-placement', 'reaper', 'link-check', 'job-check', 'flail-brake', 'grunt-model', 'test-first', 'big-read'];
+const AT_1503 = ['deploy-watch', 'flake-counter', 'ci-red', 'ci-runners', 'ci-land-gate', 'ci-numbers', 'land-verdicts', 'tripwire', 'standing-checks', 'stall-signals', 'repeat-bugs', 'decision-copies', 'turn-placement', 'reaper', 'link-check', 'job-check', 'flail-brake', 'grunt-model', 'test-first', 'big-read'];
 
 function codeFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(join(ROOT, dir))) {
@@ -86,7 +97,7 @@ test('every place that acts is a registered judge or named as not one', () => {
   }
   for (const [f, n] of counts) {
     if (registered.has(f)) continue;
-    assert.ok(NOT_JUDGES[f], `${f} acts (${n} call${n === 1 ? '' : 's'} like leaveMail, tellTaskmaster, .refuse or process.kill) and isn't a judge in src/judges.ts: register it (new judges start log-only), or add it to NOT_JUDGES in this test with why it isn't one`);
+    assert.ok(NOT_JUDGES[f], `${f} acts (${n} call${n === 1 ? '' : 's'} like leaveMail, runner.send, tellTaskmaster, .refuse or process.kill) and isn't a judge in src/judges.ts: register it (new judges start log-only), or add it to NOT_JUDGES in this test with why it isn't one`);
     assert.equal(n, NOT_JUDGES[f].calls, `${f}'s act calls went from ${NOT_JUDGES[f].calls} to ${n}: a new one that decides on real inputs is a judge, so register it in src/judges.ts; else set the count here`);
   }
   for (const [f, { calls }] of Object.entries(NOT_JUDGES)) {

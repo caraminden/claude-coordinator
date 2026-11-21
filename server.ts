@@ -35,7 +35,7 @@ import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard, registerCiArmed, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
-import { buildOwnerKey, Store, type Artifact, type Project, type User } from './src/db.ts';
+import { buildOwnerKey, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
@@ -1606,10 +1606,10 @@ ciStore.onFull = (project, text) => {
   if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
 // A step up in a scheme's CI numbers that held (#1369) wakes its Taskmaster, as a CI alert does (#983); never a gate.
-ciNumbers.onStep = (project, _step, text) => {
+ciNumbers.onStep = judged('ci-numbers', 'wake', (project: Project, _step: CiNumberStep, text: string) => {
   const coordinator = store.getOverlord(project.id);
   if (coordinator) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
-};
+}, () => {}, judgeNote((project) => project.id));
 if (!BOOT_CHECK && !PREVIEW) {
   every('ci store sweep', 24 * 60 * 60_000, () => (ciNumbers.sweep(), ciStore.sweep(true)), 15 * 60_000);
 }

@@ -22,7 +22,9 @@ On every start the launcher:
 2. Downloads a build the feed names that it doesn't have and that this PC hasn't refused. It checks the
    size and SHA-256 against the feed, throws away a mismatch and keeps nothing half-written.
 3. On the next start it tries that build. The build must say it started within 30 s (below). If it
-   crashes or stays silent, the launcher kills it and starts the old build.
+   crashes or stays silent, the launcher kills it and starts the old build. A `file` build waits while
+   a copy of the app is already running (a new start would only hand off to it), with no strike, and is
+   tried on the first start with nothing running. So a build reaches a PC on its start after next.
 4. A build that started is current but on probation: the launcher stays and watches it for 10 minutes.
    Running that long, or closing with exit code 0 first, makes it good; a clean exit within 30 s of the
    start proves nothing (it may have handed off to a copy already running), so the build stays on

@@ -7,7 +7,7 @@ import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { CiMirror } from './ci-mirror.ts';
 import type { Kind } from './ci-store.ts';
-import { desktopPaths, type DesktopTarget } from './desktop-feed.ts';
+import { desktopPaths, type DesktopIndex, type DesktopTarget } from './desktop-feed.ts';
 import type { Contains, Green, Pin } from './last-green.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
@@ -365,6 +365,25 @@ class RunsCache {
     return !t.needs?.length || (!!need && t.needs.every((w) => (need.get(w) ?? []).some((d) => d.run.head_sha === r.run.head_sha && allGreen(d))));
   }
 
+  /**
+   * A run that reached people: released, and for a target with a desktop app, on its feed too ("Released means released",
+   * Cara, 2026-11-18): the feed holds it now, or it was counted as a release once (the feed keeps only its newest few).
+   */
+  out(t: Found, r: RunJobs): boolean {
+    if (!this.released(t, r)) return false;
+    if (!t.desktop) return true;
+    return this.onFeed(t, r.run.id) || !!this.feeds.get(tkey(t))?.counted.has(runKey(r));
+  }
+  /** Whether a desktop target's feed holds run `id`'s build now. */
+  onFeed(t: Found, id: number): boolean {
+    return !!this.feeds.get(tkey(t))?.runs.has(id);
+  }
+  /** The CI runs a desktop target's feed holds, and the runs counted as its releases, read each refresh (feed()). */
+  private feeds = new Map<string, { runs: Set<number>; counted: Set<number> }>();
+  feed(t: Found, runs: Set<number>) {
+    this.feeds.set(tkey(t), { runs, counted: new Set(this.recorded(t)) });
+  }
+
   /** Where a shipped run that isn't released yet is: the first workflow it needs that hasn't passed on its commit. */
   needProgress(t: Found, r: RunJobs, now: number): Progress {
     const need = this.needRuns.get(tkey(t));
@@ -471,7 +490,7 @@ class RunsCache {
     if (p.repo_dir) {
       for (const [i, r] of out.entries()) {
         // shortcut: with no release in the page of runs, read from the oldest run listed; misses what landed before it.
-        const prev = out.slice(i + 1).find((x) => this.released(t, x)) ?? (t.needs?.length ? out.at(-1) : undefined);
+        const prev = out.slice(i + 1).find((x) => this.out(t, x)) ?? (t.needs?.length ? out.at(-1) : undefined);
         const from = prev && prev !== r && prev.run.head_sha !== r.run.head_sha ? prev.run.head_sha : null;
         const had = this.landed.get(r.run.id);
         if (had && had.from === from && r.run.status === 'completed') continue;
@@ -488,7 +507,7 @@ class RunsCache {
     const seen = new Set(this.recorded(t));
     // Every shipped run in view is counted, those from before counting began too (Cara, 2026-11-12: "This should say
     // the build number, not "earlier release""); they're numbered by run, so a late one slots into its place.
-    for (const r of (this.runs.get(tkey(t)) ?? []).filter((r) => this.released(t, r) && !seen.has(runKey(r))).reverse()) {
+    for (const r of (this.runs.get(tkey(t)) ?? []).filter((r) => this.out(t, r) && !seen.has(runKey(r))).reverse()) {
       const s = span(r);
       // Live once the last workflow it needs finished, when that was after its own job.
       const gated = [...(this.needRuns.get(tkey(t))?.values() ?? [])].flatMap((l) => l.filter((d) => d.run.head_sha === r.run.head_sha && allGreen(d)).map((d) => ms(d.run.updated_at) ?? 0));
@@ -535,8 +554,10 @@ export interface CiPackageDeps extends ActionsDeps {
   /** Each scheme's last green and the roll back pins (src/last-green.ts, ADR 0012). */
   lastGreen?: { get: (projectId: number) => Green | null; pinned: (projectId: number, target: string) => Pin | null };
   contains?: Contains;
-  /** Publish a run's build to the target's desktop feed (src/desktop-feed.ts ciPublisher). */
-  desktop?: (t: Found & { desktop: DesktopTarget }, run: { id: number; sha: string }) => unknown;
+  /** Publish a run's build to the target's desktop feed (src/desktop-feed.ts ciPublisher), and whether a run's publish failed. */
+  desktop?: ((t: Found & { desktop: DesktopTarget }, run: { id: number; sha: string }) => unknown) & { failed?: (projectId: number, app: string, run: number) => boolean };
+  /** A desktop app's feed (src/desktop-feed.ts DesktopFeeds): a desktop target's run is live only once the feed has it. */
+  feeds?: { index: (projectId: number, app: string) => Promise<DesktopIndex | null> };
 }
 
 /** A CI package (Peek Auras' Windows build): a release is the newest run on main whose shipping job passed; the next is a run in flight. */
@@ -556,14 +577,20 @@ export class CiPackageReader implements Reader {
 
   async refresh() {
     for (const t of this.d.finder.list('ci')) {
+      // A desktop target's build is out once its feed has it, not when CI ships it (#1522): read the feed first.
+      if (t.desktop) {
+        const index = await this.d.feeds?.index(t.projectId, t.desktop.app).catch(() => null);
+        this.cache.feed(t, new Set((index?.builds ?? []).flatMap((b) => (/^ci:\d+$/.test(b.source ?? '') ? [Number(b.source!.slice(3))] : []))));
+      }
       await this.cache.read(t);
       this.cache.record(t);
       const runs = this.cache.runs.get(tkey(t)) ?? [];
-      const cur = runs.find((r) => this.cache.released(t, r)) ?? (t.needs?.length ? runs.at(-1) : undefined);
+      const cur = runs.find((r) => this.cache.out(t, r)) ?? (t.needs?.length ? runs.at(-1) : undefined);
       this.pending.set(tkey(t), await this.cache.since(t, cur?.run.head_sha ?? null));
-      // A desktop app's feed follows what is out: the pinned build in a roll back, else the newest released one (#1148).
+      // A desktop app's feed follows what CI ships: the pinned build in a roll back, else the newest released one (#1148).
       const pin = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
-      const out = pin ? { id: pin.run, sha: pin.sha } : cur && this.cache.released(t, cur) ? { id: cur.run.id, sha: cur.run.head_sha } : null;
+      const shippedRun = runs.find((r) => this.cache.released(t, r));
+      const out = pin ? { id: pin.run, sha: pin.sha } : shippedRun ? { id: shippedRun.run.id, sha: shippedRun.run.head_sha } : null;
       if (t.desktop && out) void this.d.desktop?.({ ...t, desktop: t.desktop }, out);
       await this.findGreen(t, runs);
     }
@@ -614,13 +641,19 @@ export class CiPackageReader implements Reader {
       const num = this.cache.numbers(t);
       // A desktop app's current build links its first install (the launcher and that build), not the bare build (#1148).
       const installs = (r: RunJobs | undefined) => (r && t.desktop ? desktopPaths(t.projectId, t.desktop.app).install : r ? file(r) : null);
-      const out = (r: RunJobs) => this.cache.released(t, r);
+      const out = (r: RunJobs) => this.cache.out(t, r);
+      // A desktop target's run CI released that its feed hasn't taken: on its way, or refused (#1522).
+      const unpublished = (r: RunJobs) => !!t.desktop && this.cache.released(t, r) && !out(r);
+      const publishFailed = (r: RunJobs) => unpublished(r) && !!this.d.desktop?.failed?.(t.projectId, t.desktop!.app, r.run.id);
+      const tried = (r: RunJobs) => out(r) || failedShip(r) || publishFailed(r);
+      const was = (r: RunJobs) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), out(r) || !t.desktop ? file(r) : null, out(r) ? num.of(r) : null);
       // Held at last green's build by a roll back (ADR 0012): that build is what people get until the pin goes, and its
-      // card's roll back line says what waits.
-      const held = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
-      const heldRun = held && runs.find((r) => r.run.id === held.run);
+      // card's roll back line says what waits. A desktop app's pinned build is that only once its feed has it.
+      const pinned = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;
+      const heldRun = pinned && runs.find((r) => r.run.id === pinned.run);
+      const held = pinned && (!t.desktop || (heldRun ? out(heldRun) : this.cache.onFeed(t, pinned.run))) ? pinned : null;
       if (held) {
-        const recent = runs.filter((r) => r !== heldRun && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
+        const recent = runs.filter((r) => r !== heldRun && tried(r)).slice(0, PREVIOUS).map(was);
         // Newer runs can push the held one out of the page GitHub lists: it is still what people get, so show it from the pin.
         const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), installs(heldRun), num.of(heldRun))
           : { version: held.sha, number: null, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} };
@@ -628,17 +661,21 @@ export class CiPackageReader implements Reader {
       }
       const cur = runs.find(out);
       // A build that shipped but never went out (its needed workflow didn't pass) reached no one: not a release, nor a failed one.
-      const recent = runs.filter((r) => r !== cur && (out(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), file(r), num.of(r)));
-      const usual = runUsual(runs);
+      const recent = runs.filter((r) => r !== cur && tried(r)).slice(0, PREVIOUS).map(was);
+      const ciUsual = runUsual(runs);
+      // Publishing takes seconds: no stage of its own to wait out in an estimate.
+      const usual = (stage: string) => (stage === 'publish' ? 0 : ciUsual(stage));
       // The newest run in flight leads, or one that shipped and waits on a workflow it needs; a run older than the current release can't be its next.
       const newer = (r: RunJobs) => !cur || runs.indexOf(r) < runs.indexOf(cur);
-      const moving = runs.find((r) => newer(r) && (r.run.status !== 'completed' || (!!t.needs?.length && shipped(r))));
-      const running = moving ? (moving.run.status === 'completed' ? this.cache.needProgress(t, moving, now) : runProgress(moving, usual, now)) : null;
+      const moving = runs.find((r) => newer(r) && (r.run.status !== 'completed' || (unpublished(r) ? !publishFailed(r) : !!t.needs?.length && shipped(r))));
+      const publishing = (r: RunJobs): Progress => ({ stage: 'publish', since: span(r).end ?? now, usual: 0, waitingOn: null, text: 'publishing to the desktop feed' });
+      const running = !moving ? null : moving.run.status !== 'completed' ? runProgress(moving, usual, now) : unpublished(moving) ? publishing(moving) : this.cache.needProgress(t, moving, now);
       // On main past the current release and not in a run in flight (#764): waiting for CI to build it, or for a fix
       // when the newest run after the current release failed.
       const ahead = this.pending.get(tkey(t));
       const failed = runs.find((r) => r.run.status === 'completed' && newer(r));
-      const text = failed && failedShip(failed) ? 'CI failed on main: it waits on a fix' : 'on main: it goes out with the next build CI ships';
+      const text = failed && failedShip(failed) ? 'CI failed on main: it waits on a fix'
+        : failed && publishFailed(failed) ? "the desktop feed couldn't take its build: it waits on a fix" : 'on main: it goes out with the next build CI ships';
       const waiting: Progress | null = ahead?.commits.size ? { stage: 'ci', since: Math.min(...ahead.commits.values()), usual: null, waitingOn: text, text } : null;
       const inRun = new Set(moving ? ch(moving).map((c) => c.ticketId) : []);
       const changes: Change[] = [
@@ -649,7 +686,7 @@ export class CiPackageReader implements Reader {
       const lead = running ?? waiting;
       // A target numbered by run knows its number once its run exists.
       const number = t.numbering?.number === 'run' ? (moving?.run.run_number ?? null) : num.total + 1;
-      const track = t.needs?.length ? [...CI_TRACK.slice(0, -1), ...t.needs.map(needName), 'live'] : CI_TRACK;
+      const track = [...CI_TRACK.slice(0, -1), ...(t.needs ?? []).map(needName), ...(t.desktop ? ['publish'] : []), 'live'];
       return { target: targetOf(t), current: cur ? runRelease(cur, 'live', ch(cur), installs(cur), num.of(cur)) : null, next: lead ? nextOf(track, usual, lead, changes, number) : null, line: [], recent };
     });
   }

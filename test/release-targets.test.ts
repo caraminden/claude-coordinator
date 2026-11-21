@@ -406,6 +406,45 @@ test('the CI package reader: a target that began counting at its newest run coun
   assert.equal(store.countReleases(p.id, t.id), 3, 'each run is counted once');
 });
 
+test('the CI package reader: a desktop target\'s run is live, with its install link, only once its feed has it (#1522)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', desktop: { app: 'peek' } };
+  const now = Date.now(), m = 60_000;
+  const runs = [run(3, 'completed', 'success', now - 30 * m, now - 25 * m), run(2, 'completed', 'success', now - 60 * m, now - 50 * m)];
+  const jobs = { 3: [job(3, 'release', 'completed', 'success', now - 28 * m, now - 25 * m)], 2: [job(2, 'release', 'completed', 'success', now - 55 * m, now - 50 * m)] };
+  let feed: string[] = ['ci:2'];
+  const refused = new Set<number>([3]);
+  const published: number[] = [];
+  const desktop = Object.assign((_t: unknown, r: { id: number }) => void published.push(r.id), { failed: (_p: number, app: string, r: number) => app === 'peek' && refused.has(r) });
+  const feeds = { index: async (_p: number, app: string) => ({ app, current: 1, builds: feed.map((source, i) => ({ build: feed.length - i, exe: 'Peek.exe', started: 'file' as const, zip: `peek-${i}.zip`, sha256: '', size: 0, at: 0, source })) }) };
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => now, desktop, feeds });
+  const install = `/api/desktop/${p.id}/peek/install.zip`;
+
+  // Run 3 shipped in CI, but the feed refused its build: PCs keep run 2's, so that is what is live.
+  await reader.refresh();
+  assert.deepEqual(published, [3], 'the newest build CI shipped is still what the feed is asked to take');
+  let [v] = reader.read();
+  assert.deepEqual([v.current?.version, v.current?.outcome, v.current?.link], ['sha2', 'live', install], 'the build on the feed is live, with the install link');
+  assert.deepEqual(v.recent.map((r) => [r.version, r.outcome, r.number, r.link]), [['sha3', 'failed', null, null]], 'the refused build is a failed try: no number, no link');
+  assert.equal(store.countReleases(p.id, t.id), 1, 'a build no PC can get is not counted as a release');
+
+  // Still on its way to the feed (not refused): the next release, at its publish stage.
+  refused.clear();
+  [v] = reader.read();
+  assert.equal(v.current?.version, 'sha2');
+  assert.deepEqual(v.recent, []);
+  assert.deepEqual([v.next?.stage, v.next?.text, v.next?.stages.map((s) => s.name)], ['publish', 'publishing to the desktop feed', ['ci', 'package', 'publish', 'live']]);
+
+  // Once the feed has it, it is live; the older one stays live in Previous after the feed drops it (it keeps a few).
+  feed = ['ci:3'];
+  await reader.refresh();
+  [v] = reader.read();
+  assert.deepEqual([v.current?.version, v.current?.link, v.next], ['sha3', install, null]);
+  assert.deepEqual(v.recent.map((r) => [r.version, r.outcome]), [['sha2', 'live']]);
+  assert.equal(store.countReleases(p.id, t.id), 2);
+});
+
 test('the CI package reader: a run waiting for a runner waits, with no estimate', async () => {
   const store = new Store(join(root, `c-${++n}.db`));
   const p = store.createProject('Peek Auras', 'https://github.com/o/r');

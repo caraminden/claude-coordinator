@@ -327,12 +327,13 @@ export interface CiPublishDeps {
 /**
  * Publishes the build a ci target with a desktop app has out (Josh, 2026-11-19: "Auto from CI, plus by hand"): its newest
  * released run, or the run a roll back pins. The index keeps the run it followed last, so a by-hand publish stands until CI
- * moves to another run, through restarts too. A run that failed to publish isn't tried again until the server restarts.
+ * moves to another run, through restarts too. A run that failed to publish isn't tried again until the server restarts;
+ * `failed` says which, so its target's card shows it as a failed try rather than live (#1522).
  */
 export function ciPublisher(d: CiPublishDeps) {
   const failed = new Set<string>();
   const busy = new Set<string>();
-  return (t: { projectId: number; name: string; desktop: DesktopTarget }, run: { id: number; sha: string }) => {
+  const publish = (t: { projectId: number; name: string; desktop: DesktopTarget }, run: { id: number; sha: string }) => {
     const key = `${t.projectId}/${t.desktop.app}/${run.id}`;
     if (failed.has(key) || busy.has(key)) return;
     busy.add(key);
@@ -350,6 +351,7 @@ export function ciPublisher(d: CiPublishDeps) {
       }
     })().finally(() => busy.delete(key));
   };
+  return Object.assign(publish, { failed: (projectId: number, app: string, run: number) => failed.has(`${projectId}/${app}/${run}`) });
 }
 
 /** A target override's `desktop`, kept when well formed. */

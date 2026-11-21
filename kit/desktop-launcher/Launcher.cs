@@ -148,7 +148,10 @@ namespace Citadel.Desktop
                         CheckForUpdates(state, false);
                         if (state.Pending == null) throw new Exception("Couldn't download " + Title + " from " + config.Feed + ": see launcher.log.");
                     }
-                    var started = state.Pending != null ? TryPending(state) : StartCurrent(state);
+                    bool tryNow = Trial.TryNow(state, () => ACopyRuns(state));
+                    if (state.Pending != null && !tryNow)
+                        Log("build " + state.Pending.Id + " waits: a copy of " + Title + " is already running, and a new start would hand off to it, proving nothing about the new build");
+                    var started = tryNow ? TryPending(state) : StartCurrent(state);
                     EndLauncherTrial();
                     Cleanup(state);
                     if (started == null) CheckForUpdates(state, true);
@@ -212,6 +215,27 @@ namespace Citadel.Desktop
         {
             Log("starting build " + b.Id);
             Process.Start(StartInfo(b, P("started-" + b.Id))).Dispose();
+        }
+
+        /// <summary>Whether a copy of the app from any build in versions\ is running (Trial.TryNow): found by its exe's name, then its path.</summary>
+        bool ACopyRuns(State state)
+        {
+            string root = Path.GetFullPath(Versions).TrimEnd('\\') + "\\";
+            var names = new[] { state.Current, state.Previous, state.Pending }.Where(b => b != null && !string.IsNullOrEmpty(b.Exe))
+                .Select(b => Path.GetFileNameWithoutExtension(b.Exe)).Distinct(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in names)
+            {
+                foreach (var p in Process.GetProcessesByName(name))
+                {
+                    using (p)
+                    {
+                        // Another user's or an elevated process can't be read: not a copy this launcher started.
+                        try { if (p.MainModule.FileName.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true; }
+                        catch (Exception) { }
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>A build the launcher watches on probation, and when it started.</summary>

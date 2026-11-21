@@ -40,7 +40,8 @@
 #    doesn't refuse; a file's id stands for every test in it. A check that timed out, or a CI workflow still running,
 #    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
-#    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one. A fail says
+#    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
+#    the check of step 3 on the branch rebased onto main, so a red check is refused before the line too. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
 # 1. Rebases the branch onto the local main. A conflict stops here.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
@@ -49,7 +50,8 @@
 #    onto a newer main that keeps the branch's old files (undo_guard below; a message line "Undoes: <sha>"
 #    lets a meant undo through).
 # 3. Runs the check command on the rebased commit, within LAND_CHECK_TIMEOUT whole seconds (default
-#    1800). A failure or overrun stops here. With lanes (LANES below), the check of the commit's lane.
+#    1800). A failure or overrun stops here. With lanes (LANES below), the check of the commit's lane. When main
+#    hasn't moved since step 0's early check passed, the commit that check passed is taken as it is instead.
 # 4. With the CI gate on (below): pushes the commit to the scratch branch land/<branch> on origin and
 #    waits for CI to pass exactly that commit (with lanes, land/<lane>/<branch>, or no push for a lane with no CI). Red stops here. On the way out the scratch branch is
 #    deleted and its unfinished runs cancelled, except those of a commit that landed: they finish, so
@@ -80,6 +82,13 @@ CHECK='npm test'
 # break. '' none (the conflict check still runs). Past SMOKE_TIMEOUT seconds it doesn't decide, and the land goes on.
 SMOKE_CMD=''
 SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
+# The early check (#1177): 1 runs the check of the branch's lane (CHECK, CHECK_LIGHT, CHECK_<LANE>) once more in the
+# smoke check, on the branch rebased onto main, so a branch it refuses never takes a place in line (Peek Auras, 15 to
+# 19 November: 19 of 60 refused lands were a red check after the rebase, refused only at the front). When main hasn't
+# moved by the time the branch reaches the front, that checked commit lands as it is and the check doesn't run again;
+# when it has, the check runs again on the new main. 0 off: worth it for a check of minutes whose main moves under most
+# landings, which then pays the check twice for each land that passes.
+EARLY_CHECK=${LAND_EARLY_CHECK:-1}
 # The scheme's main branch.
 BRANCH=main
 # The file whose Project facts may have a "Numbered things" line.
@@ -1201,6 +1210,11 @@ build() {
   ci_lane=$lane
   if [ -z "$chk" ]; then
     [ -n "$FAST" ] || say "lane $lane runs no check"
+  elif [ -n "$early_on" ] && [ "$want" = "$early_on" ] && [ "$chk" = "$early_cmd" ] && [ "$(git rev-parse 'HEAD^{tree}')" = "$early_tree" ]; then
+    # The early check passed this same rebase onto this same commit: its commit (with any the check made) is the build.
+    git checkout -q --detach "$early_tip" 9>&- 6>&-
+    printf '%s\n' "$branch" "$early_tip" >"$gitdir/land-branch"
+    say "the check passed on this same rebase before the line and $BRANCH hasn't moved since, so it doesn't run again"
   else
     say "running $chk"
     queue_phase "waiting to run the check"
@@ -1375,12 +1389,84 @@ leave() {
   exit "$rc"
 }
 
+# The early check (EARLY_CHECK, the header's step 0): which check the branch's lane runs, as early_cmd ('' none: off,
+# not a plain land, a fast land, or a lane with no check). A merge into a build and a build itself never run it.
+early_cmd='' early_on='' early_tree='' early_tip=''
+early_plan() {
+  local lane=full why v
+  [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] || return 0
+  early_cmd=$CHECK
+  [ -n "$LANES" ] || return 0
+  read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
+  case $lane in light) early_cmd=$CHECK_LIGHT ;; full) ;; *) v=CHECK_${lane^^} && early_cmd=${!v-$CHECK} ;; esac
+}
+
+# The worktree back on the branch after the early check, or with a commit, the branch moved to that commit (the rebased
+# one, on a red check, as a red at the front does), unless the branch moved meanwhile. -f: what the check changed in
+# tracked files goes; the worktree was clean before it.
+early_back() {
+  if [ -n "${1:-}" ] && [ "$(git rev-parse "refs/heads/$branch")" = "$pre" ]; then
+    git checkout -q -f -B "$branch" "$1" 6>&-
+  else
+    git checkout -q -f "$branch" 6>&-
+  fi
+  rm -f "$gitdir/land-branch"
+}
+
+# early_check <smoke's start>: early_cmd on the branch rebased onto $BRANCH, in this worktree as in line (land-branch
+# puts it back if this is killed), under the check lock and its limits. Red refuses before the line, with the check's
+# last lines as a red at the front shows them. Green sets early_on, early_tree and early_tip, which build() takes as
+# its build when it rebases onto early_on again: the check then runs once. 1 when it neither passed nor refused.
+early_check() {
+  local t0=$1 t1=$SECONDS want rb log rc=0
+  want=$(git rev-parse "refs/heads/$BRANCH")
+  say "smoke: running $early_cmd on $branch rebased onto $BRANCH ($(git log -1 --format=%h "$want"))"
+  printf '%s\n' "$branch" "$pre" >"$gitdir/land-branch"
+  git checkout -q --detach "$pre" 6>&-
+  if ! git rebase -q "$want" >/dev/null 2>&1 6>&-; then
+    git rebase --abort 2>/dev/null || true
+    early_back
+    say "smoke: the rebase onto $BRANCH stopped, so the check doesn't decide here: getting in line, where the rebase says why"
+    return 1
+  fi
+  rb=$(git rev-parse HEAD)
+  printf '%s\n' "$branch" "$rb" >"$gitdir/land-branch"
+  log="$state/land-check-${branch//\//-}.log"
+  rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
+  (
+    flock -w "$CHECK_WAIT" 7 || exit 1
+    timeout -k 30 "$CHECK_LIMIT" bash -c "$early_cmd" >"$log" 2>&1 9>&- 7>&- 6>&-
+  ) 7>"$state/land-check.lock" 9>&- 6>&- || rc=$?
+  if [ "$rc" = 0 ]; then
+    early_on=$want early_tree=$(git rev-parse "$rb^{tree}") early_tip=$(git rev-parse HEAD)
+    early_back
+    say "smoke: the check passed on the rebased branch in $((SECONDS - t1)) s"
+    return 0
+  fi
+  if [ ! -e "$log" ]; then
+    early_back
+    say "smoke: the check lock ($state/land-check.lock) was still taken after ${CHECK_WAIT}s, so the check doesn't decide here: getting in line"
+    return 1
+  fi
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+  elif known_red "smoke: the check" <"$log"; then
+    early_back
+    return 1
+  fi
+  tail -n 40 "$log" >&2
+  early_back "$(git rev-parse HEAD)"
+  refuse "smoke: the check failed on the rebased branch (full log: $log), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it; $branch is now on that rebase onto $BRANCH, so the fix starts from there. Fix it, re-test, commit, then run this again"
+}
+
 # The smoke check (step 0): before the line, so what fails in seconds never waits in it.
 smoke() {
-  local t0=$SECONDS out rc=0
+  local t0=$SECONDS out rc=0 passed=1
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
-  if [ -n "$SMOKE_CMD" ]; then
+  early_plan
+  # A SMOKE_CMD that is the early check's own command runs once, on the rebase.
+  if [ -n "$SMOKE_CMD" ] && [ "$SMOKE_CMD" != "$early_cmd" ]; then
     out=$(timeout -k 10 "$SMOKE_TIMEOUT" bash -c "$SMOKE_CMD" 2>&1 6>&-) || rc=$?
     if { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ -n "$FAST" ]; then
       refuse "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, and a fast land goes live on it alone, so nothing landed. Find what hangs; a land labelled high takes the full gate"
@@ -1388,12 +1474,15 @@ smoke() {
       say "smoke: SMOKE_CMD ran past $SMOKE_TIMEOUT s, so it doesn't decide: getting in line"
       return 0 # it did not pass: no "passed" line (The Trans Agenda #76)
     elif [ "$rc" != 0 ]; then
-      ! known_red "smoke: SMOKE_CMD" <<<"$out" || return 0 # it said so, and it did not pass either
-      tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
-      refuse "smoke: SMOKE_CMD failed (exit $rc), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+      known_red "smoke: SMOKE_CMD" <<<"$out" || {
+        tail -n 60 <<<"$out" | sed 's/^/land: smoke: /' >&2
+        refuse "smoke: SMOKE_CMD failed (exit $rc), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+      }
+      passed='' # it said so, and it did not pass either
     fi
   fi
-  say "smoke: passed in $((SECONDS - t0)) s"
+  [ -z "$early_cmd" ] || early_check "$t0" || passed=''
+  [ -z "$passed" ] || say "smoke: passed in $((SECONDS - t0)) s"
 }
 
 # --verify (the header): the full CHECK under the check lock, then with the CI gate on, CI on land/verify (with lanes

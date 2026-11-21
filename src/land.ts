@@ -718,7 +718,7 @@ export class LandHandoffs {
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      const why = r.smoke ? `its smoke check refused it before it got in line, in seconds (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
+      const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
       try { await once('failed', () => this.d.failed?.(id, cls?.kind ?? null)); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
       await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`));

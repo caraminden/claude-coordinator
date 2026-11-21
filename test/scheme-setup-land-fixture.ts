@@ -32,7 +32,9 @@ export function setup(check = 'test ! -e red', config: Record<string, string> = 
   // The check (by default red while a file named "red" exists).
   const landSh = join(main, 'tools', 'land.sh');
   let script = readFileSync(landSh, 'utf8').replace(/^CHECK=.*$/m, () => `CHECK='${check}'`);
-  for (const [key, value] of Object.entries(config)) script = script.replace(new RegExp(`^${key}=.*$`, 'm'), () => `${key}='${value}'`);
+  // The early check (#1177) off unless a test turns it on: the tests here gate or count the check in line, and the early
+  // one would run it first, before the line. Its own tests are in scheme-setup-land-early.test.ts.
+  for (const [key, value] of Object.entries({ EARLY_CHECK: '0', ...config })) script = script.replace(new RegExp(`^${key}=.*$`, 'm'), () => `${key}='${value}'`);
   writeFileSync(landSh, script);
   if (local !== undefined) writeFileSync(join(main, 'tools', 'land.local.sh'), local);
   writeFileSync(join(main, 'a.txt'), 'one\n');

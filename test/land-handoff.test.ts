@@ -836,7 +836,7 @@ test('a smoke refusal (#1012) is a failed land that says it never got in line', 
   await s.land(SMOKE_RED, 1);
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1);
-  assert.match(s.sent[0], /didn't go through: its smoke check refused it before it got in line, in seconds \(nothing landed, and it never waited on the line or CI\)\. Fix the cause/);
+  assert.match(s.sent[0], /didn't go through: its smoke check refused it before it got in line \(nothing landed, and it never waited on the line or CI\)\. Fix the cause/);
   assert.match(s.sent[0], /prompt-budget\.test\.ts › budget/);
 });
 

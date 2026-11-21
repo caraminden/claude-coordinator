@@ -1,0 +1,115 @@
+// The scheme-setup template land.sh's early check (#1177, Peek Auras #637's idea Z1): the smoke check also runs the
+// check of the branch's lane on the branch rebased onto main, so a branch whose rebase fails it is refused before the
+// line, with the same last lines a red at the front shows; when main hasn't moved by the front, that checked commit is
+// the build and the check runs once.
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { git, setup } from './scheme-setup-land-fixture.ts';
+
+const ON = { EARLY_CHECK: '1' };
+// Red while a file named "red" is in the tree, saying so last; every run leaves a line in $COUNT.
+const CHECK = 'echo run >>"$COUNT"; test ! -e red || { echo "the check saw red"; exit 1; }';
+const count = (dir: string) => (existsSync(join(dir, 'count')) ? readFileSync(join(dir, 'count'), 'utf8').split('\n').filter(Boolean).length : 0);
+const state = (r: { main: string }) => git(r.main, 'rev-parse', '--absolute-git-dir');
+// The line before land.sh's own last one: the check's tail (this check prints one line).
+const tail = (stderr: string) => stderr.trimEnd().split('\n').at(-2);
+
+test('a branch whose rebase onto main fails the check is refused before the line, with the last lines a red at the front gets, and never takes a ticket', () => {
+  const runs: Record<string, ReturnType<ReturnType<typeof setup>['run']>> = {};
+  for (const early of ['1', '0']) {
+    const r = setup(CHECK, { EARLY_CHECK: early });
+    r.commit(r.main, 'red', 'main broke it\n'); // green on the branch alone, red only once rebased onto main
+    r.commit(r.wt, 'b.txt', 'b\n');
+    const before = git(r.main, 'rev-parse', 'main');
+    const res = (runs[early] = r.run({ COUNT: join(r.dir, 'count') }));
+    assert.equal(res.status, 1, res.stderr);
+    assert.equal(git(r.main, 'rev-parse', 'main'), before, 'main is untouched');
+    assert.equal(git(r.wt, 'branch', '--show-current'), 'ticket/1-x', 'the worktree is back on its branch');
+    assert.equal(git(r.wt, 'rev-parse', 'HEAD~1'), before, 'the branch is on the rebase, so the fix starts from there');
+    assert.ok(!existsSync(join(git(r.wt, 'rev-parse', '--absolute-git-dir'), 'land-branch')), 'nothing is left to recover');
+    assert.equal(count(r.dir), 1, 'the check ran once');
+    if (early === '1') {
+      assert.match(res.stderr, /^land: smoke: the check failed on the rebased branch \(full log: .*\), before the line \(\d+ s\), so nothing landed/m);
+      assert.doesNotMatch(res.stderr, /^queue: /m, 'it never got in line');
+      assert.ok(!existsSync(join(state(r), 'land-queue', '.seq')), 'no ticket was issued');
+    } else {
+      assert.match(res.stderr, /^land: the check failed on the rebased branch \(full log: /m);
+    }
+  }
+  assert.equal(tail(runs['1'].stderr), 'the check saw red');
+  assert.equal(tail(runs['0'].stderr), 'the check saw red');
+  assert.match(runs['1'].stderr, /the check saw red\nland: smoke: the check failed/);
+});
+
+test('with main unmoved at the front, the commit the early check passed lands as it is, with what the check committed, and the check runs once', () => {
+  // The check commits once, as Peek's regenerated test map does: the commit must ship, not be lost to a skipped rerun.
+  const check = `${CHECK}; if [ ! -e made ]; then echo m >made; git add made; git commit -qm made-by-check; fi`;
+  const r = setup(check, ON);
+  r.commit(r.main, 'm.txt', 'main moved before the hand-off\n');
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const res = r.run({ COUNT: join(r.dir, 'count') });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /smoke: the check passed on the rebased branch/);
+  assert.match(res.stderr, /the check passed on this same rebase before the line and main hasn't moved since, so it doesn't run again/);
+  assert.equal(count(r.dir), 1);
+  assert.deepEqual(git(r.main, 'log', '-3', '--format=%s', 'main').split('\n'), ['made-by-check', 'b.txt: b', 'm.txt: main moved before the hand-off']);
+  assert.equal(git(r.origin, 'rev-parse', 'main'), git(r.main, 'rev-parse', 'main'));
+});
+
+test('when main moves after the early check, the check runs again on the new main before it lands', () => {
+  // The early run moves main once (an empty commit, as another landing would), so the front sees a new main.
+  const check = `${CHECK}; [ -e "$MOVED" ] || { touch "$MOVED"; git -C "$MAIN_DIR" commit -q --allow-empty -m moved; }`;
+  const r = setup(check, ON);
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const res = r.run({ COUNT: join(r.dir, 'count'), MOVED: join(r.dir, 'moved'), MAIN_DIR: r.main });
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /doesn't run again/);
+  assert.equal(count(r.dir), 2, 'early, then again in line');
+  assert.deepEqual(git(r.main, 'log', '-2', '--format=%s', 'main').split('\n'), ['b.txt: b', 'moved']);
+});
+
+test('a SMOKE_CMD that is the check runs once, on the rebase; EARLY_CHECK=0 and a fast land run no early check', () => {
+  const same = setup(CHECK, { ...ON, SMOKE_CMD: CHECK });
+  same.commit(same.wt, 'b.txt', 'b\n');
+  const res = same.run({ COUNT: join(same.dir, 'count') });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(count(same.dir), 1);
+
+  const off = setup(CHECK, ON);
+  off.commit(off.wt, 'b.txt', 'b\n');
+  const o = off.run({ COUNT: join(off.dir, 'count'), LAND_EARLY_CHECK: '0' });
+  assert.equal(o.status, 0, o.stderr);
+  // The fixture writes EARLY_CHECK='1' over the template's default, so the env var only reaches a scheme's default.
+  const offByEnv = setup(CHECK);
+  offByEnv.commit(offByEnv.wt, 'b.txt', 'b\n');
+  assert.equal(offByEnv.run({ COUNT: join(offByEnv.dir, 'count') }).status, 0);
+  assert.equal(count(offByEnv.dir), 1, 'in line only');
+
+  const fast = setup('false', { ...ON, SMOKE_CMD: 'true' });
+  fast.commit(fast.wt, 'b.txt', 'b\n');
+  const f = fast.run({ LAND_FAST: '1' });
+  assert.equal(f.status, 0, f.stderr);
+  assert.doesNotMatch(f.stderr, /smoke: running/);
+});
+
+test("the early check runs the branch's lane's check: CHECK_LIGHT for a light change, none for a lane with no check", () => {
+  const local = `LANES=tools/lanes\nCHECK_LIGHT='echo light >>"$COUNT"; test ! -e docs/red'\n`;
+  const r = setup('echo full >>"$COUNT"', ON, local);
+  r.commit(r.main, 'tools/lanes', 'light docs/*\n');
+  r.commit(r.main, 'docs/red', 'main broke the light check\n');
+  r.commit(r.wt, 'docs/a.md', 'a\n');
+  const res = r.run({ COUNT: join(r.dir, 'count') });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /smoke: running echo light/);
+  assert.match(res.stderr, /^land: smoke: the check failed on the rebased branch/m);
+  assert.equal(readFileSync(join(r.dir, 'count'), 'utf8'), 'light\n');
+
+  const none = setup('false', ON, 'LANES=tools/lanes\nCHECK_LIGHT=\'\'\n');
+  none.commit(none.main, 'tools/lanes', 'light docs/*\n');
+  none.commit(none.wt, 'docs/a.md', 'a\n');
+  const n = none.run();
+  assert.equal(n.status, 0, n.stderr);
+  assert.doesNotMatch(n.stderr, /smoke: running/);
+});

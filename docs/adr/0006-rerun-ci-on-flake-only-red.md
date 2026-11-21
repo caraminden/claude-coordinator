@@ -63,15 +63,18 @@ red again on flakes and were refused, and 1 got no answer.
   no fresh run, no refusal and, on perigee's fallback, no retry in place (#1360). This holds for a train's run, its
   retests after suspects and its bisect too, since they all go through the same gate.
 - Known means `tools/known-flakes.ts` says so: the file passed alone on at least one other branch in the last 14 days (the
-  retro log's `flake` lines, which the Test health tab counts; `flake_events` rows keep no branch), counting only
-  sightings since the file's newest commit on main ("havent been fixed": an older one may predate its fix), or an open
-  fix minion has it (`flake_fixes`, read-only). The ship's own branch and its riders' don't count as other branches.
+  retro log's `flake` lines, which the Test health tab counts; `flake_events` rows keep no branch), or an open fix
+  minion has it (`flake_fixes`, read-only; the reason names its #N). "Havent been fixed": once a fix minion's fix has
+  passed its proof (its `flake_fixes` row is held), only sightings after that count. A sighting whose branch, or any
+  rider on its train (the line's `with` part), is the ship's own branch or one of its riders' doesn't count; a train's
+  sighting counts once, for its front.
 - A known flake that the ship, or any ship on its train, changed, or that imports what they changed (the suspects' map,
   `train_suspects_of`), is never excused: it gets the fresh run as before.
-- A file seen for the first time, a file that didn't pass alone, or anything the helper can't read keeps the behaviour above.
+- A file seen for the first time, a file that didn't pass alone, a run that also tripped the leak guard (leftover
+  processes are no flake), or anything the helper can't read keeps the behaviour above.
 - It says so plainly: `only known flakes failed …, so this goes on as green, with no fresh run`, then
   `shipped past known flakes <file> (seen on N other branches in 14 days, fix #N)` in the land's output and every
-  rider's, the shipped line, and a `known flake · <branch> · <files> · <run>` retro log line. The `flake` sightings are
-  still written, so the Test health tab keeps counting and the automatic fix minions keep coming.
-- The kit's `templates/land.sh` is still unchanged, for the reason above: a scheme's own `CHECK` gives no "passed alone"
+  rider's, the shipped line, the Releases news (as a warning), and a `known flake · <branch> · <files> · <run>` retro
+  log line. The `flake` sightings are still written, so the Test health tab keeps counting and the automatic fix minions keep coming.
+- Citadel only: the kit's `templates/land.sh` is still unchanged, for the reason above: a scheme's own `CHECK` gives no "passed alone"
   signal to know a flake by.

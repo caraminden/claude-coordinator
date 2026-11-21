@@ -948,6 +948,7 @@ export class Runner {
       this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id)]));
       this.store.warmTurnTotals(ids);
       this.store.warmTouches(open);
+      this.store.warmEvents(open.flatMap((t) => this.queue.heldMail(t.id).flatMap((m) => m.id ?? [])));
       for (const pid of new Set(open.map((t) => t.project_id))) this.store.warmOpenCards(pid, open.filter((t) => t.project_id === pid).map((t) => t.id));
       return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
     });

@@ -31,7 +31,9 @@ export interface LoopState {
  */
 export function loopHolds(store: Store): Map<number, { n: number; at: number; text: string }> {
   const out = new Map<number, { n: number; at: number; text: string }>();
-  for (const key of store.settingKeys('loop:')) {
+  const keys = store.settingKeys('loop:');
+  store.warmSettings(keys); // in a read scope (#1527), one read for every loop, not one each
+  for (const key of keys) {
     const loop = store.getSetting<LoopState>(key);
     if (!loop?.held.length) continue;
     // A pair's loop (two Taskmasters, or two minions) is held for both: either chat's Continue lets it all through.

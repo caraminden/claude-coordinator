@@ -456,9 +456,10 @@ export class LiveWaiters {
     // Read once in a request's read scope (src/read-scope.ts): a scheme's list asked four times a minion (#1527).
     return [...scoped(this.store.db, 'wake:chains', () => {
       const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
-      if (!this.outbox) return old;
-      const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf);
-      return [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
+      const rows = this.outbox ? this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf) : [];
+      const all = [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
+      this.store.warmTickets(all.map((c) => c.after)); // the leaders chainWhat names, in one read
+      return all;
     })];
   }
 

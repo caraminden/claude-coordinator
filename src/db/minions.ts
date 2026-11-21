@@ -211,6 +211,14 @@ export const minionQueries = {
     return rows.reverse().map((r) => r.text);
   },
 
+  /** Inside a read scope (src/read-scope.ts): every one of `ids` in one read, for getTicket. */
+  warmTickets(this: Store, ids: number[]) {
+    if (!inScope(this.db) || !ids.length) return;
+    const rows = this.db.prepare('SELECT * FROM tickets WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as Ticket[];
+    const got = new Map(rows.map((t) => [t.id, t]));
+    warm(this.db, ids.map((id) => [`ticket:${id}`, got.get(id)]));
+  },
+
   getTicket(this: Store, id: number): Ticket | undefined {
     const t = scoped(this.db, `ticket:${id}`, () => this.db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as unknown as Ticket | undefined);
     return t && { ...t };

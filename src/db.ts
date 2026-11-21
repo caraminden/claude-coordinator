@@ -2661,7 +2661,16 @@ export class Store {
 
 
   getEvent(id: number): EventRow | undefined {
-    return this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined;
+    const e = scoped(this.db, `event:${id}`, () => this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined);
+    return e && { ...e };
+  }
+
+  /** Inside a read scope (src/read-scope.ts): every one of `ids` in one read, for getEvent. */
+  warmEvents(ids: number[]) {
+    if (!inScope(this.db) || !ids.length) return;
+    const rows = this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as EventRow[];
+    const got = new Map(rows.map((e) => [e.id, e]));
+    warm(this.db, ids.map((id) => [`event:${id}`, got.get(id)]));
   }
 
   /** Replace an event's data, for cards whose status lives in the card (plans). */

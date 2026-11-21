@@ -779,7 +779,7 @@ export const projectRoutes: Route[] = [
       const taskmasters = all_tms.length > 1
         ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null, updated_at: t.updated_at, status: t.status }))
         : [];
-      return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
+      return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
     },
   },
   {

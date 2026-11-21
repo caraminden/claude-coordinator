@@ -5,6 +5,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from './db.ts';
+import { reconcileMoved, tidyForClosed } from './handoff-tidy.ts';
 import { spokenText } from './memory.ts';
 import { projectSharedDir } from './workspace.ts';
 
@@ -45,6 +46,8 @@ export interface HandoffHit { kind: 'handoff'; name: string; mtime: number; snip
 export class MinionIndex {
   private db: DatabaseSync;
   private store: Store;
+  /** Set by MinionIndexer: called with each newly closed minion's brief, so its handoff can be filed (src/handoff-tidy.ts). */
+  onClosed?: (projectId: number, briefText: string) => void;
   constructor(store: Store) {
     this.store = store;
     this.db = store.db;
@@ -61,7 +64,8 @@ export class MinionIndex {
     for (const t of rows) {
       // One unreadable transcript is skipped, not retried: the mark must still pass it, or the scheme's index stops there.
       try {
-        this.indexTicket(projectId, t);
+        const briefText = this.indexTicket(projectId, t);
+        this.onClosed?.(projectId, briefText);
       } catch (e) {
         console.error(`minion index: skipped #${t.number} (ticket ${t.id}): ${(e as Error).message}`);
       }
@@ -70,7 +74,7 @@ export class MinionIndex {
     return rows.length;
   }
 
-  private indexTicket(projectId: number, t: { id: number; number: number; title: string; at: number }) {
+  private indexTicket(projectId: number, t: { id: number; number: number; title: string; at: number }): string {
     const brief = (this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(t.id) as { data: string } | undefined)?.data;
     let briefText = '';
     try {
@@ -100,16 +104,18 @@ export class MinionIndex {
     this.db.prepare('DELETE FROM minion_index WHERE rowid = ?').run(t.id);
     this.db.prepare('INSERT INTO minion_index (rowid, title, type, brief, said, files, project_id, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(t.id, t.title, type, cut(briefText, BRIEF_MAX), said.join('\n\n'), [...files].slice(0, 200).join('\n'), projectId, t.at);
+    return briefText;
   }
 
   /** Bring the scheme's handoffs/ rows in line with the folder: new and changed files in, gone ones out. */
   syncHandoffs(projectId: number, dataDir: string) {
     const dir = join(projectSharedDir(dataDir, projectId), 'handoffs');
-    let names: string[];
-    try {
-      names = readdirSync(dir).filter((n) => n.endsWith('.md'));
-    } catch {
-      names = [];
+    // Filed handoffs (src/handoff-tidy.ts) stay searchable under their folder: "shipped/x.md", "not-picked/x.md".
+    const names: string[] = [];
+    for (const sub of ['', 'shipped', 'not-picked']) {
+      try {
+        for (const n of readdirSync(join(dir, sub))) if (n.endsWith('.md')) names.push(sub ? `${sub}/${n}` : n);
+      } catch { /* no such folder */ }
     }
     const have = new Map((this.db.prepare('SELECT rowid AS id, name, mtime FROM handoff_index WHERE project_id = ?').all(projectId) as { id: number; name: string; mtime: number }[]).map((r) => [r.name, r]));
     for (const name of names) {
@@ -170,6 +176,9 @@ export class MinionIndexer {
   constructor(store: Store, dataDir: string) {
     this.store = store;
     this.dataDir = dataDir;
+    store.minionIndex.onClosed = (projectId, briefText) => {
+      try { tidyForClosed(store, dataDir, projectId, briefText); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
+    };
   }
 
   async run() {
@@ -178,8 +187,9 @@ export class MinionIndexer {
     try {
       for (const p of this.store.listProjects()) {
         await new Promise((r) => setImmediate(r));
-        this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
         while (this.store.minionIndex.indexClosed(p.id) > 0) await new Promise((r) => setImmediate(r));
+        try { reconcileMoved(this.store, this.dataDir, p.id); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
+        this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
       }
     } finally {
       this.running = false;

@@ -36,7 +36,7 @@ export function pastMinionsText(hits: any[]): string {
   if (!hits.length) return 'No closed minion or handoff matches. Fewer words, or another word for it, may find one.';
   const day = pacificDay;
   return hits.map((h) => {
-    if (h.kind === 'handoff') return `Handoff ${h.name} · changed ${day(h.mtime)}\n${h.snippet}`;
+    if (h.kind === 'handoff') return `Handoff ${h.name}${h.name.startsWith('shipped/') ? ' (its minion shipped)' : h.name.startsWith('not-picked/') ? ' (not picked)' : ''} · changed ${day(h.mtime)}\n${h.snippet}`;
     const files = h.files ? h.files.split('\n') : [];
     return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
   }).join('\n\n');

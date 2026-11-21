@@ -1573,6 +1573,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "PUT /api/projects/:p/claims/nope/queue": {
+  "anon": "401 Not logged in",
+  "person": "400 queue is a list of up to 50 minion numbers, first in line first",
+  "member": "400 queue is a list of up to 50 minion numbers, first in line first",
+  "outsider": "404 No such scheme",
+  "tmA": "400 queue is a list of up to 50 minion numbers, first in line first",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/contraption-turns": {
   "anon": "401 Not logged in",
   "person": "200",

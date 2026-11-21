@@ -1642,6 +1642,7 @@ export const SCHEMA_HISTORY = [
   [98, 'host_samples.cpu_psi, mem_psi (#1301)'],
   [99, 'usage_counts (#1306)'],
   [100, 'host_samples.io_psi, swap_used (#1325)'],
+  [101, 'claim_queue, claim_spans (#1334)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

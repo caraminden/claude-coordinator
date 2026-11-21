@@ -646,25 +646,26 @@ const TOOLS = () => ([
   },
   {
     name: 'claim',
-    description: "Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). It frees itself when its minion is dismissed. Without `minion` you hold it yourself.",
+    description: "Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). `queue` sets who waits for it, in order, held by anyone: when its holder is dismissed or it is released, it passes to the first in line, who gets one chat line saying so (a minion still waiting on its start_after leader starts when its chain does), and with nobody in line it is free. A queue alone on a free claim gives it to the first in line. Without `minion` or `queue` you hold it yourself.",
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Lowercase words joined by hyphens, e.g. pipeline-lane' },
         minion: { type: 'integer', description: 'The minion that holds it (#N as a number); leave out to hold it yourself' },
         note: { type: 'string', maxLength: 300, description: 'Optional: what it is held for' },
+        queue: { type: 'array', items: { type: 'integer' }, maxItems: 50, description: 'Optional: the whole waiting line, first in line first (#N as numbers); it replaces the line list_claims shows, [] empties it' },
       },
       required: ['name'],
     },
   },
   {
     name: 'release',
-    description: 'Free a claim, whoever holds it, e.g. once the pipeline lane\'s minion has shipped or a fix for broken shipping must jump the lane.',
+    description: 'Free a claim, whoever holds it, e.g. a fix for broken shipping must jump the lane: it passes to the first in its queue, or is free. Take a minion out of the line with claim\'s `queue`.',
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The claim, e.g. pipeline-lane' } }, required: ['name'] },
   },
   {
     name: 'list_claims',
-    description: 'List the scheme\'s claims: each duty, its holder and since when. list_tickets shows them too.',
+    description: 'List the scheme\'s claims: each duty, its holder and since when, and its queue in order. list_tickets shows them too.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -1802,12 +1803,12 @@ async function runTool(name: string, args: any): Promise<string> {
       return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
     }
     case 'claim': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null });
-      return `Claimed: ${claimLine(r.claim)}`;
+      const r = await call('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null, queue: args.queue ?? null });
+      return `${args.queue && args.minion == null ? 'Queue set' : 'Claimed'}: ${claimLine(r.claim)}`;
     }
     case 'release': {
       const r = await call('DELETE', `/api/projects/${C().PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
-      return r.released ? `Released: ${claimLine(r.released)}` : `Nobody held ${args.name}.`;
+      return r.released ? `Released: ${claimLine(r.released)}${r.claim ? `\nNow: ${claimLine(r.claim)}` : ''}` : `Nobody held ${args.name}.`;
     }
     case 'list_claims': {
       const { claims } = await call('GET', `/api/projects/${C().PROJECT}/claims`);
@@ -2464,7 +2465,11 @@ function scheduleLine(s: any): string {
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
 function claimLine(c: any) {
-  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}`;
+  const chip = (q: any) => `#${q.number}${q.state === 'chained' ? ` (after #${q.after})` : q.state === 'new' ? ' (not started)' : q.state === 'working' ? ' (working)' : ''}`;
+  const waiting = (c.queue ?? []).filter((q: any) => q.state !== 'done');
+  const left = c.estimate ? `, about ${Math.round(c.estimate.left_ms / 3_600_000 * 10) / 10} h left (an estimate from the last ${c.estimate.of} holders)` : '';
+  const line = waiting.length ? `; queue: ${waiting.map(chip).join(', ')}; ${c.done} of ${c.total} done${left}` : '';
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${line}`;
 }
 
 /** list_tickets, read_ticket and live_facts with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */

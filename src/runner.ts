@@ -12,6 +12,8 @@ import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, clip, coldKey, loopHolds, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
+import { APP_NAME } from './appname.ts';
+import type { Claim } from './claims.ts';
 import { fableMeter } from './costs.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
@@ -899,14 +901,36 @@ export class Runner {
     };
   }
 
-  /** A dismissed minion's claims (#921) free themselves; whoever keeps the scheme's claims hears so as held mail. */
+  /** A dismissed minion's claims (#921) pass to the next in each one's queue, or free themselves (#1334: claimPassed). */
   private freeClaims(ticketId: number) {
-    const freed = this.store.claims.releaseHeldBy(ticketId);
     const minion = this.store.getTicket(ticketId);
-    const keeper = minion && freed.length ? this.store.getOverlord(minion.project_id) : undefined;
-    if (!keeper) return;
-    for (const c of freed) this.leaveMail(keeper.id, `#${minion!.number} ${minion!.title}`, `(nothing to do unless something waits on it) ${c.name} is free: #${minion!.number}, its holder, was dismissed.`);
-    this.broadcast({ type: 'claims', projectId: minion!.project_id });
+    const passed = this.store.claims.releaseHeldBy(ticketId);
+    if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, was dismissed`, `#${minion.number} ${minion.title}`);
+  }
+
+  /**
+   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, parked or not; a chained
+   * minion still holding its brief gets the line as a note and starts when its chain does, so it is never woken without
+   * its brief. Whoever keeps the scheme's claims hears it as held mail. A scheme's page redraws either way.
+   */
+  claimPassed(projectId: number, passed: { from: Claim; to?: Claim }[], why: string, author: string) {
+    if (!passed.length) return;
+    const keeper = this.store.getOverlord(projectId);
+    for (const { from, to } of passed) {
+      const next = to && this.store.getTicket(to.holder);
+      if (next && next.status !== 'closed') {
+        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when you are dismissed.`;
+        if (this.heldFor(next.id)) this.emit(next.id, 'note', { text: line });
+        else {
+          if (next.state === 'parked') this.store.updateTicket(next.id, { state: null });
+          this.send(next.id, APP_NAME, line);
+        }
+      }
+      if (keeper && keeper.id !== to?.holder) {
+        this.leaveMail(keeper.id, author, `(nothing to do unless something waits on it) ${from.name} ${next ? `passed to #${next.number} ${next.title}, next in its queue` : 'is free'}: ${why}.`);
+      }
+    }
+    this.broadcast({ type: 'claims', projectId });
   }
 
   /**

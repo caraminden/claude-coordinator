@@ -416,14 +416,63 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
   return [...hits.values()].slice(0, 100);
 }
 
-/** A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids. */
-export function claimView(app: App, c: Claim) {
+/** Where a claim's holder is (#1334), and how far along the bar: its plan's steps fill Working; Reviewing and Shipping sit near the end. */
+function holderStage(app: App, t: Ticket | undefined): { stage: 'working' | 'reviewing' | 'shipping' | null; progress: number; step: { n: number; of: number; done: number } | null } {
+  if (!t || t.kind === 'coordinator') return { stage: null, progress: 0, step: null };
+  if (t.state === 'pending-deploy' || app.landings.get(t.id)?.code === null) return { stage: 'shipping', progress: 0.93, step: null };
+  const step = t.status === 'closed' ? null : app.runner.progressOf(t).step;
+  if (step?.label && /review/i.test(step.label) && step.done < step.of) return { stage: 'reviewing', progress: 0.78, step };
+  return { stage: 'working', progress: step ? 0.6 * (step.done / step.of) : 0, step: step && { n: step.n, of: step.of, done: step.done } };
+}
+
+/** A queued minion's state for its chip: a past holder, chained behind another (start_after), not started yet, working now, or waiting. */
+function queuedState(app: App, t: Ticket | undefined, done: boolean): { state: string; after: number | null } {
+  if (done) return { state: 'done', after: null };
+  const chain = t && app.waiters.chains().find((c) => c.ticket === t.id);
+  if (chain) return { state: 'chained', after: app.store.getTicket(chain.after)?.number ?? null };
+  if (!t || t.status === 'closed') return { state: 'gone', after: null };
+  if (t.status === 'new') return { state: 'new', after: null };
+  return { state: app.runner.isRunning(t.id) ? 'working' : 'waiting', after: null };
+}
+
+/**
+ * A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids, and its
+ * queue (#1334): past holders, the holder's stage, the waiting in order, and when the history allows, each one's expected start.
+ */
+export function claimView(app: App, c: Claim, now = Date.now()) {
   const { store } = app;
   const t = store.getTicket(c.holder);
   // A Taskmaster that took a claim for itself has no number: name it (#921).
   const holder_name = t?.kind !== 'coordinator' ? `#${t?.number ?? c.holder} ${t?.title ?? ''}`.trim()
     : t.coordinator_of != null ? `${store.getUser(t.coordinator_of)?.name ?? 'a person'}'s Taskmaster` : store.isSplit(t.project_id) ? 'the Overlord' : 'the Taskmaster';
-  return { ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', holder_name, since_text: `since ${pacific(c.since)}` };
+  const rows = store.claims.queue(c.project_id, c.name);
+  const est = rows.some((r) => r.done_at == null) ? store.claims.estimate(c.project_id, c.name) : null;
+  const left = est ? Math.max(est.median - (now - c.since), 0) : 0;
+  let ahead = 0;
+  const queue = rows.map((r) => {
+    const q = store.getTicket(r.ticket);
+    const done = r.done_at != null;
+    const starts = est && !done ? now + left + est.median * ahead++ : null;
+    return { number: q?.number ?? null, title: q?.title ?? '', ...queuedState(app, q, done), done_at: r.done_at, starts_at: starts, starts_text: starts ? pacific(starts) : null };
+  });
+  const waiting = queue.filter((q) => q.state !== 'done').length;
+  return {
+    ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', holder_name, since_text: `since ${pacific(c.since)}`,
+    ...holderStage(app, t), queue,
+    // Steps of this run: past holders, the holder, the waiting. Its time left only once ESTIMATE_MIN holders have finished.
+    done: queue.length - waiting, total: queue.length + 1,
+    estimate: est && waiting ? { left_ms: left + est.median * waiting, median_ms: est.median, of: est.of } : null,
+  };
+}
+
+/** A claim's queue from a body's list of minion numbers: open minions of this scheme, in order. */
+function queueOf(app: App, projectId: number, raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length > 50) throw new HttpError(400, 'queue is a list of up to 50 minion numbers, first in line first');
+  return raw.map((n) => {
+    const t = app.store.getTicketByNumber(projectId, Number(n));
+    if (!t || t.kind === 'coordinator' || t.status === 'closed') throw new HttpError(400, `No open minion #${Number(n)} in this scheme`);
+    return t.id;
+  });
 }
 
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
@@ -1612,33 +1661,58 @@ export const projectRoutes: Route[] = [
       const body = await readJson(req);
       const name = claimName(body.name);
       const note = body.note == null ? '' : str(body.note, 'Note', 300);
+      const queue = body.queue == null ? null : queueOf(app, project.id, body.queue);
       let holder = caller;
       if (body.minion != null) {
         holder = app.store.getTicketByNumber(project.id, Number(body.minion));
         if (!holder || holder.kind === 'coordinator' || holder.status === 'closed') throw new HttpError(400, `No open minion #${Number(body.minion)} in this scheme`);
       }
       if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number)');
-      const { claim, held } = app.store.claims.take(project.id, name, holder.id, session.name, note);
-      if (held) {
-        const v = claimView(app, held);
-        throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${held.note ? ` (${held.note})` : ''}. Release it first if it should move.`);
+      const held = app.store.claims.get(project.id, name);
+      // Only a queue (#1334): edit the line of a claim someone else holds, or start a free one with the first in line.
+      if (queue && body.minion == null && held && held.holder !== holder.id) {
+        app.store.claims.setQueue(project.id, name, queue, session.name);
+        app.broadcast({ type: 'claims', projectId: project.id });
+        return json(res, 200, { claim: claimView(app, held) });
       }
+      if (queue?.length && body.minion == null && !held) holder = app.store.getTicket(queue[0])!;
+      const taken = app.store.claims.take(project.id, name, holder.id, session.name, note);
+      if (taken.held) {
+        const v = claimView(app, taken.held);
+        throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${taken.held.note ? ` (${taken.held.note})` : ''}. Release it first if it should move, or add to its queue.`);
+      }
+      if (queue) app.store.claims.setQueue(project.id, name, queue, session.name);
       app.broadcast({ type: 'claims', projectId: project.id });
-      const view = claimView(app, claim);
+      const view = claimView(app, taken.claim);
       if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
-      return json(res, 201, { claim: view });
+      return json(res, held ? 200 : 201, { claim: view });
     },
   },
   {
+    // The page's reorder and remove (#1334): the whole waiting order, first in line first.
+    method: 'PUT', path: '/api/projects/:project/claims/:name/queue', who: PEOPLE_AND_TASKMASTER,
+    async handler({ req, res, app, session, project, params }) {
+      const name = claimName(decodeURIComponent(params.name));
+      const queue = queueOf(app, project.id, (await readJson(req)).queue);
+      const held = app.store.claims.get(project.id, name);
+      if (!held) throw new HttpError(404, `Nobody holds ${name}, so it has no queue`);
+      app.store.claims.setQueue(project.id, name, queue, session.name);
+      app.broadcast({ type: 'claims', projectId: project.id });
+      return json(res, 200, { claim: claimView(app, held) });
+    },
+  },
+  {
+    // Release: the claim passes to the first in its queue, who hears so (#1334), or is free.
     method: 'DELETE', path: '/api/projects/:project/claims/:name', who: PEOPLE_AND_TASKMASTER,
     handler({ res, app, session, caller, project, params }) {
-      const released = app.store.claims.release(project.id, claimName(decodeURIComponent(params.name)));
-      const view = released && claimView(app, released);
-      if (view) {
-        app.broadcast({ type: 'claims', projectId: project.id });
-        if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})`);
+      const passed = app.store.claims.passOn(project.id, claimName(decodeURIComponent(params.name)), 'released');
+      const view = passed && claimView(app, passed.from);
+      if (passed && view) {
+        if (passed.to) app.runner.claimPassed(project.id, [passed], `${session.name} released it from ${view.holder_name}`, session.name);
+        else app.broadcast({ type: 'claims', projectId: project.id });
+        if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? view.holder, `${session.name} released ${view.name} (held by ${view.holder_name})${passed.to ? `; it passed to the next in its queue` : ''}`);
       }
-      return json(res, 200, { released: view || null });
+      return json(res, 200, { released: view || null, ...(passed?.to && { claim: claimView(app, passed.to) }) });
     },
   },
   // Edit, pause or resume, or delete a schedule; runs it already started stay.

@@ -90,7 +90,8 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 
 /** A block of the overview in Citadel's look (#1068): a heading in its hue over a box of rows that open, as Host load is. */
-const block = (title, hue, cls, ...rows) => h('section', { class: `ci-block ${cls}` }, h('h3', { class: 'settings-section', 'data-hue': hue }, title), h('div', { class: 'settings-rows' }, ...rows));
+// No title: the one row under it already says it (a heading that repeats its row is wasted height).
+const block = (title, hue, cls, ...rows) => h('section', { class: `ci-block ${cls}${title ? '' : ' ci-bare'}` }, title ? h('h3', { class: 'settings-section', 'data-hue': hue }, title) : '', h('div', { class: 'settings-rows' }, ...rows));
 const tones = (...cs) => cs.filter(Boolean);
 /** Who a run or job tests, as plain text beside its name (a link when it is a minion's chat). */
 const whoText = (x) => x.who?.href ? h('a', { href: x.who.href, title: x.who.label }, x.who.label) : h('span', { class: 'muted' }, x.who?.label ?? x.branch ?? '');
@@ -111,7 +112,7 @@ function problemsBlock(s) {
     x.fixTicket || x.noFix ? '' : h('span', { class: 'ci-detail-line ci-problem-link' }, x.link ? [h('span', { class: 'muted' }, x.link.kind === 'minion' ? 'Fix minion: ' : 'Heard by: '),
       h('a', { href: x.link.href }, x.link.label), x.link.closed ? h('span', { class: 'muted' }, ' (closed)') : ''] : '')))) 
     : emptyCard('Nothing needs fixing', 'A red run or a stuck runner shows here with why and the fix.'));
-  return block('Open problems', ring ? 'danger' : quiet ? 'held' : 'done', 'ci-problems', row);
+  return block(null, ring ? 'danger' : quiet ? 'held' : 'done', 'ci-problems', row);
 }
 
 /** Each workflow's verdict on the branch. */
@@ -132,7 +133,7 @@ function verdictsBlock(v) {
     summary: [toneChip(tone, word), `${ok} of ${ws.length} workflows green`] },
   statTiles([String(ok), 'green', 'done'], bad && [String(bad), 'failing', 'danger'], going && [String(going), 'running', 'running']),
   ws.length ? showFirst({ key: `ci-verdicts-${v.slug}`, items: ws.map(item), n: 6, noun: 'workflows' }) : emptyCard('No workflows', 'This repo has none that report here.', { mark: '·', hue: 'muted' }));
-  return block('Verdicts', bad ? 'danger' : 'done', 'ci-verdicts', row);
+  return block(null, bad ? 'danger' : 'done', 'ci-verdicts', row);
 }
 
 /** The queue per set of labels, for Running now's header: "peek-auras-ci: 1 runner, 9 queued". */
@@ -180,7 +181,7 @@ function runningBlock(s, now, ui) {
     statTiles([String(busy), 'busy', 'running'], [String(count('idle')), 'idle', 'done'], off && [String(off), 'offline', 'danger']),
     showFirst({ key: `ci-running-${s.id}`, items, n: 6, noun: 'runners' }),
     note ? h('p', { class: 'look-prose' }, note) : null);
-  return block('Running now', 'running', 'ci-running', row);
+  return block(null, 'running', 'ci-running', row);
 }
 
 /** A scheme's one line about the desktops its runners are on, linking to each one's row in the list (Josh, 2026-11-19: the load lives at the list's bottom, not in each scheme). */
@@ -227,7 +228,7 @@ function waitingBlock(s, now, ui) {
   n ? statTiles([String(n), 'jobs queued', 'waiting'], [shortSpan(now - oldest), 'oldest wait', 'waiting']) : null,
   n ? showFirst({ key: `ci-waiting-${s.id}`, items: groups.map((g) => queueRows(g, v.slug, ui)), n: 5, noun: 'groups', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) })
     : emptyCard('No job is waiting', 'Jobs queue here when every runner is busy.'));
-  return block('Waiting for a runner', n ? 'waiting' : 'done', 'ci-waiting', row);
+  return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
 function overview(s, pcs, now, ui) {

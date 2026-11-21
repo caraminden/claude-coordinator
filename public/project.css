@@ -531,6 +531,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-block .ci-problem-link { min-height: 1.4em; }
 .ci-block .queue-sub { padding-left: 1.4rem; }
 .ci-block .hue-row-meta .small { white-space: nowrap; }
+.ci-block.ci-bare:not(:first-child) { margin-top: var(--space-3, 0.75rem); }
 .ci-block .ci-desktop { margin-top: var(--space-3, 0.75rem); }
 button.ci-run { width: 100%; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; font-size: 0.88em; text-align: left; cursor: pointer; }
 button.ci-run:disabled { cursor: default; }

@@ -6,3 +6,6 @@ env
 
 # new-test-box.ps1 writes the box's sign-in here; never commit it
 tools/win-test-box/*.password.txt
+
+# Node compile cache for booted test servers (test/helpers.ts bootServer)
+.compile-cache/

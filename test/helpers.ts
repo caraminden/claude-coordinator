@@ -295,6 +295,10 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       CITADEL_HOST_SIGNALS: 'fixed', CITADEL_PSI_CPU: undefined, CITADEL_PSI_MEMORY: undefined, CITADEL_PSI_IO: undefined,
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
+      // Node's compile cache for the server's modules (#1518): a cold boot type-strips and compiles the whole app, about
+      // 4 s of CPU, which a loaded box stretched past listeningPort's 20 s (access-matrix's smoke flake). In the checkout,
+      // gitignored, so a land's smoke boots warm from the minion's own runs; Node rechecks each file's content.
+      NODE_COMPILE_CACHE: join(REPO, '.compile-cache'),
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', err],

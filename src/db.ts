@@ -15,14 +15,14 @@ import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
+import { ciNumberQueries } from './db/ci-numbers.ts';
+import { deliveryQueries } from './db/deliveries.ts';
+import { flakeQueries } from './db/flakes.ts';
 import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
-import { deliveryQueries } from './db/deliveries.ts';
 import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
-import { ciNumberQueries } from './db/ci-numbers.ts';
-import { flakeQueries } from './db/flakes.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
@@ -3866,11 +3866,31 @@ export class Store {
  * Each area's queries live in src/db/<area>.ts and are attached to Store's prototype here (#1313), so callers keep calling
  * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
  */
+// One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
+const AREAS = [
+  ciNumberQueries,
+  deliveryQueries,
+  flakeQueries,
+  machineQueries,
+  minionQueries,
+  pushQueries,
+  settingQueries,
+  viewQueries,
+];
+// The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
+type Areas =
+  & typeof ciNumberQueries
+  & typeof deliveryQueries
+  & typeof flakeQueries
+  & typeof machineQueries
+  & typeof minionQueries
+  & typeof pushQueries
+  & typeof settingQueries
+  & typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
-type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof settingQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries & typeof flakeQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, minionQueries, pushQueries, settingQueries, viewQueries, deliveryQueries, ciNumberQueries, flakeQueries]) {
+for (const area of AREAS) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

@@ -9,38 +9,234 @@ import { Store } from '../src/db.ts';
 const src = join(import.meta.dirname, '..', 'src');
 
 /** Setup, migrations and settings: these stay in src/db.ts. */
-const STAYS = `attachState autoCheckpoint closedAtFromNotes deleteSetting dropEarlyPeekAurasBuilds getSetting groupByType keyRange
-  lendingLists moveSharedViews noteSchemaVersion numberTickets setSetting settingKeys settingsWithPrefix settleBuilds
-  shippingFromRules serverLoginOwnerOnly statePath`;
+const STAYS = `
+attachState
+autoCheckpoint
+closedAtFromNotes
+deleteSetting
+dropEarlyPeekAurasBuilds
+getSetting
+groupByType
+keyRange
+lendingLists
+moveSharedViews
+noteSchemaVersion
+numberTickets
+serverLoginOwnerOnly
+setSetting
+settingKeys
+settingsWithPrefix
+settleBuilds
+shippingFromRules
+statePath
+`;
 
-/** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. */
-const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError addEvent addFlakeEvents addFlakeFix addGithubSeen addHealthEvent
-  addHostSample addMember addOpenrouterCall addRelease addStepTimes adoptOwnerless appDeploysSince appErrorsSince
-  appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns bugBriefs canSee
-  cardEventId chatTextEvents ciFiles contraptionByKeyHash contraptionEnabled contraptionErrors
-  contraptionReleases contraptionSession contraptionSessions contraptionsFor contraptionTurnsSince contraptionUsers
-  countReleases createContraption createProject createUser dailyCosts deleteCiFile deleteClaudeState
-  deleteContraptionSession deleteCredential deleteProject deleteRepoCollaborator deleteSecret deleteTurnAudit deleteUser
-  deployedSince dropAudit endContraptionTurn eventIdAt eventsBefore eventsBetween eventsOfKinds eventsPage fableSpend
-  failCredential findArtifact findEvents findUser finishOpenrouterCall flakeCounts flakeDetails flakeFiles flakeFix
-  flakeFixes flakeSightings forgetCards getCiFile getClaudeState getContraption getContraptionTurn getCredential
-  getEvent getProject getRepoCollaborator getSecret getUser githubSeen hasActed hasFlakeNear healthBetween healthCount
-  healthEventsSince heldBelow hiddenProjects hostSamples inScheme insertEvent instructionHistory isAdmin isTicketPinned
-  lastApkPublish lastEventOf lastHealthEvent lastTurnEnd latestArtifact latestPlan listArtifacts listClaudeState
-  listContraptionDeploys listContraptions listCredentials listEvents listMembers listOrder listProjects listReleases
-  listRepoCollaborators listSecrets listTurns listUsers liveReleasesSince markSeen memberSchemes
-  minionCosts minionTurnsSince noteLooks onboardingOpenedAt openCardAt openCardEventId openCards openCardsOf
-  openCardsWhere openrouterSpent personalInstructionHistory personalInstructions personalLayer personNotes pickedCards
-  pinnedArtifactPaths pinnedTickets planEvents promptHashes pruneArtifacts publishCiFile putCiFile putClaudeState
-  putContraptionSession putCredential putFates putRepoCollaborator putSecret putTurnAudit readCardRows recap recentCards
-  recordApkPublish recordGrunts recordTurn releasesSince removeMember renameProject replyTexts rewriteClaudeEvents
-  saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner setAppInstructions setArtifactPinned
-  setContraptionUser setEventData setListOrder setOpenrouterCallPath setPersonalInstructions setPersonNote
-  setProjectHidden setProjectInstructions setProjectRepoDir setProjectSettings setProjectUpstream
-  setSeenItems setSharedPin setTicketPinned setTurnVerdict sharedPins shipNotesSince shippedNotes
-  shippedSince spendByPayer spendRows startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts
-  ticketCost turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix updateUser visibleProjects
-  warmCardRows writeArtifactData`;
+/** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. One name per line, sorted, so
+ * two branches removing names rarely touch the same lines. */
+const NOT_MOVED_YET = `
+accountSpend
+addContraptionDeploy
+addContraptionError
+addEvent
+addFlakeEvents
+addFlakeFix
+addGithubSeen
+addHealthEvent
+addHostSample
+addMember
+addOpenrouterCall
+addRelease
+addStepTimes
+adoptOwnerless
+appDeploysSince
+appErrorsSince
+appInstructionHistory
+appInstructions
+appTurnsSince
+artifactData
+backfillTurns
+bugBriefs
+canSee
+cardEventId
+chatTextEvents
+ciFiles
+contraptionByKeyHash
+contraptionEnabled
+contraptionErrors
+contraptionReleases
+contraptionSession
+contraptionSessions
+contraptionsFor
+contraptionTurnsSince
+contraptionUsers
+countReleases
+createContraption
+createProject
+createUser
+dailyCosts
+deleteCiFile
+deleteClaudeState
+deleteContraptionSession
+deleteCredential
+deleteProject
+deleteRepoCollaborator
+deleteSecret
+deleteTurnAudit
+deleteUser
+deployedSince
+dropAudit
+endContraptionTurn
+eventIdAt
+eventsBefore
+eventsBetween
+eventsOfKinds
+eventsPage
+fableSpend
+failCredential
+findArtifact
+findEvents
+findUser
+finishOpenrouterCall
+flakeCounts
+flakeDetails
+flakeFiles
+flakeFix
+flakeFixes
+flakeSightings
+forgetCards
+getCiFile
+getClaudeState
+getContraption
+getContraptionTurn
+getCredential
+getEvent
+getProject
+getRepoCollaborator
+getSecret
+getUser
+githubSeen
+hasActed
+hasFlakeNear
+healthBetween
+healthCount
+healthEventsSince
+heldBelow
+hiddenProjects
+hostSamples
+inScheme
+insertEvent
+instructionHistory
+isAdmin
+isTicketPinned
+lastApkPublish
+lastEventOf
+lastHealthEvent
+lastTurnEnd
+latestArtifact
+latestPlan
+listArtifacts
+listClaudeState
+listContraptionDeploys
+listContraptions
+listCredentials
+listEvents
+listMembers
+listOrder
+listProjects
+listReleases
+listRepoCollaborators
+listSecrets
+listTurns
+listUsers
+liveReleasesSince
+markSeen
+memberSchemes
+minionCosts
+minionTurnsSince
+noteLooks
+onboardingOpenedAt
+openCardAt
+openCardEventId
+openCards
+openCardsOf
+openCardsWhere
+openrouterSpent
+personalInstructionHistory
+personalInstructions
+personalLayer
+personNotes
+pickedCards
+pinnedArtifactPaths
+pinnedTickets
+planEvents
+promptHashes
+pruneArtifacts
+publishCiFile
+putCiFile
+putClaudeState
+putContraptionSession
+putCredential
+putFates
+putRepoCollaborator
+putSecret
+putTurnAudit
+readCardRows
+recap
+recentCards
+recordApkPublish
+recordGrunts
+recordTurn
+releasesSince
+removeMember
+renameProject
+replyTexts
+rewriteClaudeEvents
+saveFates
+schemeTurnAudit
+seenAt
+seenItems
+seenTimes
+serverLoginOwner
+setAppInstructions
+setArtifactPinned
+setContraptionUser
+setEventData
+setListOrder
+setOpenrouterCallPath
+setPersonalInstructions
+setPersonNote
+setProjectHidden
+setProjectInstructions
+setProjectRepoDir
+setProjectSettings
+setProjectUpstream
+setSeenItems
+setSharedPin
+setTicketPinned
+setTurnVerdict
+sharedPins
+shipNotesSince
+shippedNotes
+shippedSince
+spendByPayer
+spendRows
+startContraptionTurn
+stepRatio
+sweepOpenrouterCalls
+sweepTurnAudit
+syncArtifacts
+ticketCost
+turnAudit
+turnMarks
+turnOutcomes
+turnStart
+updateContraption
+updateFlakeFix
+updateUser
+visibleProjects
+warmCardRows
+writeArtifactData
+`;
 
 /** The methods declared in src/db.ts's Store class body, by name. */
 function classMethods(): string[] {

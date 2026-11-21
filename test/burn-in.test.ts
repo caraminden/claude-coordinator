@@ -1,6 +1,7 @@
 // The burn-in (#1443, tools/burn-in.sh): a ship's new and changed tests run as 10 copies at once, each with its own
 // TMPDIR, before the full suite; one failed copy refuses the ship. Pinned here (the handoff's three cases): a file
-// failing 1 copy in 10 is refused, a clean file passes, and a change with no test in it starts no copy.
+// failing 1 copy in 10 is refused, a clean file passes, and a change with no test in it starts no copy. Since #1456 a
+// changed source file also burns in the tests that import it, directly or through one more file, nearest first.
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,7 +57,7 @@ test('a clean new test passes all 10 copies at once', () => {
 test('a change with no test file and no mapped test starts no copy', () => {
   const r = ship(repo({ 'README.md': 'changed\n', 'test/helper.ts': 'export const x = 1;\n' }));
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.stdout.trim(), 'burn-in: this change adds or changes no test file and maps to none: nothing to burn in');
+  assert.equal(r.stdout.trim(), 'burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in');
 });
 
 test("a changed source file burns in the tests the map gives it, up to the cap; a whole-folder ** rule's tests are left out", () => {
@@ -64,7 +65,59 @@ test("a changed source file burns in the tests the map gives it, up to the cap; 
   const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, map, { 'src/a.ts': 'export {};\n', 'test/a.test.ts': CLEAN, 'test/b.test.ts': CLEAN, 'test/c.test.ts': CLEAN, 'test/guard.test.ts': CLEAN });
   const r = ship(dir, { BURN_IN_MAPPED: '2', BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: the change maps to 3 tests; only the first 2 are burned in \(left out: test\/c\.test\.ts\)$/m);
+  assert.match(r.stdout, /^burn-in: the change maps to 3 tests and 0 more import it; only the first 2 are burned in \(left out: test\/c\.test\.ts\)$/m);
   assert.match(r.stdout, /mapped from the change: test\/a\.test\.ts test\/b\.test\.ts$/m);
   assert.doesNotMatch(r.stdout, /guard\.test\.ts/);
+});
+
+// A test that imports `spec` from test/, so the walk sees it; it still passes in every copy.
+const importing = (...specs: string[]) => specs.map((p) => `import '${p}';\n`).join('') + CLEAN;
+
+test('a source-only change burns in the tests that import it, directly or through one more file, each pick named', () => {
+  const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, '', {
+    'src/a.ts': 'export {};\n', 'src/b.ts': "import './a.ts';\n", 'src/c.ts': "import './b.ts';\n",
+    'test/direct.test.ts': importing('../src/a.ts'), 'test/via.test.ts': importing('../src/b.ts'),
+    'test/too-far.test.ts': importing('../src/c.ts'), 'test/other.test.ts': CLEAN,
+  });
+  const r = ship(dir, { BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: picked test\/direct\.test\.ts: it imports src\/a\.ts$/m);
+  assert.match(r.stdout, /^burn-in: picked test\/via\.test\.ts: it imports src\/b\.ts, which imports src\/a\.ts$/m);
+  assert.match(r.stdout, /^burn-in: 2 file\(s\), 2 copies of each at once, one file after another, within 150 s: importing the change: test\/direct\.test\.ts test\/via\.test\.ts$/m);
+  assert.match(r.stdout, /^burn-in: test\/via\.test\.ts: 2 of 2 copies at once passed/m);
+  assert.doesNotMatch(r.stdout, /too-far|other\.test/, 'two files away, or not importing it at all, is not burned in');
+});
+
+test('the cap holds over the map and importers together, nearest importers first', () => {
+  const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, 'src/a.ts: test/mapped.test.ts\n', {
+    'src/a.ts': 'export {};\n', 'src/b.ts': "import './a.ts';\n", 'test/mapped.test.ts': CLEAN,
+    'test/a.test.ts': importing('../src/a.ts'), 'test/aa.test.ts': importing('../src/a.ts'), 'test/0via.test.ts': importing('../src/b.ts'),
+  });
+  const r = ship(dir, { BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // The map's pick first, then the importer named like the file, then the other direct one; the one through src/b.ts is left out.
+  assert.match(r.stdout, /^burn-in: the change maps to 1 tests and 3 more import it; only the first 3 are burned in \(left out: test\/0via\.test\.ts\)$/m);
+  assert.match(r.stdout, /mapped from the change: test\/mapped\.test\.ts; importing the change: test\/a\.test\.ts test\/aa\.test\.ts$/m);
+  assert.doesNotMatch(r.stdout, /picked test\/0via/);
+});
+
+test('a changed source file no test imports burns in nothing', () => {
+  const dir = repo({ 'src/lone.ts': 'export const x = 2;\n' }, '', { 'src/lone.ts': 'export {};\n', 'test/other.test.ts': importing('../src/other.ts'), 'src/other.ts': 'export {};\n' });
+  const r = ship(dir);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), 'burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in');
+});
+
+// The real case (#795, Nov 16): the write queue changed src/db-writer.ts and src/routes/tickets.ts, and
+// test/fresh-session.test.ts went flaky though its file hadn't changed. The import walk can't pick it: fresh-session
+// imports neither file, nor any file that imports one (only server.ts and two routes do). Its race (the idle-handoff
+// test, fixed by #862) was latent and surfaced under the new load, which no import line shows; the walk picks the
+// write queue's own importers instead.
+test("#795's change picks its importers on the real repo, and can't reach fresh-session: no import path leads there", () => {
+  const r = spawnSync('bash', ['tools/burn-in.sh', '--importers', 'src/db-writer.ts', 'src/routes/tickets.ts'], { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const picks = r.stdout.trim().split('\n').map((l) => l.split('\t')[0]);
+  assert.equal(picks[0], 'test/db-writer.test.ts', 'the importer named like the changed file comes first');
+  assert.ok(picks.includes('test/own-writes.test.ts'), r.stdout);
+  assert.ok(!picks.includes('test/fresh-session.test.ts'), r.stdout);
 });

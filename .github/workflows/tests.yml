@@ -151,7 +151,7 @@ jobs:
           done
           echo "lands kept running (or GitHub unread) for 30 minutes: starting anyway, niced"
       # The burn-in (#1443): a ship's new and changed test files, and up to 3 tests tools/affected-map.txt maps its changed
-      # source files to, each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
+      # source files to or that import them (#1456), each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
       # here, with that copy's output, and land.sh refuses the ship on it as its own red, never a flake. land.sh pushes the
       # ship's base (main as it was) as land-base/<branch> beside land/<branch>, so only this ship's changes count; at its
       # CI limit it gives the run this step's time more, once. With no runner the ship's suite runs on perigee, and the

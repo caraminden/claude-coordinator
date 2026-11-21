@@ -677,7 +677,7 @@ export class Runner {
    * A person's Claude accounts (#779), in order, with the one turns run on now; null when they have none.
    * The ClaudeLink's, set by the server.
    */
-  claudeAccounts?: (person: number) => { inUse: number | null; why?: string; pinned?: number; accounts: { n: number; label: string }[] } | null;
+  claudeAccounts?: (person: number) => { inUse: number | null; why?: string; pinned?: number; accounts: { n: number; label: string; same?: string }[] } | null;
   /**
    * A turn on `account` hit its limit, which resets at `until` (src/claude-link.ts, limited): the account turns
    * move on to, or null when none is ready, with the earliest reset of the person's accounts.
@@ -4184,7 +4184,7 @@ export class Runner {
    * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
    * account in use. With several accounts (#779) it says which, and carries each account's.
    */
-  usageOf(uid: number | null | undefined): (Usage & { account?: number; why?: string; pinned?: number; accounts?: { n: number; label: string; usage: Usage | null }[] }) | null {
+  usageOf(uid: number | null | undefined): (Usage & { account?: number; why?: string; pinned?: number; accounts?: { n: number; label: string; same?: string; usage: Usage | null }[] }) | null {
     const payer = this.payerOf(uid);
     const acc = uid ? this.claudeAccounts?.(uid) : null;
     const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));

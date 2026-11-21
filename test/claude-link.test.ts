@@ -248,3 +248,26 @@ test("the server login's extra account runs on the host with its own config fold
   assert.equal(link.status(user.id).state, 'linked');
   assert.throws(() => link.linkSlot(user.id, 1));
 });
+
+test('two account folders signed in to one Claude organization say so; one email in two organizations does not (#1461)', () => {
+  const user = store.createUser({ name: 'Twin', login: `twin${++n}`, server_login: true });
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), join(bin, 'claude'), new Containers(fakeRun), `citadel-claude-t${n}-`);
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  const one = join(root, `twin-host-${n}`);
+  const two = join(root, 'data', 'claude-accounts', String(user.id), '2');
+  mkdirSync(one, { recursive: true });
+  mkdirSync(two, { recursive: true });
+  const signIn = (dir: string, org: string) => writeFileSync(join(dir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'cara@x', accountUuid: 'u1', organizationUuid: org } }));
+  process.env.CLAUDE_CONFIG_DIR = one;
+  try {
+    store.setSetting(`claude_accounts:${user.id}`, { accounts: [acct(1), acct(2, { email: 'cara@x' })], inUse: 1 });
+    signIn(one, 'org-a');
+    signIn(two, 'org-a');
+    assert.deepEqual(link.accountList(user.id)?.accounts, [{ n: 1, label: "the server's own login" }, { n: 2, label: 'cara@x', same: "the server's own login" }]);
+    signIn(two, 'org-b');
+    assert.deepEqual(link.accountList(user.id)?.accounts, [{ n: 1, label: "the server's own login" }, { n: 2, label: 'cara@x' }], 'a re-login is read again');
+  } finally {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+  }
+});

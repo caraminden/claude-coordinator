@@ -21,7 +21,13 @@ test('a cold turn goes to the account whose week resets soonest and still has ro
 
 test('a warm session stays on its account, even when another resets sooner', () => {
   assert.deepEqual(pick({ warm: 1 }), { n: 1, nextUp: 2, why: 'warm' }, 'new work still goes to 2');
-  assert.equal(pick({ warm: 1, meters: { 1: week(0.99, 120 * H), 2: week(0.1, 24 * H) } })?.n, 1, 'a nearly full week is not a limit: the warm session stays');
+});
+
+// Cara, 2026-11-21, picked "Move at their next turn" (#1461): keeping a cache on a nearly spent account only defers a limit mid-turn.
+test('a warm session leaves an account with no room at its next turn, while another has room', () => {
+  assert.deepEqual(pick({ warm: 1, meters: { 1: week(0.99, 24 * H), 2: week(0.1, 120 * H) } }), { n: 2, nextUp: 2, why: 'soonest' }, 'a nearly full week');
+  assert.equal(pick({ warm: 1, meters: { 1: week(0.4, 24 * H, 0.95), 2: week(0.1, 120 * H) } })?.n, 2, 'a nearly full 5-hour window');
+  assert.equal(pick({ warm: 1, meters: { 1: week(0.99, 24 * H), 2: week(0.98, 120 * H) } })?.n, 1, 'with no room anywhere it stays: moving gains nothing');
 });
 
 test('a hard limit moves even a warm session', () => {

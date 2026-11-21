@@ -11,6 +11,7 @@ const fresh = { n: 2, label: 'cara', usage: { weekly: w(0.84, now + 86400000), s
 test('an account whose week already reset shows 0% with a note, so the lines add up to the combined one', () => {
   assert.equal(accountLine(stale, false, now), 'server login: week 0% (week reset, no turns since), 5 hours 0%');
   assert.equal(accountLine(fresh, true, now), '▸ cara: week 84%, 5 hours 20%');
+  assert.equal(accountLine({ ...fresh, same: 'server login' }, false, now), 'cara: week 84%, 5 hours 20% (the same Claude account as server login)', 'two links to one account (#1461)');
   assert.equal(combineWindows([stale, fresh], 'weekly', now)?.utilization, 0.42);
   assert.equal(accountLine({ n: 3, label: 'new', usage: null }, false, now), 'new: no turns yet');
 });

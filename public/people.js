@@ -376,7 +376,9 @@ function claudeCard() {
     const now = Date.now();
     const rows = accounts.map((a) => {
       const own = st.host && a.n === 1;
+      const same = st.usage?.accounts?.find((x) => x.n === a.n)?.same;
       const [chip, cls] = a.expired ? ['Needs linking again', 'warn']
+        : same ? [`Same Claude account as ${same}`, 'warn']
         : a.limitedUntil > now ? [`Limited until ${clock(a.limitedUntil)}`, 'warn']
         : a.n === st.pinned ? ['Pinned', 'use']
         : a.n === st.inUse ? ['Next up', 'use']

@@ -357,11 +357,30 @@ export class ClaudeLink {
   }
 
   /** A person's accounts in order with the one a new or cold turn runs on now, and why (Runner.claudeAccounts); null with none. */
-  accountList(uid: number): { inUse: number | null; why?: Pick['why']; pinned?: number; accounts: { n: number; label: string }[] } | null {
+  accountList(uid: number): { inUse: number | null; why?: Pick['why']; pinned?: number; accounts: { n: number; label: string; same?: string }[] } | null {
     const set = this.accounts(uid);
     if (!set) return null;
     const p = this.pick(uid, set);
-    return { inUse: p?.n ?? null, ...(p ? { why: p.why } : {}), ...(set.pinned ? { pinned: set.pinned } : {}), accounts: set.accounts.map((a) => ({ n: a.n, label: this.label(uid, a) })) };
+    // Two folders signed in to one Claude organization share one allowance (#1461): `same` names the first by its label, so the meter says so.
+    const orgs = set.accounts.map((a) => this.orgOf(uid, a.n));
+    return { inUse: p?.n ?? null, ...(p ? { why: p.why } : {}), ...(set.pinned ? { pinned: set.pinned } : {}), accounts: set.accounts.map((a, i) => {
+      const twin = orgs[i] ? set.accounts[orgs.indexOf(orgs[i])] : undefined;
+      return { n: a.n, label: this.label(uid, a), ...(twin && twin.n !== a.n ? { same: this.label(uid, twin) } : {}) };
+    }) };
+  }
+
+  /**
+   * The Claude organization account `n`'s folder is signed in to, from its .claude.json (never the credentials). The
+   * organization, not the email: one email can sign in to two organizations, each with its own allowance.
+   */
+  private orgOf(uid: number, n: number): string | null {
+    // The server login's own account keeps .claude.json beside its folder, unless CLAUDE_CONFIG_DIR moved it in.
+    const file = this.serverLogin(uid) && n === 1 && !process.env.CLAUDE_CONFIG_DIR ? join(this.home, '.claude.json') : join(this.configDir(uid, n) ?? '', '.claude.json');
+    try {
+      return JSON.parse(readFileSync(file, 'utf8')).oauthAccount?.organizationUuid ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** limited() for the runner (Runner.onLimit): the account turns move on to, and the first of the accounts to reset. */

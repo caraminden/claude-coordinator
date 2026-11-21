@@ -1,8 +1,8 @@
 // Which of a person's Claude accounts a turn runs on (#793). Two aims pull against each other:
 // spend each account's weekly allowance before its weekly reset, and never move a session whose
 // prompt cache is warm (the cache is the account's: a move rereads the whole context at full
-// price, and again on every move back). So a warm session stays where it is, and only cheap
-// moments (a new session, a fresh start, a cold wake, a limit) go to the account picked here:
+// price, and again on every move back). So a warm session stays where it is while its account has room, and only cheap
+// moments (a new session, a fresh start, a cold wake, a limit, a nearly spent account) go to the account picked here:
 // the one whose week resets soonest that still has room. Pure: claude-link.ts feeds it.
 
 /** One window of an account's meter as a turn last reported it (runner.ts, Usage). */
@@ -107,12 +107,16 @@ function nextUp(input: PickInput): { n: number; full: boolean } | null {
   return any ? { n: any.n, full: true } : null;
 }
 
-/** The account a turn runs on: its warm one while ready, else a pinned one while ready, else next-up. */
+/**
+ * The account a turn runs on: its warm one while that has room (or none does), else a pinned one while ready, else next-up.
+ * A warm cache on a nearly spent account only puts off a limit mid-turn (Cara, 2026-11-21, #1461), so it moves at the next turn.
+ */
 export function pickAccount(input: PickInput): Pick | null {
   const up = nextUp(input);
   if (!up) return null;
   const ready = (n: number | null | undefined) => n != null && input.accounts.some((a) => a.n === n && accountReady(a, input.now));
-  if (ready(input.warm)) return { n: input.warm!, nextUp: up.n, why: 'warm' };
+  const warm = input.accounts.find((a) => a.n === input.warm);
+  if (warm && (up.full ? accountReady(warm, input.now) : hasRoom(warm, input, false))) return { n: warm.n, nextUp: up.n, why: 'warm' };
   if (ready(input.pinned)) return { n: input.pinned!, nextUp: up.n, why: 'pinned' };
   return { n: up.n, nextUp: up.n, why: up.full ? 'full' : 'soonest' };
 }

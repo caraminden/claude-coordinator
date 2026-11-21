@@ -75,3 +75,12 @@ tools/always-tests.txt: test/citadel-test.test.ts
 src/backup.html: test/backup.test.ts
 src/backup.ts: test/backup.test.ts
 tools/stale-docs: test/stale-docs.test.ts
+
+# The judges' pinned files (#1503): a change replays the judges on their real past inputs.
+src/deploy-watch.ts: test/judges.test.ts
+src/flake-fixes.ts: test/judges.test.ts
+src/flakes.ts: test/judges.test.ts
+src/ci-health.ts: test/judges.test.ts
+src/ci-numbers.ts: test/judges.test.ts
+src/judges.ts: test/judges.test.ts
+tools/judge-replays/**: test/judges.test.ts

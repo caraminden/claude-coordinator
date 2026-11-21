@@ -15,7 +15,7 @@ import { promisify } from 'node:util';
 import type { Store } from './db.ts';
 import type { GhGet } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
-import { ZONE, clockTime, pacific } from './pacific.ts';
+import { ZONE, clockTime, pacific, pacificDay } from './pacific.ts';
 import { HEALTH_KIND, keptChecks } from './standing-checks.ts';
 import { PLANNED } from './sd-watchdog.ts';
 
@@ -187,6 +187,8 @@ export interface Sources {
 }
 export type IncidentStore = Pick<Store, 'getSetting' | 'setSetting' | 'healthBetween' | 'runnerLoadSince'>;
 
+const STALL_LINE = /^The event loop was held for /;
+
 /** Digits and hashes out, so the same message with another number is one line. */
 const shape = (s: string) => s.replace(/\b[0-9a-f]{7,40}\b/g, '#').replace(/\d+(\.\d+)?/g, '#');
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -208,7 +210,7 @@ export const deployEntries = (deploys: Deploy[]): Entry[] =>
 
 export function healthEntries(rows: { at: number; kind: string; detail: string }[]): Entry[] {
   return rows.map((r) => {
-    const detail = clip(oneLine(r.detail), 220);
+    const detail = clip(oneLine(r.detail), STALL_KINDS.includes(r.kind) ? 700 : 220);
     return { at: r.at, source: 'health' as const, text: `${r.kind}: ${detail}`, key: `${r.kind}: ${shape(detail).slice(0, 80)}` };
   });
 }
@@ -268,7 +270,7 @@ export function journalEntries(text: string): Entry[] {
   for (const line of text.split('\n')) {
     const m = /^(\d+(?:\.\d+)?) \S+ ([^:]+): (.*)$/.exec(line);
     if (!m) continue;
-    const msg = clip(oneLine(m[3]), 240);
+    const msg = clip(oneLine(m[3]), STALL_LINE.test(m[3]) ? 900 : 240);
     if (!msg) continue;
     out.push({ at: Math.round(Number(m[1]) * 1000), source: 'journal', text: msg, key: shape(msg).slice(0, 100) });
   }
@@ -276,7 +278,14 @@ export function journalEntries(text: string): Entry[] {
 }
 
 /** One line per (source, key): the first time, how many, and the last time. Sorted by when each began. */
-export interface Group { first: Entry; n: number; last: number; branches: Map<string, number> }
+export interface Group { first: Entry; n: number; last: number; branches: Map<string, number>; /** The different numbers and hashes the merged lines carried (shape() blanks them), so "x ×81" can say they weren't one line repeated. */ variants: Set<string> }
+/** The digits and hashes of a line, in order: what shape() takes out. */
+const vars = (s: string) => (s.match(/\b[0-9a-f]{7,40}\b|\d+(?:\.\d+)?/g) ?? []).join(',');
+/** What the numbers in a merged line count: the word before the first one ("Ticket 2869" is tickets), else "numbers". */
+const nounOf = (text: string) => {
+  const w = /([A-Za-z]{3,})\s+#?\d/.exec(text)?.[1];
+  return w ? `${w.toLowerCase()}s`.replace(/ss$/, 's') : 'numbers';
+};
 export function group(entries: Entry[]): Group[] {
   const groups = new Map<string, Group>();
   for (const e of [...entries].sort((a, b) => a.at - b.at)) {
@@ -285,8 +294,9 @@ export function group(entries: Entry[]): Group[] {
     if (g) {
       g.n++;
       g.last = Math.max(g.last, e.at);
+      g.variants.add(vars(e.text));
       if (e.branch !== undefined) g.branches.set(e.branch, (g.branches.get(e.branch) ?? 0) + 1);
-    } else groups.set(k, { first: e, n: 1, last: e.at, branches: new Map(e.branch !== undefined ? [[e.branch, 1]] : []) });
+    } else groups.set(k, { first: e, n: 1, last: e.at, branches: new Map(e.branch !== undefined ? [[e.branch, 1]] : []), variants: new Set([vars(e.text)]) });
   }
   return [...groups.values()].sort((a, b) => a.first.at - b.first.at);
 }
@@ -347,6 +357,11 @@ export function branchList(branches: Map<string, number>): string {
   const shown = all.slice(0, MAX_BRANCHES).map(([b, c]) => `${b} ×${c}`);
   return all.length > MAX_BRANCHES ? `${shown.join(', ')}, +${all.length - MAX_BRANCHES} more` : shown.join(', ');
 }
+/** "×81 lines like this, 70 different tickets" when the merged lines differ in their numbers; "×3" when they were the same line. */
+export function countWords(g: Group): string {
+  const merged = g.first.source === 'journal' || g.first.source === 'health';
+  return merged && g.variants.size > 1 ? `×${g.n} lines like this, ${g.variants.size} different ${nounOf(g.first.text)}` : `×${g.n}`;
+}
 /** The group's text, its one branch swapped for the list when several branches hit it. */
 const textWithBranches = (g: Group, text: string) => {
   const list = branchList(g.branches);
@@ -355,18 +370,69 @@ const textWithBranches = (g: Group, text: string) => {
   return own && text.endsWith(own) ? `${text.slice(0, -own.length)} (${list})` : `${text} (${list})`;
 };
 
+export interface Stall { start: number; end: number; heldS: number; cause: string; wait: string; running: string }
+/** A Pacific wall-clock time on `day` ("2026-11-21", "02:23:05") as epoch ms. */
+function pacificMs(day: string, hms: string): number {
+  const guess = Date.parse(`${day}T${hms}Z`);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(guess).map((x) => [x.type, Number(x.value)]));
+  const shown = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  const first = guess - (shown - guess);
+  const again = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(first).map((x) => [x.type, Number(x.value)]));
+  return first - (Date.UTC(again.year, again.month - 1, again.day, again.hour, again.minute, again.second) - guess);
+}
+/**
+ * A loop-lag line's stall: how long, its own start and end (read from the line: `at` is when the line was written, which
+ * can be seconds after the stall ended), its cause, the kernel wait and the top frames it ran. Null for another line.
+ */
+export function parseStall(text: string, at: number): Stall | null {
+  const m = /held for (\d+(?:\.\d+)?) s(?: \((\d\d:\d\d:\d\d)(?: [A-Z]{3})? to (\d\d:\d\d:\d\d)(?: [A-Z]{3,4})?\))?/.exec(text);
+  if (!m || !/event loop was held/.test(text)) return null;
+  const heldS = Number(m[1]);
+  let start = at - heldS * 1000, end = at;
+  if (m[2]) {
+    // The line's clock is the stall's: on the Pacific day it was written, or the day before when it crossed midnight.
+    for (const day of [pacificDay(at), pacificDay(at - 86_400_000)]) {
+      const e = pacificMs(day, m[3]);
+      if (e <= at + 1000) { end = e; start = pacificMs(day, m[2]); if (start > end) start = pacificMs(pacificDay(at - 86_400_000), m[2]); break; }
+    }
+  }
+  return {
+    start, end, heldS,
+    cause: /Cause: ([a-z ]+?) \(/.exec(text)?.[1] ?? 'unclear',
+    wait: /Main thread waited on: ([^.]*?)\./.exec(text)?.[1] ?? '',
+    running: (/Running: (.*?)(?: Disk:| Also open on|$)/.exec(text)?.[1] ?? '').split('; ').slice(0, 2).join('; ').replace(/\.$/, ''),
+  };
+}
+/** The five longest stalls in the entries, each once (the health row and the journal line say the same stall), longest first. */
+export function biggestStalls(entries: Entry[]): Stall[] {
+  const seen = new Map<string, Stall>();
+  for (const e of entries) {
+    const st = e.source === 'health' || e.source === 'journal' ? parseStall(e.text.replace(/^loop-lag(?:-boot)?: /, ''), e.at) : null;
+    if (!st) continue;
+    const k = `${Math.round(st.start / 1000)}:${st.heldS}`;
+    const had = seen.get(k);
+    if (!had || st.running.length > had.running.length) seen.set(k, st);
+  }
+  return [...seen.values()].sort((a, b) => b.heldS - a.heldS).slice(0, 5);
+}
+
 /** The timeline file's markdown. */
 export function render(incident: Open, from: number, to: number, g: Gathered, dbPath: string): string {
   const groups = group([...incident.why.map((why) => ({ at: incident.from, source: 'trigger' as const, text: why })), ...g.entries]);
   const shown = groups.slice(0, MAX_LINES);
   const line = (g: Group) => {
     const { first, n, last } = g;
-    const more = n > 1 ? ` (×${n}, the last ${pacific(last)})` : '';
+    const more = n > 1 ? ` (${countWords(g)}, the last ${pacific(last)})` : '';
     const link = first.url ? ` [run](${first.url})` : '';
     return `- **${pacific(first.at)}** · ${SOURCE_NAME[first.source]} · ${textWithBranches(g, first.text).replace(/\n/g, ' ')}${more}${link}`;
   };
   const biggest = groups.filter((x) => x.n > 1 && x.first.source !== 'trigger').sort((a, b) => b.n - a.n).slice(0, 5);
   const firstBad = groups.find((x) => x.first.source === 'ci' && / failed/.test(x.first.text));
+  const stalls = biggestStalls(g.entries);
+  const stallSection = stalls.length
+    ? ['## Biggest stalls', '', 'The five longest event-loop holds, each with its own start and end (not when its line was written), before any grouped count below.', '',
+      ...stalls.map((x) => `- **${pacific(x.start)}** to ${pacific(x.end).replace(/^.*?, /, '')} · ${x.heldS.toFixed(1)} s · ${x.cause}${x.wait ? ` · waited on ${x.wait}` : ''}${x.running ? ` · ${x.running}` : ''}`), '']
+    : [];
   const sec = (ms: number) => Math.floor(ms / 1000);
   return [
     `# Incident: ${pacific(incident.from)} to ${pacific(incident.last)}`,
@@ -382,9 +448,10 @@ export function render(incident: Open, from: number, to: number, g: Gathered, db
     '## At a glance',
     '',
     ...(firstBad ? [`- First failed CI run: ${line(firstBad).slice(2)}`] : []),
-    ...biggest.map((x) => `- Most repeated: ${x.n}× ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? `${x.first.key}${branchList(x.branches) ? ` (${branchList(x.branches)})` : ''}` : x.first.text}, ${pacific(x.first.at)} to ${pacific(x.last)}`),
+    ...biggest.map((x) => `- Most repeated: ${/different/.test(countWords(x)) ? `${x.n} lines like` : `${x.n}×`} ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? `${x.first.key}${branchList(x.branches) ? ` (${branchList(x.branches)})` : ''}` : x.first.text}${/different/.test(countWords(x)) ? `, ${x.variants.size} different ${nounOf(x.first.text)}` : ''}, ${pacific(x.first.at)} to ${pacific(x.last)}`),
     ...(firstBad || biggest.length ? [] : ['- Nothing repeated.']),
     '',
+    ...stallSection,
     '## Timeline (Pacific)',
     '',
     'Each line is its first time; a repeat of the same thing is counted on it, with the last time.',

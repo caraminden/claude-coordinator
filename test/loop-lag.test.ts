@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ioStalledUs, namedStacks, openersOf, stallCause, watchLoopLag, type Reading } from '../src/loop-lag.ts';
+import { ioStalledUs, namedStacks, openersOf, stallCause, stallSpan, summarizeWaits, watchLoopLag, type Reading } from '../src/loop-lag.ts';
 import { until } from './wait.ts';
 
 const spin = (ms: number) => {
@@ -48,7 +48,7 @@ test('with the sampler on, a stall names the code that held the loop (#609)', as
     const ours = () => logged.filter((l) => /holdTheLoopForTest \(test\/loop-lag\.test\.ts:\d+\)/.test(l));
     await waitFor(() => ours().length > 0);
     assert.equal(ours().length, 1, logged.join('\n'));
-    assert.match(ours()[0], /held for \d+\.\d s: .* Running: \d+% /);
+    assert.match(ours()[0], /held for \d+\.\d s \([^)]+\): .* Running: \d+% /);
   } finally {
     watch.stop();
   }
@@ -128,7 +128,45 @@ test('a real stall line carries its cause and the writer backlog (P2)', async ()
     await new Promise((r) => setTimeout(r, 100));
     spin(400);
     await waitFor(() => logged.length > 0);
-    assert.match(logged[0], /held for \d+\.\d s: the server answered nobody meanwhile\. Cause: (own work|waited for CPU|waited for disk|waited for memory|unclear) \(.*; 7 writes queued on the write worker\)\./, logged[0]);
+    assert.match(logged[0], /held for \d+\.\d s \([^)]+\): the server answered nobody meanwhile\. Cause: (own work|waited for CPU|waited for disk|waited for memory|unclear) \(.*; 7 writes queued on the write worker\)\./, logged[0]);
+  } finally {
+    watch.stop();
+  }
+});
+
+test('a stall line states its own start and end clock time, measured when it was detected', async () => {
+  const logged: string[] = [];
+  const watch = watchLoopLag((text) => logged.push(text), 10, 150);
+  try {
+    await new Promise((r) => setTimeout(r, 50));
+    const before = Date.now();
+    spin(400);
+    await waitFor(() => logged.length > 0);
+    const m = /held for \d+\.\d s \((\d\d):(\d\d):(\d\d) to (\d\d):(\d\d):(\d\d) P[SD]T\)/.exec(logged[0]);
+    assert.ok(m, logged[0]);
+    assert.match(stallSpan(before, before + 1000), /^\d\d:\d\d:\d\d to \d\d:\d\d:\d\d P[SD]T$/);
+  } finally {
+    watch.stop();
+  }
+});
+
+test('summarizeWaits names the commonest kernel waits, a D state with its wchan', () => {
+  const s = (state: string, wchan: string) => ({ state, wchan });
+  assert.equal(summarizeWaits([s('D', 'folio_wait_bit_common'), s('D', 'folio_wait_bit_common'), s('S', 'futex_wait_queue'), s('R', '0')]), 'D folio_wait_bit_common ×2, S futex_wait_queue ×1, R ×1');
+  assert.equal(summarizeWaits([]), '');
+});
+
+test('a hold of the main thread is sampled from /proc by a worker: the line names the kernel state it was in', { skip: process.platform !== 'linux' }, async () => {
+  const logged: string[] = [];
+  const watch = watchLoopLag((text) => logged.push(text), 10, 150);
+  try {
+    await new Promise((r) => setTimeout(r, 300)); // the worker starts
+    spin(700);
+    await waitFor(() => logged.some((l) => /Main thread waited on: R ×\d+/.test(l)));
+    // Blocked off-CPU, as on a disk wait: the thread sleeps in the kernel.
+    logged.length = 0;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
+    await waitFor(() => logged.some((l) => /Main thread waited on: S/.test(l)));
   } finally {
     watch.stop();
   }

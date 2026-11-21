@@ -390,3 +390,30 @@ test("a standing check's promise broken since before the window is named in the 
   // One first seen inside the window has its own health row there; it isn't named twice.
   assert.doesNotMatch(s.files[0].text, /turn-record: #8/);
 });
+
+// #1460: the readout says what happened.
+test('lines that differ only in a number are counted as different tickets, not one line repeated', () => {
+  const entries = Array.from({ length: 81 }, (_, i) => ({ at: T0 + i * 1000, source: 'journal' as const, text: `Ticket ${2000 + (i % 70)} re-attached`, key: 'Ticket # re-attached' }));
+  const same = [0, 1, 2].map((i) => ({ at: T0 + i, source: 'journal' as const, text: 'disk is slow', key: 'disk is slow' }));
+  const text = render({ from: T0, last: T0 + MIN, why: ['x'] }, T0, T0 + 2 * MIN, { entries: [...entries, ...same], read: {} }, '/db');
+  assert.match(text, /81 lines like this, 70 different tickets/);
+  assert.match(text, /Most repeated: 81 lines like Journal: Ticket 2000 re-attached, 70 different tickets/);
+  assert.match(text, /disk is slow \(×3, the last/, 'identical lines stay a plain count');
+});
+
+test('an incident lists its five biggest stalls, with their own times and top frames, before any grouped count', () => {
+  const line = (heldS: string, span: string, extra = '') => `The event loop was held for ${heldS} s (${span} PST): the server answered nobody meanwhile. Cause: unclear (x).${extra}`;
+  const write = (hms: string, text: string, kind = 'loop-lag') => ({ at: pst(hms), source: 'health' as const, text: `${kind}: ${text}`, key: `${kind}: same` });
+  const entries = [
+    // written 14 s after it ended, with the real span inside the line
+    write('02:23:32', line('13.2', '02:23:05 to 02:23:18', ' Main thread waited on: D folio_wait_bit_common ×7. Running: 60% readFileSync (src/db.ts:9); 20% (garbage collector)')),
+    ...[0.6, 0.7, 0.5, 0.6, 0.6, 0.9].map((h, i) => write(`02:24:0${i}`, line(h.toFixed(1), `02:24:0${i} to 02:24:0${i}`))),
+  ];
+  const text = render({ from: pst('02:23:00'), last: pst('02:25:00'), why: ['x'] }, pst('02:22:00'), pst('02:26:00'), { entries, read: {} }, '/db');
+  const at = text.indexOf('## Biggest stalls');
+  assert.ok(at > 0 && at < text.indexOf('## Timeline'), text);
+  const section = text.slice(at, text.indexOf('## Timeline')).split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(section.length, 5);
+  assert.match(section[0], /Nov 20, 02:23 PST\*\* to 02:23 PST · 13\.2 s · unclear · waited on D folio_wait_bit_common ×7 · 60% readFileSync \(src\/db\.ts:9\); 20% \(garbage collector\)/);
+  assert.match(section[0], /02:23 PST/, 'the stall started at 02:23:05, not 02:23:32 when its line was written');
+});

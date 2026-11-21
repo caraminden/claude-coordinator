@@ -8,6 +8,8 @@ import { cpus } from 'node:os';
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { Session } from 'node:inspector/promises';
 import { basename } from 'node:path';
+import { Worker } from 'node:worker_threads';
+import { ZONE } from './pacific.ts';
 
 const SAMPLE_US = 10_000;
 /** A fresh profile this often keeps its samples bounded (about 60,000) when nothing stalls. */
@@ -118,6 +120,87 @@ export function readNow(): Reading {
     ioWaitUs: pressureUs('io'),
     memWaitUs: pressureUs('memory'),
   };
+}
+
+/** A wall-clock instant as the line's reader (Pacific) sees it: "02:23:05" and "PST". */
+function clockParts(ms: number): { time: string; zone: string } {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(ms).map((x) => [x.type, x.value]));
+  return { time: `${p.hour}:${p.minute}:${p.second}`, zone: p.timeZoneName };
+}
+/** "02:23:05 to 02:23:18 PST", the stall's own start and end, measured when it was detected (not when the line was written). */
+export function stallSpan(startMs: number, endMs: number): string {
+  const a = clockParts(startMs), b = clockParts(endMs);
+  return a.zone === b.zone ? `${a.time} to ${b.time} ${b.zone}` : `${a.time} ${a.zone} to ${b.time} ${b.zone}`;
+}
+
+/** One look at the held thread: its kernel state letter (R, S, D...) and what it waits on in the kernel ("" or "0" when nothing). */
+export interface WaitSample { state: string; wchan: string }
+/** "D folio_wait_bit_common ×7, S futex_wait_queue ×2", commonest first; empty with no samples. */
+export function summarizeWaits(samples: WaitSample[]): string {
+  const count = new Map<string, number>();
+  for (const s of samples) {
+    const w = s.wchan && s.wchan !== '0' ? ` ${s.wchan}` : '';
+    count.set(`${s.state}${w}`, (count.get(`${s.state}${w}`) ?? 0) + 1);
+  }
+  return [...count].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k} ×${n}`).join(', ');
+}
+
+const SLOTS = 64, SLOT_BYTES = 40;
+/** The worker's code: while the main thread's heartbeat is older than `over` ms it samples that thread's state and wchan from /proc into the shared slots. */
+const WAIT_WORKER = `
+const { workerData } = require('node:worker_threads');
+const fs = require('node:fs');
+const { over, pid, hb, slots, count, slotBytes, max } = workerData;
+const beat = new Float64Array(hb), bytes = new Uint8Array(slots), n = new Int32Array(count);
+const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+setInterval(() => {
+  const at = beat[0];
+  if (!(at > 0) || Number(process.hrtime.bigint() / 1000000n) - at <= over) return;
+  const i = Atomics.load(n, 0);
+  if (i >= max) return;
+  const stat = read('/proc/' + pid + '/task/' + pid + '/stat');
+  const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) || '?';
+  const wchan = read('/proc/' + pid + '/task/' + pid + '/wchan').trim();
+  const buf = Buffer.from(state + wchan).subarray(0, slotBytes - 1);
+  bytes.fill(0, i * slotBytes, (i + 1) * slotBytes);
+  bytes.set(buf, i * slotBytes);
+  Atomics.store(n, 0, i + 1);
+}, 50);
+`;
+
+/**
+ * Samples the main thread's kernel state and wchan during a hold (#1460). The main thread can't look at itself while
+ * held, so a worker thread does, from /proc/<pid>/task/<pid> (the main thread's tid is the pid): no root needed.
+ * `drain` reads what it saw since the last drain, at the tick that ends the hold. Null where it can't start.
+ */
+export function startWaitSampler(over: number): { drain(): WaitSample[]; beat(): void; stop(): void } | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    const hb = new SharedArrayBuffer(8), slots = new SharedArrayBuffer(SLOTS * SLOT_BYTES), count = new SharedArrayBuffer(4);
+    const beatAt = new Float64Array(hb), n = new Int32Array(count), bytes = new Uint8Array(slots);
+    const worker = new Worker(WAIT_WORKER, { eval: true, workerData: { over, pid: process.pid, hb, slots, count, slotBytes: SLOT_BYTES, max: SLOTS } });
+    worker.on('error', () => {});
+    worker.unref();
+    const beat = () => { beatAt[0] = Number(process.hrtime.bigint() / 1000000n); };
+    beat();
+    return {
+      beat,
+      drain() {
+        const k = Math.min(Atomics.load(n, 0), SLOTS);
+        const out: WaitSample[] = [];
+        for (let i = 0; i < k; i++) {
+          const raw = Buffer.from(bytes.subarray(i * SLOT_BYTES, (i + 1) * SLOT_BYTES));
+          const text = raw.subarray(0, raw.indexOf(0) < 0 ? raw.length : raw.indexOf(0)).toString('utf8');
+          out.push({ state: text.slice(0, 1), wchan: text.slice(1) });
+        }
+        Atomics.store(n, 0, 0);
+        return out;
+      },
+      stop() { void worker.terminate(); },
+    };
+  } catch {
+    return null;
+  }
 }
 
 export type Cause = 'own work' | 'waited for CPU' | 'waited for disk' | 'waited for memory' | 'unclear';
@@ -237,11 +320,15 @@ class Sampler {
  */
 export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false, files = [] as string[], backlog = () => 0 } = {}): { stop(): void } {
   const sampler = profile ? new Sampler(log) : null;
+  const waits = startWaitSampler(over);
   let last = process.hrtime.bigint();
   let io = ioStalledUs();
   let reading = readNow();
   const timer = setInterval(() => {
     const now = process.hrtime.bigint();
+    const endedAt = Date.now();
+    const seen = waits?.drain() ?? [];
+    waits?.beat();
     const held = Number(now - last) / 1e6 - every;
     const from = Number(last / 1000n);
     const ioFrom = io;
@@ -253,7 +340,9 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     // The window is the whole gap since the last tick: wall time `held + every`.
     const why = stallCause(before, reading, held + every);
     const queued = backlog();
-    const line = `The event loop was held for ${(held / 1000).toFixed(1)} s: the server answered nobody meanwhile. Cause: ${why.cause} (${why.text}; ${queued} writes queued on the write worker).`;
+    // Its own start and end, read now: the Running part below is written after the profile step, seconds later.
+    const kernel = summarizeWaits(seen);
+    const line = `The event loop was held for ${(held / 1000).toFixed(1)} s (${stallSpan(endedAt - held, endedAt)}): the server answered nobody meanwhile. Cause: ${why.cause} (${why.text}; ${queued} writes queued on the write worker).${kernel ? ` Main thread waited on: ${kernel}.` : ''}`;
     // A blocked write is the disk (this) or another process's lock (the openers): only the second waits on a busy timeout.
     const disk = io != null && ioFrom != null ? ` Disk: the box was fully stalled on I/O for ${((io - ioFrom) / 1e6).toFixed(1)} s of it.` : '';
     const to = Number(now / 1000n);
@@ -266,6 +355,7 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     stop() {
       clearInterval(timer);
       sampler?.stop();
+      waits?.stop();
     },
   };
 }

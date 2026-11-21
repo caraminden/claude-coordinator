@@ -14,6 +14,8 @@ const root = mkdtempSync('/tmp/ghh-');
 const seen: { url: string; headers: IncomingHttpHeaders }[] = [];
 const github = createServer((req, res) => {
   seen.push({ url: req.url!, headers: req.headers });
+  if (req.url!.includes('boom')) return req.socket.destroy(); // GitHub unreachable mid-read
+  if (req.url!.includes('gone')) return res.writeHead(401).end('{"message":"Bad credentials"}');
   if (req.headers['if-none-match'] === '"v1"') return res.writeHead(304, { etag: '"v1"' }).end();
   res.writeHead(200, { 'content-type': 'application/json', etag: '"v1"' }).end(JSON.stringify({ path: req.url, n: seen.length }));
 });
@@ -110,4 +112,24 @@ test('an idle helper exits, and the next read starts another', async () => {
   await new Promise((r) => first.proc.once('exit', r));
   assert.equal(live(h).length, 0);
   assert.equal((await helped(h, 'x', null, { GH_TOKEN: 'tok-a' })).status, 200);
+});
+
+test('GitHub failing mid-read: that read goes through gh, and the helper stays up', async () => {
+  const h = make();
+  await helped(h, 'x', null, { GH_TOKEN: 'tok-a' });
+  const [first] = live(h);
+  assert.equal(await h.get('boom', null, { GH_TOKEN: 'tok-a' }), null);
+  assert.equal((await h.get('x', null, { GH_TOKEN: 'tok-a' }))?.status, 200);
+  assert.equal(live(h)[0].proc.pid, first.proc.pid, 'the same helper');
+});
+
+test('a token GitHub refuses (401): gh reads it instead, and the login\'s helper stops and rests', async () => {
+  const h = make();
+  await helped(h, 'x', null, { GH_TOKEN: 'tok-old' });
+  const [first] = live(h);
+  assert.equal(await h.get('gone', null, { GH_TOKEN: 'tok-old' }), null);
+  await until('the helper to stop', () => first.proc.exitCode !== null || first.proc.signalCode !== null);
+  assert.equal(live(h).length, 0);
+  assert.equal(await h.get('x', null, { GH_TOKEN: 'tok-old' }), null, 'resting: gh, no new helper');
+  assert.equal(live(h).length, 0);
 });

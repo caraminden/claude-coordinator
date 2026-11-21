@@ -51,12 +51,20 @@ export class GhHelpers {
       return null;
     }
     if (!h.ready) return null;
+    let got: GhAnswer | null;
     try {
-      return await ask(h.socket, h.nonce, path, etag);
+      got = await ask(h.socket, h.nonce, path, etag);
     } catch {
       this.drop(key, h.proc);
       return null;
     }
+    // A token GitHub no longer takes (a new `gh auth login`, a revoked link): gh reads it fresh, and the helper rests a while.
+    if (got?.status === 401) {
+      this.off.set(key, Date.now() + NO_HELPER_MS);
+      this.drop(key, h.proc);
+      return null;
+    }
+    return got;
   }
 
   private async start(key: string, token: string | null, env: NodeJS.ProcessEnv) {
@@ -96,8 +104,11 @@ export class GhHelpers {
   }
 }
 
-/** One GET through a helper's socket: a header line, then the body to the end. Throws on anything but a clean answer. */
-function ask(socket: string, nonce: string, path: string, etag: string | null): Promise<GhAnswer> {
+/**
+ * One GET through a helper's socket: a header line, then the body to the end. Null when the helper says GitHub itself
+ * failed (unreachable, timed out, too big): the helper is fine and gh tries. Throws when the helper doesn't answer right.
+ */
+function ask(socket: string, nonce: string, path: string, etag: string | null): Promise<GhAnswer | null> {
   return new Promise((done, fail) => {
     const conn = connect(socket);
     const chunks: Buffer[] = [];
@@ -109,7 +120,8 @@ function ask(socket: string, nonce: string, path: string, etag: string | null): 
       const nl = all.indexOf(10);
       try {
         const head = JSON.parse(all.subarray(0, nl < 0 ? all.length : nl).toString('utf8'));
-        if (typeof head.status !== 'number') throw new Error(head.error ?? 'helper gave no status');
+        if (typeof head.error === 'string') return done(null);
+        if (typeof head.status !== 'number') throw new Error('helper gave no status');
         const rest = nl < 0 ? '' : all.subarray(nl + 1).toString('utf8');
         let body: any = null;
         try {

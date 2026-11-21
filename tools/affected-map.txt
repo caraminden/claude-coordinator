@@ -37,8 +37,23 @@ src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-as
 server.ts: test/boot-imports.test.ts
 src/**: test/boot-imports.test.ts
 
-# Routes and who sees what.
+# Routes and who sees what. The route test takes over 5 CPU-seconds, so it runs for these paths, not on every run (#1544);
+# land.sh's quick check adds it when this map picks it. server.ts holds the router() calls it reads, src/http.ts the 403
+# texts and validator strings its snapshot pins.
+server.ts: test/access-matrix.test.ts
+src/http.ts: test/access-matrix.test.ts
+src/auth.ts: test/access-matrix.test.ts
+src/apps.ts: test/access-matrix.test.ts
+src/contraptions.ts: test/access-matrix.test.ts
 src/routes/**: test/access-matrix.test.ts
+# What each persona sees comes from the store and what access.ts and auth.ts import.
+src/db.ts: test/access-matrix.test.ts
+src/db/*.ts: test/access-matrix.test.ts
+src/properties.ts: test/access-matrix.test.ts
+src/machines.ts: test/access-matrix.test.ts
+src/appname.ts: test/access-matrix.test.ts
+test/helpers.ts: test/access-matrix.test.ts
+test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
 public/**: test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts

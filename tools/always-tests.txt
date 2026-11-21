@@ -1,7 +1,8 @@
 # Test files tools/citadel-test adds to every run, whatever files it is given (#768). Put a test here when it is fast
 # and pins a repo-wide snapshot or budget that a change anywhere can break (a route, an MCP tool, a prompt line, a
 # schema bump, a pipeline path), so the failure shows before the land, not in it. One path per line.
-test/access-matrix.test.ts
+# Not one that takes over 5 CPU-seconds (#1544): a slow one goes on tools/affected-map.txt by the paths that can break it
+# (test/access-matrix.test.ts did, and was over half of every minion's test CPU). land.sh's quick check follows the map for it.
 test/prompt-budget.test.ts
 test/schema-compat.test.ts
 test/pipeline-files.test.ts

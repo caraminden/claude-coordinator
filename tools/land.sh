@@ -423,6 +423,15 @@ smoke() {
   if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
     # The always-tests, and in a plain land the test files the branch adds or changes; citadel-test drops repeats.
     mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts')
+    # The route test is off the always list (#1544): the map decides, from what this branch changed. Captured first (grep -q
+    # under pipefail can SIGPIPE the reader), and a map that can't answer runs it, never skips it.
+    if [ -f tools/affected.ts ]; then
+      if aff=$("$tools/citadel-node" --no-warnings tools/affected.ts --root . --base "$(git merge-base main HEAD)" 2>/dev/null); then
+        grep -q $'^run\ttest/access-matrix\\.test\\.ts\t' <<<"$aff" && tests+=(test/access-matrix.test.ts)
+      else
+        say "smoke: the affected map couldn't answer, so the route test runs"; tests+=(test/access-matrix.test.ts)
+      fi
+    fi
     if [ ${#tests[@]} -gt 0 ]; then
       say "smoke: running ${#tests[@]} test files"
       out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?

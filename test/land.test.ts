@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
+const repo = join(import.meta.dirname, '..');
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
   const r = setup();
@@ -1134,6 +1135,24 @@ test("the smoke check runs the always-tests and the branch's changed test files,
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.deepEqual(timings(r.shared), []);
   assert.match(landLog(r.shared), /· smoke · ticket\/1-x · tests failed \(exit 1\) · \d+s$/m);
+});
+
+test("the smoke check adds the route test only when the affected map picks it for what the branch changed (#1544)", () => {
+  const route = 'access-matrix';
+  const run = (changed: string) => {
+    const r = smokeSetup();
+    for (const f of ['affected.ts', 'affected-map.txt']) copyFileSync(join(repo, 'tools', f), join(r.source, 'tools', f));
+    writeFileSync(join(r.source, 'test', `${route}.test.ts`), ''); // built, not quoted: a quoted test name reads as an import to test/pipeline-files.test.ts
+    git(r.source, 'add', '-A');
+    git(r.source, 'commit', '-qm', 'map');
+    git(r.wt, 'rebase', '-q', 'main');
+    mkdirSync(dirname(join(r.wt, changed)), { recursive: true });
+    r.commit(r.wt, changed, 'x\n');
+    assert.equal(r.smoke().status, 0);
+    return r.ran()[0];
+  };
+  assert.match(run('src/http.ts'), new RegExp(`test/mine\\.test\\.ts test/${route}\\.test\\.ts$`));
+  assert.doesNotMatch(run('notes/c.txt'), new RegExp(route));
 });
 
 test("a clean smoke check lands as before, its time outside the timing line; tests past the limit don't decide; LAND_SMOKE=0 skips it (#1012)", () => {

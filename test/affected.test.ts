@@ -71,6 +71,16 @@ test('the guard tests land.sh runs before CI are picked for every path that can 
   for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts', 'test/one-until.test.ts', 'test/ui-contract.test.ts']) assert.ok(sh.includes(t), `land.sh's guards run ${t}`);
 });
 
+// #1544: the route test is over 5 CPU-seconds, so it is on the map, not the always list.
+test('the route test runs for the paths that can move the route table, and not on every run', () => {
+  const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
+  assert.ok(!always.includes('test/access-matrix.test.ts'));
+  const picked = (path: string) => lines([path]).run.map((r) => r.test);
+  for (const path of ['server.ts', 'src/http.ts', 'src/auth.ts', 'src/apps.ts', 'src/contraptions.ts', 'src/access.ts', 'src/routes/x.ts', 'src/db/people.ts', 'test/helpers.ts', 'test/access-matrix.snapshot.json', 'test/access-matrix.test.ts'])
+    assert.ok(picked(path).includes('test/access-matrix.test.ts'), path);
+  assert.ok(!picked('test/ports.test.ts').includes('test/access-matrix.test.ts'));
+});
+
 test('the command prints which rule picked each test', () => {
   const r = spawnSync('node', ['tools/affected.ts', '--paths', 'src/db.ts', 'NOTES.txt'], { cwd: repo, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);

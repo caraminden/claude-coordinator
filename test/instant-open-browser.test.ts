@@ -43,6 +43,15 @@ async function openOnce(srv: Booted, hash: string, width = 1280) {
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width, height: 800 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
+  // A stream's hello redraws the usage meter from the server's usage (none on a test server: it hides the meter), so a
+  // test that draws usage itself waits for the hello first: `window.hellos` counts the ones the page has handled.
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    window.hellos = 0;
+    const ES = window.EventSource;
+    window.EventSource = class extends ES {
+      set onmessage(f) { super.onmessage = (e) => { f(e); if (JSON.parse(e.data).type === 'hello') window.hellos++; }; }
+    };
+  })()` });
   await page.send('Page.navigate', { url: `${srv.base}/c/${hash}` });
   await waitFor(page, 'the chat', said('hello from before'));
   await waitFor(page, 'the kept chat', `JSON.parse(localStorage.getItem('cc-last-chat') || '{}').hash === ${JSON.stringify(hash)}`);
@@ -122,13 +131,16 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
   const { srv, hash } = await server();
   const page = await openOnce(srv, hash);
   const seen = `({ chips: document.querySelectorAll('.topbar .meters .ci-chip, .topbar .meters .status-chip, .topbar .meters .releases-chip').length, usage: !!document.querySelector('.topbar .meters .usage:not([hidden])') })`;
+  await waitFor(page, 'the stream\'s hello', 'window.hellos > 0');
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
   await waitFor(page, 'the chips and meter', `${seen}.chips === 3 && ${seen}.usage`);
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
   assert.deepEqual(await page.eval(seen), { chips: 0, usage: false }, 'the login screen shows none');
   await shoot(page, 'signed-out.png');
+  await page.eval('window.hellos = 0');
   await page.eval(`(() => { const f = document.getElementById('login-form'); f.login.value = 'Cara'; f.password.value = ${JSON.stringify(PASSWORD)}; f.requestSubmit(); })()`);
   await waitFor(page, 'the chips back', `${seen}.chips === 3`);
+  await waitFor(page, 'the new stream\'s hello', 'window.hellos > 0'); // a hello after the usage below hid it under load
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
   assert.equal((await page.eval(seen)).usage, true, 'the meter shows again');
   await shoot(page, 'signed-in-again.png');

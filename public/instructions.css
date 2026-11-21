@@ -1,0 +1,49 @@
+/* Settings → Project instructions: the editor, its history and diff, the import picker, and My instructions. Moved out of settings.css (#1357). */
+/* Project instructions: the editor with its import picker */
+.instructions-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
+.instructions-tools button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
+.instructions-tools .small { font-size: 0.82em; }
+.instructions-text { width: 100%; min-height: 55vh; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; tab-size: 2; }
+.instructions-actions { margin-top: 0.6rem; }
+/* What already says a person's new words, before their save (#1162). */
+.instructions-repeats { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); }
+.instructions-repeats p { margin: 0 0 0.4rem; }
+.instructions-repeats ul { margin: 0 0 0.6rem; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.instructions-repeats li + li { margin-top: 0.3rem; }
+.instructions-repeats .row { margin: 0.2rem 0 0.6rem; }
+.instructions-repeats > p:last-child { margin-bottom: 0; }
+.instructions-repeats .repeat-verdict { display: block; }
+.instructions-repeats .repeat-verdict.strong { font-weight: 600; }
+/* Approval rules and plugin folders: the editor's two lists */
+.instructions-text.settings-list { min-height: 7rem; }
+.instructions-history details { margin: 0.3rem 0; }
+.instructions-history summary { cursor: pointer; padding: max(0.2rem, var(--tap-pad)) 0; }
+.instructions-diff { margin: 0.3rem 0 0.6rem; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.instructions-diff .add { color: var(--done); }
+.instructions-diff .del { color: var(--error); }
+.instructions-diff .gap { color: var(--muted); }
+.instructions-actions .counter.over { color: var(--error); font-weight: 600; }
+.import-picker { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.75rem; }
+.import-picker .sub + .sub { margin-top: 0.7rem; }
+.import-picker h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.import-picker > .row { margin-top: 0.7rem; }
+.import-picker > .row button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
+.import-source > summary { cursor: pointer; display: flex; flex-direction: column; padding: 0.25rem 0; list-style: none; }
+.import-source > summary::-webkit-details-marker { display: none; }
+.import-source label { display: inline-flex; gap: 0.45rem; align-items: center; margin: 0; font-size: 0.95em; color: var(--ink); cursor: pointer; }
+.import-source label input { margin: 0; width: auto; }
+.import-source .meta { color: var(--muted); font-size: 0.8em; padding-left: 1.6rem; overflow-wrap: anywhere; }
+.import-source .meta.hint { font-style: italic; }
+.import-source pre { max-height: 16rem; overflow: auto; background: var(--code-bg); border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.3rem 0 0.5rem 1.6rem; white-space: pre-wrap; }
+.import-picker .small { font-size: 0.82em; }
+/* My instructions (#688): a shorter field than the shared layers', and the three layers each in its own hue */
+.my-instructions .instructions-text { min-height: 14rem; margin-top: 0.6rem; }
+.my-scope { gap: 0.4rem; }
+.my-scope .chip { cursor: pointer; padding: 0.3rem 0.8rem; }
+.my-layers { margin: 0.3rem 0 0.6rem; padding: 0; list-style: none; display: grid; gap: 0.4rem; counter-reset: layer; }
+.my-layers > li { counter-increment: layer; display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; padding: 0.4rem 0.6rem; border-left: 3px solid var(--line); border-radius: 4px; background: var(--bg); }
+.my-layers > li::before { content: counter(layer) "."; font-weight: 700; }
+.my-layers > .l-app { border-left-color: var(--cat-1); }
+.my-layers > .l-scheme { border-left-color: var(--cat-2); }
+.my-layers > .l-mine { border-left-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, var(--panel)); }
+.my-limits { margin: 0.3rem 0 0; padding-left: 1.2rem; max-width: 75ch; }

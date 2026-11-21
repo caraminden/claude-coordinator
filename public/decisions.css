@@ -1,0 +1,20 @@
+/* Decisions page. Moved out of settings.css (#1357). */
+/* Decisions (#1064) */
+.decision-tools { flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0.75rem 0 0.25rem; }
+.decision-tools input[type=search] { width: min(100%, 24rem); }
+.decision-tools .range-pick { margin: 0; }
+.decision-tools .range-pick button { width: auto; padding: 0 0.8rem; }
+.idea-status { flex-wrap: wrap; margin: 0.25rem 0 0.75rem; }
+.idea-status button { width: auto; padding: 0 0.8rem; }
+.idea-links { line-height: 1.6; }
+.idea-edit { flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.idea-edit select, .idea-edit input { min-height: var(--control-h, 2.25rem); }
+.decision-counts { margin: 0.25rem 0 0.75rem; font-size: 0.85rem; }
+.decision-list p.small { font-size: 0.85em; }
+.decision-gap { color: var(--warn, #b7791f); }
+.decision-row-reversed .settings-row-title { text-decoration: line-through; color: var(--muted); }
+.decision-quote { margin: 0 0 0.5rem; padding: 0.4rem 0.7rem; border-left: 3px solid var(--accent); background: var(--panel); font-style: italic; overflow-wrap: anywhere; }
+.decision-text { margin: 0 0 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
+.decision-places a, .decision-reversed a { overflow-wrap: anywhere; }
+.decision-reversed { display: flex; flex-direction: column; align-items: flex-start; gap: 0.4rem; margin-top: 0.5rem; }
+.decision-reversed p { margin: 0; }

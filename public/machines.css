@@ -1,0 +1,110 @@
+/* Settings → Machines: the list, the add and setup forms, lends, lending, jobs. Moved out of settings.css (#1357). */
+.machine-facts { margin: 0.2rem 0 1rem; }
+.machine-facts summary { cursor: pointer; color: var(--accent); }
+.machine-facts ul { margin: 0.3rem 0 0; padding-left: 1.2rem; display: grid; gap: 0.3rem; }
+.machine-facts strong { color: var(--ink); font-weight: 600; }
+/* Machines: the Settings tab that adds, connects and lists them */
+.dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }
+.machine-row > .row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; }
+.machine-row .dot { flex: none; }
+.machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
+.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
+.machine-add label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: end; min-height: 2.5rem; cursor: pointer; }
+.machine-add label.check input { width: auto; margin: 0; }
+.machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
+.machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }
+.machine-setup-ways { margin: 0.6rem 0 0.3rem; }
+.machine-setup-ways > .row { gap: 0.4rem; }
+.machine-setup-ways .chip { cursor: pointer; }
+.machine-setup code { word-break: break-all; }
+.machine-list { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 1rem; }
+.machine-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+/* The quiet list (#437): one line per machine, its status as a dot; asleep and checking get a hollow one. */
+.dot.ready { background: var(--done); }
+.dot.fix { background: var(--waiting-tint); }
+.dot.down { background: var(--error); }
+.dot.asleep, .dot.checking { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.machines-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; }
+.machines-bar h3 { margin: 0; font-size: 1em; }
+.machines-main .machine-add[hidden] { display: none; }
+h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
+.machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
+.machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
+.machine-kv .machine-lending, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
+.machine-kv .row.small { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
+.machine-kv label.always-on { display: flex; gap: 0.4rem; align-items: center; margin: 0.2rem 0 0; cursor: pointer; }
+.machine-kv label.always-on input { width: auto; margin: 0; }
+.machine-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .machine-kv { grid-template-columns: 1fr; gap: 0.15rem; }
+  .machine-kv > span.muted { margin-top: 0.35rem; }
+}
+.machines-main > p.small { font-size: 0.85em; }
+.machines-bar.runners-bar { margin-top: 0; flex-wrap: wrap; }
+.machines-bar.runners-bar button { flex: none; }
+.machine-notes { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
+.machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
+.machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
+/* What a machine lends (#439): a tick per MCP server and folder its agent found. */
+.machine-lends { display: grid; gap: 0.5rem; min-width: 0; }
+.machine-lends p { margin: 0; }
+.machine-lends label.row { display: flex; flex-wrap: nowrap; gap: 0.4rem; align-items: center; padding: 0.15rem 0; margin: 0; cursor: pointer; }
+.machine-lends label.row input { width: auto; margin: 0; flex: none; }
+.machine-lends .machine-workspace { margin: 0 0 0.3rem 1.4rem; color: var(--muted); }
+.machine-lends button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.machine-lends summary { cursor: pointer; color: var(--muted); }
+.machine-lends details p { margin: 0.4rem 0; }
+.machine-lends pre { overflow-x: auto; font-size: 0.9em; margin: 0.3rem 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; }
+.machine-workspace { margin: 0.3rem 0; overflow-wrap: anywhere; }
+.machine-workspace ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.machine-lending { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+/* A scheme on a machine's list (#438): its name and a remove button, in one pill. */
+.scheme-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.65rem; font-size: 0.85em; line-height: 1.3; }
+.scheme-chip button { flex: none; width: 1.3rem; height: 1.3rem; padding: 0; border-radius: 50%; line-height: 1; background: transparent; color: var(--muted); border: 0; }
+.scheme-chip button:hover { background: var(--line); color: var(--ink); }
+/* Phone: the × and the picker are tap targets, a control's height. */
+@media (max-width: 800px) {
+  .scheme-chip { padding: 0 0 0 0.75rem; }
+  .scheme-chip button { width: var(--citadel-control-h); height: var(--citadel-control-h); font-size: 1.15em; }
+  .machine-lending select.add-scheme { min-height: var(--citadel-control-h); }
+}
+.machine-lending select.add-scheme { width: auto; margin: 0; padding: 0.33rem 0.5rem; border-radius: 999px; font-size: 0.85em; line-height: 1.3; color: var(--muted); cursor: pointer; }
+
+/* A machine's Jobs section (#859): GPU use from the running job, job hours, the one-off window, the Pause switch,
+   the always-allowed kinds, and compact rows that open into the job's card. */
+.mjobs { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.mjobs-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.mjobs-gpu { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; font-size: var(--size-small); }
+.mjobs-meter { display: block; width: 90px; height: 8px; background: var(--code-bg); border-radius: 4px; overflow: hidden; }
+.mjobs-meter span { display: block; height: 100%; background: var(--running); }
+.mjobs-settings, .mjobs-kinds { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: center; margin-bottom: 0.6rem; }
+.mjobs-settings .row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.mjobs-settings input[type=time] { width: auto; }
+.mjobs-pause { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.4rem; margin: 0; cursor: pointer; }
+.mjobs-pause span { flex: 1; min-width: 0; }
+.mjobs-pause input { width: auto; margin: 0; }
+.mjobs-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.mjobs-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 2px 4px 2px 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); font-size: var(--size-small); }
+.mjobs-chip button { min-height: 0; padding: 2px 8px; border-radius: var(--radius-pill); }
+.mjobs-item { margin-bottom: 4px; }
+.mjobs-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 10px; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; cursor: pointer; }
+.mjobs-row:hover, .mjobs-item.open .mjobs-row { border-color: var(--control-line); }
+.mjobs-row .jc-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--jt); }
+.mjobs-row .text { display: flex; flex-direction: column; min-width: 0; }
+.mjobs-row .name { font-weight: 600; font-size: var(--size-small); }
+.mjobs-row .meta { color: var(--muted); font-size: var(--size-meta); overflow-wrap: anywhere; }
+.mjobs-row .right { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mjobs-row .jc-bar { grid-column: 2 / -1; height: 4px; margin: 2px 0 0; }
+.mjobs-item .jobcard { margin: 4px 0 8px; }
+@media (max-width: 520px) {
+  .mjobs-settings, .mjobs-kinds { grid-template-columns: 1fr; gap: 0.2rem; }
+  .mjobs-row { grid-template-columns: 14px 1fr; }
+  .mjobs-row .right { grid-column: 2; }
+}
+.machine-fix { display: block; margin-top: 0.3rem; }

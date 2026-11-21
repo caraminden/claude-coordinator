@@ -1,0 +1,59 @@
+/* Settings → CI: the desktop panel and host load. Moved out of settings.css (#1357). */
+/* The CI desktop panel (#534, public/ci-desktop.js): a PC that hosts CI runners: verdict, now, 24 hours, pools. */
+.ci-desktop p { margin: 0; }
+.ci-desktop { display: grid; gap: var(--space-3); padding: var(--space-3); background: var(--panel); border-radius: var(--radius); font-size: 0.88em; min-width: 0; }
+.ci-verdict { display: flex; gap: var(--space-2); align-items: baseline; font-size: 1.05em; }
+.ci-verdict .dot { flex: none; transform: translateY(-1px); }
+.ci-now { display: grid; gap: var(--space-1); }
+.ci-meter { display: grid; grid-template-columns: 4.5rem minmax(4rem, 12rem) 3rem 1fr; gap: var(--space-2); align-items: center; }
+.ci-meter-bar { height: 8px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
+.ci-meter-bar > span { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--running); }
+.ci-meter-bar[data-level="warm"] > span { background: var(--waiting-tint); }
+.ci-meter-bar[data-level="hot"] > span { background: var(--error); }
+.ci-meter-value { font-variant-numeric: tabular-nums; text-align: right; }
+.ci-meter-detail { min-width: 0; overflow-wrap: anywhere; }
+.ci-facts { margin: 0; }
+.ci-figure { margin: 0; display: grid; gap: var(--space-1); min-width: 0; }
+.ci-figure figcaption { display: flex; gap: var(--space-3); align-items: baseline; flex-wrap: wrap; }
+.ci-title { font-weight: 600; }
+.ci-legend { display: flex; gap: var(--space-3); color: var(--muted); font-size: var(--size-meta); }
+.ci-legend > span, .ci-tip > span { display: flex; gap: var(--space-1); align-items: center; }
+.ci-chart { position: relative; }
+.ci-chart svg { display: block; width: 100%; height: 96px; touch-action: pan-y; }
+.ci-axis { position: absolute; inset: 0; pointer-events: none; }
+.ci-chart .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ci-chart .line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ci-chart .line.cpu, .ci-chart .line.running { stroke: var(--running); }
+.ci-chart .line.peak { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.ci-chart .line.waiting { stroke: var(--waiting); }
+.ci-chart .restart { stroke: var(--error); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ci-chart .cross { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ci-axis span { position: absolute; white-space: nowrap; font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; }
+.ci-axis .y { left: 0; transform: translateY(-50%); }
+.ci-axis .x { bottom: 0; transform: translateX(-50%); }
+.ci-desktop i.key { display: inline-block; width: 10px; height: 2px; border-radius: 1px; background: var(--muted); flex: none; }
+.ci-desktop i.key.cpu, .ci-desktop i.key.running { background: var(--running); }
+.ci-desktop i.key.waiting { background: var(--waiting); }
+.ci-desktop i.key.restart { width: 2px; height: 10px; background: var(--error); }
+.ci-tip { position: absolute; top: 0; width: 150px; padding: var(--space-1) var(--space-2); display: grid; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--size-meta); pointer-events: none; font-variant-numeric: tabular-nums; }
+.ci-tip[hidden] { display: none; }
+.ci-pools-wrap { overflow-x: auto; }
+.ci-pools { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.ci-pools th { font-size: var(--size-meta); font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }
+.ci-pools th, .ci-pools td { padding: var(--space-1) var(--space-2); border-top: 1px solid var(--line); vertical-align: baseline; }
+.ci-pools thead th { border-top: 0; }
+.ci-pools th:first-child, .ci-pools td:first-child { padding-left: 0; }
+.ci-pools .num { text-align: right; white-space: nowrap; }
+.ci-pool-name { font-weight: 600; margin-right: var(--space-2); }
+.ci-pool-labels { font-size: var(--size-meta); }
+.ci-stuck { color: var(--waiting); font-weight: 600; }
+@media (max-width: 600px) {
+  .ci-meter { grid-template-columns: 4.5rem 1fr 3rem; }
+  .ci-meter-detail { grid-column: 1 / -1; }
+}
+/* Host load on the CI page (#1060) */
+.host-week th:nth-child(2), .host-week td:nth-child(2) { width: 3.6rem; }
+.host-week .host-median { width: 4.8rem; }
+.host-week th:last-child { width: 36%; }
+.ci-host .settings-section { margin-top: 0.25rem; }
+@media (max-width: 520px) { .host-week .host-median { display: none; } .host-week th:last-child { width: 44%; } }

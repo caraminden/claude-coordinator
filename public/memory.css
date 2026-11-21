@@ -1,0 +1,63 @@
+/* Orders → Memory. Moved out of settings.css (#1357). */
+/* Orders → Memory (#1058) */
+.memory-main > input[type=search] { align-self: flex-start; width: min(100%, 24rem); margin: 0 0 0.75rem; }
+/* Memory (#1071, Josh picked "By kind, with numbers on top"): what loads at a start, numbers that filter, groups by kind. */
+.memory-head { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.4rem; row-gap: 0.2rem; }
+.memory-head b { color: var(--ink); font-weight: 600; }
+.memory-meter { display: inline-flex; flex: 0 1 24rem; min-width: 0; }
+.memory-meter > .meter { flex: 1; flex-direction: row-reverse; }
+.memory-rest { flex-basis: 100%; }
+.memory-folders[hidden] { display: none; }
+.memory-folders { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+.memory-folders button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.85em; }
+.memory-folders button.on { border-color: var(--running); color: var(--running); font-weight: 600; }
+.memory-stats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
+.memory-stats[hidden] { display: none; }
+.memory-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; min-width: 7rem; padding: 0.5rem 0.8rem; border: 1px solid transparent; border-radius: 8px;
+  background: color-mix(in srgb, var(--h) 10%, var(--panel)); color: var(--muted); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease-out, background 150ms ease-out; }
+.memory-stat:hover { border-color: var(--control-line); }
+.memory-stat.on { border-color: var(--h); }
+.memory-stat b { font-size: 1.35rem; line-height: 1.2; font-weight: 700; color: var(--h); font-variant-numeric: tabular-nums; }
+.memory-stat span { font-size: 0.8em; }
+.memory-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.memory-folder { display: flex; flex-direction: column; gap: 0.9rem; }
+.memory-folder[hidden], .memory-group[hidden] { display: none; }
+.memory-group > summary { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.15rem; margin-bottom: 0.35rem; cursor: pointer; list-style: none;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--h); }
+.memory-group > summary::-webkit-details-marker { display: none; }
+.memory-group > summary > svg { width: 0.9rem; height: 0.9rem; flex: none; transition: transform 150ms; }
+.memory-group[open] > summary > svg { transform: rotate(90deg); }
+.memory-group-count { color: var(--muted); font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.memory-group-why { margin-left: auto; color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 0.95em; text-align: right; }
+.memory-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--waiting-tint); }
+.memory-dot[hidden] { display: none; }
+.memory-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.45rem 0.65rem; border-radius: 6px; font-size: 0.9em;
+  background: color-mix(in srgb, var(--waiting-tint) 14%, var(--panel)); color: var(--ink); }
+.memory-warn[hidden] { display: none; }
+.memory-warn button { padding-block: 0.2rem; }
+.memory-empty { margin: 0.5rem 0.15rem; }
+@media (max-width: 800px) {
+  .memory-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
+  .memory-stat { min-width: 0; padding: 0.4rem 0.55rem; }
+  .memory-stat span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .memory-stat b { font-size: 1.1rem; }
+  .memory-group-why { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .memory-group > summary > svg, .memory-stat { transition: none; } }
+.memory-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0; font-size: 0.85em; padding: 0.5rem 0.65rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
+.memory-tidy[hidden] { display: none; }
+.memory-tidy .settings-section { margin-top: 0.75rem; }
+.memory-changes { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.6rem 0; }
+.memory-change { border-left: 3px solid var(--h); padding: 0.45rem 0.6rem; background: var(--panel); border-radius: 0 6px 6px 0; }
+.memory-change-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; cursor: pointer; }
+.memory-change-head input { margin: 0; width: auto; flex: none; }
+.memory-change-head { margin-bottom: 0; color: var(--ink); }
+.memory-change-head code { overflow-wrap: anywhere; }
+.memory-change-notick { display: inline-grid; place-items: center; width: 1rem; height: 1rem; font-weight: 700; color: var(--waiting); }
+.memory-change-why { margin: 0.25rem 0 0 1.5rem; color: var(--muted); font-size: 0.9em; }
+.memory-change-diff { margin: 0.25rem 0 0 1.5rem; font-size: 0.9em; }
+.memory-change-diff summary { cursor: pointer; color: var(--muted); }
+.memory-change-diff .instructions-diff { max-height: 18rem; overflow: auto; }
+.memory-actions .spacer { flex: 1; }
+.memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }

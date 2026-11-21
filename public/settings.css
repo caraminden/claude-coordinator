@@ -132,23 +132,6 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
   .ticket-head > .settings-tabs + .meta { margin-top: 0.5rem; }
 }
 .ticket-head button.tune-up { flex: none; padding: 0.3rem 0.7rem; font-size: 0.9em; white-space: nowrap; }
-/* Project instructions: the editor with its import picker */
-.instructions-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
-.instructions-tools button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
-.instructions-tools .small { font-size: 0.82em; }
-.instructions-text { width: 100%; min-height: 55vh; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; tab-size: 2; }
-.instructions-actions { margin-top: 0.6rem; }
-/* What already says a person's new words, before their save (#1162). */
-.instructions-repeats { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); }
-.instructions-repeats p { margin: 0 0 0.4rem; }
-.instructions-repeats ul { margin: 0 0 0.6rem; padding-left: 1.2rem; overflow-wrap: anywhere; }
-.instructions-repeats li + li { margin-top: 0.3rem; }
-.instructions-repeats .row { margin: 0.2rem 0 0.6rem; }
-.instructions-repeats > p:last-child { margin-bottom: 0; }
-.instructions-repeats .repeat-verdict { display: block; }
-.instructions-repeats .repeat-verdict.strong { font-weight: 600; }
-/* Approval rules and plugin folders: the editor's two lists */
-.instructions-text.settings-list { min-height: 7rem; }
 .settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }
 /* Help where it applies (#492): a card per setting, its examples as chips that fill the field, a caution
    beside what it is about, steps as a numbered list; help text never runs wider than about 75 characters. */
@@ -166,103 +149,6 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .settings-steps > li { counter-increment: step; display: grid; grid-template-columns: 1.6rem 1fr; gap: 0 0.6rem; align-items: start; }
 .settings-steps > li::before { content: counter(step); width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); display: grid; place-items: center; font-size: 0.8em; font-weight: 700; }
 .settings-steps > li > * { grid-column: 2; }
-.machine-facts { margin: 0.2rem 0 1rem; }
-.machine-facts summary { cursor: pointer; color: var(--accent); }
-.machine-facts ul { margin: 0.3rem 0 0; padding-left: 1.2rem; display: grid; gap: 0.3rem; }
-.machine-facts strong { color: var(--ink); font-weight: 600; }
-.instructions-history details { margin: 0.3rem 0; }
-.instructions-history summary { cursor: pointer; padding: max(0.2rem, var(--tap-pad)) 0; }
-.instructions-diff { margin: 0.3rem 0 0.6rem; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.instructions-diff .add { color: var(--done); }
-.instructions-diff .del { color: var(--error); }
-.instructions-diff .gap { color: var(--muted); }
-.instructions-actions .counter.over { color: var(--error); font-weight: 600; }
-.import-picker { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.75rem; }
-.import-picker .sub + .sub { margin-top: 0.7rem; }
-.import-picker h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.import-picker > .row { margin-top: 0.7rem; }
-.import-picker > .row button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
-.import-source > summary { cursor: pointer; display: flex; flex-direction: column; padding: 0.25rem 0; list-style: none; }
-.import-source > summary::-webkit-details-marker { display: none; }
-.import-source label { display: inline-flex; gap: 0.45rem; align-items: center; margin: 0; font-size: 0.95em; color: var(--ink); cursor: pointer; }
-.import-source label input { margin: 0; width: auto; }
-.import-source .meta { color: var(--muted); font-size: 0.8em; padding-left: 1.6rem; overflow-wrap: anywhere; }
-.import-source .meta.hint { font-style: italic; }
-.import-source pre { max-height: 16rem; overflow: auto; background: var(--code-bg); border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.3rem 0 0.5rem 1.6rem; white-space: pre-wrap; }
-.import-picker .small { font-size: 0.82em; }
-
-/* Machines: the Settings tab that adds, connects and lists them */
-.dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }
-.machine-row > .row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; }
-.machine-row .dot { flex: none; }
-.machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
-.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
-.machine-add label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: end; min-height: 2.5rem; cursor: pointer; }
-.machine-add label.check input { width: auto; margin: 0; }
-.machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
-.machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
-.machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }
-.machine-setup-ways { margin: 0.6rem 0 0.3rem; }
-.machine-setup-ways > .row { gap: 0.4rem; }
-.machine-setup-ways .chip { cursor: pointer; }
-.machine-setup code { word-break: break-all; }
-.machine-list { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 1rem; }
-.machine-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
-/* The quiet list (#437): one line per machine, its status as a dot; asleep and checking get a hollow one. */
-.dot.ready { background: var(--done); }
-.dot.fix { background: var(--waiting-tint); }
-.dot.down { background: var(--error); }
-.dot.asleep, .dot.checking { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
-.machines-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; }
-.machines-bar h3 { margin: 0; font-size: 1em; }
-.machines-main .machine-add[hidden] { display: none; }
-h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
-.machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
-.machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
-.machine-kv .machine-lending, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
-.machine-kv .row.small { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
-.machine-kv label.always-on { display: flex; gap: 0.4rem; align-items: center; margin: 0.2rem 0 0; cursor: pointer; }
-.machine-kv label.always-on input { width: auto; margin: 0; }
-.machine-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-@media (max-width: 600px) {
-  .machine-kv { grid-template-columns: 1fr; gap: 0.15rem; }
-  .machine-kv > span.muted { margin-top: 0.35rem; }
-}
-.machines-main > p.small { font-size: 0.85em; }
-.machines-bar.runners-bar { margin-top: 0; flex-wrap: wrap; }
-.machines-bar.runners-bar button { flex: none; }
-.machine-notes { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
-.machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
-.machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
-/* What a machine lends (#439): a tick per MCP server and folder its agent found. */
-.machine-lends { display: grid; gap: 0.5rem; min-width: 0; }
-.machine-lends p { margin: 0; }
-.machine-lends label.row { display: flex; flex-wrap: nowrap; gap: 0.4rem; align-items: center; padding: 0.15rem 0; margin: 0; cursor: pointer; }
-.machine-lends label.row input { width: auto; margin: 0; flex: none; }
-.machine-lends .machine-workspace { margin: 0 0 0.3rem 1.4rem; color: var(--muted); }
-.machine-lends button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
-.machine-lends summary { cursor: pointer; color: var(--muted); }
-.machine-lends details p { margin: 0.4rem 0; }
-.machine-lends pre { overflow-x: auto; font-size: 0.9em; margin: 0.3rem 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; }
-.machine-workspace { margin: 0.3rem 0; overflow-wrap: anywhere; }
-.machine-workspace ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
-.machine-lending { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
-/* A scheme on a machine's list (#438): its name and a remove button, in one pill. */
-.scheme-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.65rem; font-size: 0.85em; line-height: 1.3; }
-.scheme-chip button { flex: none; width: 1.3rem; height: 1.3rem; padding: 0; border-radius: 50%; line-height: 1; background: transparent; color: var(--muted); border: 0; }
-.scheme-chip button:hover { background: var(--line); color: var(--ink); }
-/* Phone: the × and the picker are tap targets, a control's height. */
-@media (max-width: 800px) {
-  .scheme-chip { padding: 0 0 0 0.75rem; }
-  .scheme-chip button { width: var(--citadel-control-h); height: var(--citadel-control-h); font-size: 1.15em; }
-  .machine-lending select.add-scheme { min-height: var(--citadel-control-h); }
-}
-.machine-lending select.add-scheme { width: auto; margin: 0; padding: 0.33rem 0.5rem; border-radius: 999px; font-size: 0.85em; line-height: 1.3; color: var(--muted); cursor: pointer; }
 
 /* Settings → Members and People */
 .people-list { display: flex; flex-direction: column; gap: 0.25rem; margin: 1rem 0; }
@@ -324,102 +210,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .github-refused p { margin: 0; }
 .github-refused p + p { margin-top: 0.4rem; }
 
-/* The CI desktop panel (#534, public/ci-desktop.js): a PC that hosts CI runners: verdict, now, 24 hours, pools. */
-.ci-desktop p { margin: 0; }
-.ci-desktop { display: grid; gap: var(--space-3); padding: var(--space-3); background: var(--panel); border-radius: var(--radius); font-size: 0.88em; min-width: 0; }
-.ci-verdict { display: flex; gap: var(--space-2); align-items: baseline; font-size: 1.05em; }
-.ci-verdict .dot { flex: none; transform: translateY(-1px); }
-.ci-now { display: grid; gap: var(--space-1); }
-.ci-meter { display: grid; grid-template-columns: 4.5rem minmax(4rem, 12rem) 3rem 1fr; gap: var(--space-2); align-items: center; }
-.ci-meter-bar { height: 8px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
-.ci-meter-bar > span { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--running); }
-.ci-meter-bar[data-level="warm"] > span { background: var(--waiting-tint); }
-.ci-meter-bar[data-level="hot"] > span { background: var(--error); }
-.ci-meter-value { font-variant-numeric: tabular-nums; text-align: right; }
-.ci-meter-detail { min-width: 0; overflow-wrap: anywhere; }
-.ci-facts { margin: 0; }
-.ci-figure { margin: 0; display: grid; gap: var(--space-1); min-width: 0; }
-.ci-figure figcaption { display: flex; gap: var(--space-3); align-items: baseline; flex-wrap: wrap; }
-.ci-title { font-weight: 600; }
-.ci-legend { display: flex; gap: var(--space-3); color: var(--muted); font-size: var(--size-meta); }
-.ci-legend > span, .ci-tip > span { display: flex; gap: var(--space-1); align-items: center; }
-.ci-chart { position: relative; }
-.ci-chart svg { display: block; width: 100%; height: 96px; touch-action: pan-y; }
-.ci-axis { position: absolute; inset: 0; pointer-events: none; }
-.ci-chart .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.ci-chart .line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
-.ci-chart .line.cpu, .ci-chart .line.running { stroke: var(--running); }
-.ci-chart .line.peak { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
-.ci-chart .line.waiting { stroke: var(--waiting); }
-.ci-chart .restart { stroke: var(--error); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.ci-chart .cross { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.ci-axis span { position: absolute; white-space: nowrap; font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; }
-.ci-axis .y { left: 0; transform: translateY(-50%); }
-.ci-axis .x { bottom: 0; transform: translateX(-50%); }
-.ci-desktop i.key { display: inline-block; width: 10px; height: 2px; border-radius: 1px; background: var(--muted); flex: none; }
-.ci-desktop i.key.cpu, .ci-desktop i.key.running { background: var(--running); }
-.ci-desktop i.key.waiting { background: var(--waiting); }
-.ci-desktop i.key.restart { width: 2px; height: 10px; background: var(--error); }
-.ci-tip { position: absolute; top: 0; width: 150px; padding: var(--space-1) var(--space-2); display: grid; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--size-meta); pointer-events: none; font-variant-numeric: tabular-nums; }
-.ci-tip[hidden] { display: none; }
-.ci-pools-wrap { overflow-x: auto; }
-.ci-pools { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.ci-pools th { font-size: var(--size-meta); font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }
-.ci-pools th, .ci-pools td { padding: var(--space-1) var(--space-2); border-top: 1px solid var(--line); vertical-align: baseline; }
-.ci-pools thead th { border-top: 0; }
-.ci-pools th:first-child, .ci-pools td:first-child { padding-left: 0; }
-.ci-pools .num { text-align: right; white-space: nowrap; }
-.ci-pool-name { font-weight: 600; margin-right: var(--space-2); }
-.ci-pool-labels { font-size: var(--size-meta); }
-.ci-stuck { color: var(--waiting); font-weight: 600; }
-@media (max-width: 600px) {
-  .ci-meter { grid-template-columns: 4.5rem 1fr 3rem; }
-  .ci-meter-detail { grid-column: 1 / -1; }
-}
-/* My instructions (#688): a shorter field than the shared layers', and the three layers each in its own hue */
-.my-instructions .instructions-text { min-height: 14rem; margin-top: 0.6rem; }
-.my-scope { gap: 0.4rem; }
-.my-scope .chip { cursor: pointer; padding: 0.3rem 0.8rem; }
-.my-layers { margin: 0.3rem 0 0.6rem; padding: 0; list-style: none; display: grid; gap: 0.4rem; counter-reset: layer; }
-.my-layers > li { counter-increment: layer; display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; padding: 0.4rem 0.6rem; border-left: 3px solid var(--line); border-radius: 4px; background: var(--bg); }
-.my-layers > li::before { content: counter(layer) "."; font-weight: 700; }
-.my-layers > .l-app { border-left-color: var(--cat-1); }
-.my-layers > .l-scheme { border-left-color: var(--cat-2); }
-.my-layers > .l-mine { border-left-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, var(--panel)); }
-.my-limits { margin: 0.3rem 0 0; padding-left: 1.2rem; max-width: 75ch; }
 
-/* A machine's Jobs section (#859): GPU use from the running job, job hours, the one-off window, the Pause switch,
-   the always-allowed kinds, and compact rows that open into the job's card. */
-.mjobs { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
-.mjobs-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-.mjobs-gpu { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; font-size: var(--size-small); }
-.mjobs-meter { display: block; width: 90px; height: 8px; background: var(--code-bg); border-radius: 4px; overflow: hidden; }
-.mjobs-meter span { display: block; height: 100%; background: var(--running); }
-.mjobs-settings, .mjobs-kinds { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: center; margin-bottom: 0.6rem; }
-.mjobs-settings .row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.mjobs-settings input[type=time] { width: auto; }
-.mjobs-pause { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.4rem; margin: 0; cursor: pointer; }
-.mjobs-pause span { flex: 1; min-width: 0; }
-.mjobs-pause input { width: auto; margin: 0; }
-.mjobs-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.mjobs-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 2px 4px 2px 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); font-size: var(--size-small); }
-.mjobs-chip button { min-height: 0; padding: 2px 8px; border-radius: var(--radius-pill); }
-.mjobs-item { margin-bottom: 4px; }
-.mjobs-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 10px; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; cursor: pointer; }
-.mjobs-row:hover, .mjobs-item.open .mjobs-row { border-color: var(--control-line); }
-.mjobs-row .jc-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--jt); }
-.mjobs-row .text { display: flex; flex-direction: column; min-width: 0; }
-.mjobs-row .name { font-weight: 600; font-size: var(--size-small); }
-.mjobs-row .meta { color: var(--muted); font-size: var(--size-meta); overflow-wrap: anywhere; }
-.mjobs-row .right { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mjobs-row .jc-bar { grid-column: 2 / -1; height: 4px; margin: 2px 0 0; }
-.mjobs-item .jobcard { margin: 4px 0 8px; }
-@media (max-width: 520px) {
-  .mjobs-settings, .mjobs-kinds { grid-template-columns: 1fr; gap: 0.2rem; }
-  .mjobs-row { grid-template-columns: 14px 1fr; }
-  .mjobs-row .right { grid-column: 2; }
-}
-.machine-fix { display: block; margin-top: 0.3rem; }
 
 .settings-row[hidden] { display: none; }
 .settings-row-body .toggle { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; color: var(--ink); cursor: pointer; }
@@ -428,119 +219,10 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .settings-row-body .hint { color: var(--muted); font-size: 0.9em; }
 .settings-block[hidden] { display: none; }
 
-/* Minion rules pickers (#1041, public/minion-rules.js): checkboxes, segmented choices, switches, chips and an ordered list. */
-.rules-body { display: flex; flex-direction: column; gap: 0.5rem; }
-.rules-checks { display: flex; flex-direction: column; gap: 2px; }
-.rules-check { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0.25rem; border-radius: 6px; cursor: pointer; }
-.rules-check:hover { background: color-mix(in srgb, var(--h) 6%, transparent); }
-.rules-check input { margin: 0.2rem 0 0; accent-color: var(--accent); width: 1rem; height: 1rem; flex: none; }
-.rules-check.locked { cursor: default; opacity: 0.7; }
-.rules-what { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
-.rules-what code { font-size: 0.8em; color: var(--muted); overflow-wrap: anywhere; }
-.rules-item { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0; flex-wrap: wrap; }
-.rules-item + .rules-item { border-top: 1px solid var(--line); }
-/* The 1px gap over the line colour draws the dividers, so a phone's wrapped second line gets one above it too, and its buttons share the width. */
-.rules-seg { display: inline-flex; flex-wrap: wrap; gap: 1px; max-width: 100%; border: 1px solid var(--control-line); border-radius: 7px; overflow: hidden; align-self: flex-start; background: var(--control-line); }
-.rules-seg button { flex: 1 1 auto; font: inherit; font-size: 0.84rem; padding: 0.3rem 0.65rem; line-height: 1.3; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); cursor: pointer; }
-.rules-seg button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.rules-seg button:disabled { cursor: default; }
-.rules-seg button:disabled:not([aria-pressed=true]) { color: var(--muted); }
-.rules-switch { position: relative; width: 2.3rem; height: 1.3rem; min-width: 2.3rem; min-height: 1.3rem; box-sizing: border-box; padding: 0; border: 0; border-radius: 99px; background: var(--control-line); cursor: pointer; flex: none; }
-.rules-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: calc(1.3rem - 4px); height: calc(1.3rem - 4px); border-radius: 50%; background: #fff; transition: transform var(--citadel-motion, 120ms); }
-.rules-switch[aria-checked=true] { background: var(--done); }
-.rules-switch[aria-checked=true]::after { transform: translateX(1rem); }
-.rules-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.rules-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.rules-chip { display: inline-flex; align-items: center; gap: 0.3rem; min-height: 1.9rem; padding: 0 0.65rem; border: 1px solid var(--line); border-radius: 99px; background: var(--panel); color: var(--ink); font: inherit; font-size: 0.86rem; cursor: pointer; }
-.rules-chip[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); font-weight: 600; }
-.rules-order { display: flex; flex-direction: column; gap: 4px; }
-.rules-ord { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.4rem 0.3rem 0.65rem; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
-.rules-ord span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.rules-mini { font: inherit; font-size: 0.8rem; border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 5px; padding: 0.15rem 0.5rem; cursor: pointer; }
-.rules-mini:disabled { opacity: 0.35; cursor: default; }
-.rules-hand { font: inherit; font-size: 0.86rem; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; align-self: flex-start; }
-.rules-hand-input { flex: 1; min-width: 10rem; }
-.rules-pick select { width: auto; max-width: 100%; }
-.rules-what .dot { margin-right: 0.4rem; }
-
-/* Host load on the CI page (#1060) */
-.host-week th:nth-child(2), .host-week td:nth-child(2) { width: 3.6rem; }
-.host-week .host-median { width: 4.8rem; }
-.host-week th:last-child { width: 36%; }
-.ci-host .settings-section { margin-top: 0.25rem; }
-@media (max-width: 520px) { .host-week .host-median { display: none; } .host-week th:last-child { width: 44%; } }
-
-.rules-number { width: 5rem; }
-/* The pass on Minion rules after setup (#1046). */
-.rules-review { margin-top: 0.75rem; padding: 0.75rem 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--accent, var(--line)); border-radius: 10px; background: var(--panel); }
-.rules-review h3 { margin: 0 0 0.25rem; font-size: 0.95rem; }
-.rules-review p { margin: 0 0 0.5rem; }
-.rules-review > .row { margin-bottom: 0.5rem; }
-.rules-review .hue-rows { margin-bottom: 0.6rem; }
 
 
-/* Orders → Memory (#1058) */
-.memory-main > input[type=search] { align-self: flex-start; width: min(100%, 24rem); margin: 0 0 0.75rem; }
-/* Memory (#1071, Josh picked "By kind, with numbers on top"): what loads at a start, numbers that filter, groups by kind. */
-.memory-head { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.4rem; row-gap: 0.2rem; }
-.memory-head b { color: var(--ink); font-weight: 600; }
-.memory-meter { display: inline-flex; flex: 0 1 24rem; min-width: 0; }
-.memory-meter > .meter { flex: 1; flex-direction: row-reverse; }
-.memory-rest { flex-basis: 100%; }
-.memory-folders[hidden] { display: none; }
-.memory-folders { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
-.memory-folders button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.85em; }
-.memory-folders button.on { border-color: var(--running); color: var(--running); font-weight: 600; }
-.memory-stats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
-.memory-stats[hidden] { display: none; }
-.memory-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; min-width: 7rem; padding: 0.5rem 0.8rem; border: 1px solid transparent; border-radius: 8px;
-  background: color-mix(in srgb, var(--h) 10%, var(--panel)); color: var(--muted); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease-out, background 150ms ease-out; }
-.memory-stat:hover { border-color: var(--control-line); }
-.memory-stat.on { border-color: var(--h); }
-.memory-stat b { font-size: 1.35rem; line-height: 1.2; font-weight: 700; color: var(--h); font-variant-numeric: tabular-nums; }
-.memory-stat span { font-size: 0.8em; }
-.memory-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.memory-folder { display: flex; flex-direction: column; gap: 0.9rem; }
-.memory-folder[hidden], .memory-group[hidden] { display: none; }
-.memory-group > summary { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.15rem; margin-bottom: 0.35rem; cursor: pointer; list-style: none;
-  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--h); }
-.memory-group > summary::-webkit-details-marker { display: none; }
-.memory-group > summary > svg { width: 0.9rem; height: 0.9rem; flex: none; transition: transform 150ms; }
-.memory-group[open] > summary > svg { transform: rotate(90deg); }
-.memory-group-count { color: var(--muted); font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.memory-group-why { margin-left: auto; color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 0.95em; text-align: right; }
-.memory-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--waiting-tint); }
-.memory-dot[hidden] { display: none; }
-.memory-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.45rem 0.65rem; border-radius: 6px; font-size: 0.9em;
-  background: color-mix(in srgb, var(--waiting-tint) 14%, var(--panel)); color: var(--ink); }
-.memory-warn[hidden] { display: none; }
-.memory-warn button { padding-block: 0.2rem; }
-.memory-empty { margin: 0.5rem 0.15rem; }
-@media (max-width: 800px) {
-  .memory-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
-  .memory-stat { min-width: 0; padding: 0.4rem 0.55rem; }
-  .memory-stat span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-  .memory-stat b { font-size: 1.1rem; }
-  .memory-group-why { display: none; }
-}
-@media (prefers-reduced-motion: reduce) { .memory-group > summary > svg, .memory-stat { transition: none; } }
-.memory-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; margin: 0; font-size: 0.85em; padding: 0.5rem 0.65rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-.memory-edit { width: 100%; font-family: var(--mono, monospace); font-size: 0.85em; }
-.memory-tidy[hidden] { display: none; }
-.memory-tidy .settings-section { margin-top: 0.75rem; }
-.memory-changes { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.6rem 0; }
-.memory-change { border-left: 3px solid var(--h); padding: 0.45rem 0.6rem; background: var(--panel); border-radius: 0 6px 6px 0; }
-.memory-change-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; cursor: pointer; }
-.memory-change-head input { margin: 0; width: auto; flex: none; }
-.memory-change-head { margin-bottom: 0; color: var(--ink); }
-.memory-change-head code { overflow-wrap: anywhere; }
-.memory-change-notick { display: inline-grid; place-items: center; width: 1rem; height: 1rem; font-weight: 700; color: var(--waiting); }
-.memory-change-why { margin: 0.25rem 0 0 1.5rem; color: var(--muted); font-size: 0.9em; }
-.memory-change-diff { margin: 0.25rem 0 0 1.5rem; font-size: 0.9em; }
-.memory-change-diff summary { cursor: pointer; color: var(--muted); }
-.memory-change-diff .instructions-diff { max-height: 18rem; overflow: auto; }
-.memory-actions .spacer { flex: 1; }
-.memory-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+
 
 /* Instructions aids: size meter and outline, and the repo setup card (read-only). */
 .aids-box { margin: 0.4rem 0; }
@@ -554,25 +236,6 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .repo-facts dt { font-weight: 600; overflow-wrap: anywhere; }
 .repo-facts dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .repo-facts { grid-template-columns: 1fr; gap: 0.1rem; } .repo-facts dd { margin-bottom: 0.5rem; } }
-/* Decisions (#1064) */
-.decision-tools { flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0.75rem 0 0.25rem; }
-.decision-tools input[type=search] { width: min(100%, 24rem); }
-.decision-tools .range-pick { margin: 0; }
-.decision-tools .range-pick button { width: auto; padding: 0 0.8rem; }
-.idea-status { flex-wrap: wrap; margin: 0.25rem 0 0.75rem; }
-.idea-status button { width: auto; padding: 0 0.8rem; }
-.idea-links { line-height: 1.6; }
-.idea-edit { flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
-.idea-edit select, .idea-edit input { min-height: var(--control-h, 2.25rem); }
-.decision-counts { margin: 0.25rem 0 0.75rem; font-size: 0.85rem; }
-.decision-list p.small { font-size: 0.85em; }
-.decision-gap { color: var(--warn, #b7791f); }
-.decision-row-reversed .settings-row-title { text-decoration: line-through; color: var(--muted); }
-.decision-quote { margin: 0 0 0.5rem; padding: 0.4rem 0.7rem; border-left: 3px solid var(--accent); background: var(--panel); font-style: italic; overflow-wrap: anywhere; }
-.decision-text { margin: 0 0 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
-.decision-places a, .decision-reversed a { overflow-wrap: anywhere; }
-.decision-reversed { display: flex; flex-direction: column; align-items: flex-start; gap: 0.4rem; margin-top: 0.5rem; }
-.decision-reversed p { margin: 0; }
 
 /* Citadel's look (#1068, Josh picked "Rows that open" with the card take's colour; the rules: .claude/rules/citadel-look.md).
    The parts a page's first look is built from, made in look.js. A section heading takes its group's hue. */

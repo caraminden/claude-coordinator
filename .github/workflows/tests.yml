@@ -23,6 +23,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  id-token: write # tools/ci-numbers.sh's run token (the citadel:ci-store skill)
 
 jobs:
   test:
@@ -192,7 +193,9 @@ jobs:
           # is the first one with no results.
           : >"$RUNNER_TEMP/tests.log"
           tail -n +1 -f "$RUNNER_TEMP/tests.log" &
+          started=$SECONDS
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          [ "$rc" != 0 ] || echo "$((SECONDS - started))" >"$RUNNER_TEMP/suite-secs" # a green run's wall time, for the numbers step
           sleep 1; kill $! # tail prints what it has read: a second for the last lines
           [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
           exit "$rc"
@@ -203,6 +206,18 @@ jobs:
       # before land.sh's (steps run back to back on one runner, and land.sh only extends once the full suite has ended),
       # and the reruns end 30 s short of the window, for the job's end and land.sh's next look: a real red is red in time. It never turns
       # a red run green: land.sh gives a red of flakes only its one fresh run.
+      # Numbers per run for the CI page's Numbers tab (higher is worse; a step up wakes the Taskmaster). Never fails the job.
+      - name: Keep the run's numbers
+        if: ${{ success() }}
+        continue-on-error: true
+        run: |
+          [ -s "$RUNNER_TEMP/suite-secs" ] || exit 0
+          nums=("suite-time=$(cat "$RUNNER_TEMP/suite-secs")s")
+          # the slowest test file: its line in the spec output is `✔ test/x.test.ts (123.4ms)`
+          slow=$(sed -n 's/^[✔✖] test\/.*(\([0-9.]*\)ms)$/\1/p' "$RUNNER_TEMP/tests.log" | sort -g | tail -1)
+          [ -z "$slow" ] || nums+=("slowest-test-file=${slow}ms")
+          nums+=("front-end-size=$(find public -type f -printf '%s\n' | awk '{s+=$1} END {print s}')B")
+          tools/ci-numbers.sh "${nums[@]}" || true
       - name: rerun failed files alone
         if: ${{ failure() && steps.suite.conclusion == 'failure' }}
         env:

@@ -1088,6 +1088,41 @@ test("a red credits a minion that names a later run of the same red streak, not 
   assert.equal(health.hold(other.id), null);
 });
 
+// Her pick's own words (Cara, 2026-11-21 11:17 PST, "Credit the real fixer"): "counts a minion that names the run anywhere in
+// its chat, not just its brief, and clears once that minion's fix is live and its proof run is green". #1336 started the
+// flake-proof run itself, so it is older than the red; its brief named an earlier tests.yml run, its own words named this one.
+test("a red credits a minion that names its run anywhere in its chat, however old, and holds it for the re-run; tool output and Taskmasters don't count (#1491, #1336's case)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  const say = (id: number, text: string, type = 'assistant') => w.store.addEvent(id, 'claude', type === 'assistant'
+    ? { type, message: { content: [{ type: 'text', text }] } }
+    : { type, message: { content: [{ type: 'tool_result', content: text }] } });
+  const fixer = w.minion(w.peek.id, 'ticket/1336-main-red');
+  w.store.addEvent(fixer.id, 'user_message', { text: 'Main went red: tests.yml run 44841937686 failed; get main back to green' });
+  w.store.db.prepare('UPDATE tickets SET created_at = ? WHERE id = ?').run(NOW - 2 * HOUR, fixer.id);
+  const tm = w.store.createTicket({ project_id: w.peek.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 1 } as any);
+  w.gh.mainRuns = [runOf({ id: 44907507834, event: 'workflow_dispatch', name: 'flake-proof', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: '43e5e17423', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+
+  // The Taskmaster hears of it and another minion's tool output lists it: neither is a fixer.
+  w.store.addEvent(tm.id, 'user_message', { text: 'Peek Auras: CI: desktop.yml failed on main (run 44907507834)' });
+  say(tm.id, 'Starting a fix minion for run 44907507834');
+  const lister = w.minion(w.peek.id, 'ticket/1400-other');
+  say(lister.id, '44907507834  failure  flake-proof  main', 'user');
+  await health.tick(NOW + 5 * MIN);
+  assert.doesNotMatch(item()!, /fix minion #/, 'no fixer from a Taskmaster or tool output');
+
+  // #1336's own words name the run: it is the red's fix minion, held open until the re-run is green, as a named one is (#1074).
+  say(fixer.id, 'flake-proof run 44907507834 went red on copy 8 of 10: the ended card races the stop');
+  await health.tick(NOW + RED_FIX_MS);
+  assert.equal(item('ci.open') ?? null, null, 'no ring');
+  assert.match(item()!, new RegExp(`fix minion #${fixer.number} started`));
+  assert.match(health.hold(fixer.id)!, /run 44907507834/);
+  assert.equal(health.hold(lister.id), null);
+});
+
 // #1491 (Cara, 2026-11-21, "Investigate button"): one press on a red in Open problems starts a fix minion in the red's own scheme,
 // briefed from the red, and the red names it at once; Peek Auras, a scheme other than Citadel.
 test('Investigate on a red starts one Sonnet-medium bug minion in its scheme, briefed with the run and its failing tests, and the red names it at once (#1491)', async () => {

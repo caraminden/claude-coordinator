@@ -308,6 +308,22 @@ export const minionQueries = {
     return null;
   },
 
+  /**
+   * #1491: the scheme's minions (not its Taskmasters, which hear of every red) whose chat (people's messages and Claude's own
+   * words, not tool output) names any of `needles`, among events after `afterId`; and the newest event id read, for the next
+   * call to start from. It reads 500 ids back from `afterId`: an id is handed out before its row is written (reserveEventId).
+   */
+  minionsNaming(this: Store, projectId: number, needles: string[], afterId: number): { ids: number[]; upTo: number } {
+    const upTo = (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0;
+    if (!needles.length || upTo <= afterId) return { ids: [], upTo: Math.max(upTo, afterId) };
+    const like = needles.map((n) => `%${n.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    const rows = this.db.prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.id > ? AND e.id <= ? AND t.project_id = ? AND t.kind = 'ticket'
+        AND (e.kind = 'user_message' OR (e.kind = 'claude' AND e.data LIKE '{"type":"assistant"%'))
+        AND (${like.map(() => `e.data LIKE ? ESCAPE '\\'`).join(' OR ')})`).all(Math.max(0, afterId - 500), upTo, projectId, ...like) as { id: number }[];
+    return { ids: rows.map((r) => r.id), upTo };
+  },
+
   /** Change a ticket's activity line without counting it as new activity. */
   setLastActivity(this: Store, id: number, text: string) {
     this.db.prepare('UPDATE tickets SET last_activity = ? WHERE id = ?').run(text, id);

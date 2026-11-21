@@ -202,6 +202,8 @@ export interface RedMark {
   fixer?: { ticket: number; sha: string; file: string };
   /** #1491: the workflow's file (tests.yml), for the Investigate brief. */
   file?: string;
+  /** #1491 ("names the run anywhere in its chat"): minions whose chat names a run of the streak, and the newest event id read for them. */
+  chat?: { ids: number[]; upTo: number };
 }
 /**
  * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at

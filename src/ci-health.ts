@@ -794,8 +794,8 @@ export class CiHealth {
   }
 
   /**
-   * The minion fixing a red: the one its re-run is for (#1074), else of the scheme's made since its Taskmaster heard whose title
-   * or brief names a run of the streak, the first open one, else the newest; else (#1491) the one credited by its shipped fix.
+   * The minion fixing a red: the one its re-run is for (#1074), else of the scheme's made since its Taskmaster heard whose title,
+   * brief or chat (mark.chat) names a run of the streak, the first open one, else the newest; else (#1491) the one credited by its shipped fix.
    */
   private fixMinion(p: Project, mark: RedMark): Fix | null {
     const t = this.fixTicket(p, mark);
@@ -812,8 +812,13 @@ export class CiHealth {
     const ids = [mark.run, ...(mark.runs ?? [])].map(String);
     // The first open one, else the newest (Josh, 2026-11-19): a second fix after the first closed is the one at work, and a
     // later minion that only quotes the run (a review) can't take the hold from the open one.
-    const named = this.store.listTickets(p.id).filter((x) => x.number != null && x.created_at >= (mark.told ?? 0) - 60_000).sort((a, b) => a.created_at - b.created_at)
-      .filter((x) => { const brief = this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? ''; return ids.some((id) => x.title.includes(id) || brief.includes(id)); });
+    const named = this.store.listTickets(p.id).filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
+      .sort((a, b) => a.created_at - b.created_at)
+      .filter((x) => {
+        if (mark.chat?.ids.includes(x.id)) return true;
+        const brief = this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '';
+        return ids.some((id) => x.title.includes(id) || brief.includes(id));
+      });
     return named.find((x) => x.status !== 'closed') ?? named.at(-1) ?? null;
   }
 
@@ -832,6 +837,13 @@ export class CiHealth {
     }
     if (!mark.file && runs[0]) {
       mark.file = workflowFile(runs[0]);
+      save();
+    }
+    // Her pick's words: a minion that "names the run anywhere in its chat"; read from where the last poll stopped.
+    // A run can't be named before it exists, so any minion counts, however old (#1336 started the run it fixed), from the red on.
+    const chat = this.store.minionsNaming(p.id, [mark.run, ...(mark.runs ?? [])].map(String), mark.chat?.upTo ?? this.store.eventIdAt(at(mark.at)) - 1);
+    if (chat.upTo !== mark.chat?.upTo) {
+      mark.chat = { ids: [...new Set([...(mark.chat?.ids ?? []), ...chat.ids])], upTo: chat.upTo };
       save();
     }
     if (!mark.failures) {

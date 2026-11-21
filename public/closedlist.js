@@ -35,8 +35,9 @@ export const closedCount = (list = view.tickets) => Math.max(closedState(list).t
 
 /** The stream moved a minion in or out of Dismissed: the count follows, for ones the page knew about. */
 export function noteTicketChange(before, ticket) {
-  if (!before) return;
   const s = closedState();
+  // A minion the page never read, now open and not just created: it was dismissed and reopened, so the count drops (a new minion is minutes old).
+  if (!before) { if (ticket.status !== 'closed' && ticket.created_at < Date.now() - 300_000) s.total = Math.max(0, s.total - 1); return; }
   if (before.status !== 'closed' && ticket.status === 'closed') s.total++;
   else if (before.status === 'closed' && ticket.status !== 'closed') s.total = Math.max(0, s.total - 1);
 }
@@ -47,6 +48,8 @@ export function mergeOpen(open, dismissed) {
   const next = new Map(open.map((t) => [t.id, t]));
   for (const t of old.values()) if (t.status === 'closed' && !next.has(t.id)) next.set(t.id, t);
   states.set(next, { ...closedState(old) });
+  // One dismissed while the stream was down is no longer in the fresh open list: restart the paging so the next read brings it.
+  if ([...old.values()].some((t) => t.status !== 'closed' && !next.has(t.id))) Object.assign(closedState(next), { cursor: null, more: true });
   setClosedTotal(next, dismissed);
   return next;
 }

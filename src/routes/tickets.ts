@@ -1696,7 +1696,7 @@ export const ticketRoutes: Route[] = [
       const label = runnerLabel(project!.name);
       if (!label) throw new HttpError(409, `${project!.name}'s name has no letters a-z or digits to make a runner label from, so no runner can match`);
       const body = await readJson(req);
-      addRunnerWaiter(app.store, ticket.id, str(body.reason, 'Reason', 1000));
+      addRunnerWaiter(app.store, ticket.id, str(body.reason, 'Reason', 1000), app.outbox);
       app.runner.broadcastTicket(ticket.id); // a parked row moves to Waiting (#718)
       return json(res, 201, { label, labels: schemeLabels(project!.name) });
     },

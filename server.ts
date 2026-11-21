@@ -98,7 +98,7 @@ import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { pressure } from './src/pressure.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
-import { addRunnerWaiter, CiHealth, runnerWaiters, type Run } from './src/ci-health.ts';
+import { addRunnerWaiter, CiHealth, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
 import { ghGet } from './src/gh-api.ts';
@@ -392,6 +392,7 @@ if (!BOOT_CHECK && !PREVIEW && runner.units) {
 // old timed-wakes key in, resends what a killed server left mid-send, and sends what came due while it was down.
 const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
 const timedWakes = new TimedWakes(store, outbox);
+registerRunnersBack(store, outbox);
 // News of a minion's test-box job (#1425, machines.watchBoxes below): its start, its end with the exit code and last lines.
 outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.payload.text).slice(0, 120)}`, deliver: (rows, ctx) => rows.map((r) => ctx.send(r, String(r.payload.text))) });
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
@@ -701,7 +702,7 @@ runner.heldFor = (id) => waiters.heldFor(id);
 runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
-  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
+  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? store.listDeliveries({ kind: 'runners_back', to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
 // The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
 // A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).
@@ -1301,6 +1302,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // one Mandate alert for every admin (#540), cleared when it's all over (green that skipped jobs, a quiet item from
 // its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
+  outbox,
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {
@@ -1400,7 +1402,7 @@ const landHandoffs = new LandHandoffs({
   runnersBack: (id, reason) => {
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);
     if (!project || !repoSlug(project.repo_url ?? null) || !runnerLabel(project.name)) return false;
-    addRunnerWaiter(store, id, reason);
+    addRunnerWaiter(store, id, reason, outbox);
     const run = landings.get(id); // CI gave no verdict: parked till runners are back, still a failed try (#1375)
     if (run) recordFailure(store, id, run.output, run.code);
     return true;

@@ -38,12 +38,14 @@
 // also wakes its scheme's Taskmaster once as it opens (wakeFor; the land gate wakes the live checkout's scheme), so a ring
 // is never the first anyone hears of it. The person ring stays the backup, and the #869 wake no longer sends CI's bundle to Citadel's.
 // #1017: in a scheme in fast mode, a land's push going red on main is fast mode's to handle (src/fast-mode.ts), not an alert.
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { quietUntil, type AlertPart } from './alert-wakes.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
-import { schemeLabels } from './ci-runner.ts';
+import { runnerLabel, schemeLabels } from './ci-runner.ts';
+import type { Outbox } from './outbox.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
 import type { GreenRun } from './last-green.ts';
 import { repoSlug } from './prlinks.ts';
@@ -212,9 +214,43 @@ export function runnerWaiters(store: Store): RunnerWaiter[] {
   return store.getSetting<RunnerWaiter[]>(RUNNER_WAITERS) ?? [];
 }
 
-/** Wait for `ticket`'s scheme's runners; a second call replaces the first. */
-export function addRunnerWaiter(store: Store, ticket: number, reason: string): void {
+/** Wait for `ticket`'s scheme's runners; a second call replaces the first. With the outbox (the server's) the wait is a row (ADR 0021, step 4). */
+export function addRunnerWaiter(store: Store, ticket: number, reason: string, outbox?: Outbox): void {
+  if (outbox) {
+    const project_id = store.getTicket(ticket)?.project_id ?? 0;
+    outbox.add({ project_id, kind: 'runners_back', to_kind: 'minion', to_id: ticket, when_kind: 'runners', when_arg: runnerLabel(store.getProject(project_id)?.name ?? ''), payload: { reason }, set_by: `minion:${ticket}`, dedupe_key: String(ticket) });
+    return;
+  }
   store.setSetting(RUNNER_WAITERS, [...runnerWaiters(store).filter((w) => w.ticket !== ticket), { ticket, reason }]);
+}
+
+/** The `runners_back` kind (ADR 0021, step 4): registered with the outbox before it boots, so a row a killed server left sending is sent again. */
+export function registerRunnersBack(store: Store, outbox: Outbox): void {
+  outbox.register({
+    kind: 'runners_back',
+    // The dual read: move the old key's waits into the table, in one transaction that empties the key: none dropped.
+    migrate: () => {
+      const old = store.getSetting<RunnerWaiter[]>(RUNNER_WAITERS);
+      if (!old?.length) return;
+      store.importDeliveries(
+        RUNNER_WAITERS,
+        old.map((w) => {
+          const t = store.getTicket(w.ticket);
+          return {
+            project_id: t?.project_id ?? 0, kind: 'runners_back', to_kind: 'minion' as const, to_id: w.ticket, when_kind: 'runners',
+            when_arg: runnerLabel(store.getProject(t?.project_id ?? 0)?.name ?? ''), payload: { reason: w.reason }, set_by: `minion:${w.ticket}`,
+            dedupe_key: String(w.ticket), origin: `${RUNNER_WAITERS}:${createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16)}`,
+          };
+        }),
+        outbox.clock(),
+      );
+    },
+    describe: (r) => `wake_when_runners_back: ${r.payload.reason}`,
+    // A wait the poll already met (its send is being retried) keeps the text it saved.
+    merge: (row, incoming) => (row.met_at != null ? row.payload : incoming.payload),
+    // The poll saved the text when it met the row (an unreadable list: ask a person); a row without one was never met.
+    deliver: (rows, ctx) => rows.map((r) => ctx.send(r, r.payload.text ?? r.payload.reason)),
+  });
 }
 
 /** The online runners carrying a scheme's label: Windows or Linux, or its session runner's (add-runner.ps1 -Session). */
@@ -265,6 +301,8 @@ export interface CiHealthDeps {
   tell?: (project: Project, text: string, wake?: boolean) => boolean | number;
   /** The scheme whose Taskmaster hears problems that aren't one scheme's (#983): the live checkout's. */
   home?: () => Project | undefined;
+  /** The server's outbox: waits on runners are rows in it (ADR 0021, step 4); without one they stay in the old key. */
+  outbox?: Outbox;
   /** Each poll's runs of a scheme (all branches, newest first) with its default branch, for its last green (src/last-green.ts, #1016). */
   green?: (project: Project, runs: GreenRun[], branch: string) => void;
 }
@@ -956,11 +994,29 @@ ${text}`);
       .slice(0, 5).map((n) => { const m = n.message.replace(/\s+/g, ' ').trim(); return m.length > 200 ? `${m.slice(0, 199)}…` : m; });
   }
 
+  /** The outbox's rows waiting on this scheme's runners: met once one is online, or when the list can't be read (they are told to ask). The outbox sends, retries and holds them for a dismissed minion. */
+  private meetRunners(p: Project, runners: Runner[] | null) {
+    const outbox = this.deps.outbox;
+    if (!outbox) return;
+    const up = runners && onlineRunners(runners, p.name);
+    if (up && !up.length) return;
+    const names = up?.map((r) => r.name).join(', ');
+    for (const r of this.store.listDeliveries({ kind: 'runners_back', states: ['waiting'] })) {
+      if (r.project_id !== p.id || r.met_at != null) continue;
+      const reason = String(r.payload.reason).replace(/[.\s]+$/, '');
+      const text = !up
+        ? `${APP_NAME} can't read ${p.name}'s CI runners with the scheme's GitHub login, so it can't tell when they are back: ask a person whether they are, then ${reason}.`
+        : `${p.name}'s CI runners are back (${names} online): ${reason}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`;
+      outbox.meet(r.id, { text });
+    }
+  }
+
   /**
    * Message (once) and drop the scheme's minions parked on its runners, once one of them is online; dismissed ones are dropped.
    * `runners` null: the list can't be read, so nothing would ever say they're back, and the minions hear that instead.
    */
   wakeParked(p: Project, runners: Runner[] | null) {
+    this.meetRunners(p, runners);
     const all = runnerWaiters(this.store);
     const mine = (w: RunnerWaiter) => this.store.getTicket(w.ticket)?.project_id === p.id;
     const gone = (w: RunnerWaiter) => { const t = this.store.getTicket(w.ticket); return !t || t.status === 'closed'; };

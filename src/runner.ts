@@ -840,6 +840,40 @@ export class Runner {
     return this.turns.has(ticketId);
   }
 
+  /** How often a start waiting on a turn this server doesn't follow checks whether its wrapper has gone (#1464). */
+  strayPollMs = 5_000;
+
+  /**
+   * One live turn per minion (#1464): what a new turn of `ticketId` must wait for, or null when none runs. The turn this
+   * server follows, else one whose wrapper still runs in its folder though nothing follows it (#1284's first turn, after
+   * a second replaced it here): checked against /proc (wrapperAlive), not only this server's map or the database.
+   */
+  private liveTurn(ticketId: number): Promise<void> | null {
+    const followed = this.turns.get(ticketId);
+    if (followed) return followed.ended;
+    const stray = this.strayTurnDir(ticketId);
+    if (!stray) return null;
+    console.error(`Minion ${ticketId}: a turn nothing here follows still runs in ${stray}; its next turn waits for it to end (#1464).`);
+    return new Promise((done) => {
+      const check = () => (wrapperAlive(stray) ? setTimeout(check, this.strayPollMs).unref() : done());
+      check();
+    });
+  }
+
+  /** A turn folder of `ticketId`'s, host or container (<minion>-<ms>), whose wrapper is alive (and hasn't written its exit) though this server follows none. */
+  private strayTurnDir(ticketId: number): string | null {
+    let dirs: string[];
+    try {
+      dirs = readdirSync(this.turnsDir).flatMap((name) => {
+        const dir = join(this.turnsDir, name);
+        return /^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir];
+      });
+    } catch {
+      return null; // no turns yet
+    }
+    return dirs.find((d) => basename(d).startsWith(`${ticketId}-`) && /^\d+-\d+$/.test(basename(d)) && !existsSync(join(d, 'exit.json')) && wrapperAlive(d) === true) ?? null;
+  }
+
   /** The message ids each of these minions would take into its next turn, a usage-limit wait's too (they wait in its queue, #1378), read only (the standing checks, #1415). */
   queuedIds(ticketIds: number[]): Record<number, number[]> {
     return Object.fromEntries(ticketIds.map((id) => [id, this.peekQueue(id).flatMap((m) => m.id ?? [])]).filter(([, ids]) => (ids as number[]).length));
@@ -1721,8 +1755,9 @@ export class Runner {
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return void (ours() && this.cancelLimitWait(ticketId));
-    // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
-    const ran = this.lanes.run(ticketId, 'resume', () => this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
+    // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
+    // turn still live by then (#1464): as above, that turn is resume enough.
+    const ran = this.lanes.run(ticketId, 'resume', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') {
@@ -2816,7 +2851,8 @@ export class Runner {
     if (this.lanes.busy(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.peekQueue(ticketId));
-    this.lanes.run(ticketId, 'turn', () => this.afterRestore(ticketId, person, () => {
+    // Nor beside a turn still live (#1464): the lane holds the queue until it ends, then asks again.
+    this.lanes.run(ticketId, 'turn', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, person, () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return;

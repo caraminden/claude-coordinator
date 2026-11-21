@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -138,6 +139,79 @@ test('a lane runs one step at a time per minion, different minions side by side,
   lanes.run(3, 'after', () => void log.push('3b'));
   await until('lane 3 to drain', () => !lanes.busy(3));
   assert.equal(log.at(-1), '3b');
+});
+
+test('a step that runs another step on its idle lane at once keeps the lane busy until both have ended (#1464)', async () => {
+  const lanes = new Lanes();
+  const idle: number[] = [];
+  lanes.onIdle = (id) => idle.push(id);
+  const inner = gate();
+  const log: string[] = [];
+  // As the outbox does: its step on the minion's lane sends a message, and the send starts the turn's step at once.
+  await lanes.run(1, 'outer', () => void lanes.run(1, 'inner', async () => {
+    log.push('inner start');
+    await inner.wait;
+    log.push('inner end');
+  }));
+  assert.deepEqual(log, ['inner start']);
+  assert.ok(lanes.busy(1), 'the inner step still holds the lane after the outer one ends');
+  assert.deepEqual(idle, [], 'the lane is not idle while the inner step runs');
+  lanes.run(1, 'later', () => void log.push('later'));
+  assert.deepEqual(log, ['inner start'], 'a later step waits for the inner one');
+  inner.open();
+  await until('lane 1 to drain', () => !lanes.busy(1));
+  assert.deepEqual(log, ['inner start', 'inner end', 'later']);
+  assert.deepEqual(idle, [1], 'the lane says once that it has drained');
+});
+
+const turnDirs = (r: Runner, id: number) => readdirSync(r.turnsDir).filter((n) => n.startsWith(`${id}-`));
+
+test("a turn started from inside another lane step (the outbox's) holds the lane, so the outbox's retry can't start a second turn beside it (#1464)", async () => {
+  reset();
+  const r = makeRunner();
+  const { id } = minion();
+  // #1284, Nov 20: the outbox's wake started a turn from its step on the minion's lane, the step ended, and the lane
+  // went idle with the turn still running; the wake's retry six minutes later started a second turn on the session.
+  await r.onLane(id, 'outbox', () => void r.send(id, 'System', 'wake one'));
+  assert.ok(r.isRunning(id), 'the wake starts a turn');
+  let retriedBeside: boolean | null = null;
+  const retry = r.onLane(id, 'outbox', () => {
+    retriedBeside = r.isRunning(id);
+    r.send(id, 'System', 'wake two');
+  });
+  assert.equal(retriedBeside, null, "the retry's step waits behind the live turn");
+  assert.equal(turnDirs(r, id).length, 1, 'one turn runs');
+  writeFileSync(go, '');
+  await retry;
+  assert.equal(retriedBeside, false, "the retry's step ran once the first turn had ended");
+  await until('both wakes to have run, one turn after the other', () => turnsRun() === 2 && !r.isRunning(id) && !(r as any).lanes.busy(id));
+  const [first, second] = lines(prompts);
+  assert.match(first, /wake one/);
+  assert.doesNotMatch(first, /wake two/);
+  assert.match(second, /wake two/);
+});
+
+test("a minion whose turn still runs unfollowed (its wrapper is alive in its folder) starts no second turn until that one ends (#1464)", async () => {
+  reset();
+  const r = makeRunner();
+  r.strayPollMs = 20;
+  const { id } = minion();
+  // A turn this server doesn't follow, as #1284's first turn after the second replaced it: its wrapper's arguments name its folder.
+  const dir = join(r.turnsDir, `${id}-1`);
+  mkdirSync(dir, { recursive: true });
+  const stray = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', dir], { stdio: 'ignore' });
+  writeFileSync(join(dir, 'pid.json'), JSON.stringify({ wrapper: stray.pid }));
+  writeFileSync(go, '');
+  try {
+    r.send(id, 'Cara', 'hello');
+    assert.equal(r.isRunning(id), false, 'no turn starts beside the live one');
+    assert.ok((r as any).lanes.busy(id), 'the turn step holds the lane until it ends');
+    assert.deepEqual(turnDirs(r, id), [`${id}-1`]);
+  } finally {
+    stray.kill();
+  }
+  await until('the message to run once the stray turn has ended', () => turnsRun() === 1 && !r.isRunning(id));
+  assert.match(lines(prompts)[0], /hello/);
 });
 
 test("a usage-limit resume that comes due while the last turn's session is still saving waits for the save", async () => {

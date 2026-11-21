@@ -38,7 +38,10 @@ export class Lanes {
       () => {},
       (err) => console.error(`Minion ${key}: ${what} failed:`, err),
     );
-    const tail = done.then(() => {
+    // A step started at once may itself have run a step on this lane at once (the outbox's send starts a turn, #1464):
+    // that step's tail is the lane's now, and this one ends only after it, or the lane would go idle under a live turn.
+    const nested = before ? undefined : this.tails.get(key);
+    const tail = Promise.all([done, nested]).then(() => {
       if (this.tails.get(key) !== tail) return;
       this.tails.delete(key);
       this.onIdle(key);

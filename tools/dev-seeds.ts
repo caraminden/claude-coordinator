@@ -1203,10 +1203,16 @@ mock.boards('#takes', { boards: [
         offline: {}, sent: {},
         problems: [
           { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service' },
-          { key: 'red:drift.yml', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false }, rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' } },
-          { key: 'red:lint.yml', title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed', why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold', fix: `reopen #${gone.number} or start another fix minion naming run 9095`, fixMinion: { number: gone.number!, closed: true } },
-          { key: 'red:nightly.yml', title: 'CI, Seeded: nightly.yml is red on main (run 9096).', why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago', fix: 'the Taskmaster starts a fix minion naming run 9096', quiet: true, noFix: { ringsAt: now + 48 * 60_000, late: false } },
+          { key: 'red:301', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false }, rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' } },
+          { key: 'red:302', title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed', why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold', fix: `reopen #${gone.number} or start another fix minion naming run 9095`, fixMinion: { number: gone.number!, closed: true } },
+          { key: 'red:303', title: 'CI: nightly.yml failed on main (run 9096, at 4e5f6a7)', why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago', fix: 'the Taskmaster starts a fix minion naming run 9096', quiet: true, noFix: { ringsAt: now + 48 * 60_000, late: false } },
         ],
+      });
+      // #1491: the reds' marks, keyed by workflow id like real ones: the nightly red has no fix minion, so it shows Investigate with its failing tests.
+      c.store.setSetting(`ci-health:red:${c.project.id}`, {
+        301: { run: 9090, at: iso(190), told: now - 180 * 60_000, file: 'drift.yml', failures: [] },
+        302: { run: 9091, at: iso(300), told: now - 290 * 60_000, file: 'lint.yml', runs: [9095], failures: [] },
+        303: { run: 9096, at: iso(14), told: now - 12 * 60_000, where: '4e5f6a7', file: 'nightly.yml', failures: [{ file: 'test/aura-outline.test.ts', name: 'an aura keeps its outline after a reload', message: 'AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n2 !== 3' }] },
       });
       return `#/p/${c.project.id}/ci`;
     },

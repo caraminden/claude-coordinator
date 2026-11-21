@@ -15,6 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'settled-'));
 const writers: Writer[] = [];
 after(async () => {
   for (const w of writers) await w.stop();
+  // timing-ok: only the in-process Store's database is in root, and its writers have stopped above; bootServer cleans its own
   rmSync(root, { recursive: true, force: true });
 });
 

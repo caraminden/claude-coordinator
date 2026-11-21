@@ -40,8 +40,9 @@ export class Lanes {
     );
     // A step started at once may itself have run a step on this lane at once (the outbox's send starts a turn, #1464):
     // that step's tail is the lane's now, and this one ends only after it, or the lane would go idle under a live turn.
+    // Straight off `done` otherwise: the lane is free in the same tick a caller awaiting the step resumes, as before.
     const nested = before ? undefined : this.tails.get(key);
-    const tail = Promise.all([done, nested]).then(() => {
+    const tail = (nested ? Promise.all([done, nested]) : done).then(() => {
       if (this.tails.get(key) !== tail) return;
       this.tails.delete(key);
       this.onIdle(key);

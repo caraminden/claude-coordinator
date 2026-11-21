@@ -188,6 +188,21 @@ test('a supervisor killed mid-turn: the turn finishes and its reply is recorded,
   rmSync(join(t.dir, 'release'), { force: true });
 });
 
+/**
+ * How long a turn takes to start in its wrapper with no supervisor at all, right now: the bar the fallback tests measure
+ * against, so a loaded machine (a slow node start) doesn't read as the runner waiting on its supervisor.
+ */
+async function wrapperStartMs() {
+  const r = server();
+  r.supervisor = false;
+  const t = newTicket();
+  const t0 = Date.now();
+  await started(r, t);
+  const ms = Date.now() - t0;
+  await finished(r, t);
+  return ms;
+}
+
 /** Point the runner's supervisor.json at a stand-in that seems to run, at `port`, for the length of `fn`. */
 async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
   const s = spec(r);
@@ -213,11 +228,12 @@ test('a turn the supervisor can\'t take starts in its wrapper at once', async ()
       probe.close(() => res(p));
     });
   });
+  const bar = await wrapperStartMs();
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(Date.now() - t0 < 1_500, `started in ${Date.now() - t0} ms`);
+    assert.ok(Date.now() - t0 < bar + 1_000, `started in ${Date.now() - t0} ms, a wrapper alone in ${bar} ms`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -228,11 +244,12 @@ test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, 
   const hung = createServer(() => {}); // takes the request and never answers
   servers.push(hung);
   const port = await new Promise<number>((res) => hung.listen(0, '127.0.0.1', () => res((hung.address() as { port: number }).port)));
+  const bar = await wrapperStartMs();
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(Date.now() - t0 < 1_500, `started in ${Date.now() - t0} ms: the wait for an answer is short`);
+    assert.ok(Date.now() - t0 < bar + 1_000, `started in ${Date.now() - t0} ms, a wrapper alone in ${bar} ms: the wait for an answer is short`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });

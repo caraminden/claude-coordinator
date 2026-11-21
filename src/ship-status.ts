@@ -5,7 +5,7 @@ import { branchStatus, shipLine, type BranchStatus, type Ship } from './branch.t
 import type { Store } from './db.ts';
 import type { Runner } from './runner.ts';
 import { DEPLOY_FAILURE } from './routes/tickets.ts';
-import { SCAN_DELAY_MS } from './artifact-scan.ts';
+import { SCAN_DELAY_MS, ScanTimers, TOOL_GAP_MS } from './artifact-scan.ts';
 
 // gh calls go over the network, so a ticket's PR is looked up at most this often; git is checked every time.
 export const PR_TTL_MS = 60_000;
@@ -21,11 +21,12 @@ export interface ShipDeps {
   /** branchStatus, or a fake in tests. */
   status?: typeof branchStatus;
   delayMs?: number;
+  gapMs?: number;
 }
 
 export class ShipStatus {
   private cache = new Map<number, { status: BranchStatus | null; prAt: number; json: string }>();
-  private timers = new Map<number, NodeJS.Timeout>();
+  private timers: ScanTimers;
   /** The ship line each minion's row last showed; a change re-sends the minion. */
   private shown = new Map<number, string>();
   private polling = false; // a slow git can't stack up rounds
@@ -34,6 +35,9 @@ export class ShipStatus {
 
   constructor(d: ShipDeps) {
     this.d = d;
+    this.timers = new ScanTimers((id) => {
+      this.branch(id, this.d.runner.isRunning(id) ? PR_TTL_MS : 0).catch((err) => console.error(`Branch check of ticket ${id} failed:`, err));
+    }, d.delayMs ?? SCAN_DELAY_MS, d.gapMs ?? TOOL_GAP_MS);
   }
 
   /** Where a ticket's branch stands (null for tickets without one); broadcast when it changes. */
@@ -73,13 +77,8 @@ export class ShipStatus {
   }
 
   /** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
-  scheduleCheck(ticketId: number) {
-    if (this.timers.has(ticketId)) return;
-    this.timers.set(ticketId, setTimeout(() => {
-      this.timers.delete(ticketId);
-      this.branch(ticketId, this.d.runner.isRunning(ticketId) ? PR_TTL_MS : 0)
-        .catch((err) => console.error(`Branch check of ticket ${ticketId} failed:`, err));
-    }, this.d.delayMs ?? SCAN_DELAY_MS));
+  scheduleCheck(ticketId: number, soon = false) {
+    this.timers.schedule(ticketId, soon);
   }
 
   /** At startup every open minion's branch, so the list has its badges. */

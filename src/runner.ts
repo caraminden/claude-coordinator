@@ -644,7 +644,8 @@ export class Runner {
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
-  onFilesMayChange: (ticketId: number) => void = () => {};
+  /** `soon`: a turn ended or a reply linked a file, so look within seconds; otherwise a tool result, looked at throttled (#1542). */
+  onFilesMayChange: (ticketId: number, soon: boolean) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
   ship: (ticketId: number) => Ship | null = () => null;
   /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
@@ -3585,7 +3586,7 @@ export class Runner {
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
     if (this.deployedMidTurn.delete(ticketId) && out.followUps.includes('deploy-note')) this.deployLive(ticketId);
     void dropTurnDir(live.dir); // renamed aside at once, deleted off the thread (#1459)
-    this.onFilesMayChange(ticketId);
+    this.onFilesMayChange(ticketId, true);
     // The emulator lease (#1128) ends with the turn that took it.
     const endedTicket = this.store.getTicket(ticketId);
     if (endedTicket) releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!);
@@ -3939,7 +3940,11 @@ export class Runner {
       if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
-      this.onFilesMayChange(ticketId);
+      this.onFilesMayChange(ticketId, false);
+    }
+    // A reply that links a file shows it in the artifacts list as it lands (the scan's own test: replyTexts).
+    if (ev.type === 'assistant' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(']('))) {
+      this.onFilesMayChange(ticketId, true);
     }
     this.notePushes(ticketId, ev);
   }

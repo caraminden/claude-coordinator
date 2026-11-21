@@ -1200,9 +1200,9 @@ const autoDeploy = new AutoDeploy({
   },
 });
 
-runner.onFilesMayChange = (ticketId) => {
-  artifacts.schedule(ticketId);
-  ships.scheduleCheck(ticketId);
+runner.onFilesMayChange = (ticketId, soon) => {
+  artifacts.schedule(ticketId, soon);
+  ships.scheduleCheck(ticketId, soon);
 };
 runner.filesDir = sharedDir;
 runner.sharedDir = (project) => projectSharedDir(DATA_DIR, project.id);

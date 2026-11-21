@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ArtifactScanner } from '../src/artifact-scan.ts';
+import { ArtifactScanner, ScanTimers } from '../src/artifact-scan.ts';
 import type { BranchStatus } from '../src/branch.ts';
 import { Store } from '../src/db.ts';
 import { MemoryIndexer } from '../src/memory.ts';
@@ -385,6 +385,27 @@ test('scans of one minion run one at a time, and schedule() coalesces calls with
   assert.equal(scans, 1);
 });
 
+test('after a run, tool results wait out the gap, while a soon request (a linking reply, a turn end) runs at once (#1542)', async () => {
+  const runs: number[] = [];
+  const timers = new ScanTimers((id) => void runs.push(id), 0, 150);
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  timers.schedule(1);
+  await wait(20);
+  assert.deepEqual(runs, [1], 'the first tool result runs at once');
+  for (let i = 0; i < 5; i++) timers.schedule(1);
+  timers.schedule(2);
+  await wait(40);
+  assert.deepEqual(runs, [1, 2], 'tool results within the gap wait; another minion has its own gap');
+  timers.schedule(1, true);
+  await wait(20);
+  assert.deepEqual(runs, [1, 2, 1], 'a soon request pulls the waiting run forward, once');
+  timers.schedule(1);
+  await wait(40);
+  assert.deepEqual(runs, [1, 2, 1], 'and starts a new gap');
+  await wait(150);
+  assert.deepEqual(runs, [1, 2, 1, 1], 'the waiting run still comes, by the end of the gap');
+});
+
 // ---------- ship status ----------
 
 const merged = (live: boolean): BranchStatus => ({
@@ -497,7 +518,7 @@ test('a check after a turn looks up the PR again unless the minion is still runn
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(lookups, [true, false], 'running: the cached PR stands');
   running = false;
-  ship.scheduleCheck(t.id);
+  ship.scheduleCheck(t.id, true); // the turn's end
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(lookups, [true, false, true], 'turn over: the PR is looked up now');
 });

@@ -10,6 +10,38 @@ import { projectDir, projectSharedDir } from './workspace.ts';
 
 // Rescan a ticket's folder shortly after it may have written files, at most once per delay.
 export const SCAN_DELAY_MS = 2000;
+// After a tool result, look again at most this often (#1542): each look starts several `git` processes on the server's
+// one thread, and tool results come many times a minute per running turn. A reply that links a file, or the turn's end,
+// looks within SCAN_DELAY_MS.
+export const TOOL_GAP_MS = 45_000;
+
+/** One pending run per ticket: `soon` runs within `delayMs`, otherwise no sooner than `gapMs` after the last run. */
+export class ScanTimers {
+  private timers = new Map<number, { at: number; timer: NodeJS.Timeout }>();
+  private last = new Map<number, number>();
+  private run: (ticketId: number) => void;
+  private delayMs: number;
+  private gapMs: number;
+
+  constructor(run: (ticketId: number) => void, delayMs: number, gapMs: number) {
+    this.run = run;
+    this.delayMs = delayMs;
+    this.gapMs = gapMs;
+  }
+
+  schedule(ticketId: number, soon = false) {
+    const now = Date.now();
+    const at = Math.max(now + this.delayMs, soon ? 0 : (this.last.get(ticketId) ?? -Infinity) + this.gapMs);
+    const pending = this.timers.get(ticketId);
+    if (pending && pending.at <= at) return;
+    if (pending) clearTimeout(pending.timer);
+    this.timers.set(ticketId, { at, timer: setTimeout(() => {
+      this.timers.delete(ticketId);
+      this.last.set(ticketId, Date.now());
+      this.run(ticketId);
+    }, at - now) });
+  }
+}
 // The file a broken link's name finds (findByName), kept a while: a scan runs every few seconds, and
 // broken links stay in the replies for good.
 const NAME_FIX_MS = 10 * 60_000;
@@ -17,7 +49,7 @@ const NAME_FIX_MS = 10 * 60_000;
 const REPLY_PAGE = 200;
 
 export class ArtifactScanner {
-  private scanTimers = new Map<number, NodeJS.Timeout>();
+  private timers: ScanTimers;
   private scanning = new Map<number, Promise<void>>();
   // What each project's shared folder held at the last scan, so a change can tell open pages to refresh.
   private sharedSeen = new Map<number, string>();
@@ -29,24 +61,20 @@ export class ArtifactScanner {
   private store: Store;
   private dataDir: string;
   private broadcast: (msg: object) => void;
-  private delayMs: number;
 
-  constructor(store: Store, dataDir: string, broadcast: (msg: object) => void, delayMs = SCAN_DELAY_MS) {
+  constructor(store: Store, dataDir: string, broadcast: (msg: object) => void, delayMs = SCAN_DELAY_MS, gapMs = TOOL_GAP_MS) {
     this.store = store;
     this.dataDir = dataDir;
     this.broadcast = broadcast;
-    this.delayMs = delayMs;
+    this.timers = new ScanTimers((id) => this.scan(id).catch((err) => console.error(`Artifact scan of ticket ${id} failed:`, err)), delayMs, gapMs);
   }
 
   /** Where a ticket keeps files it fetched or made to show people, outside its repo. */
   sharedDir = (ticket: Ticket): string => join(projectDir(this.dataDir, ticket.project_id), 'shared', String(ticket.id));
 
-  schedule(ticketId: number) {
-    if (this.scanTimers.has(ticketId)) return;
-    this.scanTimers.set(ticketId, setTimeout(() => {
-      this.scanTimers.delete(ticketId);
-      this.scan(ticketId).catch((err) => console.error(`Artifact scan of ticket ${ticketId} failed:`, err));
-    }, this.delayMs));
+  /** Scan a ticket's files again: `soon` after a reply that links one or a turn's end, else throttled (ScanTimers). */
+  schedule(ticketId: number, soon = false) {
+    this.timers.schedule(ticketId, soon);
   }
 
   /**

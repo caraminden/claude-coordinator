@@ -451,6 +451,8 @@
     "--unit=citadel-turn-<TAG>-2-<TIME>",
     "--slice=citadel-turns.slice",
     "-p",
+    "ManagedOOMPreference=avoid",
+    "-p",
     "TimeoutStopSec=15",
     "-p",
     "UMask=0077",

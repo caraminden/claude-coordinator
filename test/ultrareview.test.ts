@@ -250,7 +250,8 @@ test('a review outlives a restart: the next server follows it and posts its find
   const dir = mkdtempSync(join(root, 'restart-'));
   const bin = join(dir, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'systemd-run'), '#!/usr/bin/env bash\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done\nsetsid "$@" </dev/null >/dev/null 2>&1 &\n', { mode: 0o755 });
+  const calls = join(dir, 'systemd-run.calls');
+  writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash\necho "$*" >> '${calls}'\nwhile [ "\${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done\nsetsid "$@" </dev/null >/dev/null 2>&1 &\n`, { mode: 0o755 });
   const go = join(dir, 'go');
   const started = join(dir, 'started');
   // At most 30 s, so a failed test leaves nothing running.
@@ -268,6 +269,7 @@ test('a review outlives a restart: the next server follows it and posts its find
   try {
     assert.equal((await srv.call(`/api/tickets/${M.id}/ultrareview`, { mode: 'branch', confirm: true })).status, 202);
     await until('the CLI runs', () => existsSync(started));
+    assert.match(readFileSync(calls, 'utf8'), /--slice=citadel-turns\.slice -p UMask=0077 -p ManagedOOMPreference=avoid /, "oomd's last pick, as a minion turn is (#1338)");
     assert.equal((await srv.call('/api/health')).data.interruptible, 0, "a restart doesn't wait for the review");
     await srv.stop({ keepTurns: true });
     // Its clone looks as old as a long review's: the next server's sweep of turn folders leaves it be.

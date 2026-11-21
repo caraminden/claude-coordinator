@@ -13,6 +13,15 @@ src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
 
+# The guards (mutation run R11, #1284): the tests that caught a broken guard, which the map missed before.
+src/access.ts: test/access-matrix.test.ts test/access-gaps.test.ts test/people.test.ts test/turn-asker.test.ts test/turn-person-env.test.ts
+src/tripwire.ts: test/tripwire.test.ts test/coordinator-access.test.ts test/codex.test.ts
+src/tripwire-git.ts: test/tripwire.test.ts test/coordinator-access.test.ts test/codex.test.ts
+src/tripwire-base.ts: test/tripwire.test.ts test/coordinator-access.test.ts test/codex.test.ts
+src/auth.ts: test/auth.test.ts test/people.test.ts test/apps.test.ts test/sibling-files.test.ts
+tools/guard.sh: test/guard.test.ts
+.githooks/**: test/guard.test.ts
+
 # Agent instructions and the tools every turn loads.
 src/prompts.ts: test/prompt-done-when.test.ts test/prompt-hashes.test.ts test/model-table.test.ts
 src/mcp.ts: test/mcp-always-load.test.ts

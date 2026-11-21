@@ -100,3 +100,16 @@ test('the command reads a real diff: committed, uncommitted and untracked change
   const bad = spawnSync('node', ['tools/affected.ts', '--base', 'no-such-ref'], { cwd: repo, encoding: 'utf8' });
   assert.equal(bad.status, 2);
 });
+
+// #1413: a file CLAUDE.md names under "High risk by file" must have a map rule, so a broken guard shows in a pre-ship run.
+// shortcut: the deploy files have no test that catches a break yet (not in R11), so they are exempt; map each and drop it here.
+const DEPLOY_GAPS = ['tools/deploy.sh', 'tools/boot-check.ts', 'deploy/'];
+test('every file CLAUDE.md lists as high risk by file is covered by a rule of the map', () => {
+  const bullet = readFileSync(join(repo, 'CLAUDE.md'), 'utf8').split('\n- ').find((b) => b.startsWith('**High risk by file')) ?? '';
+  const paths = [...bullet.matchAll(/`([^`<>\s]+)`/g)].map((m) => m[1]).filter((p) => /[/.]/.test(p) && !p.startsWith('test/') && !DEPLOY_GAPS.includes(p));
+  assert.ok(paths.length >= 5, 'found the high-risk paths in CLAUDE.md');
+  for (const p of paths) {
+    const probe = p.endsWith('/') ? `${p}x` : p;
+    assert.ok(map.rules.some((r) => r.glob !== '**' && r.re.test(probe)), `${p} is high risk in CLAUDE.md but no rule of tools/affected-map.txt covers it`);
+  }
+});

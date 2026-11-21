@@ -21,6 +21,9 @@ let on = false;
 const ready: Record<SpareKind, string[]> = { link: [], copy: [] };
 let seq = 0;
 let making: Promise<void> | null = null;
+let failed = false;
+/** Every spares folder this process made, removed when it exits. */
+const swept = new Set<string>();
 
 /** Where this process's spares go and what they copy. Makes none yet: fillPinSpares starts that (server.ts, after boot). */
 export function pinSparesAt(dir: string, src: string): void {
@@ -30,13 +33,15 @@ export function pinSparesAt(dir: string, src: string): void {
   ready.copy = [];
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
+  if (!swept.size) process.once('exit', () => { for (const d of swept) rmSync(d, { recursive: true, force: true }); });
+  swept.add(dir);
 }
 
 /** Start keeping spares ready; resolves once they are all made (tests wait on it). */
-export function fillPinSpares(): Promise<void> {
+export async function fillPinSpares(): Promise<void> {
   on = true;
-  return fill();
+  failed = false;
+  while (need()) await fill();
 }
 
 /** The spares ready now, for tests. */
@@ -65,35 +70,39 @@ export function takeSpare(src: string, dst: string, kind: SpareKind): boolean {
       return false;
     }
   } finally {
+    failed = false;
     void fill();
   }
 }
 
+/** The kind to make next, if any: links first, since host turns start far more often. None after a failure, until a take. */
+const need = (): SpareKind | undefined => (at && on && !failed ? (['link', 'copy'] as const).find((k) => ready[k].length < SPARES[k]) : undefined);
+
 /** Make spares one at a time until each kind has its count, so a refill never crowds the disk. */
 function fill(): Promise<void> {
-  making ??= (async () => {
+  if (!making && need()) making = pass().finally(() => {
+    making = null;
+    void fill(); // a take or a fill that came while this pass was ending
+  });
+  return making ?? Promise.resolve();
+}
+
+async function pass(): Promise<void> {
+  for (let kind = need(); kind; kind = need()) {
+    const now = at!;
+    const dir = join(now.dir, `${kind}-${++seq}`);
     try {
-      for (;;) {
-        const now = at;
-        const kind = (['link', 'copy'] as const).find((k) => ready[k].length < SPARES[k]);
-        if (!now || !on || !kind) return;
-        const dir = join(now.dir, `${kind}-${++seq}`);
-        try {
-          if (kind === 'link') await linkTree(now.src, dir);
-          else await cp(now.src, dir, { recursive: true, verbatimSymlinks: true });
-        } catch (e) {
-          await rm(dir, { recursive: true, force: true }).catch(() => {});
-          console.warn(`pin spares: making a ${kind} spare failed, trying again at the next turn: ${(e as Error).message}`);
-          return;
-        }
-        if (at !== now) return void (await rm(dir, { recursive: true, force: true }).catch(() => {}));
-        ready[kind].push(dir);
-      }
-    } finally {
-      making = null;
+      if (kind === 'link') await linkTree(now.src, dir);
+      else await cp(now.src, dir, { recursive: true, verbatimSymlinks: true });
+    } catch (e) {
+      failed = true;
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      console.warn(`pin spares: making a ${kind} spare failed, trying again at the next turn: ${(e as Error).message}`);
+      return;
     }
-  })();
-  return making;
+    if (at !== now) return void (await rm(dir, { recursive: true, force: true }).catch(() => {}));
+    ready[kind].push(dir);
+  }
 }
 
 /** copyPinned's links, made with fs/promises: folders made, files linked, symlinks kept as they are. */

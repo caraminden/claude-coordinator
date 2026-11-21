@@ -96,6 +96,10 @@ test('a turn start takes a spare copy made off the loop: one rename, links for a
   const { fillPinSpares, readySpares, SPARES } = await import('../src/pin-spares.ts');
   const { chmodSync, mkdirSync, statSync, writeFileSync } = await import('node:fs');
   const pins = testPins();
+  const early = join(pins.dataDir, 'run', 'turns', '4-1', 'pin');
+  mkdirSync(dirname(early), { recursive: true });
+  copyPinned(pins.MCP_DIR, early, true); // before any spares: copied on the loop, and later fills still work
+  assert.equal(statSync(join(early, pins.TRIPWIRE.split('/').pop()!)).ino, statSync(pins.TRIPWIRE).ino);
   await fillPinSpares();
   assert.equal(readySpares('link').length, SPARES.link);
   assert.equal(readySpares('copy').length, SPARES.copy);

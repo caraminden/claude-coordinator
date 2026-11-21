@@ -999,6 +999,7 @@ async function route() {
   // Answer the click straight away: highlight the thread being opened and dim the old view.
   for (const a of document.querySelectorAll('#coordinator-row .thread-row, #threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
   document.body.classList.add('navigating');
+  document.getElementById('app')?.classList.add('nav-dim');
   try {
     // Leaving the file viewer for the chat under it just closes it; anywhere else goes on from there.
     if (!hash.startsWith('#/f/') && closeViewer() === hash) {
@@ -1046,6 +1047,7 @@ async function route() {
   } finally {
     if (seq === routeSeq) {
       document.body.classList.remove('navigating');
+      document.getElementById('app')?.classList.remove('nav-dim');
       routedHash = hash;
     }
     reportPresence();

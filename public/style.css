@@ -324,13 +324,14 @@ h2 { font-size: 1.15rem; margin: 0; }
 .where .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
 @media (max-width: 600px) { .where-table .bar-col { display: none; } .where-table tbody th { max-width: 9rem; } }
 
-/* While another view loads, dim the one on screen (after a beat, so quick switches don't flicker). */
-body.navigating { cursor: progress; }
-body.navigating #app .split > :last-child, body.navigating #app > :not(.split) { opacity: 0.55; transition: opacity 0.15s 0.12s; }
+/* While another view loads, dim the one on screen (after a beat, so quick switches don't flicker). The dim keys on #app's own
+   class, child combinators only: a class on body (cursor, the dim, the spinner) restyled the whole page on each toggle, 19 to 25 ms (#1540). */
+#app.nav-dim { cursor: progress; }
+#app.nav-dim > .split > :last-child, #app.nav-dim > :not(.split) { opacity: 0.55; transition: opacity 0.15s 0.12s; }
 /* A load that takes a moment (a scheme switch is about 3 s on a busy box) shows a spinner, not just the dim. */
-body.navigating::after { content: ''; pointer-events: none; position: fixed; z-index: 60; top: calc(40vh - 14px); left: calc(50% - 14px); width: 28px; height: 28px; box-sizing: border-box; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, var(--bg)); border-top-color: var(--accent); background: var(--bg); box-shadow: 0 0 0 4px var(--bg); animation: nav-busy-in 0s 0.3s both, scheme-spin 0.8s linear infinite; }
+#app.nav-dim::after { content: ''; pointer-events: none; position: fixed; z-index: 60; top: calc(40vh - 14px); left: calc(50% - 14px); width: 28px; height: 28px; box-sizing: border-box; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, var(--bg)); border-top-color: var(--accent); background: var(--bg); box-shadow: 0 0 0 4px var(--bg); animation: nav-busy-in 0s 0.3s both, scheme-spin 0.8s linear infinite; }
 @keyframes nav-busy-in { from { visibility: hidden; } }
-@media (prefers-reduced-motion: reduce) { body.navigating::after { animation: nav-busy-in 0s 0.3s both; } }
+@media (prefers-reduced-motion: reduce) { #app.nav-dim::after { animation: nav-busy-in 0s 0.3s both; } }
 /* "Show me where" (#1122, show-part.js): the part a ?show= link names, outlined for three seconds; a steady outline with reduced motion. */
 .part-show { --show-off: 3px; outline: 3px solid var(--accent); outline-offset: var(--show-off); animation: part-pulse 1s ease-in-out 3; }
 .part-show.part-show-in { --show-off: -7px; } /* a box that clips (a settings row in its rows box): drawn inside */

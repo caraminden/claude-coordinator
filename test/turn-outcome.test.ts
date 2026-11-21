@@ -1,0 +1,85 @@
+// One table over every way a turn ends (ADR 0024, seam 2): the kind, its follow-ups and the resume it earns, with no
+// process and no fake claude. The runner's own tests (auto-resume, kill-resume, usage-limit, network-resume) check it
+// carries them out.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { nextRetries, outcome, RETRIES, retriesOf, type EndedTurn, type TurnEnd } from '../src/turn-outcome.ts';
+
+const ok = { error: false, text: 'done' };
+const end = (over: Partial<TurnEnd> & { turn?: EndedTurn | null } = {}): TurnEnd => ({
+  turn: { result: ok }, exit: { code: 0, signal: null }, stderr: [], closing: false, ran: { unit: true, container: false }, ...over,
+});
+const LIMIT = "Claude AI usage limit reached: You've hit your session limit · resets 3pm";
+const onAccount = (turn: EndedTurn = {}) => ({ person: 7, account: 2, result: { error: true, text: LIMIT }, ...turn });
+
+const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
+  ['ended well', end(), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note', 'seam'] }],
+  ['ended well with a cached prefix', end({ turn: { result: ok, fp: 'f', fpParts: { a: 'b' } } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note', 'seam', 'keepalive'] }],
+  ["a fresh step's turn ended well: no seam enrolment", end({ turn: { result: ok, fresh: 'handoff' } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note'] }],
+  ['ended well after close_self', end({ closing: true }), { kind: 'closing', followUps: ['cleared', 'close'] }],
+  ['stopped', end({ turn: { stopped: true }, exit: { code: null, signal: 'SIGTERM' } }), { kind: 'stopped', followUps: [] }],
+  ['stopped, even after close_self', end({ turn: { stopped: true, result: ok }, closing: true }), { kind: 'stopped' }],
+  ['killed by a signal', end({ turn: {}, exit: { code: null, signal: 'SIGKILL' } }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
+  ['killed with no record of how', end({ turn: {}, exit: null }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
+  ['exit 143 is a kill', end({ turn: {}, exit: { code: 143, signal: null } }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
+  ['killed again in a row: stops for good', end({ turn: { retries: { kill: 1, restart: 1 } }, exit: null }), { kind: 'killed', spent: { via: 'kill', tries: 1 } }],
+  ['a kill carries the restart count', end({ turn: { retries: { restart: 1, limit: 2 } }, exit: null }), { retry: { via: 'kill', retries: { kill: 1, restart: 1 } } }],
+  ['a killed fresh step is not resumed', end({ turn: { fresh: 'compact' }, exit: null }), { kind: 'killed', retry: undefined, spent: undefined }],
+  ['a killed turn set to close is not resumed', end({ turn: { closing: null }, exit: null }), { kind: 'killed', retry: undefined }],
+  ['killed after its result is not resumed', end({ turn: { result: ok }, exit: { code: null, signal: 'SIGKILL' } }), { kind: 'killed', retry: undefined }],
+  ['usage limit', end({ turn: { result: { error: true, text: LIMIT } }, exit: { code: 1, signal: null } }), { kind: 'limit', reason: LIMIT, retry: { via: 'limit', retries: { limit: 1 } } }],
+  ['usage limit, the third in a row', end({ turn: { result: { error: true, text: LIMIT }, limitTries: 3 } }), { kind: 'limit', spent: { via: 'limit', tries: 3 } }],
+  ['a limit on a linked account asks the account pick', end({ turn: onAccount() }), { kind: 'switch-account', askAccount: true }],
+  ['another account is ready', end({ turn: onAccount({ retries: { limit: 1, net: 2 } }), account: 'ready' }), { kind: 'switch-account', retry: { via: 'switch', retries: { switch: 1, limit: 1 } } }],
+  ['every account limited', end({ turn: onAccount(), account: 'all-limited' }), { kind: 'limit', retry: { via: 'limit', retries: { limit: 1 } }, switchesSpent: undefined }],
+  ['no other account', end({ turn: onAccount(), account: null }), { kind: 'limit', retry: { via: 'limit', retries: { limit: 1 } } }],
+  [`switched ${RETRIES.switch.cap} times in a row: waits out the limit`, end({ turn: onAccount({ retries: { switch: RETRIES.switch.cap } }), account: 'ready' }), { kind: 'limit', switchesSpent: RETRIES.switch.cap, retry: { via: 'limit', retries: { limit: 1 } } }],
+  ['a Codex limit never switches Claude accounts', end({ turn: onAccount({ codex: true }) }), { kind: 'limit', askAccount: undefined }],
+  ['an expired sign-in on account 2 asks the account pick', end({ turn: { person: 7, account: 2, result: { error: true, text: 'API Error: 401 authentication_error' } } }), { kind: 'switch-account', authFailed: true, askAccount: true }],
+  ['an expired sign-in with no other account fails', end({ turn: { person: 7, account: 2, result: { error: true, text: 'API Error: 401 authentication_error' } }, account: null }), { kind: 'failed', authFailed: true }],
+  ['account 1 on the host has no sign-in of ours', end({ turn: { person: 7, account: 1, result: { error: true, text: 'API Error: 401 authentication_error' } } }), { kind: 'failed', authFailed: false }],
+  ['account error', end({ turn: { result: { error: true, text: 'API Error: 400 Identity verification is required to continue.' } } }), { kind: 'account-error' }],
+  ['network', end({ turn: { result: { error: true, text: "API Error: Can't reach the API server (EAI_AGAIN)" } } }), { kind: 'net', retry: { via: 'net', retries: { net: 1 } } }],
+  ['network from stderr, with no words of its own', end({ turn: {}, exit: { code: 1, signal: null }, stderr: ['x', 'connect ECONNREFUSED'] }), { kind: 'net' }],
+  ['network, the third in a row', end({ turn: { result: { error: true, text: 'stream disconnected' }, netTries: 3 } }), { kind: 'net', spent: { via: 'net', tries: 3 } }],
+  ['failed', end({ turn: { result: { error: true, text: 'boom' } } }), { kind: 'failed', reason: 'boom' }],
+  ['exited with no result', end({ turn: {}, exit: { code: 0, signal: null } }), { kind: 'failed' }],
+  ['could not start', end({ turn: null, exit: { code: null, signal: null, error: 'ENOENT' } }), { kind: 'failed', reason: 'Could not start claude: ENOENT' }],
+  ['a restart cut it off', end({ turn: { resumes: 1, killTries: 1 }, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 2, kill: 1 } } }],
+  ['a restart cut off a turn people started', end({ turn: null, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 1 } } }],
+  ['a restart cut it off, twice in a row already', end({ turn: { retries: { restart: 2 } }, cut: { rerun: false } }), { kind: 'killed', spent: { via: 'restart', tries: 2 } }],
+  ['a restart cut it off before claude had its prompt', end({ cut: { rerun: true } }), { kind: 'killed', followUps: ['rerun'], retry: undefined }],
+  ['a restart cut off a stopped turn', end({ turn: { stopped: true }, cut: { rerun: true } }), { kind: 'stopped' }],
+  ['a restart cut off a turn set to close', end({ turn: { closing: 'done' }, cut: { rerun: false } }), { kind: 'killed', retry: undefined, spent: undefined }],
+];
+
+for (const [name, input, want] of rows) {
+  test(`outcome: ${name}`, () => {
+    const got = outcome(input);
+    for (const [k, v] of Object.entries(want)) assert.deepEqual((got as any)[k], v, `${k} of ${JSON.stringify(got)}`);
+  });
+}
+
+test('every kind has a row', () => {
+  const kinds = new Set(rows.map(([, input]) => outcome(input).kind));
+  for (const k of ['ok', 'stopped', 'closing', 'limit', 'net', 'switch-account', 'account-error', 'killed', 'failed']) assert.ok(kinds.has(k as any), k);
+});
+
+test("today's caps are unchanged, and an account switch has one", () => {
+  assert.deepEqual(Object.fromEntries(Object.entries(RETRIES).map(([k, v]) => [k, v.cap])), { restart: 2, kill: 1, limit: 3, net: 3, switch: 3 });
+});
+
+test('a resume carries only the counts its row keeps', () => {
+  const r = { restart: 1, kill: 1, limit: 2, net: 1, switch: 1 };
+  assert.deepEqual(nextRetries(r, 'restart'), { restart: 2, kill: 1 });
+  assert.deepEqual(nextRetries(r, 'kill'), { kill: 2, restart: 1 });
+  assert.deepEqual(nextRetries(r, 'limit'), { limit: 3 });
+  assert.deepEqual(nextRetries(r, 'net'), { net: 2 });
+  assert.deepEqual(nextRetries(r, 'switch'), { switch: 2, limit: 2 });
+});
+
+test('a row saved before the retries record reads its four counters', () => {
+  assert.deepEqual(retriesOf({ resumes: 1, limitTries: 2, netTries: 0, killTries: 1 }), { restart: 1, limit: 2, kill: 1 });
+  assert.deepEqual(retriesOf({ resumes: 0 }), {});
+  assert.deepEqual(retriesOf({ retries: { net: 1 }, resumes: 2 }), { net: 1 });
+});

@@ -1249,6 +1249,7 @@ export const ticketRoutes: Route[] = [
         runner.broadcastTicket(id);
         // Its worktree back now if the sweep removed it (#660), behind any dismissal cleanup on its lane.
         void runner.reopened(id);
+        void app.outbox?.poke({ type: 'reopened', ticket: id }); // its held deliveries (wake_at, ADR 0021) go now
       }
       await ownWrites();
       return json(res, 200, ticketView(app, id));

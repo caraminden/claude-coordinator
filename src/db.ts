@@ -18,6 +18,7 @@ import type { KeepaliveRow } from './keepalive.ts';
 import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
+import { deliveryQueries } from './db/deliveries.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
@@ -1352,6 +1353,33 @@ CREATE TABLE IF NOT EXISTS usage_counts (
   n INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, kind, name)
 );
+-- The one outbox (src/outbox.ts, ADR 0021, #1385): every saved "send this later" row, whatever its kind. Its queries are
+-- in src/db/deliveries.ts; state, due and met_at follow the ADR's crash rule.
+CREATE TABLE IF NOT EXISTS deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  to_kind TEXT NOT NULL,
+  to_id INTEGER NOT NULL,
+  when_kind TEXT NOT NULL,
+  when_arg TEXT NOT NULL DEFAULT 'null',
+  payload TEXT NOT NULL DEFAULT '{}',
+  set_by TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'waiting',
+  due INTEGER,
+  met_at INTEGER,
+  dedupe_key TEXT,
+  origin TEXT UNIQUE,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries(state, due);
+CREATE INDEX IF NOT EXISTS deliveries_event ON deliveries(state, when_kind);
+CREATE INDEX IF NOT EXISTS deliveries_target ON deliveries(to_kind, to_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS deliveries_dedupe ON deliveries(kind, dedupe_key) WHERE dedupe_key IS NOT NULL AND state IN ('waiting', 'held');
 -- The ideas ledger (src/ideas.ts, #1150): one row per idea a scheme was shown, on a choices page (page, card) or in a
 -- handoff with no page (page '', card = the handoff's path). It fills itself from picks, handoffs, starts and ships;
 -- status_manual and link_manual are hand edits the scan never undoes. No foreign keys: a row outlives its minion.
@@ -1653,6 +1681,7 @@ export const SCHEMA_HISTORY = [
   [101, 'claim_queue, claim_spans (#1334)'],
   [102, 'host_samples.cpu_ledger (#1332)'],
   [103, 'machines.token_sealed (#1355)'],
+  [104, 'deliveries (#1385)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3783,9 +3812,9 @@ export class Store {
  */
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
-type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof viewQueries;
+type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof viewQueries & typeof deliveryQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, minionQueries, pushQueries, viewQueries]) {
+for (const area of [machineQueries, minionQueries, pushQueries, viewQueries, deliveryQueries]) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

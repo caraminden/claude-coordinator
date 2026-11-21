@@ -12,10 +12,13 @@
 // with a new hash, the way one minion lands another's work. A branch with no commits of its own never
 // counts as work in: it is on main trivially.
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store } from './db.ts';
+import type { Delivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
+import { type Outbox, span } from './outbox.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
@@ -669,19 +672,32 @@ export function parseWakeTime(text: string): number {
 
 export class TimedWakes {
   private store: Store;
-  private send: (ticketId: number, text: string) => void;
-  now: () => number;
-  private timer: NodeJS.Timeout | null = null;
+  private outbox: Outbox;
 
-  constructor(store: Store, send: (ticketId: number, text: string) => void, now: () => number = Date.now) {
+  constructor(store: Store, outbox: Outbox) {
     this.store = store;
-    this.send = send;
-    this.now = now;
+    this.outbox = outbox;
+    outbox.register({
+      kind: 'wake_at',
+      migrate: () => this.migrate(),
+      describe: (r) => `wake_at for ${pacificTime(r.when_arg)}: ${r.payload.note}`,
+      deliver: (rows, ctx) =>
+        rows.map((r) => {
+          const at = Number(r.when_arg);
+          const late =
+            r.reason === 'target closed' ? ' (it came due while this minion was dismissed)'
+            : at < ctx.bootAt && ctx.now - at >= 60_000 ? ` (${span(ctx.now - at)} late: the server was down when it came due)`
+            : '';
+          return ctx.send(r, `Wake you set for ${pacificTime(at)}${late}: ${r.payload.note}`);
+        }),
+    });
   }
 
+  private wake = (r: Delivery): TimedWake => ({ id: r.id, ticket: r.to_id, at: Number(r.when_arg), note: r.payload.note, setBy: r.payload.setBy });
+
+  /** Wakes not yet sent, in id order: every chat's, or one chat's. */
   list(ticket?: number): TimedWake[] {
-    const all = this.store.getSetting<TimedWake[]>(TIMED) ?? [];
-    return ticket === undefined ? all : all.filter((w) => w.ticket === ticket);
+    return this.store.listDeliveries({ kind: 'wake_at', to: ticket, states: ['waiting', 'held', 'sending'] }).map(this.wake);
   }
 
   /** The soonest wake of `ticket`, for its list note, or null. */
@@ -691,55 +707,41 @@ export class TimedWakes {
 
   /** Set a wake; throws a message the caller can pass on when the time is past, too far out, or the chat has too many. */
   add(ticket: number, at: number, note: string, setBy: string): TimedWake {
-    const now = this.now();
+    const now = this.outbox.clock();
     if (!Number.isFinite(at)) throw new Error('That is not a time: use "2026-11-18 09:00" (Pacific unless it ends in Z or an offset like -08:00).');
     if (at <= now) throw new Error(`${pacificTime(at)} is already past (it is ${pacificTime(now)}). Give a later time.`);
     if (at > now + MAX_AHEAD_MS) throw new Error(`${pacificTime(at)} is more than 90 days away. Set a wake nearer the date, or ask a person.`);
     if (this.list(ticket).length >= MAX_WAKES) throw new Error(`This chat already has ${MAX_WAKES} wakes pending: cancel one first.`);
-    const all = this.list();
-    const w = { id: Math.max(0, ...all.map((o) => o.id)) + 1, ticket, at, note, setBy };
-    this.store.setSetting(TIMED, [...all, w]);
-    this.arm();
-    return w;
+    const project = this.store.getTicket(ticket)?.project_id ?? 0;
+    return this.wake(this.outbox.add({ project_id: project, kind: 'wake_at', to_kind: 'minion', to_id: ticket, when_kind: 'at', when_arg: at, due: at, payload: { note, setBy }, set_by: `minion:${ticket}` }));
   }
 
-  /** Cancel one of `ticket`'s wakes; false when it is gone (already fired, or never its own). */
+  /** Cancel one of `ticket`'s wakes; false when it is gone (already sent, or never its own). */
   cancel(ticket: number, id: number): boolean {
-    const all = this.list();
-    if (!all.some((w) => w.id === id && w.ticket === ticket)) return false;
-    this.store.setSetting(TIMED, all.filter((w) => w.id !== id));
-    this.arm();
-    return true;
+    const r = this.store.getDelivery(id);
+    return !!r && r.kind === 'wake_at' && r.to_kind === 'minion' && r.to_id === ticket && this.outbox.cancel(id);
   }
 
-  /** Send every wake that is due (a dismissed minion's is dropped unsent), then wait for the next. */
-  fire(): number {
-    const now = this.now();
-    const all = this.list();
-    const due = all.filter((w) => w.at <= now);
-    // Dropped before sending, so a send that throws can't send twice.
-    if (due.length) this.store.setSetting(TIMED, all.filter((w) => w.at > now));
-    for (const w of due) {
-      const t = this.store.getTicket(w.ticket);
-      if (!t || t.status === 'closed') continue;
-      try {
-        // The runner queues a send for a chat mid-turn, so it is read after that turn ends.
-        this.send(w.ticket, `Wake you set for ${pacificTime(w.at)}: ${w.note}`);
-      } catch (err) {
-        console.error(`Waking #${w.ticket} (wake_at) failed:`, err);
-      }
-    }
-    this.arm();
-    return due.length;
-  }
-
-  /** One timer, to the nearest wake (capped: setTimeout can't count past 24 days). At boot this also sends the ones missed while down. */
-  arm(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    const soonest = Math.min(...this.list().map((w) => w.at));
-    if (!Number.isFinite(soonest)) return;
-    this.timer = setTimeout(() => this.fire(), Math.min(Math.max(soonest - this.now(), 0), MAX_TIMER_MS));
-    this.timer.unref();
+  /** Move the old settings key's wakes into the table, in one transaction that empties the key: none dropped. */
+  private migrate() {
+    const old = this.store.getSetting<TimedWake[]>(TIMED);
+    if (!old) return;
+    this.store.importDeliveries(
+      TIMED,
+      old.map((w) => ({
+        id: w.id,
+        project_id: this.store.getTicket(w.ticket)?.project_id ?? 0,
+        kind: 'wake_at',
+        to_kind: 'minion',
+        to_id: w.ticket,
+        when_kind: 'at',
+        when_arg: w.at,
+        due: w.at,
+        payload: { note: w.note, setBy: w.setBy },
+        set_by: `minion:${w.ticket}`,
+        origin: `${TIMED}:${createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16)}`,
+      })),
+      this.outbox.clock(),
+    );
   }
 }

@@ -652,6 +652,8 @@ export class Runner {
   memoryScheme: (projectId: number) => boolean = () => false;
   /** A ticket was dismissed (its preview goes with it). */
   onClose: (ticketId: number) => Promise<void> | void = () => {};
+  /** A turn started and saved the messages it carries (their event ids): the outbox marks what it handed over as sent (server.ts). */
+  onTurnStart: (ticketId: number, eventIds: number[]) => void = () => {};
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -3039,6 +3041,12 @@ export class Runner {
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
+    // Its messages are saved with the turn now: the outbox's rows they carry are sent (#1385, ADR 0021 "Accepted means durable").
+    try {
+      this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
+    } catch (err) {
+      console.error(`onTurnStart for #${ticket.id} failed:`, err);
+    }
     const live = this.follow(ticket.id, turn);
     live.had = had;
     // A keepalive never shows as running: the list and the chat don't know it happened.

@@ -47,6 +47,7 @@ import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { Outbox } from './src/outbox.ts';
 import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
@@ -388,9 +389,12 @@ function ownScheme(): Project | null {
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
 waiters.prs = githubPrs(githubOf);
-// wake_at (#722): a message in the asker's own chat at its time; armed now, it sends the ones missed while the server was down.
-const timedWakes = new TimedWakes(store, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
-if (!BOOT_CHECK) timedWakes.arm();
+// The one outbox (src/outbox.ts, ADR 0021): saved "send this later" rows. wake_at (#722) is its first kind; boot moves the
+// old timed-wakes key in, resends what a killed server left mid-send, and sends what came due while it was down.
+const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
+const timedWakes = new TimedWakes(store, outbox);
+runner.onTurnStart = (ticketId, eventIds) => outbox.turnStarted(ticketId, eventIds);
+if (!BOOT_CHECK) void outbox.boot();
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
 services.githubAs = (c) => {
@@ -663,6 +667,7 @@ if (!BOOT_CHECK) {
   const stopPreview = runner.onClose;
   runner.onClose = (ticketId) => {
     const stopped = stopPreview(ticketId);
+    void outbox.poke({ type: 'closed', ticket: ticketId });
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
     void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
@@ -1616,7 +1621,7 @@ const app: App = {
     ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })),
     ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
   ],
-  store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
+  store, runner, auth, waiters, timedWakes, outbox, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
   reaper,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },

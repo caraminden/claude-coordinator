@@ -47,6 +47,7 @@ import type { Schedule } from './schedules.ts';
 import type { Embed } from './memory.ts';
 import type { UltraReviews } from './ultrareview.ts';
 import type { SideAsks } from './side-ask.ts';
+import type { Outbox } from './outbox.ts';
 import type { Chain, LiveWaiters, TimedWakes } from './wake.ts';
 import type { ClientErrors, DeployWatch } from './deploy-watch.ts';
 import type { StatusPage } from './status-page.ts';
@@ -288,6 +289,7 @@ export interface App {
   held: Pick<HeldStarts, 'has' | 'release'>;
   /** wake_at's timed wakes (#722). */
   timedWakes: TimedWakes;
+  outbox?: Outbox;
   /** The post-deploy watch and the beacon's limits (src/deploy-watch.ts, #724); absent in tests that build no server. */
   health?: { watch: DeployWatch | null; clientErrors: ClientErrors };
   previews: Previews | null;

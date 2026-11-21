@@ -15,6 +15,10 @@
 //   resume-owed: record left that nothing acts on.
 // A failure names the flow, the cut, its step and what the task before it wrote, so it can be found again by hand.
 //
+// A flow with `outbox` runs the one outbox (src/outbox.ts, ADR 0021) beside each runner, as server.ts does: a wake it
+// set counts as sent, a restarted server boots its own outbox, and a delivery row it will (re)send, or one its timer
+// waits on, carries the wake. A row left `sending` with no turn to accept it is a problem.
+//
 // To cover a new flow, add one entry to FLOWS: a name, an optional setup (accounts, say), and steps. Each step does one
 // thing from outside the runner (a message, a turn's end, a timer firing) and waits for the runner to go quiet.
 // RESTART_ANYWHERE_STRICT=1 cuts after every single write as well, a hard crash's points: it lists the gaps only a crash
@@ -31,7 +35,9 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { coldKey, mailKey } from '../src/minion-relay.ts';
 import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
+import { Outbox } from '../src/outbox.ts';
 import { Runner } from '../src/runner.ts';
+import { TimedWakes } from '../src/wake.ts';
 import { releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -52,9 +58,11 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
-type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
+type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; wake: (note: string, inMs: number) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
 type Flow = {
   name: string;
+  /** Runs the one outbox beside each runner (wake_at on it), as server.ts does. */
+  outbox?: boolean;
   /** Hooks both the flow's runner and every restarted one get (a person's Claude accounts, say). */
   setup?: (store: Store, projectId: number) => (r: Runner) => void;
   steps: { name: string; run: (c: Ctx) => Promise<void> }[];
@@ -163,6 +171,41 @@ const FLOWS: Flow[] = [
         const next = c.restart();
         next.recover();
         await c.quiet('the resume', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
+    name: 'a wake_at comes due on an idle minion',
+    outbox: true,
+    steps: [
+      { name: 'the minion sets a wake', run: async (c) => {
+        setRelease('ok');
+        c.wake('wake: check the deploy', 600);
+        await sleep(30);
+      } },
+      { name: 'it comes due and its turn runs', run: async (c) => {
+        const before = turnsRun();
+        await c.quiet('the wake\'s turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
+    name: 'a wake_at due mid-turn waits behind the turn',
+    outbox: true,
+    steps: [
+      { name: 'Cara asks for a turn', run: async (c) => {
+        setRelease(null);
+        c.say('Cara', 'build it');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+      } },
+      { name: 'a wake comes due while it runs', run: async (c) => {
+        c.wake('wake: mid-turn', 100);
+        await sleep(300);
+      } },
+      { name: 'the turn ends and the wake\'s turn runs', run: async (c) => {
+        const before = turnsRun();
+        setRelease('ok');
+        await c.quiet('the wake\'s turn', () => turnsRun() === before + 2);
       } },
     ],
   },
@@ -293,10 +336,10 @@ class Recorder {
     return parts.join('; ') || 'other rows';
   }
 
-  /** Messages sent before cut `n` and not yet handed to a turn that started. */
+  /** Messages sent before cut `n` and not yet handed to a turn that started (a wake's note is inside the text it sends). */
   held(n: number): string[] {
-    const handed = new Set(this.log.filter((l) => l.kind === 'start' && l.at <= n).flatMap((l) => l.texts));
-    return this.log.filter((l) => l.kind === 'sent' && l.at <= n).flatMap((l) => l.texts).filter((t) => !handed.has(t));
+    const handed = this.log.filter((l) => l.kind === 'start' && l.at <= n).flatMap((l) => l.texts);
+    return this.log.filter((l) => l.kind === 'sent' && l.at <= n).flatMap((l) => l.texts).filter((t) => !handed.some((h) => h.includes(t)));
   }
 
   /** The turn the uncut run started after cut `n` in the same step, which a restart there still owes. */
@@ -326,12 +369,28 @@ async function record(flow: Flow) {
     };
     return r;
   };
-  const runners = [watch(makeRunner(store, hooks))];
+  const outboxes: Outbox[] = [];
+  let wakes: TimedWakes | null = null;
+  const withOutbox = (r: Runner) => {
+    if (!flow.outbox) return r;
+    outboxes.at(-1)?.stop();
+    const outbox = new Outbox(store, r, { author: 'Citadel' });
+    r.onTurnStart = (ticketId, ids) => outbox.turnStarted(ticketId, ids);
+    wakes = new TimedWakes(store, outbox);
+    outboxes.push(outbox);
+    void outbox.boot();
+    return r;
+  };
+  const runners = [withOutbox(watch(makeRunner(store, hooks)))];
   const ctx: Ctx = {
     runner: runners[0], store, id: t.id,
     say: (author, text) => {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
       ctx.runner.send(t.id, author, text);
+    },
+    wake: (note, inMs) => {
+      rec.log.push({ kind: 'sent', texts: [note], at: rec.cuts.length, step: rec.step });
+      wakes!.add(t.id, Date.now() + inMs, note, 'Minion');
     },
     mail: (from, text) => {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
@@ -342,7 +401,7 @@ async function record(flow: Flow) {
       await sleep(30); // anything it set off on its way out
     },
     restart: () => {
-      ctx.runner = watch(makeRunner(store, hooks));
+      ctx.runner = withOutbox(watch(makeRunner(store, hooks)));
       runners.push(ctx.runner);
       return ctx.runner;
     },
@@ -355,6 +414,7 @@ async function record(flow: Flow) {
     }
   } finally {
     rec.stop();
+    for (const o of outboxes) o.stop();
     for (const r of runners) {
       r.detachAll();
       clearTimeout((r as any).limitTimer);
@@ -372,11 +432,21 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
   const store = new Store(join(cut.dir, 'test.db'));
   const r = makeRunner(store, hooks);
   const started: Msg[][] = [];
-  (r as any).startTurn = (_p: unknown, ticket: { id: number }, batch: Msg[]) => void (ticket.id === id && started.push(batch));
+  (r as any).startTurn = (_p: unknown, ticket: { id: number }, batch: (Msg & { id?: number })[]) => {
+    if (ticket.id !== id) return;
+    started.push(batch);
+    r.onTurnStart(id, batch.flatMap((m) => (m.id == null ? [] : [m.id]))); // as the real one does once the turn is saved
+  };
   (r as any).reattach = () => false; // its turn died with the old server
+  const outbox = flow.outbox ? new Outbox(store, r, { author: 'Citadel' }) : null;
+  if (outbox) {
+    r.onTurnStart = (ticketId, ids) => outbox.turnStarted(ticketId, ids);
+    new TimedWakes(store, outbox);
+  }
   const problems: string[] = [];
   try {
     r.recover();
+    void outbox?.boot();
     // Settled: a turn started, or its lane stayed free past recover's spaced starts.
     const t0 = Date.now();
     for (let free = 0; !started.length && free < 3;) {
@@ -392,12 +462,18 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     const net = r.netWait(id);
     const mail = store.getSetting<Msg[]>(mailKey(id)) ?? [];
     const queue: Msg[] = (r as any).queues.get(id) ?? [];
-    const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && store.getSetting(coldKey(id)) ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : null;
+    // The outbox's rows still to send: its timer waits on them, or a delivery is queued on the minion's lane.
+    const rows = store.listDeliveries({ to: id, states: ['waiting', 'held', 'sending'] });
+    const armed = outbox && ((outbox as any).timer || (outbox as any).busy.size);
+    for (const d of rows) if (d.state === 'sending' && ![...(outbox as any).handed.values()].includes(d.id)) problems.push(`delivery #${d.id} is left sending with nothing to accept it`);
+    const outboxWait = rows.some((d) => d.state !== 'sending') && armed ? 'the outbox timer' : null;
+    const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && store.getSetting(coldKey(id)) ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : outboxWait;
     // A saved wait is only a wait if its timer is armed (the cold sweep and an unpark come from outside the runner).
     if (limit && !(r as any).limitTimer) problems.push('its usage-limit wait is saved, but no timer is armed to resume it');
     if (net && !(r as any).netTimer) problems.push('its network wait is saved, but no probe is armed');
-    const carried = new Set([...started.flat(), ...queue, ...(limit?.queued ?? []), ...(net?.queued ?? []), ...mail].map((m) => m.text));
-    for (const text of rec.held(cut.n)) if (!carried.has(text)) problems.push(`lost "${text}": no turn, queue, wait or held mail has it`);
+    const carried = [...started.flat(), ...queue, ...(limit?.queued ?? []), ...(net?.queued ?? []), ...mail].map((m) => m.text);
+    if (armed) carried.push(...rows.filter((d) => d.state !== 'sending').map((d) => String(d.payload.note)));
+    for (const text of rec.held(cut.n)) if (!carried.some((c) => c.includes(text))) problems.push(`lost "${text}": no turn, queue, wait, held mail or outbox row has it`);
     if (!started.length && !waiting) {
       const owed = rec.owed(cut.n);
       if (owed) problems.push(`owed a turn (the uncut run started one next, with ${JSON.stringify(owed.texts.map((x) => x.slice(0, 40)))}) but it sits idle`);
@@ -407,6 +483,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
       for (const key of [`turn:${id}`, `resume-owed:${id}`, `waiting:${id}`, `saving:${id}`]) if (store.getSetting(key) !== null) problems.push(`${key} is left with nothing acting on it`);
     }
   } finally {
+    outbox?.stop();
     r.detachAll();
     clearTimeout((r as any).limitTimer);
     await sleep(0);

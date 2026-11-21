@@ -74,7 +74,7 @@ export function callsInMessage(transcriptPath: unknown, toolUseId: unknown): num
   return 1;
 }
 
-/** Whether this minion is in the nudged half: the trial's arm, by number. */
+/** Whether this minion is in the nudged half: the trial's arm, by minion number (COORDINATOR_NUMBER, the #N; COORDINATOR_TICKET is the row id). Until 2026-11-21 it split on the row id; the report groups earlier turns by row id. */
 export function nudgedMinion(ticket: unknown): boolean {
   const n = Number(ticket);
   return Number.isInteger(n) && n % 2 === 0;
@@ -84,7 +84,7 @@ type State = { count: number; said: boolean };
 
 /** One hook call; returns the line to add, or null. */
 export function batchNudgeLine(input: any, env = process.env, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
-  if (env.COORDINATOR_ROLE !== 'thread' || input?.agent_id || !nudgedMinion(env.COORDINATOR_TICKET)) return null;
+  if (env.COORDINATOR_ROLE !== 'thread' || input?.agent_id || !nudgedMinion(env.COORDINATOR_NUMBER)) return null;
   const tool = String(input?.tool_name ?? '');
   const file = join(stateDir, `batch-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);
   const write = (s: State) => {

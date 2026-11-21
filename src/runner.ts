@@ -734,7 +734,7 @@ export class Runner {
     // login can't see a member's private repo. Its gh folder is the person's, since the land outlives the turn's folder.
     const person = (this.turns.has(ticket.id) ? this.store.getSetting<TurnState>(turnKey(ticket.id))?.person : null) ?? ticket.person_id;
     const github = this.githubFor?.(person, join(this.dataDir, 'people', String(person ?? 'nobody')))?.env;
-    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
+    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
   }
 
   /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */

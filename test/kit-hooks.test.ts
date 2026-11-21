@@ -469,7 +469,7 @@ test('writing-for-agents\' HOOKS.md names every hook: the kit\'s (kit/hooks/) an
 test('batch nudge: third single lookup in a row, even-numbered minions only, never Grunts, batched calls end the run', async () => {
   const { batchNudgeLine, BATCH_LINE, readOnlyBash, callsInMessage } = await import('../kit/hooks/batch-nudge.ts');
   const dir = mkdtempSync(join(tmpdir(), 'batch-'));
-  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '1278' };
+  const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_NUMBER: '1278', COORDINATOR_TICKET: '1279' };
   const call = (tool_name: string, extra: object = {}, e: any = env, sid = 's1') => batchNudgeLine({ session_id: sid, tool_name, tool_input: {}, ...extra }, e, dir);
   assert.equal(call('Read'), null);
   assert.equal(call('Grep'), null);
@@ -478,7 +478,7 @@ test('batch nudge: third single lookup in a row, even-numbered minions only, nev
   assert.equal(call('Edit'), null);
   assert.equal(call('Read'), null, 'an edit reset the count');
   assert.equal(call('Bash', { tool_input: { command: 'npm test' } }), null, 'a Bash that is not a lookup ends the run');
-  for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, {}, { ...env, COORDINATOR_TICKET: '1279' }, 's2'), null, 'odd minion: control');
+  for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, {}, { ...env, COORDINATOR_NUMBER: '1279', COORDINATOR_TICKET: '1278' }, 's2'), null, 'odd minion: control');
   for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, { agent_id: 'a1' }, env, 's3'), null, 'Grunt');
   for (const t of ['Read', 'Read', 'Read']) assert.equal(call(t, {}, { ...env, COORDINATOR_ROLE: 'coordinator' }, 's4'), null, 'Taskmaster');
   assert.equal(readOnlyBash('ls -la && cat a | grep b 2>&1'), true);

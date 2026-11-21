@@ -735,7 +735,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
   if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
   args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
-  env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+  env = { ...env, ...facts.env.coordinator, COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id), ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }) };
   // The kit's hooks (kit/hooks/hooks.json) keep their compile cache where the turn's own hooks do (hookCommand).
   env.CITADEL_HOOK_CACHE = join(pin, COMPILE_CACHE);
   // The kit's title check (kit/hooks/answer-check.ts, #1154) compares the title the turn starts with to its prompt. Not

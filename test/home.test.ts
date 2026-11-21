@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
-import { HOME_BUCKETS_MS, HOME_FIRST_LOOK, HOME_VISIT_GAP, HomeBucketCache, homeDays, homeSince, homeView } from '../src/inbox.ts';
+import { HOME_BUCKETS_MS, HOME_DAYS, HOME_FIRST_LOOK, HOME_VISIT_GAP, HomeBucketCache, homeDays, homeSince, homeView } from '../src/inbox.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'home-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -92,7 +92,7 @@ test('ship notes are read through events_notes, never a walk over every event si
   }
 });
 
-test('Home\'s ship buckets are read once a minute for everyone, and `shipped` stays per request', () => {
+test('Home\'s ship buckets are held for everyone, a new ship shows at once, and old ones leave the window', () => {
   const { store, josh, scheme, minion, approvals } = setup('cache.sqlite');
   const peek = scheme('Peek Auras');
   const idle = minion(peek, 'one'), other = minion(peek, 'two');
@@ -101,12 +101,14 @@ test('Home\'s ship buckets are read once a minute for everyone, and `shipped` st
   const who = { name: 'josh', uid: josh.id };
   store.addEvent(idle.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
   const first = homeView(store, approvals, who, () => false, now - 1000, now, cache);
+  assert.equal(first.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 1);
   store.addEvent(other.id, 'note', { text: 'Shipped bbb2222: second. Risk low: x.' });
   const second = homeView(store, approvals, who, () => false, now - 1000, now + 5000, cache);
-  assert.deepEqual(second.schemes[0].daily, first.schemes[0].daily, 'inside the minute the buckets are the held ones');
-  assert.equal(second.schemes[0].shipped, 2, 'shipped-since is read fresh each call');
-  const later = homeView(store, approvals, who, () => false, now - 1000, now + HOME_BUCKETS_MS + 1, cache);
-  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2, 'after the minute they are read again');
+  assert.equal(second.schemes[0].shipped, 2, 'shipped-since sees the new ship at once');
+  assert.equal(second.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2, 'and so do the buckets');
+  const gone = now + (HOME_DAYS + 2) * 86_400_000;
+  const later = homeView(store, approvals, who, () => false, gone - 1000, gone, cache);
+  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 0, 'past the window they are dropped');
 });
 
 test('Home\'s days are the last 14 Pacific dates, oldest first, each once, across both clock changes', () => {
@@ -128,4 +130,38 @@ test('a visit to Home counts what shipped since the last one ended, and keeps th
   const back = t0 + 60_000 + HOME_VISIT_GAP + 1;
   assert.equal(homeSince(store, 'josh', back), t0 + 60_000, 'a new visit starts where the last one ended');
   assert.equal(homeSince(store, 'cara', back), back - HOME_FIRST_LOOK, 'kept per person');
+});
+
+// #1414: a cold read of 15 days of ship notes in one statement held the live loop 3-10.7 s on Home's first look, and
+// again every minute after. The first fill now goes a range of event ids at a time, and refreshes read only new notes.
+test('Home\'s ship cache fills in ranges of event ids, then reads only notes past the last one read', async () => {
+  const { store, josh, scheme, minion, approvals } = setup('ranges.sqlite');
+  const peek = scheme('Peek Auras');
+  const one = minion(peek, 'one'), two = minion(peek, 'two');
+  store.addEvent(one.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
+  store.db.prepare("INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (20000, ?, 'note', '{}', ?)").run(one.id, Date.now());
+  const reads: unknown[][] = [];
+  const prepare = store.db.prepare.bind(store.db);
+  store.db.prepare = ((sql: string, ...r: any[]) => {
+    const st = prepare(sql, ...r);
+    if (!/Shipped/.test(sql)) return st;
+    const all = st.all.bind(st);
+    st.all = ((...a: any[]) => (reads.push(a), all(...a))) as typeof st.all;
+    return st;
+  }) as typeof store.db.prepare;
+  const cache = new HomeBucketCache();
+  await cache.ready(store);
+  assert.ok(reads.length >= 4, `the first read goes in ranges: ${JSON.stringify(reads)}`);
+  for (const [from, to] of reads) assert.ok(Number(to) - Number(from) <= 5_000, `${from}..${to}`);
+  const now = Date.now();
+  const who = { name: 'josh', uid: josh.id };
+  reads.length = 0;
+  assert.equal(homeView(store, approvals, who, () => false, now - 60_000, now, cache).schemes[0].shipped, 1);
+  assert.equal(reads.length, 0, 'no new events: no read at all, `shipped` included');
+  store.addEvent(two.id, 'note', { text: 'Shipped bbb2222: two. Risk low: x.' });
+  const later = homeView(store, approvals, who, () => false, now - 60_000, now + HOME_BUCKETS_MS, cache);
+  assert.equal(later.schemes[0].shipped, 2);
+  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2);
+  assert.equal(reads.length, 1, 'one read, of the notes past the last');
+  assert.ok(Number(reads[0][0]) > 20000, 'starting past the last event read');
 });

@@ -7,6 +7,7 @@ import { openMentions } from './mentions.ts';
 import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
 import { pacificDay } from './pacific.ts';
+import { drain, pace } from './breathe.ts';
 
 export interface InboxItem {
   /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'spend' for a running turn's unanswered spend alert (#723), 'quiet' for a running turn gone quiet (#906), 'loop' for messages the loop guard holds for a person's Continue (#1067), 'mention' for a message that @mentions them (#1149), or 'replies' for one offering one-tap replies in another state. */
@@ -154,16 +155,24 @@ export const HOME_DAYS = 14;
 
 /** `ms` as its Pacific day, "2026-11-20". */
 
-/** How long Home's 14-day buckets are kept: they are the same for every person, and the page refetches on each burst of news. */
+/** How often Home's held ship notes drop the ones past the window (HomeBucketCache). */
 export const HOME_BUCKETS_MS = 60_000;
 
 /** Minions shipped per scheme per Pacific day over the last HOME_DAYS days: project -> day -> tickets. */
 export type HomeBuckets = Map<number, Map<string, Set<number>>>;
 
-/** One pass over the ship notes of the window, each note's day worked out once. */
-function bucketShips(store: Store, now: number): HomeBuckets {
+type ShipNote = { ticket_id: number; project_id: number; at: number };
+
+/** How far back the ship notes behind the buckets go. */
+const homeWindow = (now: number) => now - (HOME_DAYS + 1) * 86_400_000;
+
+/** Event ids per step of the cache's first read: a cold read of 15 days' notes at once held the loop 3-10.7 s (#1414). */
+const HOME_FILL_IDS = 5_000;
+
+/** One pass over ship notes, each note's day worked out once. */
+function bucketShips(notes: ShipNote[]): HomeBuckets {
   const out: HomeBuckets = new Map();
-  for (const n of store.shippedNotes(now - (HOME_DAYS + 1) * 86_400_000)) {
+  for (const n of notes) {
     const days = out.get(n.project_id) ?? out.set(n.project_id, new Map()).get(n.project_id)!;
     const day = pacificDay(n.at);
     (days.get(day) ?? days.set(day, new Set()).get(day)!).add(n.ticket_id);
@@ -171,12 +180,49 @@ function bucketShips(store: Store, now: number): HomeBuckets {
   return out;
 }
 
-/** The server's cache of the buckets above, `HOME_BUCKETS_MS` long. Without one (a test), every call reads fresh. */
+/**
+ * The server's copy of the window's ship notes and their buckets, the same for everyone. A ship note is written once,
+ * so each call reads only the notes past the last event read. The first read goes a
+ * range of event ids at a time, yielding between them: await ready() before homeView. Without a cache (a test), every
+ * call reads fresh. shortcut: a minion deleted or moved after its ship stays counted under its old scheme until the
+ * note leaves the window or the server restarts; rebuild on a timer if that ever shows.
+ */
 export class HomeBucketCache {
-  private held: { store: Store; at: number; buckets: HomeBuckets } | null = null;
-  get(store: Store, now: number): HomeBuckets {
-    if (!this.held || this.held.store !== store || now - this.held.at >= HOME_BUCKETS_MS || now < this.held.at) this.held = { store, at: now, buckets: bucketShips(store, now) };
-    return this.held.buckets;
+  private held: { store: Store; mark: number; at: number; notes: ShipNote[]; buckets: HomeBuckets } | null = null;
+  private filling: Promise<void> | null = null;
+
+  /** Fills the cache once per store, paced; later calls return at once. */
+  ready(store: Store, now = Date.now()): Promise<void> {
+    if (this.held?.store === store) return Promise.resolve();
+    return (this.filling ??= pace(this.fillSteps(store, now)).finally(() => (this.filling = null)));
+  }
+
+  private *fillSteps(store: Store, now: number): Generator<void, void> {
+    // eventIdAt past every event is one past the newest id.
+    const top = store.eventIdAt(Number.MAX_SAFE_INTEGER);
+    const notes: ShipNote[] = [];
+    for (let from = store.eventIdAt(homeWindow(now)); from < top; from += HOME_FILL_IDS) {
+      notes.push(...store.shippedNotes(0, [from, Math.min(from + HOME_FILL_IDS, top)]));
+      yield;
+    }
+    this.held = { store, mark: top, at: now, notes, buckets: bucketShips(notes) };
+  }
+
+  /** The window's notes and buckets: each call reads the notes past the last event read (a few rows, on events_notes). */
+  get(store: Store, now: number): { notes: ShipNote[]; buckets: HomeBuckets } {
+    if (this.held?.store !== store) drain(this.fillSteps(store, now));
+    const h = this.held!;
+    const top = store.eventIdAt(Number.MAX_SAFE_INTEGER);
+    // top < mark: the newest events were deleted and their ids may come back, so read the window afresh.
+    if (top < h.mark) return drain(this.fillSteps(store, now)), this.get(store, now);
+    const fresh = top > h.mark ? store.shippedNotes(0, [h.mark, top]) : [];
+    h.mark = top;
+    // Old notes leave the window once a minute; the buckets are worked out again only when the notes changed.
+    const prune = now - h.at >= HOME_BUCKETS_MS || now < h.at;
+    if (prune) h.notes = h.notes.filter((n) => n.at >= homeWindow(now)), (h.at = now);
+    if (fresh.length) h.notes = [...h.notes, ...fresh];
+    if (prune || fresh.length) h.buckets = bucketShips(h.notes);
+    return h;
   }
 }
 
@@ -198,9 +244,10 @@ export function homeView(store: Store, approvals: Approvals, who: { name: string
   const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
   const schemes = ids.map((id) => store.getProject(id)).filter((p): p is Project => !!p);
   const days = homeDays(now);
-  const buckets = cache ? cache.get(store, now) : bucketShips(store, now);
-  // Only this person's "shipped since your last visit" is read per request.
-  const sinceShips = store.shippedNotes(since);
+  const held = cache?.get(store, now);
+  const buckets = held ? held.buckets : bucketShips(store.shippedNotes(homeWindow(now)));
+  // "Shipped since your last visit" comes from the held notes when the visit is inside their window.
+  const sinceShips = held && since >= homeWindow(now) ? held.notes : store.shippedNotes(since);
   const items: InboxItem[] = [];
   const out: HomeView['schemes'] = [];
   for (const p of schemes) {

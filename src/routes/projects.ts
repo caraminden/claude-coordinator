@@ -531,7 +531,8 @@ export const projectRoutes: Route[] = [
   {
     // Home (#1140): what waits on you across your schemes, what's working in them, and what shipped since your last visit here.
     method: 'GET', path: '/api/home', who: ['person'],
-    handler: ({ res, app: { store, runner }, session }) => {
+    handler: async ({ res, app: { store, runner }, session }) => {
+      await homeBuckets.ready(store);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()), Date.now(), homeBuckets);
       // The waiting minions as a scheme's list draws them (#1217: Josh, 2026-11-20, "the normal minion list render"), and when this person last opened each.

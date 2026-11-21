@@ -7,7 +7,7 @@ import { Landings } from '../src/land.ts';
 import { serverWorkWatch } from '../src/server-work.ts';
 import { isShipping, isWorking } from '../public/schemecounts.js';
 
-test("server work (#727): a handed-off land is working until it settles, and its row is sent at each end", (t) => {
+test("server work (#727): a handed-off land is working until it settles, and its row is sent at each end", async (t) => {
   const data = mkdtempSync(join(tmpdir(), 'server-work-'));
   t.after(() => rmSync(data, { recursive: true, force: true }));
   let clock = 0;
@@ -18,7 +18,8 @@ test("server work (#727): a handed-off land is working until it settles, and its
   const dir = join(data, 'run', 'landings', '5');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: 's', risk: 'low', reason: 'r', args: [] }));
-  landings = new Landings(data); // reads the waiting hand-offs once, at start
+  landings = new Landings(data); // reads the waiting hand-offs once, at start, off the server's thread (#1463)
+  await landings.scanned;
 
   assert.deepEqual(work.of(5), { kind: 'land' });
   assert.equal(work.of(6), null, 'another minion');

@@ -63,3 +63,32 @@ test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; on
   assert.match(await run('unset', {}), new RegExp(`^${join(root, 'unset', 'tmp')} `));
   assert.match(await run('disk', { TMPDIR: onDisk }), new RegExp(`^${onDisk}\\s*$`));
 });
+
+test('look() reads a job as state() does, off the server\'s thread (#1463)', async () => {
+  const heard: string[] = [];
+  const before = jobLost.hear;
+  jobLost.hear = (dir) => heard.push(dir);
+  try {
+    const jobs = new HostJobs(() => false);
+    const lost = join(root, 'look-lost');
+    mkdirSync(lost);
+    writeFileSync(join(lost, 'started'), String(Date.now() - 3600_000));
+    writeFileSync(join(lost, 'pid'), '999999999');
+    writeFileSync(join(lost, 'output.log'), 'x'.repeat(50) + 'the end');
+    assert.deepEqual(await jobs.look(lost, 7), { output: 'the end', code: -1 });
+    assert.deepEqual(await jobs.look(lost, 7), { output: 'the end', code: -1 });
+    assert.deepEqual(heard, [lost], 'heard once, as state() does');
+    const starting = join(root, 'look-starting');
+    mkdirSync(starting);
+    writeFileSync(join(starting, 'started'), String(Date.now()));
+    assert.deepEqual(await jobs.look(starting, 100), { output: '', code: null }, 'no pid yet, but in its grace: still running');
+    // A live pid on its own folder: this test's own process, whose command line names no folder, is not it.
+    writeFileSync(join(starting, 'pid'), String(process.pid));
+    writeFileSync(join(starting, 'started'), '1');
+    assert.equal((await jobs.look(starting, 100))!.code, -1, 'a reused pid does not count');
+    assert.equal(await jobs.look(join(root, 'look-nothing'), 100), null);
+    assert.deepEqual(heard, [lost, starting]);
+  } finally {
+    jobLost.hear = before;
+  }
+});

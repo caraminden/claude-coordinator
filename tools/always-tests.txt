@@ -5,3 +5,4 @@ test/access-matrix.test.ts
 test/prompt-budget.test.ts
 test/schema-compat.test.ts
 test/pipeline-files.test.ts
+test/sync-calls.test.ts

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -802,12 +802,13 @@ test('every way a handed-off land ends replaces its outside state', async () => 
   assert.deepEqual([waiting.ticket.state, waiting.ticket.note], ['outside', 'shipped, wakes once live; waiting on: the CI run']);
 });
 
-test('handoffs() answers from memory: it does not read the landings folder again (#1210)', () => {
+test('handoffs() answers from memory: it does not read the landings folder again (#1210)', async () => {
   const data = mkdtempSync(join(root, 'mem-'));
   const dir = join(data, 'run', 'landings');
   for (let i = 1; i <= 50; i++) mkdirSync(join(dir, String(i)), { recursive: true });
   writeFileSync(join(dir, '7', 'handoff.json'), '{}');
   const l = new Landings(data);
+  await l.scanned;
   rmSync(dir, { recursive: true, force: true });
   assert.deepEqual(l.handoffs(), [7], 'found at start, then served from memory');
   l.settled(7);
@@ -913,4 +914,41 @@ test('a report cut off after its shipped line finishes once: no second line, dep
   await new LandHandoffs({ ...deps, landings: s.landings }).poll();
   assert.equal(s.notes.length, 2, "the next ship's line goes out");
   assert.deepEqual(counts, { flakes: 2, learned: 2, landed: 2 }, 'and its flakes, lines and landed mark');
+});
+
+test('polls that overlap report a land once (#1463: the poll reads off the thread, so the next can start mid-read)', async () => {
+  const s = setup('overlap');
+  await s.land(LIVE);
+  await Promise.all([s.handoffs.poll(), s.handoffs.poll(), s.handoffs.poll()]);
+  assert.equal(s.notes.length, 1, 'one shipped line');
+  assert.equal(s.did.filter((d) => d.startsWith('close')).length, 1, 'one dismissal');
+  assert.deepEqual(s.landings.handoffs(), []);
+});
+
+test('the start reads no landing folder before it returns, and the daily prune keeps an unreported hand-off (#1463)', async () => {
+  const data = mkdtempSync(join(root, 'prune-'));
+  const dir = join(data, 'run', 'landings');
+  const old = Date.now() - 30 * 24 * 3600_000;
+  for (const id of ['3', '4', '5']) {
+    mkdirSync(join(dir, id), { recursive: true });
+    writeFileSync(join(dir, id, 'code'), '0');
+  }
+  writeFileSync(join(dir, '4', 'handoff.json'), '{}');
+  for (const id of ['3', '4']) utimesSync(join(dir, id, 'code'), old / 1000, old / 1000);
+  const l = new Landings(data);
+  assert.deepEqual(l.handoffs(), [], 'nothing yet: the scan runs off the thread');
+  assert.ok(l.hasHandoff(4), 'one minion asked while it scans: a stat on its own folder');
+  assert.deepEqual(await l.pending(), [4], 'the hand-off left by the last server');
+  await l.prune(Date.now());
+  assert.deepEqual(readdirSync(dir).sort(), ['4', '5'], 'the old finished folder goes; the old unreported one and the recent one stay');
+});
+
+test('a land settled while the start scans is not added back by the scan (#1463)', async () => {
+  const data = mkdtempSync(join(root, 'scan-race-'));
+  mkdirSync(join(data, 'run', 'landings', '8'), { recursive: true });
+  writeFileSync(join(data, 'run', 'landings', '8', 'handoff.json'), '{}');
+  const l = new Landings(data);
+  l.settled(8);
+  assert.deepEqual(await l.pending(), []);
+  assert.ok(!l.hasHandoff(8));
 });

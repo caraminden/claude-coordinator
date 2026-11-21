@@ -46,7 +46,7 @@
  "src/keepalive.ts": 8,
  "src/kit-sync.ts": 7,
  "src/land-news.ts": 4,
- "src/land.ts": 25,
+ "src/land.ts": 18,
  "src/link-check.ts": 11,
  "src/long-jobs.ts": 10,
  "src/loop-lag.ts": 4,

@@ -6,6 +6,7 @@
 // off: only those count as running(), which feeds the runner's interruptible().
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
 
@@ -145,17 +146,26 @@ export class HostJobs {
         } catch {
           return null;
         }
-        code = -1;
-        // Noted once per job, as its code, so the hook hears it once (#1325): ships cut off by systemd-oomd were only in the journal.
-        try {
-          writeFileSync(join(dir, 'code'), '-1', { flag: 'wx' });
-          void heardLost(dir);
-        } catch {
-          // Noted already.
-        }
+        code = lost(dir);
       }
     }
     return { output: tail(join(dir, 'output.log'), maxOutput), code };
+  }
+
+  /**
+   * state(), read off the server's thread (#1463): the ship hand-off poll reads every handed-off job each few seconds,
+   * and its blocking reads were in the stall stacks.
+   */
+  async look(dir: string, maxOutput: number): Promise<JobState | null> {
+    let code = await readCodeAsync(dir);
+    if (code === null && !(await this.aliveAsync(dir))) {
+      code = await readCodeAsync(dir);
+      if (code === null) {
+        if (!(await readFile(join(dir, 'started')).then(() => true, () => false))) return null;
+        code = lost(dir);
+      }
+    }
+    return { output: await tailAsync(join(dir, 'output.log'), maxOutput), code };
   }
 
   /** Whether a job's wrapper may still run: its pid is a live process on its folder, or it is still starting. */
@@ -173,13 +183,38 @@ export class HostJobs {
       }
     }
     try {
-      // Its command line names its folder, so a pid the system reused for something else doesn't count. Bash
-      // may exec the wrapper's last command, the mv of its code, in its place: that names a file in the folder.
-      return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').some((a) => a === dir || a.startsWith(`${dir}/`));
+      return onFolder(readFileSync(`/proc/${pid}/cmdline`, 'utf8'), dir);
     } catch {
       return false;
     }
   }
+
+  private async aliveAsync(dir: string): Promise<boolean> {
+    if (this.starting.has(dir)) return true;
+    const pid = Number(await readFile(join(dir, 'pid'), 'utf8').catch(() => ''));
+    if (!(pid > 0)) return Date.now() - Number(await readFile(join(dir, 'started'), 'utf8').catch(() => NaN)) < START_GRACE_MS;
+    const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => null);
+    return cmdline !== null && onFolder(cmdline, dir);
+  }
+}
+
+/**
+ * A process command line that names the job's folder, so a pid the system reused for something else doesn't count. Bash
+ * may exec the wrapper's last command, the mv of its code, in its place: that names a file in the folder.
+ */
+function onFolder(cmdline: string, dir: string): boolean {
+  return cmdline.split('\0').some((a) => a === dir || a.startsWith(`${dir}/`));
+}
+
+/** A job that ended with no exit code: noted once, as its code, so the hook hears it once (#1325: ships cut off by systemd-oomd were only in the journal). */
+function lost(dir: string): number {
+  try {
+    writeFileSync(join(dir, 'code'), '-1', { flag: 'wx' });
+    void heardLost(dir);
+  } catch {
+    // Noted already.
+  }
+  return -1;
 }
 
 function readCode(dir: string): number | null {
@@ -207,5 +242,24 @@ function tail(file: string, max: number): string {
     return buf.toString('utf8');
   } finally {
     closeSync(fd);
+  }
+}
+
+async function readCodeAsync(dir: string): Promise<number | null> {
+  const text = await readFile(join(dir, 'code'), 'utf8').then((t) => t.trim(), () => '');
+  return text === '' ? null : Number(text);
+}
+
+async function tailAsync(file: string, max: number): Promise<string> {
+  const fh = await open(file, 'r').catch(() => null);
+  if (!fh) return '';
+  try {
+    const { size } = await fh.stat();
+    const len = Math.min(size, max);
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, size - len);
+    return buf.toString('utf8');
+  } finally {
+    await fh.close();
   }
 }

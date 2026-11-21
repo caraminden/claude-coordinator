@@ -1470,6 +1470,8 @@ const serverWork = serverWorkWatch(() => landings.handoffs(), (id) => runner.bro
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
 runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
+// Was a blocking scan at each start, before the listen (#1463).
+if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
 if (!BOOT_CHECK) {
   every('deploy watch', 60_000, () => deployWatch!.tick(), 0);
 }

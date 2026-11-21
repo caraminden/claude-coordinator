@@ -11,8 +11,8 @@
 // cut off: only those count toward the runner's interruptible().
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { access, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
@@ -26,7 +26,7 @@ export interface Landing {
 }
 
 const MAX_OUTPUT = 64 * 1024;
-/** Finished landings' folders older than this go when a server starts. */
+/** Finished landings' folders older than this go at the daily prune (server.ts). */
 const KEEP_MS = 14 * 24 * 3600_000;
 /** Said when the wrapper ended without writing a code: its unit was stopped, or a restart cut off a child. */
 export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, or a restart cut it off. Check `git log main`.]';
@@ -136,18 +136,29 @@ export class Landings {
     this.root = join(resolve(dataDir), 'run', 'landings');
     // As the runner tags turn units: two servers on one box (a dev copy) never share a unit name.
     this.unitTag = createHash('sha256').update(this.root).digest('hex').slice(0, 8);
-    this.prune();
-    this.waiting = this.scan();
+    this.scanned = this.scan();
   }
 
   /** Minions with a hand-off not yet reported: kept in memory, read from the folders once at start (#1210: a scan per call froze the server). */
-  private readonly waiting: Set<number>;
+  private readonly waiting = new Set<number>();
+  /** Settled while the start's scan ran: it may have seen their hand-off before the rename, and must not add them back. */
+  private readonly goneWhileScanning = new Set<number>();
+  private scanDone = false;
+  /** The start's scan of the folders, off the server's thread (#1463: 9.5 s under load, and it held the listen). */
+  readonly scanned: Promise<void>;
 
-  private scan(): Set<number> {
+  private async scan() {
     try {
-      return new Set(readdirSync(this.root).filter((n) => /^\d+$/.test(n) && existsSync(join(this.root, n, HANDOFF))).map(Number));
+      const names = (await readdir(this.root)).filter((n) => /^\d+$/.test(n));
+      for (let i = 0; i < names.length; i += 16) {
+        const found = await Promise.all(names.slice(i, i + 16).map((n) => access(join(this.root, n, HANDOFF)).then(() => Number(n), () => null)));
+        for (const id of found) if (id !== null && !this.goneWhileScanning.has(id)) this.waiting.add(id);
+      }
     } catch {
-      return new Set();
+      // No landings yet.
+    } finally {
+      this.scanDone = true;
+      this.goneWhileScanning.clear();
     }
   }
 
@@ -178,19 +189,26 @@ export class Landings {
     return true;
   }
 
-  /** Minions whose handed-off landing isn't reported yet. */
+  /** Minions whose handed-off landing isn't reported yet. Until the start's scan ends, only the ones this server handed off. */
   handoffs(): number[] {
     return [...this.waiting];
   }
 
-  /** Whether this one minion's hand-off is unreported: one stat on its own folder, never a scan. */
-  hasHandoff(ticketId: number): boolean {
-    return this.waiting.has(ticketId) || existsSync(join(this.dir(ticketId), HANDOFF));
+  /** handoffs(), once the start's scan has ended: the reporter's list, so a land that ended across a restart is reported. */
+  async pending(): Promise<number[]> {
+    await this.scanned;
+    return [...this.waiting];
   }
 
-  handoff(ticketId: number): (Handoff & { args: string[] }) | null {
+  /** Whether this one minion's hand-off is unreported: from memory, or one stat on its own folder while the start's scan runs. */
+  hasHandoff(ticketId: number): boolean {
+    return this.waiting.has(ticketId) || (!this.scanDone && existsSync(join(this.dir(ticketId), HANDOFF)));
+  }
+
+  /** The hand-off's own file, read off the server's thread (#1463). */
+  async readHandoff(ticketId: number): Promise<(Handoff & { args: string[] }) | null> {
     try {
-      return JSON.parse(readFileSync(join(this.dir(ticketId), HANDOFF), 'utf8'));
+      return JSON.parse(await readFile(join(this.dir(ticketId), HANDOFF), 'utf8'));
     } catch {
       return null;
     }
@@ -212,9 +230,15 @@ export class Landings {
     await rename(`${file}.tmp`, file);
   }
 
+  /** Whether the hand-off is still unreported, from memory alone. */
+  isWaiting(ticketId: number): boolean {
+    return this.waiting.has(ticketId);
+  }
+
   /** Reported: it no longer counts as a hand-off. */
   settled(ticketId: number) {
     this.waiting.delete(ticketId);
+    if (!this.scanDone) this.goneWhileScanning.add(ticketId);
     try {
       renameSync(join(this.dir(ticketId), HANDOFF), join(this.dir(ticketId), 'handoff.done.json'));
     } catch {
@@ -224,7 +248,7 @@ export class Landings {
 
   /** A message came for the minion (a person's, a relay): if its land is handed off, a clean land then leaves it open. */
   talked(ticketId: number) {
-    if (existsSync(join(this.dir(ticketId), HANDOFF))) writeFileSync(join(this.dir(ticketId), 'talked'), '');
+    if (this.hasHandoff(ticketId)) writeFileSync(join(this.dir(ticketId), 'talked'), '');
   }
 
   wasTalked(ticketId: number): boolean {
@@ -277,17 +301,28 @@ export class Landings {
     return r && r.code === -1 ? { output: r.output + NO_CODE, code: 1 } : r;
   }
 
-  /** Drop finished landings' folders from long ago. */
-  private prune() {
+  /** get(), read off the server's thread (#1463): the hand-off poll's read, every few seconds for each landing. */
+  async look(ticketId: number): Promise<Landing | null> {
+    const r = await this.jobs.look(this.dir(ticketId), MAX_OUTPUT);
+    return r && r.code === -1 ? { output: r.output + NO_CODE, code: 1 } : r;
+  }
+
+  /**
+   * Drop finished landings' folders from long ago, one at a time and off the server's thread: a daily job (server.ts),
+   * not the start, where it held the listen (#1463). A hand-off not yet reported keeps its folder.
+   */
+  async prune(now = Date.now()) {
+    await this.scanned;
     let names: string[];
     try {
-      names = readdirSync(this.root);
+      names = await readdir(this.root);
     } catch {
       return;
     }
     for (const name of names) {
+      if (this.waiting.has(Number(name))) continue;
       try {
-        if (Date.now() - statSync(join(this.root, name, 'code')).mtimeMs > KEEP_MS) rmSync(join(this.root, name), { recursive: true, force: true });
+        if (now - (await stat(join(this.root, name, 'code'))).mtimeMs > KEEP_MS) await rm(join(this.root, name), { recursive: true, force: true });
       } catch {
         // Still running, or never started: left alone.
       }
@@ -514,7 +549,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 }
 
 export interface HandoffDeps {
-  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew' | 'reported' | 'markReported'> & Partial<Pick<Landings, 'stopped'>>;
+  landings: Pick<Landings, 'pending' | 'look' | 'readHandoff' | 'isWaiting' | 'settled' | 'wasTalked' | 'log' | 'prepNew' | 'reported' | 'markReported'> & Partial<Pick<Landings, 'stopped'>>;
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
@@ -568,10 +603,11 @@ export class LandHandoffs {
   }
 
   async poll() {
-    for (const id of this.d.landings.handoffs()) {
+    for (const id of await this.d.landings.pending()) {
       if (this.busy.has(id)) continue;
-      const run = this.d.landings.get(id);
-      const h = this.d.landings.handoff(id);
+      const [run, h] = await Promise.all([this.d.landings.look(id), this.d.landings.readHandoff(id)]);
+      // Polls overlap now that they read off the thread: one that settled it while this one read leaves it alone.
+      if (this.busy.has(id) || !this.d.landings.isWaiting(id)) continue;
       if (h && run && run.code === null) {
         this.showLanding(id, run);
         this.tellPrep(id, run);

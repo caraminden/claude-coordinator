@@ -10,8 +10,8 @@ import { until } from './wait.ts';
 testPins();
 
 // A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears. It ignores
-// SIGTERM, as a claude still writing its reply may for a while: otherwise a stop could end the turn, and
-// delete its folder, before the test's crash finds pid.json (#470; crash's SIGKILLs still end it).
+// SIGINT and SIGTERM, as a claude still writing its reply may for a while: otherwise a stop (SIGINT first, AG-04)
+// could end the turn, and delete its folder, before the test's crash reads pid.json (#470; crash's SIGKILLs still end it).
 const root = mkdtempSync(join(tmpdir(), 'auto-resume-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -25,6 +25,7 @@ writeFileSync(
   `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
 process.on('SIGTERM', () => {});
+process.on('SIGINT', () => {});
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
   console.log(JSON.stringify({ type: 'system', subtype: 'init' })); // as claude does once it has the prompt

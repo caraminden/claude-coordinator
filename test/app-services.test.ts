@@ -2,21 +2,22 @@ import assert from 'node:assert/strict';
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
 import { AppServices, folderHolds, manifestOn, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
-import { fakeSystemd, settled } from './helpers.ts';
+import { fakeSystemd, settled, tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 
 // Citadel writes and runs contraptions' user services (#266). Everything here runs against a stand-in
 // systemctl and a temp unit folder: never the real ones.
-const root = mkdtempSync(join(tmpdir(), 'app-services-'));
+const tmp = tempRoot('app-services-');
+const root = tmp.dir;
 after(async () => {
   await settled(); // a deploy or install check still going writes into root's logs (#1437)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 // Build steps take a slot from the real tools/citadel-heavy (#847), in a lock folder of the test's own.
 const heavyDir = join(root, 'heavy');
@@ -338,7 +339,7 @@ function remote(repo: string) {
 /** Something listening on a free port: the app's "service". */
 async function listening(): Promise<Server & { port: number }> {
   const srv = createServer((s) => s.end());
-  await new Promise<void>((ok) => srv.listen(0, '127.0.0.1', ok));
+  await tmp.serve(srv);
   return Object.assign(srv, { port: (srv.address() as any).port });
 }
 async function done(name: string) {
@@ -396,7 +397,7 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
   const heavyJob = (who: string, script: string) => {
     // Not CITADEL_HEAVY_HELD: a suite run under citadel-heavy has it set, and a job with it runs at once, never in line.
     // CITADEL_HEAVY_HERE: the repo has a citadel-heavy workflow, so a plain job would go to its CI runners (#1160) and never take this folder's slot.
-    const child = spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = tmp.spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     child.stderr!.on('data', (b) => (err += b));
     return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };
@@ -761,7 +762,7 @@ test('a deploy that doesn\'t come up healthy rolls back, and says so when the ro
   // 6 s of health checks, and another test file's server that was handed it answered them (#758).
   let up = true;
   const svc = createHttpServer((_req, res) => res.writeHead(up ? 200 : 503).end());
-  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  await tmp.serve(svc);
   // In a finally: a server left listening keeps the file, and the deploy lock, running forever (#377).
   try {
     const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
@@ -791,7 +792,7 @@ test("a deploy checks, as the person deploying, that the app installs as its own
     seen.push(req.headers['x-citadel-identity'] as string | undefined);
     res.end(req.url === `/apps/${name}/` ? '<link rel="manifest" href="/manifest.webmanifest">' : 'ok');
   });
-  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  await tmp.serve(svc);
   try {
     const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara', [], () => 'v1.signed.header');
@@ -823,7 +824,7 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     if (req.url === `${home}manifest.webmanifest`) return res.end(JSON.stringify(manifest));
     res.end('png');
   });
-  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  await tmp.serve(svc);
   try {
     const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     const icons: string[] = [], todos: string[][] = [], notes: string[] = [];
@@ -866,7 +867,7 @@ test('a deploy fills an empty rail icon from its manifest, and hands back what i
     res.statusCode = 404;
     res.end('no');
   });
-  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  await tmp.serve(svc);
   try {
     const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     const icons: string[] = [];
@@ -1054,7 +1055,7 @@ exit 0
     const db = existsSync(join(data, 'db.txt')) ? readFileSync(join(data, 'db.txt'), 'utf8') : '';
     res.writeHead(req.url === '/health' && !db.includes('GARBLED') ? 200 : 500).end();
   });
-  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  await tmp.serve(svc);
   const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
   const manifest = appManifest([], { health: '/health', migrations: ['migrate.sh'] });
   const db = () => readFileSync(join(data, 'db.txt'), 'utf8');

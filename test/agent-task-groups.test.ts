@@ -2,24 +2,18 @@
 // groups as it exits. A task whose first process has ended can leave the rest of its group running (`sleep 600 &`):
 // that group is still the agent's to end (#468 S09-5 review, Codex 1).
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { REPO, stopProcs, until } from './helpers.ts';
+import { REPO, tempRoot, until } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'agent-task-groups-'));
-const procs: ChildProcess[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
+const tmp = tempRoot('agent-task-groups-');
 let leftover = 0;
 after(async () => {
   if (leftover) try { process.kill(-leftover, 'SIGKILL'); } catch {}
-  await stopProcs(procs);
-  for (const s of servers) s.closeAllConnections(), s.close();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const alive = (pid: number) => {
@@ -32,9 +26,9 @@ const alive = (pid: number) => {
 };
 
 test('a task that has ended but left its group running is ended with the agent', { skip: process.platform === 'win32' }, async () => {
-  const ws = join(root, 'ws');
+  const ws = tmp.path('ws');
   mkdirSync(ws);
-  const config = join(root, 'machine-agent.json');
+  const config = tmp.path('machine-agent.json');
   writeFileSync(config, JSON.stringify({ workspaces: { w: { path: ws, tasks: { launch: { run: ['sh', '-c', `sleep 47 & echo "child $!"`] } } } } }));
   // An app that lends the workspace, then asks for the task once; the agent's answers come back on /send.
   const replies: any[] = [];
@@ -55,11 +49,8 @@ test('a task that has ended but left its group running is ended with the agent',
       res.writeHead(202).end('{}');
     });
   });
-  servers.push(srv);
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
-  const agent = spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), base, 'ccm_1_x', '--config', config], { stdio: ['ignore', 'pipe', 'pipe'] });
-  procs.push(agent);
+  const base = `http://127.0.0.1:${await tmp.serve(srv)}`;
+  const agent = tmp.spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), base, 'ccm_1_x', '--config', config], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   agent.stdout!.on('data', (d) => (out += d));
   agent.stderr!.on('data', (d) => (out += d));

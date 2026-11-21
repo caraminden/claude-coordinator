@@ -2,9 +2,7 @@
 // page on the server. The viewer answers only its own frames' sandboxed pages, the server only a person
 // whose viewer opened the same file the frame shows, and agents read and write only their scheme's pages.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -13,9 +11,10 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, ownPicture, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'artifact-bridge-'));
+const tmp = tempRoot('artifact-bridge-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -53,7 +52,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 /** The token path a person's viewer frames an artifact at, as the frame's page reports it. */
@@ -347,7 +346,7 @@ test("agents read and write their scheme's pages, by artifact or path, and no ot
 
 test('artifact_data is offered to minions and Taskmasters, and reads a page', async () => {
   const call = (role: string, msg: object, env: object = {}) => {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
     const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, ...msg }) + '\n');
     return reply.finally(() => child.kill());

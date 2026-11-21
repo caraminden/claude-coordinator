@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { after, test } from 'node:test';
-import { procsUnder, until } from './helpers.ts';
+import { procsUnder, tempRoot, until } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
 
 // tools/citadel-test (#641): a minion's own test files, run with the leak guard and a time limit, showing only the
@@ -12,8 +11,9 @@ import { scriptEnv } from './script-env.ts';
 const repo = join(import.meta.dirname, '..');
 const bin = join(repo, 'tools', 'citadel-test');
 // No NODE_TEST_CONTEXT, which makes a node --test inside a test skip its files. Its own TMPDIR: the log lands there, and the leak guard counts a process as leaked when it names a deleted folder in it.
-const tmp = mkdtempSync(join(tmpdir(), 'citadel-test-'));
-after(() => rmSync(tmp, { recursive: true, force: true }));
+const scratch = tempRoot('citadel-test-');
+const tmp = scratch.dir;
+after(() => scratch.teardown());
 
 function file(name: string, body: string): string {
   const path = join(tmp, name);
@@ -26,7 +26,7 @@ writeFileSync(noList, '# no repo-wide files\n');
 
 function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -68,8 +68,9 @@ test('--name keeps only the tests it matches', async () => {
 
 test('a hung test ends at the limit, named, with a line saying so, and what it started stops too', async () => {
   // Outside the run's TMPDIR, whose processes the leak guard kills: this one only the limit's group TERM stops.
-  const away = mkdtempSync(join(tmpdir(), 'citadel-test-away-'));
-  after(() => rmSync(away, { recursive: true, force: true }));
+  const awayRoot = tempRoot('citadel-test-away-');
+  const away = awayRoot.dir;
+  after(() => awayRoot.teardown());
   const worker = join(away, 'worker');
   const f = file(
     'hang.test.ts',

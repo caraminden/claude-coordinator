@@ -1,23 +1,14 @@
 // Two agents with the same token (#468 S09-3): the app keeps the newer and tells the older why it was dropped. The older
 // one must not reconnect at once, or the two drop each other once a second for as long as both run.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { REPO, stopProcs, until } from './helpers.ts';
+import { REPO, tempRoot, until } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'agent-replaced-'));
-const procs: ChildProcess[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
-after(async () => {
-  await stopProcs(procs);
-  for (const s of servers) s.closeAllConnections(), s.close();
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('agent-replaced-');
+after(() => tmp.teardown());
 
 /** An app whose first connect says hello and then that another agent took over; later connects just stay open. */
 async function replacingApp() {
@@ -33,15 +24,13 @@ async function replacingApp() {
     }
     res.writeHead(202).end('{}');
   });
-  servers.push(srv);
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  return { base: `http://127.0.0.1:${(srv.address() as AddressInfo).port}`, state };
+  const port = await tmp.serve(srv);
+  return { base: `http://127.0.0.1:${port}`, state };
 }
 
 async function run(args: string[]) {
   const app = await replacingApp();
-  const proc = spawn(process.execPath, [args[0], app.base, ...args.slice(1)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  procs.push(proc);
+  const proc = tmp.spawn(process.execPath, [args[0], app.base, ...args.slice(1)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   proc.stdout!.on('data', (d) => (out += d));
   proc.stderr!.on('data', (d) => (out += d));
@@ -58,7 +47,7 @@ test('a machine agent told another agent took over says so and does not reconnec
 });
 
 test('a runner agent told another agent took over says so and does not reconnect at once', async () => {
-  const tokenFile = join(root, 'token');
+  const tokenFile = tmp.path('token');
   writeFileSync(tokenFile, 'ccm_1_x\n');
   const { connects, out } = await run([join(REPO, 'public/runner-agent.mjs'), '--token-file', tokenFile]);
   assert.equal(connects, 1, out);

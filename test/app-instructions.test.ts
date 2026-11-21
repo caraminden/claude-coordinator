@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -9,11 +7,12 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { systemPrompt } from '../src/prompts.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
 
 // The Citadel-wide instructions (#148): one app-wide text with history, in every prompt right before
 // the scheme's own, and edited only by people and the Citadel scheme's Taskmaster.
-const root = mkdtempSync(join(tmpdir(), 'app-instructions-'));
+const tmp = tempRoot('app-instructions-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 
@@ -40,7 +39,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop(); // ends the server and its turns before the folder goes (#218)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const as = (id: number, method = 'GET', body?: object) =>
@@ -52,7 +51,7 @@ const as = (id: number, method = 'GET', body?: object) =>
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`'s Taskmaster. */
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, appTools: boolean): Promise<any> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
       COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'coordinator',

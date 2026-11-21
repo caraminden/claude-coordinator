@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
 // tools/citadel-app-heavy (#847): an app's way into the heavy slots, capped and one app at a time, on a throwaway lock folder.
 const tool = join(import.meta.dirname, '..', 'tools', 'citadel-app-heavy');
-const root = mkdtempSync(join(tmpdir(), 'app-heavy-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('app-heavy-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 const pressure = join(root, 'pressure');
 writeFileSync(pressure, 'some avg10=1.00 avg60=1.00 avg300=1.00 total=1\n');
+import { tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 let n = 0;
 function env(app: string, more: Record<string, string> = {}) {
@@ -39,10 +40,10 @@ test('a hold past the cap is stopped with 124 and told to split the work', () =>
 test('apps hold one slot between them: a second app waits outside the line, then runs', async () => {
   n++;
   const go = join(root, 'go'), aUp = join(root, 'a-up'), bUp = join(root, 'b-up');
-  const a = spawn(tool, ['sh', '-c', `touch '${aUp}'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`], { env: env('one'), stdio: 'ignore' });
+  const a = tmp.spawn(tool, ['sh', '-c', `touch '${aUp}'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`], { env: env('one'), stdio: 'ignore' });
   const aDone = new Promise((r) => a.on('close', r));
   await until('the first app to start', () => existsSync(aUp));
-  const b = spawn(tool, ['touch', bUp], { env: env('two'), stdio: ['ignore', 'ignore', 'pipe'] });
+  const b = tmp.spawn(tool, ['touch', bUp], { env: env('two'), stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   b.stderr!.on('data', (d) => (err += d));
   const bDone = new Promise((r) => b.on('close', r));

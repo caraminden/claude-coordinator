@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, stopTurns, testPins, until } from './helpers.ts';
+import { agentToken, bootServer, tempRoot, testPins, until } from './helpers.ts';
 testPins();
 
-const root = mkdtempSync(join(tmpdir(), 'approvals-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('approvals-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the children and the detached turns before the folder goes (#271)
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- rules and plugin folders ----------
@@ -135,12 +132,11 @@ const api = createServer(async (req, res) => {
   send(200, await cards.wait(TICKET, url.searchParams.get('id')!, 200));
 });
 // No top-level await: tests registered after one would run after the file's cleanup.
-const listening = new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-after(() => api.close());
+const listening = tmp.serve(api);
 
 async function mcpServer(approvals: boolean) {
   await listening;
-  const proc = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
+  const proc = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined,
       COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,

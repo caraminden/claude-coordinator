@@ -1,16 +1,13 @@
 // Claims (#921): the pipeline lane and any other single-holder duty, as rows any Taskmaster reads and takes.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Claims, claimName } from '../src/claims.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, stopProcs, stopTurns, type Booted } from './helpers.ts';
+import { agentToken, bootServer, tempRoot, type Booted } from './helpers.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
 function bare() {
@@ -105,7 +102,8 @@ test('claim names are hyphenated lowercase slugs', () => {
 });
 
 test('a holder whose work shipped passes its claim on as shipped when dismissed, which the estimate counts', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'claims-runner-'));
+  const scratch = tempRoot('claims-runner-');
+  const dir = scratch.dir;
   try {
     const store = new Store(join(dir, 'test.db'));
     const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
@@ -129,17 +127,13 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     assert.deepEqual(how(), [[a.id, 'live'], [b.id, 'dismissed']]);
     assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await scratch.teardown();
   }
 });
 
-const root = mkdtempSync(join(tmpdir(), 'claims-api-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('claims-api-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 let base = '';
 let cookie = '';
 let srv: Booted;
@@ -149,7 +143,7 @@ before(async () => {
   srv = await bootServer({ root, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
 });
 
 test('the Taskmaster claims the lane for a minion; minions only read; dismissing the holder frees it', async () => {
@@ -192,7 +186,7 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   assert.equal(freed.data.released.name, 'release-train');
 
   // A one-person scheme has no other Taskmasters, so its takes and releases leave no digest lines (R3: it stays as it was).
-  const digest = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  const digest = new DatabaseSync(join(root, 'data', 'coordinator.db'), { readOnly: true });
   const lines = (digest.prepare('SELECT text FROM taskmaster_digest WHERE project_id = ? ORDER BY id').all(p.id) as { text: string }[]).map((r) => r.text);
   digest.close();
   assert.deepEqual(lines, []);
@@ -253,11 +247,10 @@ test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets s
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: m } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'fix land.sh', title: 'Fix land.sh', properties: { type: 'chore' } } });
-  const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
+  const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
     env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id) },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
-  procs.push(mcp);
   const replies = new Map<number, (r: any) => void>();
   createInterface({ input: mcp.stdout! }).on('line', (l) => { const r = JSON.parse(l); replies.get(r.id)?.(r); });
   let next = 1;

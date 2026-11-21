@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
 import { isTurnNote } from '../src/codex.ts';
 import { TRIPWIRE_BLOCKS } from '../src/tripwire-blocks.ts';
+import { tempRoot } from './helpers.ts';
 
 // How the app behaves (the chat, links, the tripwire) is the same in every scheme, so the built-in
 // prompts say it; tools/deploy.sh, pending-deploy and previews only exist where the server runs the code.
+const tmp = tempRoot('app-facts-');
+after(() => tmp.teardown());
 const project = { id: 3, name: 'Delve', instructions: '', approval_rules: '' } as any;
 const minion = { id: 5, number: 5, title: 'T', kind: 'ticket', branch: 'ticket/5-t' } as any;
 const taskmaster = { ...minion, kind: 'coordinator' } as any;
@@ -32,7 +34,7 @@ test('deploy lines show only when the server runs the scheme', () => {
 /** The thread MCP server's tools, with or without COORDINATOR_DEPLOYS. */
 async function threadTools(deploys: boolean, more: Record<string, string> = {}): Promise<any[]> {
   const env: Record<string, string | undefined> = { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'x', COORDINATOR_PROJECT: '3', COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '5', COORDINATOR_DEPLOYS: deploys ? '1' : undefined, ...more };
-  const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], { env, stdio: ['pipe', 'pipe', 'inherit'] });
+  const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], { env, stdio: ['pipe', 'pipe', 'inherit'] });
   try {
     const reply = new Promise<any>((r) => createInterface({ input: mcp.stdout! }).once('line', (l) => r(JSON.parse(l))));
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) + '\n');

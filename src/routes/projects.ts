@@ -37,6 +37,7 @@ import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
+import { mailParksUnderOldRule } from '../rule-parks.ts';
 import { heldPlan, readVerdicts, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
 import { runDescribe } from '../review-describe.ts';
 import { postPlan } from '../plan-cards.ts';
@@ -991,6 +992,7 @@ export const projectRoutes: Route[] = [
         store.setProjectInstructions(project.id, instructions, session.name);
         await ownWrites(); // the decisions log is read from the new instructions (#1244)
         recheckDecisions(app, [store.getProject(project.id)!]);
+        mailParksUnderOldRule(app, [store.getProject(project.id)!], project.instructions, instructions, 'scheme');
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
           runner.emit(coordinator.id, 'note', { everyone: true,
@@ -1084,10 +1086,12 @@ export const projectRoutes: Route[] = [
       if (text.length > MAX_INSTRUCTIONS) {
         throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
       }
-      if (text !== store.appInstructions().text) {
+      const was = store.appInstructions().text;
+      if (text !== was) {
         store.setAppInstructions(text, session.name);
         await ownWrites(); // the decisions log, the broadcast and the reply read them back (#1244)
         recheckDecisions(app, store.listProjects());
+        mailParksUnderOldRule(app, store.listProjects(), was, text, `${APP_NAME}-wide`);
         // Every Taskmaster gets the line, since the text reaches every scheme.
         for (const p of store.listProjects()) {
           const coordinator = store.getOverlord(p.id);

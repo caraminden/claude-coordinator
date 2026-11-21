@@ -472,6 +472,8 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     ...(role ? [roleLine(role)] : []),
     ...(builds && project.builds !== 'off' && role !== 'person' ? [BUILDS_LINE] : []),
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
+    // #1488 (Cara, 2026-11-20: "I want to be able to just kick off as many minions as I want"; 2026-11-21: parks left under the old lane rule).
+    'Start every minion people ask for at once: the box paces turns, so limit heavy work (citadel-heavy), not starts. start_after is for code a minion needs, never for spacing; when a rule on the order of work changes, unpark minions parked only under the old one.',
     project.repo_dir
       ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir}, one folder per minion, named by an internal id, not its number: read_ticket shows each one's worktree. You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`
       : `This scheme has no git repo; each minion gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,

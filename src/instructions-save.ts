@@ -6,6 +6,7 @@ import { APP_NAME } from './appname.ts';
 import { recheckDecisions } from './decisions-load.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { RULE_HOMES } from './rule-homes.ts';
+import { mailParksUnderOldRule } from './rule-parks.ts';
 import { added, homeText, inSettingsHome, overlapsFor, readIn, schemeRules, section, settingsSources, type Overlap } from './rule-overlap.ts';
 import { ownWrites, type App } from './http.ts';
 import type { Project } from './db.ts';
@@ -27,6 +28,7 @@ export async function saveInstructions(app: App, ticketId: number, held: Omit<He
   await ownWrites(); // the decisions log and the broadcast read them back (#1244)
   recheckDecisions(app, citadel ? store.listProjects() : [store.getProject(held.project)!]);
   const where = citadel ? `${APP_NAME}-wide` : 'scheme';
+  mailParksUnderOldRule(app, citadel ? store.listProjects() : [store.getProject(held.project)!], held.old, held.text, where);
   const cut = (t: string) => (t.length > 2000 ? `${t.slice(0, 2000)}… (${t.length - 2000} more characters)` : t);
   const shown = held.edits.map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
   runner.emit(ticketId, 'note', { text: `Saved the ${where} Settings text as ${by}; it applies from each minion's next turn.\n${shown}` });

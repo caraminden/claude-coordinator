@@ -690,13 +690,27 @@ export class AppServices {
     if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
-    const quiet = action === 'start' ? null : await this.drain(row, action === 'stop');
+    // Held across the drain too, so a deploy that starts meanwhile is refused instead of stopped under.
+    this.busy.add(row.name);
     try {
-      await this.must(action, main);
+      const quiet = action === 'start' ? null : await this.drain(row, action === 'stop');
+      try {
+        await this.must(action, main);
+      } finally {
+        quiet?.release();
+      }
+      return { ...(await this.state(main)), waited: quiet?.said ?? null };
     } finally {
-      quiet?.release();
+      this.busy.delete(row.name);
     }
-    return { ...(await this.state(main)), waited: quiet?.said ?? null };
+  }
+
+  /** A deploy cut short twice may have died with the app drained and stopped: start its service (a no-op if it runs). */
+  async startAfterCut(row: ContraptionRow): Promise<boolean> {
+    const main = `${unitName(row.name)}.service`;
+    if (!(await this.owned(row.name)).includes(main)) return false;
+    await this.must('start', main);
+    return true;
   }
 
   /** Deploys running now, so a Citadel restart waits for them (runner.hostJobs). */

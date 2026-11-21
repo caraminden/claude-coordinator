@@ -1278,3 +1278,26 @@ test("a folder app (#1136): a ship that changes nothing in its folder holds its 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a deploy started while a stop or restart drains the app is refused, not stopped under (C1)', async () => {
+  appFolder('mandate');
+  const m = { ...row('mandate', 7341), repo: 'cara/mandate' } as ContraptionRow;
+  await services.install(m);
+  drainSpy(null, 150);
+  const acting = services.act(m, 'restart');
+  await new Promise((r) => setTimeout(r, 30));
+  assert.throws(() => services.deploy(m, 'Cara'), /being installed or deployed already/);
+  await acting;
+  services.drain = async () => ({ said: null, release: () => {} });
+});
+
+test('startAfterCut starts an installed app\'s service, and says no for one never installed (C2)', async () => {
+  appFolder('mandate');
+  const m = row('mandate', 7341);
+  assert.equal(await services.startAfterCut(m), false);
+  await services.install(m);
+  await services.act(m, 'stop');
+  const calls = fake.calls().length;
+  assert.equal(await services.startAfterCut(m), true);
+  assert.ok(fake.calls().slice(calls).some((c) => c.includes('start citadel-app-mandate.service')));
+});

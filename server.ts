@@ -1745,6 +1745,9 @@ server.on('listening', () => void services.interrupted().then((cut) => {
     if (!row) continue;
     if (d.resumed) {
       console.log(`${d.name}'s deploy was cut short by a restart twice: not starting it again.`);
+      // It may have died with the app stopped: start the units back up (a no-op when it runs).
+      void services.startAfterCut(row).then((started) => started && console.log(`${d.name}: started its service after the deploy was cut short twice.`),
+        (err) => console.error(`Couldn't start ${d.name} after its deploy was cut short twice:`, err.message));
       continue;
     }
     try {

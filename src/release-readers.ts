@@ -646,7 +646,7 @@ export class CiPackageReader implements Reader {
       const unpublished = (r: RunJobs) => !!t.desktop && this.cache.released(t, r) && !out(r);
       const publishFailed = (r: RunJobs) => unpublished(r) && !!this.d.desktop?.failed?.(t.projectId, t.desktop!.app, r.run.id);
       const tried = (r: RunJobs) => out(r) || failedShip(r) || publishFailed(r);
-      const was = (r: RunJobs) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), out(r) || !t.desktop ? file(r) : null, out(r) ? num.of(r) : null);
+      const was = (r: RunJobs) => runRelease(r, out(r) ? 'live' : 'failed', ch(r), out(r) || !t.desktop ? file(r) : null, num.of(r));
       // Held at last green's build by a roll back (ADR 0012): that build is what people get until the pin goes, and its
       // card's roll back line says what waits. A desktop app's pinned build is that only once its feed has it.
       const pinned = this.d.lastGreen?.pinned(t.projectId, t.id)?.build;

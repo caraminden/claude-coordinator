@@ -61,3 +61,21 @@ test('chips given while a turn runs come alive once it ends; a tapped one and ol
   await page.eval(`chat.push({ type: 'end', data: {} })`);
   assert.deepEqual(await chips(page), ['A:off', 'B:off', 'C:on']);
 });
+
+test('a turn cut off by a restart shows Retry, which sends RETRY_SAY and goes once the next turn starts (#1382)', { skip }, async () => {
+  const page = await browser.page(base, { width: 600, height: 500 });
+  const { RETRY_SAY } = await import('../public/ui/chat.js');
+  const cut = (retry: boolean) => `chat.push({ type: 'error', data: { code: 'interrupted', retry: ${retry}, message: 'Citadel restarted and cut this turn off before it finished.' } })`;
+  await page.eval(`chat.ask('tune it'); chat.push({ type: 'tool', data: { id: 't1', name: 'mcp__peek__view_clip', input: {}, parent: null } }); ${cut(true)}`);
+  assert.deepEqual(await chips(page), ['Retry:on']);
+  // The app's own reply chips can sit beside it: one tap turns them all off, so only one message goes.
+  await page.eval(`chat.replies([{ label: 'Skip it' }])`);
+  assert.deepEqual(await chips(page), ['Retry:on', 'Skip it:on']);
+  await page.eval(`document.querySelector('.cui-choice').click()`);
+  assert.deepEqual(await page.eval('said'), [RETRY_SAY]);
+  assert.deepEqual(await chips(page), ['Retry:off', 'Skip it:off']);
+  // The app sends it as the person's message: the cut turn's Retry goes. Cut again: no Retry (one per cut).
+  await page.eval(`chat.ask(said[0]); ${cut(false)}`);
+  assert.deepEqual(await chips(page), ['Skip it:off'], 'Retry goes; the older reply chip stays off, as older turns\' do');
+  assert.match(await page.eval<string>(`document.querySelector('.cui-turn:last-child .cui-notice').textContent`), /cut this turn off/);
+});

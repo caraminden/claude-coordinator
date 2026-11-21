@@ -95,6 +95,8 @@ function turnModel(turn, k, last, card) {
     } else if (e?.type === 'error') {
       ended = true;
       if (d.code === 'canceled') add({ kind: 'stopped' });
+      // Cut off by a restart (#1382): the newest turn offers Retry when the turn API does (not on a second cut in a row).
+      else if (d.code === 'interrupted' && d.retry === true && last) add({ kind: 'error', code: 'interrupted', message: String(d.message ?? ''), retry: true });
       else add({ kind: 'error', code: String(d.code ?? 'failed'), message: String(d.message ?? '') });
     } else if (e?.type === 'end') {
       ended = true;
@@ -155,13 +157,20 @@ function runHtml(b, o) {
   return `<div class="cui-run" data-state="${state}" data-key="${esc(b.id)}"><button type="button" class="cui-run-head" aria-expanded="${open}">${markHtml(state)}<span class="cui-run-label">${label}</span><span class="cui-chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button>${body}</div>`;
 }
 
+/** What Retry sends after a cut-off turn: the session's transcript holds the work so far, so the agent carries on from it. */
+export const RETRY_SAY = 'Your last turn was cut off before it finished. Carry on from where you were.';
+
 function blockHtml(b, o, streaming) {
   switch (b.kind) {
     case 'text': return `<div class="cui-md">${renderMarkdown(b.text, mdOpts(o.markdown, streaming))}</div>`;
     case 'steps': return runHtml(b, o);
     case 'card': return '<div class="cui-card"></div>';
     case 'stopped': return '<div class="cui-stopped">Stopped.</div>';
-    case 'error': return `<div class="cui-notice" data-tone="danger"><b>Couldn't finish:</b> ${esc(b.message || b.code)}</div>`;
+    case 'error': {
+      const notice = `<div class="cui-notice" data-tone="danger"><b>Couldn't finish:</b> ${esc(b.message || b.code)}</div>`;
+      // A live chat with onReply only: the tap sends RETRY_SAY as the person's message, in the same session.
+      return b.retry && o.retry ? `<div>${notice}<div class="cui-choices"><button type="button" class="cui-choice" data-say="${esc(RETRY_SAY)}">Retry</button></div></div>` : notice;
+    }
   }
   return '';
 }
@@ -303,7 +312,7 @@ export function mountChat(el, opts = {}) {
       n.el.append(n.reply);
       log.append(n.el);
     }
-    const o = { stepLabel: opts.stepLabel, now: Date.now(), open };
+    const o = { stepLabel: opts.stepLabel, now: Date.now(), open, retry: !!opts.onReply };
     t.blocks.forEach((b, i) => {
       let node = n.blocks.get(b.id);
       if (b.kind === 'text') {
@@ -394,7 +403,8 @@ export function mountChat(el, opts = {}) {
     }
     const chip = e.target.closest('.cui-choice[data-say]');
     if (chip && el.contains(chip) && !chip.disabled) {
-      for (const c of chip.parentElement.children) c.disabled = true;
+      // Every chip in the log, not just its row: a Retry and the app's reply chips can both be live (#1382).
+      for (const c of el.querySelectorAll('.cui-choice')) c.disabled = true;
       chip.setAttribute('aria-pressed', 'true');
       opts.onReply?.(chip.dataset.say);
     }

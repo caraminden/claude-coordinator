@@ -92,6 +92,11 @@ take().then((m) => {
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
+  // Cut off mid-tool-call (#1382): Claude Code's own SIGTERM handler exits 143; with no handler, the signal ends it.
+  if (prompt.includes('cut off') || prompt.includes('killed outright')) {
+    out({ type: 'assistant', message: { id: 'mc', content: [{ type: 'tool_use', id: 'c1', name: 'mcp__peek__view_clip', input: { capture: 'x' } }] } });
+    return setTimeout(() => (prompt.includes('cut off') ? process.exit(143) : process.kill(process.pid, 'SIGTERM')), 50);
+  }
   if (prompt.includes('refused')) {
     // A call refused before it reached the app (#624): the error the agent saw, as a string or as text blocks.
     out({ type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'r1', name: 'mcp__mandate__list', input: {} }, { type: 'tool_use', id: 'r2', name: 'mcp__mandate__list', input: {} }] } });
@@ -1145,4 +1150,41 @@ test('a limit after output is marked but not retried: the app never sees a reply
   const text = readdirSync(join(root, 'claude2', 'projects')).flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8'))).join('');
   assert.match(text, /hello again/, 'the session came along');
   caraOn = 1; caraSpare = false;
+});
+
+test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a second cut in a row offers none (#1382)', async () => {
+  const outcome = (evs: Ev[]) => store.getContraptionTurn(evs.find((e) => e.event === 'start')!.data.turn)!.outcome;
+  const cut = await turn(peek, { session: 'cut', prompt: 'cut off' });
+  assert.deepEqual(cut.map((e) => e.event), ['start', 'tool', 'error']);
+  assert.equal(errorOf(cut), 'interrupted');
+  assert.equal(cut.at(-1)!.data.retry, true, 'the first cut offers a retry');
+  assert.match(cut.at(-1)!.data.message, /cut off/);
+  assert.equal(outcome(cut), 'interrupted', 'the meter says interrupted, not failed');
+  // Cut again in the same session: one resume per kill, so no retry is offered and nothing loops.
+  const again = await turn(peek, { session: 'cut', prompt: 'cut off' });
+  assert.equal(errorOf(again), 'interrupted');
+  assert.equal(again.at(-1)!.data.retry, false);
+  // A turn that ends clears it: the next cut offers a retry again.
+  assert.equal((await turn(peek, { session: 'cut' })).at(-1)!.event, 'end');
+  assert.equal((await turn(peek, { session: 'cut', prompt: 'cut off' })).at(-1)!.data.retry, true);
+  // A fresh turn kept no session to carry on in (blind turns are fresh too): no retry, even the first time, so an app
+  // sending every turn fresh can't loop on it.
+  const fresh = await turn(peek, { session: 'cut-fresh', fresh: true, prompt: 'cut off' });
+  assert.equal(errorOf(fresh), 'interrupted');
+  assert.equal(fresh.at(-1)!.data.retry, false);
+  assert.match(fresh.at(-1)!.data.message, /start over/);
+  // Ended by the signal itself, with no exit code.
+  const sig = await turn(peek, { session: 'cut-sig', prompt: 'killed outright' });
+  assert.equal(errorOf(sig), 'interrupted');
+  // While Citadel shuts down for a restart, it says so.
+  turns.stopping = true;
+  try {
+    const restart = await turn(peek, { session: 'cut-restart', prompt: 'cut off' });
+    assert.equal(errorOf(restart), 'interrupted');
+    assert.match(restart.at(-1)!.data.message, /Citadel restarted/);
+  } finally {
+    turns.stopping = false;
+  }
+  // A cancel is still canceled, and a crash still failed.
+  assert.equal(errorOf(await turn(peek, { session: 'cut-crash', prompt: 'crash' })), 'failed');
 });

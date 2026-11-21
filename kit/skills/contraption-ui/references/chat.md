@@ -28,6 +28,8 @@ and "Done." never glue together; each run of tool calls between texts collapses 
 the step in hand while running ("**Moving “Dry cleaning”…** · step 2") and a count once done ("3 steps
 · 1 Grunt · 1 failed"), and opens on a tap; Grunts (Agent calls) show as their own rows holding their
 calls, with a clock, while they run; `canceled` shows "Stopped.", any other error a danger notice.
+A turn the turn API ends `interrupted` with `retry: true` (cut off by a Citadel restart) also gets
+a Retry chip under it when you pass `onReply`, which sends `RETRY_SAY` (a short "carry on") through it.
 It updates in place (text through `updateMarkdown`), so a selection, focus and an open row survive
 streaming; it stays at the end while the log grows (a `block` card filling in later) or its box
 shrinks (an undo bar, a phone keyboard), and only a person scrolling up (wheel, touch, keys, the

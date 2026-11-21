@@ -41,8 +41,8 @@ export type Block =
   | { id: string; kind: 'card'; tool: string; name: string; input: Record<string, unknown>; result?: BlockResult }
   /** The turn was canceled: "Stopped." */
   | { id: string; kind: 'stopped' }
-  /** The turn failed: a danger notice with the turn API's code and message. */
-  | { id: string; kind: 'error'; code: string; message: string };
+  /** The turn failed: a danger notice with the turn API's code and message. `retry`: the newest turn was cut off (`interrupted`) and may be sent again; a live chat with `onReply` shows a Retry chip that sends RETRY_SAY. */
+  | { id: string; kind: 'error'; code: string; message: string; retry?: true };
 
 export interface ChatItem {
   ask: string | null;
@@ -121,6 +121,9 @@ export function stepMark(state: StepState): HTMLSpanElement;
 
 /** Who a Grunt is, from its Agent call's input: its description, else its agent type, else "Grunt". */
 export function gruntName(input: unknown): string;
+
+/** What the Retry chip under a cut-off turn sends through onReply (#1382). */
+export const RETRY_SAY: string;
 
 /** Milliseconds as "41s" or "1m 12s". */
 export function duration(ms: number): string;

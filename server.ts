@@ -1785,6 +1785,7 @@ const SHUTDOWN_GRACE_MS = 5000;
 process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
   services.stopping = true;
+  contraptionTurns.stopping = true; // an app turn systemd's SIGTERM cuts off now says Citadel restarted (#1382)
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
   store.usage.flush();

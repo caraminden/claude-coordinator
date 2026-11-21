@@ -342,7 +342,7 @@ last event is always `end` or `error`, then the stream closes.
 | `compacted` | `{}`: the conversation was compacted |
 | `taken` | `{ id }`: the agent read a mid-turn message, `id` as its send returned |
 | `end` | `{ stop, usage: { input, output, cacheRead, cacheWrite }, provider, model }`; usage adds up every reply in the turn, and `model` is the full name the agent reported (`claude-haiku-…`), else as in `start` |
-| `error` | `{ code, message }`, `message` written for a person |
+| `error` | `{ code, message }`, `message` written for a person; `interrupted` adds `retry` (below) |
 
 A Grunt that starts its own Grunt shows that Agent call under its own row, but the inner Grunt's
 tool calls don't arrive.
@@ -356,11 +356,26 @@ tool calls don't arrive.
 | `busy` | A turn is already running in that session |
 | `timeout` | It ran past `timeoutSec` and was stopped |
 | `canceled` | You cancelled it, or hung up before it started |
+| `interrupted` | It was cut off from outside before it finished: a Citadel restart, or a stray SIGTERM to the agent. `retry: true` means send a turn in the same session to carry on; `false` means don't on your own: it was cut off twice in a row, or it was a fresh or blind turn with no session to carry on in (below) |
 | `failed` | Anything else (the agent ended without a reply; a preview copy of Citadel, which runs no turns) |
 
 **Hanging up** (closing the request) cancels the turn. **While your service restarts** (an
 install, deploy, rollback, stop or restart), new turns wait to start until it is back (after a
 deploy, until it passes its health check); running ones get up to 3 minutes to finish before the restart goes ahead and cuts them (tested).
+
+**Cut off: `interrupted`.** A Citadel restart (a deploy of Citadel itself) stops every agent with it, and
+a stray SIGTERM can stop one at any time. The turn then ends with `error` `interrupted`, not `failed`,
+and the work so far stays in the session's transcript. With `retry: true`, send a turn in the same
+session to carry on: a short "Your last turn was cut off before it finished. Carry on from where you
+were." (the chat part's `RETRY_SAY`) works better than sending the first prompt again, which the
+agent would see twice. Show a Retry, or retry once on your own; never more. `retry` is `false` when
+the session's previous turn was cut off too, so an app that retries by itself can't loop: say so and
+leave it to the person. Any other ending resets it. A `fresh` or `blind` turn kept no session, so its
+`retry` is always `false`: offer to send the whole prompt again, never by itself (tested). If Citadel
+goes down before it can send the event, your stream just closes without an `end` or `error`: Citadel
+can't count those, so your server must: treat one as `interrupted` with `retry: true` only if that
+session's last turn didn't end cut off or closed the same way. In `ui/chat.js`, a mounted chat with `onReply` shows a Retry chip under the newest
+cut-off turn that sends `RETRY_SAY` through `onReply`, as reply chips do (tested in a browser).
 
 ### Cancel: `POST /api/contraptions/turns/<turn>/cancel`
 
@@ -1065,6 +1080,9 @@ red would hold a real release. So name what your updater gates on.
 
 Newest first.
 
+- **2026-11-20:** A turn cut off by a Citadel restart or a stray SIGTERM ends with `error` `interrupted`
+  and `retry`, not `failed` ("Cut off: `interrupted`"); `ui/chat.js` shows a Retry chip for it and
+  exports `RETRY_SAY`.
 - **2026-11-20:** An app restart no longer leaves pages stale: an open `EventSource` waits for your
   server and then reconnects by itself instead of getting a 502, and a page load while you're down gets
   a kit-styled "Can't reach" page with Retry that reloads once you're back ("Requests from browsers").

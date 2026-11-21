@@ -42,6 +42,11 @@ const CODEX_FILES = ['codex-turn.ts', 'codex-lock.ts', 'codex.ts', 'tripwire.ts'
 
 /** A contraption session's Codex thread while its turns run on Codex: dropped on the first Claude turn after, or a fresh session. */
 const codexKey = (c: number, person: number, session: string) => `codex:contraption:${c}:${person}:${session}`;
+/**
+ * Set while a session's newest turn ended `interrupted` (#1382): the next cut in a row offers no retry, so an app that
+ * retries on its own can't loop (one resume per kill, as #1364's minion turns). A setting, so it outlives the restart that cut it.
+ */
+const cutKey = (c: number, person: number, session: string) => `cut:contraption:${c}:${person}:${session}`;
 interface CodexSession {
   thread: string | null;
 }
@@ -69,7 +74,7 @@ export function machinesPrompt(machines: PersonMachine[]): string {
 
 export { args, mcpConfig, settings, toolNamesPrompt, userLine };
 
-export type TurnErrorCode = 'not_enabled' | 'no_plan' | 'limit' | 'busy' | 'timeout' | 'canceled' | 'bad_request' | 'failed';
+export type TurnErrorCode = 'not_enabled' | 'no_plan' | 'limit' | 'busy' | 'timeout' | 'canceled' | 'interrupted' | 'bad_request' | 'failed';
 
 export class TurnError extends Error {
   code: TurnErrorCode;
@@ -273,6 +278,8 @@ export class ContraptionTurns {
   private holds = new Map<number, { count: number; open: Promise<void>; release: () => void }>();
   /** A preview (a copy of the data) never runs turns. */
   noTurns = false;
+  /** The server got SIGTERM (a restart): a turn cut off now says Citadel restarted. Set by server.ts. */
+  stopping = false;
   /** The person's own machines online now (#306), and the address their proxies reach Citadel at: set by server.ts. */
   machines: (person: number) => PersonMachine[] = () => [];
   apiUrl = () => '';
@@ -482,6 +489,9 @@ export class ContraptionTurns {
       rmSync(dir.onHost, { recursive: true, force: true });
       if (blind) this.dropBlind(req.person, blind, at);
       this.store.endContraptionTurn(id, outcome, usage);
+      const cut = cutKey(c.id, req.person, req.session);
+      if (outcome === 'interrupted') this.store.setSetting(cut, true);
+      else if (this.store.getSetting<boolean>(cut)) this.store.deleteSetting(cut);
       const a = live.audit;
       if (a) this.store.putTurnAudit(id, { model: a.model, blind: req.blind, images: req.imageBlocks?.length ?? 0, system: clip(a.system), prompt: clip(a.prompt), output: clip(a.output) });
     }
@@ -749,12 +759,16 @@ export class ContraptionTurns {
     });
     child.stderr!.setEncoding('utf8');
     child.stderr!.on('data', (chunk: string) => (stderr = (stderr + chunk).slice(-2000)));
+    let signal: NodeJS.Signals | null = null;
     const code = await new Promise<number | null>((resolve) => {
       child.on('error', (err) => {
         stderr += err.message;
         resolve(null);
       });
-      child.on('close', (n) => resolve(n));
+      child.on('close', (n, sig) => {
+        signal = sig;
+        resolve(n);
+      });
     });
     clearTimeout(timer);
     if (!codex) this.claude.ran?.(req.person, appWarmKey(c.id, req.session), place.account ?? 1);
@@ -809,6 +823,20 @@ export class ContraptionTurns {
     if (!codex && isAuthFailure(why)) {
       if (!place.host || (place.account ?? 1) > 1) this.claude.expire(req.person, place.account);
       return error('no_plan', 'This person\'s Claude sign-in was refused: they need to link it again in Citadel');
+    }
+    // SIGTERM from outside the turn (#1382): a Citadel restart (systemd stops every process of the service, claude
+    // with it, while the server lingers a few seconds), or a stray `pkill`. Its work so far is in the session's
+    // transcript, so the app can send a turn in it to carry on. `retry` says that holds: false on a second cut in a
+    // row (cutKey), so an app retrying by itself can't loop, and on a fresh or blind turn, which kept no session.
+    if (code === 143 || signal === 'SIGTERM') {
+      const twice = !!this.store.getSetting<boolean>(cutKey(c.id, req.person, req.session));
+      const retry = !req.fresh && !twice;
+      emit('error', {
+        code: 'interrupted', retry,
+        message: `${this.stopping ? 'Citadel restarted and cut this turn off' : 'The turn was cut off from outside Citadel'} before it finished. ${retry
+          ? 'Its work so far is kept in the session: send it again to carry on.' : twice ? 'It was cut off twice in a row, so try again in a minute.' : 'Send it again to start over.'}`,
+      });
+      return { outcome: 'interrupted', usage };
     }
     return error('failed', `${codex ? 'Codex' : 'Claude'} ended without a reply (exit ${code ?? 'unknown'})${why ? `: ${why.split('\n').filter(Boolean).at(-1)!.slice(0, 300)}` : ''}`);
   }
@@ -888,6 +916,7 @@ export class ContraptionTurns {
     if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
     this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
     this.store.deleteContraptionSession(c.id, person, name);
+    this.store.deleteSetting(cutKey(c.id, person, name));
     dropKeptSession(keptDir(this.dataDir, c), person, name);
     return 'deleted';
   }

@@ -1,6 +1,7 @@
 {
   "exports": {
     "chat.js": [
+      "RETRY_SAY",
       "chatModel",
       "duration",
       "gruntName",

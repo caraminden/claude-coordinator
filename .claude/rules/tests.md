@@ -20,5 +20,5 @@ count rises. Write the right-hand column instead.
   then check the first one stayed quiet. A fixed idle proves nothing and costs its whole length.
 - A real timer a test waits on gets a setting the test turns down; a sleep over 100 ms means the code needs a knob.
 - The one escape is `// timing-ok: <why>` on the row or the row above. It is counted in the baseline too.
-- Fixing or marking one: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON. The number only goes down.
+- A count above the baseline fails; a drop passes with a note. Lower the baseline after a fix: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON.
 - Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.

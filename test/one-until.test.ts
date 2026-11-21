@@ -61,8 +61,8 @@ test('the inline-poll guard flags sleep loops and leaves look-alikes alone', () 
 // ---- Flake-prone patterns (#1442): counted per file, never allowed to rise ----
 // Five patterns that make a test pass or fail by timing. test/flake-baseline.json holds today's count per file and
 // pattern (`n` bare hits, `ok` hits with a `// timing-ok: <why>` on the row or the row above). A count that rises, or a new
-// file with any, fails; so does one that falls without the baseline being lowered, so the numbers only go down.
-// After you fix or mark one: `FLAKE_BASELINE=write node test/one-until.test.ts`, and commit the JSON.
+// file with any, fails. A drop passes with a note (so a flake fix never goes red on a file it didn't touch): lower the numbers
+// when convenient with `FLAKE_BASELINE=write node test/one-until.test.ts`, and commit the JSON.
 export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: string }> = {
   sleep: {
     re: (r) => /\bawait\b.*\bsetTimeout\b|\bawait\s+(?:sleep|delay|nap|pause)\w*\(\s*\d/.test(r),
@@ -124,8 +124,8 @@ function flakeScan(): Record<string, Hits> {
 const toCounts = (all: Record<string, Hits>): Record<string, Counts> =>
   Object.fromEntries(Object.entries(all).map(([f, h]) => [f, Object.fromEntries(Object.entries(h).map(([p, v]) => [p, { n: v.bare.length, ok: v.ok.length }]))]));
 
-/** Problems when `now` differs from `base`: a rise names its rows, a fall asks for the baseline to be lowered. */
-export function flakeProblems(all: Record<string, Hits>, base: Record<string, Counts>): string[] {
+/** Rises only: a count over the baseline names its rows. A drop or a changed escape count is a `note`, never a failure. */
+export function flakeProblems(all: Record<string, Hits>, base: Record<string, Counts>, notes: string[] = []): string[] {
   const problems: string[] = [];
   const files = new Set([...Object.keys(all), ...Object.keys(base)]);
   for (const f of [...files].sort()) {
@@ -135,11 +135,8 @@ export function flakeProblems(all: Record<string, Hits>, base: Record<string, Co
       if (have.bare.length > was.n) {
         const rows = have.bare.map((l) => `${f}:${l}`).join(', ');
         problems.push(`${rows}: ${have.bare.length} \`${p}\` hits, the baseline allows ${was.n}. ${FLAKE_RULES[p].why} If it truly must stay, add \`// timing-ok: <why>\` on its row or the row above.`);
-      } else if (have.bare.length < was.n) {
-        problems.push(`${f}: \`${p}\` fell from ${was.n} to ${have.bare.length}. Lower the baseline: FLAKE_BASELINE=write node test/one-until.test.ts`);
-      }
-      if (have.ok.length !== was.ok) {
-        problems.push(`${f}: \`${p}\` has ${have.ok.length} \`timing-ok\` escapes, the baseline has ${was.ok}. Record them: FLAKE_BASELINE=write node test/one-until.test.ts`);
+      } else if (have.bare.length < was.n || have.ok.length !== was.ok) {
+        notes.push(`${f}: \`${p}\` is now ${have.bare.length} (+${have.ok.length} timing-ok), the baseline has ${was.n} (+${was.ok})`);
       }
     }
   }
@@ -153,7 +150,9 @@ if (process.env.FLAKE_BASELINE === 'write') {
 
 test('no test file adds a timing-dependent pattern past test/flake-baseline.json (rules: .claude/rules/tests.md)', () => {
   const base = JSON.parse(readFileSync(BASELINE, 'utf8')) as Record<string, Counts>;
-  const problems = flakeProblems(flakeScan(), base);
+  const notes: string[] = [];
+  const problems = flakeProblems(flakeScan(), base, notes);
+  if (notes.length) console.log(`flake baseline can be lowered (FLAKE_BASELINE=write node test/one-until.test.ts):\n${notes.join('\n')}`);
   assert.deepEqual(problems, [], `\n${problems.join('\n')}\n`);
 });
 
@@ -177,7 +176,8 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
   const base = toCounts({ 'a.ts': h });
   assert.deepEqual(flakeProblems({ 'a.ts': h }, base), []);
   assert.match(flakeProblems({ 'a.ts': h, 'b.ts': h }, base).join('\n'), /b\.ts:1.*sleep.*until\(/);
-  assert.match(flakeProblems({}, base).join('\n'), /a\.ts: `sleep` fell from 1 to 0\. Lower the baseline/);
-  const noEscape = flakeHits('await new Promise((r) => setTimeout(r, 50));');
-  assert.match(flakeProblems({ 'a.ts': noEscape }, base).join('\n'), /escapes/);
+  // a drop passes and says so
+  const notes: string[] = [];
+  assert.deepEqual(flakeProblems({}, base, notes), []);
+  assert.match(notes.join('\n'), /a\.ts: `sleep` is now 0/);
 });

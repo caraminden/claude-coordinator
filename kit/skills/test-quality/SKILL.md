@@ -57,7 +57,7 @@ Each passes whatever the code does. Fix any you write; flag any you review.
 ## Timing patterns that flake
 
 Pass or fail should never depend on how fast the box is. Five patterns do exactly that; write the
-right-hand side. (Citadel guards them with a per-file count that only goes down:
+right-hand side. (Citadel guards them with a per-file count that may not rise:
 `.claude/rules/tests.md`.)
 
 - A bare sleep: wait on the thing's done signal with one shared `until`, never the first sign of it.

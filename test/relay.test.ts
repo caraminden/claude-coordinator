@@ -5,8 +5,9 @@ import { createServer, request, type IncomingHttpHeaders } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
-import { bootServer, freePort, type Booted } from './helpers.ts';
+import { bootServer, tempRoot, type Booted } from './helpers.ts';
 
+const tmp = tempRoot('relay-');
 let srv: Booted;
 let mandatePub = '';
 let peekKey = '';
@@ -34,13 +35,12 @@ const relay = (path: string, init: RequestInit & { headers?: Record<string, stri
 const error = async (res: Response) => [res.status, (await res.json()).error];
 
 before(async () => {
-  const port = await freePort();
-  await new Promise<void>((r) => stub.listen(port, '127.0.0.1', r));
+  const port = await tmp.serve(stub);
   srv = await bootServer({ env: { CITADEL_RELAY_TIMEOUT_MS: '400' } });
   const mandate = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port, relay_paths: ['/app-api/'] });
   assert.equal(mandate.status, 201, JSON.stringify(mandate.data));
   assert.deepEqual(mandate.data.relay_paths, ['/app-api/']);
-  const peek = await srv.call('/api/contraptions', { name: 'peek', title: 'Peek Auras', port: await freePort() });
+  const peek = await srv.call('/api/contraptions', { name: 'peek', title: 'Peek Auras', port: await tmp.down() });
   assert.deepEqual(peek.data.relay_paths, [], 'nothing is callable until a contraption opts in');
   mandatePub = readFileSync(join(mandate.data.keys_dir, 'identity.pub'), 'utf8');
   mandateKey = readFileSync(join(mandate.data.keys_dir, 'contraption.key'), 'utf8');
@@ -53,8 +53,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop();
-  stub.closeAllConnections();
-  stub.close();
+  await tmp.teardown();
 });
 
 test('the target gets a fresh identity signed with its own key that names the caller, and nothing the caller forged', async () => {
@@ -129,7 +128,7 @@ test('relay paths are edited like open paths', async () => {
 
 test('a target that is down is a 502, one that never answers a 504 once its timeout passes', { timeout: 30_000 }, async () => {
   assert.equal((await relay('mandate/app-api/hang')).status, 504);
-  const down = await srv.call('/api/contraptions', { name: 'down', title: 'Down', port: await freePort(), relay_paths: ['/'] });
+  const down = await srv.call('/api/contraptions', { name: 'down', title: 'Down', port: await tmp.down(), relay_paths: ['/'] });
   assert.equal((await srv.call(`/api/contraptions/down/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
   assert.equal(down.status, 201);
   assert.deepEqual(await error(await relay('down/anything')), [502, 'Down is not answering']);

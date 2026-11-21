@@ -1,14 +1,4 @@
 {
- "access-matrix.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
-  "freePort": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "agent-replaced.test.ts": {
   "shortUntil": {
    "n": 1,
@@ -31,12 +21,6 @@
    "ok": 0
   }
  },
- "app-hosts.test.ts": {
-  "freePort": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "app-instructions.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -44,14 +28,6 @@
   }
  },
  "app-restart-stream.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
-  "freePort": {
-   "n": 5,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 2,
    "ok": 0
@@ -120,16 +96,12 @@
   }
  },
  "chunked-uploads.test.ts": {
-  "freePort": {
-   "n": 1,
+  "sleep": {
+   "n": 2,
    "ok": 0
   },
   "rmTemp": {
-   "n": 2,
-   "ok": 0
-  },
-  "sleep": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   },
   "shortUntil": {
@@ -138,16 +110,12 @@
   }
  },
  "ci-store.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "sleep": {
    "n": 2,
    "ok": 0
   },
   "freePort": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },
@@ -235,16 +203,6 @@
    "ok": 0
   }
  },
- "contraption-read.test.ts": {
-  "freePort": {
-   "n": 4,
-   "ok": 0
-  },
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "contraption-tools.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -319,16 +277,6 @@
    "ok": 0
   }
  },
- "fcm.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
-  "freePort": {
-   "n": 4,
-   "ok": 0
-  }
- },
  "frame-protocol-browser.test.ts": {
   "sleep": {
    "n": 1,
@@ -337,7 +285,7 @@
  },
  "fresh-session.test.ts": {
   "sleep": {
-   "n": 8,
+   "n": 1,
    "ok": 0
   }
  },
@@ -466,7 +414,7 @@
  "land-train.test.ts": {
   "sleep": {
    "n": 3,
-   "ok": 0
+   "ok": 1
   }
  },
  "land.test.ts": {
@@ -536,10 +484,6 @@
   }
  },
  "machines-tailnet.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "freePort": {
    "n": 1,
    "ok": 0
@@ -562,16 +506,6 @@
  "make-app.test.ts": {
   "rmTemp": {
    "n": 1,
-   "ok": 0
-  }
- },
- "mandate-items.test.ts": {
-  "freePort": {
-   "n": 3,
-   "ok": 0
-  },
-  "rmTemp": {
-   "n": 2,
    "ok": 0
   }
  },
@@ -802,10 +736,6 @@
   }
  },
  "proxy-retry.test.ts": {
-  "freePort": {
-   "n": 3,
-   "ok": 0
-  },
   "sleep": {
    "n": 3,
    "ok": 0
@@ -871,12 +801,6 @@
    "ok": 0
   }
  },
- "relay.test.ts": {
-  "freePort": {
-   "n": 3,
-   "ok": 0
-  }
- },
  "release-key-cards.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -930,12 +854,8 @@
   }
  },
  "restart-gap.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "freePort": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   },
   "sleep": {
@@ -944,12 +864,8 @@
   }
  },
  "restart-hold.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "freePort": {
-   "n": 7,
+   "n": 6,
    "ok": 0
   },
   "sleep": {
@@ -1067,6 +983,12 @@
   "rmTemp": {
    "n": 1,
    "ok": 0
+  }
+ },
+ "settled.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
   }
  },
  "shared-pins.test.ts": {

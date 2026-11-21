@@ -2,21 +2,19 @@
 // (src/relay.ts schemeHook). A stand-in Mandate records what it's sent; a stand-in `claude -p` calls
 // mandate_item's route mid-turn with its thread token, as the MCP tool does.
 import assert from 'node:assert/strict';
-import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { messagePerson } from '../src/access.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, freePort, jsonLines, stopProcs, until, type Booted, stopTurns, testPins } from './helpers.ts';
+import { bootServer, jsonLines, tempRoot, until, type Booted, testPins } from './helpers.ts';
 testPins();
 
-const root = mkdtempSync(join(tmpdir(), 'mandate-items-'));
-const procs: ChildProcess[] = [];
+const tmp = tempRoot('mandate-items-');
+const root = tmp.dir;
 
 // Each turn runs the calls in plan-<ticket id>.json, then logs what came back.
 const fakeClaude = join(root, 'claude-fake');
@@ -85,16 +83,15 @@ const said = async (id: number) => ((await srv.call(`/api/tickets/${id}/events?a
   .map((e) => e.kind === 'user_message' && JSON.parse(e.data)).filter((d) => d && d.author === 'Mandate').map((d) => d.text);
 
 before(async () => {
-  const port = await freePort();
-  await new Promise<void>((r) => mandate.listen(port, '127.0.0.1', r));
+  const port = await tmp.serve(mandate);
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
   writeFileSync(join(root, 'api'), srv.base);
   const m = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port });
   assert.equal(m.status, 201);
   mandateKey = readFileSync(join(m.data.keys_dir, 'contraption.key'), 'utf8');
   mandatePub = readFileSync(join(m.data.keys_dir, 'identity.pub'), 'utf8');
-  const peek = await srv.call('/api/contraptions', { name: 'peek', title: 'Peek', port: await freePort() });
+  const peek = await srv.call('/api/contraptions', { name: 'peek', title: 'Peek', port: await tmp.down() });
   peekKey = readFileSync(join(peek.data.keys_dir, 'contraption.key'), 'utf8');
   cara = (await srv.call('/api/me')).data.id;
   for (const name of ['mandate', 'peek']) assert.equal((await srv.call(`/api/contraptions/${name}/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
@@ -103,11 +100,7 @@ before(async () => {
   await idle(minion.id);
 });
 after(async () => {
-  await stopProcs(procs);
-  mandate.closeAllConnections();
-  mandate.close();
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown(); // ends the server and its detached turns before deleting their folders (#271)
 });
 
 test("a turn answering Cara's typed message puts the item straight in her Mandate, signed for the scheme, and Mandate's answer comes back", async () => {
@@ -214,15 +207,16 @@ test("in a split scheme a tick on a Taskmaster's item reaches the ticker's own T
 });
 
 test('scheme-<number> names are kept for schemes', async () => {
-  const r = await srv.call('/api/contraptions', { name: 'scheme-12', title: 'Sneaky', port: await freePort() });
+  const r = await srv.call('/api/contraptions', { name: 'scheme-12', title: 'Sneaky', port: await tmp.down() });
   assert.equal(r.status, 400);
   assert.match(r.data.error, /reserved/);
 });
 
 // Which turns may post (Runner.typedBy): only one answering one person's own typed message.
 test('typedBy: a typed message is its person\'s; GitHub, relays, contraption asks and two typists are no one\'s; a typed steer counts', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'typed-by-'));
-  after(() => rmSync(dir, { recursive: true, force: true }));
+  const typed = tempRoot('typed-by-');
+  const dir = typed.dir;
+  after(() => typed.teardown());
   // Turn n replies once release-<n> is in its folder, and exits at the end of its input.
   const hold = join(dir, 'claude-hold');
   writeFileSync(hold, `#!${process.execPath}

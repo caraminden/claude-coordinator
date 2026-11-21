@@ -3,17 +3,16 @@
 // Google is never called: unit tests hand Fcm a fake fetch, and the real server's test points at a local stub.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, request, type IncomingMessage } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Fcm, fcmMessage, parsePush } from '../src/fcm.ts';
 import { HttpError } from '../src/http.ts';
-import { bootServer, freePort, type Booted } from './helpers.ts';
+import { bootServer, tempRoot, type Booted } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'fcm-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('fcm-');
+const root = tmp.dir;
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 
@@ -167,23 +166,21 @@ const citadel = () => `127.0.0.1:${port}`;
 const pushApi = (body: unknown, bearer = key) => ask(citadel(), 'POST', '/api/contraptions/push', { Authorization: `Bearer ${bearer}` }, body);
 
 before(async () => {
-  const gPort = await freePort();
-  await new Promise<void>((r) => google.listen(gPort, '127.0.0.1', r));
+  const gPort = await tmp.serve(google);
   account(join(home, '.config', 'citadel-android'), `http://127.0.0.1:${gPort}/token`);
   srv = await bootServer({ root: join(root, 'srv'), env: { APPS_DOMAIN: DOMAIN, HOME: home, CITADEL_FCM_API: `http://127.0.0.1:${gPort}` } });
   port = Number(new URL(srv.base).port);
-  const made = await srv.call('/api/contraptions', { name: 'stub', title: 'Stub', port: await freePort() });
+  const made = await srv.call('/api/contraptions', { name: 'stub', title: 'Stub', port: await tmp.down() });
   assert.equal(made.status, 201, JSON.stringify(made.data));
   key = readFileSync(join(made.data.keys_dir, 'contraption.key'), 'utf8');
-  assert.equal((await srv.call('/api/contraptions', { name: 'other', title: 'Other', port: await freePort() })).status, 201);
+  assert.equal((await srv.call('/api/contraptions', { name: 'other', title: 'Other', port: await tmp.down() })).status, 201);
   cara = (await srv.call('/api/me')).data.id;
   assert.equal((await srv.call('/api/people', { name: 'Olive' })).data.person.login, 'olive');
   assert.equal((await srv.call(`/api/contraptions/stub/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
 });
 after(async () => {
   await srv?.stop();
-  google.closeAllConnections();
-  google.close();
+  await tmp.teardown();
 });
 
 /** A cc_app cookie for Cara on the stub's host, through the real handoff. */
@@ -253,7 +250,7 @@ test('the send API: dead tokens are dropped, other failures kept, a bad body is 
 test('without the key file the send API answers 503 naming where it goes', async () => {
   const bare = await bootServer({ root: join(root, 'bare'), env: { HOME: join(root, 'bare-home') } });
   try {
-    const made = await bare.call('/api/contraptions', { name: 'stub', title: 'Stub', port: await freePort() });
+    const made = await bare.call('/api/contraptions', { name: 'stub', title: 'Stub', port: await tmp.down() });
     const k = readFileSync(join(made.data.keys_dir, 'contraption.key'), 'utf8');
     const res = await fetch(`${bare.base}/api/contraptions/push`, { method: 'POST', headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'cara', title: 'x' }) });
     assert.equal(res.status, 503);

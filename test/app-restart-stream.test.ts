@@ -3,64 +3,58 @@
 // friendly down page, not a bare 502. The EventSource is Node's own (undici's, the WHATWG one, behind a flag), run in
 // a child process, so the test proves what a browser does with the proxy's answers rather than assuming it.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { appDown } from '../src/apps.ts';
 import { forward } from '../src/proxy.ts';
-import { bootServer, fakeSystemd, freePort, until, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, tempRoot, until, type Booted } from './helpers.ts';
 
-const servers: Server[] = [];
-const children: ChildProcess[] = [];
+const tmp = tempRoot('app-restart-stream-');
+const root = tmp.dir;
+const rebound: Server[] = []; // an app that comes back on the port it had: the one thing tmp.serve (port 0) can't do
 let srv: Booted | undefined;
-const root = mkdtempSync(join(tmpdir(), 'app-restart-stream-'));
 after(async () => {
-  for (const c of children) c.kill();
-  for (const s of servers) {
+  for (const s of rebound) {
     s.closeAllConnections();
     s.close();
   }
   await srv?.stop();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const listen = (s: Server, port: number) => new Promise<Server>((ok) => s.listen(port, '127.0.0.1', () => ok(s)));
 
 /** The fake app: /x is an event stream that says which run of the app it is, then stays open. */
-function app(port: number, run: number): Promise<Server> {
-  const s = createServer((req, res) => {
+function appServer(run: number): Server {
+  return createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
     res.write(`data: run ${run}\n\n`);
   });
-  servers.push(s);
-  return listen(s, port);
 }
 
 /** Citadel's side, with a short stream hold so the test also sees the "come back" answer. */
+/** Returns the port it listens on. */
 async function front(appPort: number, failed: string[] = []) {
   const s = createServer((req, res) => forward(req, res, appPort, '/x', { ...req.headers }, { what: 'App', retryMs: 300, streamHoldMs: 1000, failed: (st, note) => failed.push(`${st} ${note ?? ''}`) }));
-  servers.push(s);
-  return listen(s, await freePort());
+  return tmp.serve(s);
 }
 
 test('an EventSource open across an app restart longer than the hold reconnects and gets the new run, never closing for good', async () => {
-  const appPort = await freePort();
-  const first = await app(appPort, 1);
+  const first = appServer(1);
+  const appPort = await tmp.serve(first);
   const failed: string[] = [];
-  const proxy = await front(appPort, failed);
-  const url = `http://127.0.0.1:${(proxy.address() as { port: number }).port}/x`;
+  const proxyPort = await front(appPort, failed);
+  const url = `http://127.0.0.1:${proxyPort}/x`;
   // The interval keeps the child alive while it waits to reconnect, as an open tab is (undici's wait doesn't).
   const script = `setInterval(() => {}, 1000);
 const es = new EventSource(${JSON.stringify(url)});
 es.onopen = () => console.log('open');
 es.onmessage = (e) => console.log('message ' + e.data);
 es.onerror = () => console.log('error ' + es.readyState);`;
-  const child = spawn(process.execPath, ['--experimental-eventsource', '--no-warnings', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
-  children.push(child);
+  const child = tmp.spawn(process.execPath, ['--experimental-eventsource', '--no-warnings', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
   const lines: string[] = [];
   child.stdout!.setEncoding('utf8').on('data', (d: string) => lines.push(...d.split('\n').filter(Boolean)));
   await until('the first run\'s event', () => lines.includes('message run 1'), 10_000);
@@ -69,7 +63,7 @@ es.onerror = () => console.log('error ' + es.readyState);`;
   first.closeAllConnections();
   await new Promise<void>((ok) => first.close(() => ok()));
   await until('the proxy to tell the stream to come back', () => lines.filter((l) => l === 'open').length >= 2, 15_000, () => lines.join(' | '));
-  await app(appPort, 2);
+  rebound.push(await listen(appServer(2), appPort));
   await until('the second run\'s event', () => lines.includes('message run 2'), 15_000);
 
   // readyState 2 is CLOSED: what a 502 does to an EventSource, which then never asks again.
@@ -78,9 +72,9 @@ es.onerror = () => console.log('error ' + es.readyState);`;
 });
 
 test('a stream to an app that is down gets an empty 200 stream with retry once the hold is up, not a 502', async () => {
-  const proxy = await front(await freePort());
+  const proxyPort = await front(await tmp.down());
   const t = Date.now();
-  const res = await fetch(`http://127.0.0.1:${(proxy.address() as { port: number }).port}/x`, { headers: { Accept: 'text/event-stream' } });
+  const res = await fetch(`http://127.0.0.1:${proxyPort}/x`, { headers: { Accept: 'text/event-stream' } });
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
   assert.equal(await res.text(), 'retry: 3000\n\n');
@@ -88,13 +82,11 @@ test('a stream to an app that is down gets an empty 200 stream with retry once t
 });
 
 test('a stream to an app still warming up (it answers 503) is told to come back too, and the 503 is counted', async () => {
-  const appPort = await freePort();
   const warming = createServer((req, res) => res.writeHead(503, { 'Content-Type': 'text/plain' }).end('warming up'));
-  servers.push(warming);
-  await listen(warming, appPort);
+  const appPort = await tmp.serve(warming);
   const failed: string[] = [];
-  const proxy = await front(appPort, failed);
-  const res = await fetch(`http://127.0.0.1:${(proxy.address() as { port: number }).port}/x`, { headers: { Accept: 'text/event-stream' } });
+  const proxyPort = await front(appPort, failed);
+  const res = await fetch(`http://127.0.0.1:${proxyPort}/x`, { headers: { Accept: 'text/event-stream' } });
   assert.equal(res.status, 200);
   assert.equal(await res.text(), 'retry: 3000\n\n');
   assert.deepEqual(failed, ['503 ']);
@@ -118,7 +110,7 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
   mkdirSync(units, { recursive: true });
   writeFileSync(join(units, 'citadel-app-fixture.service'), '# Written by Citadel for contraption fixture.\n');
   srv = await bootServer({ root, env: { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), CITADEL_SYSTEMCTL: fake.bin, CITADEL_JOURNALCTL: fake.journal } });
-  const port = await freePort();
+  const port = await tmp.down();
   assert.equal((await srv.call('/api/contraptions', { name: 'fixture', title: 'Fixture', port })).status, 201);
   const me = (await srv.call('/api/me')).data.id;
   assert.equal((await srv.call(`/api/contraptions/fixture/people/${me}`, { enabled: true }, 'PUT')).status, 200);
@@ -147,5 +139,5 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
     }
   };
   await until('the page load and the fetch counted', () => rows().reduce((n, r) => n + Number(r.count), 0) >= 2);
-  assert.deepEqual(rows(), [{ key: '502 GET /apps/fixture/ (not answering: ECONNREFUSED)', count: 2 }]);
+  assert.deepEqual(rows(), [{ key: '502 GET /apps/fixture/ (not answering: ECONNRESET)', count: 2 }]);
 });

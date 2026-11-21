@@ -1,26 +1,28 @@
 // An app restarting behind the proxy (#1118): its requests wait for it instead of getting a 502, and a dead app still
 // fails fast. A fixture app is closed and opened again on the same port under a stream of requests.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { HOLD_MS, RestartHolds } from '../src/apps.ts';
 import { forward } from '../src/proxy.ts';
 import { FakeClock } from './fake-clock.ts';
-import { bootServer, fakeSystemd, freePort, until, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, freePort, tempRoot, until, type Booted } from './helpers.ts';
 
 const servers: Server[] = [];
 let srv: Booted | undefined;
-const root = mkdtempSync(join(tmpdir(), 'restart-hold-'));
+const tmp = tempRoot('restart-hold-');
+const root = tmp.dir;
+// The fixture app's port and the "dead app" ports below stay on freePort: the hold decides an app is back by connecting to its
+// port, so the port must be refused (not accepted and reset, as tmp.down() would) and the app must be able to listen on it again.
 after(async () => {
   for (const s of servers) {
     s.closeAllConnections();
     s.close();
   }
   await srv?.stop();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 /** The fixture app: answers 200 with the body it got. */
@@ -50,9 +52,7 @@ async function proxy(holds: RestartHolds, port: number, retryMs = 0, held: Recor
     forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: h ? 0 : retryMs });
   }));
   servers.push(s);
-  const p = await freePort();
-  await new Promise<void>((ok) => s.listen(p, '127.0.0.1', () => ok()));
-  return `http://127.0.0.1:${p}`;
+  return `http://127.0.0.1:${await tmp.serve(s)}`;
 }
 
 const ask = async (url: string, init?: RequestInit) => {

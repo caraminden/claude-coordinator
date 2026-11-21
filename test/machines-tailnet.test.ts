@@ -1,21 +1,20 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, freePort, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
+import { bootServer, freePort, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
 // but agents.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'machines-tailnet-'));
+const tmp = tempRoot('machines-tailnet-');
+const root = tmp.dir;
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const { fakeClaude, turns, startMachineAgent } = machineFakes(root, procs);
@@ -28,6 +27,7 @@ let srv: Booted;
 const call = async (path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.call(path, opts.body || undefined, opts.method ?? 'GET'));
 
 before(async () => {
+  // The server listens on the MACHINES_URL it is given and can't report a port of its own, so this one is picked up front.
   agentBase = `http://127.0.0.1:${await freePort()}`;
   srv = await bootServer({ root, env: { MACHINES_URL: agentBase, CLAUDE_BIN: fakeClaude }, stdout: true });
   base = srv.base;

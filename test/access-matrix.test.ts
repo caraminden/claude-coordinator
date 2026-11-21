@@ -4,25 +4,22 @@
 // UPDATE_ACCESS_MATRIX=1 to add its block, and read the 8 answers before committing them. Never
 // rewrite the snapshot to turn a changed answer green without knowing why it changed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { Route } from '../src/http.ts';
-import { bootServer, freePort, PASSWORD, SECRET, stopTurns } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot } from './helpers.ts';
 
 const SNAPSHOT = join(import.meta.dirname, 'access-matrix.snapshot.json');
-const root = mkdtempSync(join(tmpdir(), 'access-matrix-'));
+const tmp = tempRoot('access-matrix-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+after(() => tmp.teardown()); // ends the detached turns before deleting their folders (#271)
 
 // The world, made before the server starts: two schemes, each with a Taskmaster, and two minions in A.
 const store = new Store(join(data, 'coordinator.db'));
@@ -49,7 +46,8 @@ store.syncArtifacts(M1, [{ path: 'report.md', size: 1, mtime: 1 }]);
 const ART = store.listArtifacts(A.id)[0];
 store.setArtifactPinned(ART.id, 'Cara');
 
-const servicePort = await freePort();
+const service = createServer((_req, res) => res.end('ok')); // a contraption's service: answers everything
+const servicePort = await tmp.serve(service);
 const CX = new Contraptions(store, SECRET, join(data, 'contraptions')).register({
   name: 'cx', title: 'CX', port: servicePort, icon: null, home_scheme: null, open_paths: '["/link"]', default_model: null, turn_cap: null,
 });
@@ -152,10 +150,7 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   };
   const [member, outsider] = [await invited('Max'), await invited('Olive')];
   store.addMember(A.id, member.id);
-  // A contraption whose service answers everything, enabled for the admin.
-  const service = createServer((_req, res) => res.end('ok'));
-  await new Promise<void>((r) => service.listen(servicePort, '127.0.0.1', r));
-  after(() => service.close());
+  // A contraption whose service (above) answers everything, enabled for the admin.
   store.setContraptionUser(CX.id, store.findUser('name', 'Cara')!.id, true, null);
   const callers: Record<string, Record<string, string>> = {
     anon: {}, person: { Cookie: srv.cookie }, member: { Cookie: member.cookie }, outsider: { Cookie: outsider.cookie },

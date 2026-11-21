@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, test } from 'node:test';
@@ -11,12 +10,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { AUDIENCE, CiStore, ISSUER, RULES, RunTokens, sweepPlan, uploadAsk } from '../src/ci-store.ts';
 import { Store } from '../src/db.ts';
 import { publish } from '../src/apk-release.ts';
-import { bootServer, freePort, until } from './helpers.ts';
+import { bootServer, freePort, tempRoot, until } from './helpers.ts';
 
 // The CI store (#658, src/ci-store.ts): who may upload (GitHub's run token), what an upload leaves on disk and in
 // ci_files, what the rules delete and never delete, and how members read it back.
-const root = mkdtempSync(join(tmpdir(), 'ci-store-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('ci-store-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 const github = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const other = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -308,7 +308,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     writeFileSync(join(work, 'app.apk'), 'apk from the script');
     // Not spawnSync: the stand-in servers answer from this process.
     const job = (args: string[], env: Record<string, string> = {}) => new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
-      const p = spawn('bash', [SCRIPT, ...args], {
+      const p = tmp.spawn('bash', [SCRIPT, ...args], {
         cwd: work,
         env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
       });
@@ -347,7 +347,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     // shows on the Numbers tab's series as a step once it has held for three runs.
     const NUMBERS = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store', 'ci-numbers.sh');
     const numbers = (args: string[]) => new Promise<{ status: number | null; stdout: string }>((done) => {
-      const p = spawn('bash', [NUMBERS, ...args], { cwd: work, env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret' } });
+      const p = tmp.spawn('bash', [NUMBERS, ...args], { cwd: work, env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret' } });
       let stdout = '';
       p.stdout.on('data', (d) => (stdout += d));
       p.on('close', (status) => done({ status, stdout }));
@@ -385,7 +385,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     // A contraption reads its home scheme's files with its key (#665), and no other scheme's.
     const elsewhere = (await srv.call('/api/projects', { name: 'Elsewhere', source: 'none' })).data;
     const register = async (name: string, home: number) => {
-      const r = await srv.call('/api/contraptions', { name, title: name, port: await freePort(), home_scheme: home });
+      const r = await srv.call('/api/contraptions', { name, title: name, port: await tmp.serve(createServer((_req, res) => res.writeHead(404).end())), home_scheme: home });
       assert.equal(r.status, 201, JSON.stringify(r.data));
       return { Authorization: `Bearer ${readFileSync(join(srv.data, 'contraptions', name, 'contraption.key'), 'utf8')}` };
     };
@@ -472,7 +472,7 @@ test('over HTTP: a job uploads at the machines address only, and the scheme\'s m
     const pullDir = join(root, 'pull');
     mkdirSync(pullDir, { recursive: true });
     const pull = (args: string[], env: Record<string, string> = {}) => new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
-      const p = spawn('bash', [DOWNLOAD, ...args], {
+      const p = tmp.spawn('bash', [DOWNLOAD, ...args], {
         cwd: pullDir,
         env: { PATH: process.env.PATH!, RUNNER_TEMP: pullDir, CITADEL_STORE_URL: srv.base, CI_DOWNLOAD_WAIT: '0', ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(tokens.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
       });

@@ -1,33 +1,27 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { Agent, createServer as createHttpServer, request, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { bootServer, freePort, testPins } from './helpers.ts';
+import { bootServer, freePort, tempRoot, testPins } from './helpers.ts';
 
 const { MCP_SERVER } = testPins();
 
 // While the server restarts, a turn keeps running: its MCP calls wait for the next server, and the
 // old one finishes what it can within a few seconds instead of dropping requests.
-const root = mkdtempSync(join(tmpdir(), 'restart-gap-'));
-const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill('SIGKILL');
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('restart-gap-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 /** A thread's MCP server pointed at `port`, and a way to call its tools. */
 function threadMcp(port: number) {
-  const mcp = spawn(process.execPath, [MCP_SERVER], {
+  const mcp = tmp.spawn(process.execPath, [MCP_SERVER], {
     env: { PATH: process.env.PATH, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '7' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
-  procs.push(mcp);
   const replies = new Map<number, (r: any) => void>();
   createInterface({ input: mcp.stdout! }).on('line', (l) => {
     const r = JSON.parse(l);
@@ -41,22 +35,26 @@ function threadMcp(port: number) {
   };
 }
 
-function listen(port: number, handler: Parameters<typeof createHttpServer>[0]): Promise<Server> {
+async function listen(handler: Parameters<typeof createHttpServer>[0]): Promise<Server> {
   const api = createHttpServer(handler);
-  return new Promise((r) => api.listen(port, '127.0.0.1', () => r(api)));
+  await tmp.serve(api);
+  return api;
 }
 
 test('an MCP call made while the server is down goes through once the next one is up', async () => {
+  // Left on freePort on purpose: the MCP must see ECONNREFUSED (a refused connect is retried, a reset one is not, as the next test
+  // shows), so the port has to be closed, not held by a listener that resets.
   const port = await freePort();
   const call = threadMcp(port);
   const result = call('set_thread_status', { note: 'still going' });
   // timing-ok: setup pacing only. If the box is slow and the server comes up first, the call just goes through on its first try; nothing asserts how long this took.
   await new Promise((r) => setTimeout(r, 700)); // the first try was refused and the retry (after 500 ms) is pending
   const seen: string[] = [];
-  const api = await listen(port, (req, res) => {
+  const api = createHttpServer((req, res) => {
     seen.push(`${req.method} ${req.url}`);
     req.resume().on('end', () => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'));
   });
+  await new Promise<void>((r) => api.listen(port, '127.0.0.1', r));
   try {
     const r = await result;
     assert.ok(!r.isError, JSON.stringify(r));
@@ -68,7 +66,7 @@ test('an MCP call made while the server is down goes through once the next one i
 
 test('a write cut off mid-request is not sent again, as it may have run', async () => {
   let seen = 0;
-  const api = await listen(0, (req) => {
+  const api = await listen((req) => {
     seen++;
     req.socket.destroy();
   });
@@ -84,7 +82,7 @@ test('a write cut off mid-request is not sent again, as it may have run', async 
 test('on SIGTERM the server ends its event streams and exits within the grace period', async () => {
   const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
   const { base, cookie, proc: server } = await bootServer({ root, log, env: { TURN_UNITS: '0' } });
-  procs.push(server);
+  tmp.track(server);
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(health.interruptible, 0);
   const stream = await fetch(`${base}/api/stream`, { headers: { Cookie: cookie } });
@@ -111,15 +109,10 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
     socket.pipe(socket);
   });
-  const contraptionPort = await freePort();
-  await new Promise<void>((r) => contraption.listen(contraptionPort, '127.0.0.1', r));
-  after(() => {
-    contraption.closeAllConnections();
-    contraption.close();
-  });
+  const contraptionPort = await tmp.serve(contraption);
   const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
   const { base, cookie, call, proc: server } = await bootServer({ root: mkdtempSync(join(root, 'ws-')), log, env: { TURN_UNITS: '0' } });
-  procs.push(server);
+  tmp.track(server);
   const made = await call('/api/contraptions', { name: 'stub', title: 'Stub', port: contraptionPort, open_paths: ['/ws'] });
   assert.equal(made.status, 201, JSON.stringify(made.data));
 

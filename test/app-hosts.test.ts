@@ -10,10 +10,11 @@ import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
-import { bootServer, freePort, type Booted } from './helpers.ts';
+import { bootServer, tempRoot, type Booted } from './helpers.ts';
 
 const DOMAIN = 'apps.test';
 const APP = `stub.${DOMAIN}`;
+const tmp = tempRoot('app-hosts-');
 let srv: Booted;
 let port = 0;
 let pub = '';
@@ -81,8 +82,7 @@ async function enter(): Promise<string> {
 }
 
 before(async () => {
-  const stubPort = await freePort();
-  await new Promise<void>((r) => stub.listen(stubPort, '127.0.0.1', r));
+  const stubPort = await tmp.serve(stub);
   srv = await bootServer({ env: { APPS_DOMAIN: DOMAIN } });
   port = Number(new URL(srv.base).port);
   citadel = `127.0.0.1:${port}`;
@@ -98,8 +98,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop();
-  stub.closeAllConnections();
-  stub.close();
+  await tmp.teardown();
 });
 
 test("on Citadel's host a contraption's page goes to its own host with a sign-in token; nothing reaches the contraption there", async () => {

@@ -2,18 +2,16 @@
 // serves /app-api/read; a stand-in `claude -p` calls contraption_read's route mid-turn with its thread token,
 // as the MCP tool does.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
-import { bootServer, freePort, jsonLines, stopProcs, until, stopTurns, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, tempRoot, until, type Booted } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'contraption-read-'));
-const procs: ChildProcess[] = [];
+const tmp = tempRoot('contraption-read-');
+const root = tmp.dir;
 
 // Each turn runs the calls in plan.json, then logs what came back.
 const fakeClaude = join(root, 'claude-fake');
@@ -81,19 +79,17 @@ async function turn(plan: object[], start: () => Promise<unknown> = () => srv.ca
 }
 
 before(async () => {
-  const port = await freePort();
-  await new Promise<void>((r) => mandate.listen(port, '127.0.0.1', r));
-  const peekPort = await freePort();
-  await new Promise<void>((r) => peek.listen(peekPort, '127.0.0.1', r));
+  const port = await tmp.serve(mandate);
+  const peekPort = await tmp.serve(peek);
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
   writeFileSync(join(root, 'api'), srv.base);
   const m = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port });
   assert.equal(m.status, 201);
   mandatePub = readFileSync(join(m.data.keys_dir, 'identity.pub'), 'utf8');
   mandateKey = readFileSync(join(m.data.keys_dir, 'contraption.key'), 'utf8');
   assert.equal((await srv.call('/api/contraptions', { name: 'peek', title: 'Peek', port: peekPort })).status, 201);
-  assert.equal((await srv.call('/api/contraptions', { name: 'shut', title: 'Shut', port: await freePort() })).status, 201);
+  assert.equal((await srv.call('/api/contraptions', { name: 'shut', title: 'Shut', port: await tmp.down() })).status, 201);
   cara = (await srv.call('/api/me')).data.id;
   for (const name of ['mandate', 'peek']) assert.equal((await srv.call(`/api/contraptions/${name}/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
   project = (await srv.call('/api/projects', { name: 'P' })).data;
@@ -101,13 +97,7 @@ before(async () => {
   await idle();
 });
 after(async () => {
-  await stopProcs(procs);
-  for (const s of [mandate, peek]) {
-    s.closeAllConnections();
-    s.close();
-  }
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 test("a turn answering Cara's typed message lists and runs Mandate's read commands as her, signed for the scheme", async () => {
@@ -185,10 +175,10 @@ test('the contraption_read tool lists commands, quotes answers, says when an app
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(r));
     });
   });
-  const port = await freePort();
-  await new Promise<void>((r) => api.listen(port, '127.0.0.1', r));
+  const tool = tempRoot('contraption-read-tool-');
+  const port = await tool.serve(api);
   const call = async (args: object) => {
-    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+    const child = tool.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_ROLE: 'thread' },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -207,7 +197,6 @@ test('the contraption_read tool lists commands, quotes answers, says when an app
     assert.equal(await call({ app: 'peek' }), 'peek offers no read commands: it has no /app-api/read.');
     assert.match(await call({ app: 'shut' }), /Cara doesn't have Shut enabled/);
   } finally {
-    api.closeAllConnections();
-    api.close();
+    await tool.teardown();
   }
 });

@@ -12,12 +12,13 @@ import { ChunkedUploads, CHUNK_SIZE } from '../src/chunked-uploads.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, freePort, type Booted } from './helpers.ts';
+import { bootServer, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
 const DOMAIN = 'apps.test';
 const APP = `stub.${DOMAIN}`;
-const root = mkdtempSync(join(tmpdir(), 'chunked-'));
+const tmp = tempRoot('chunked-');
+const root = tmp.dir;
 const home = join(root, 'home');
 let srv: Booted;
 let port = 0;
@@ -59,8 +60,7 @@ function ask(host: string, method: string, path: string, headers: Record<string,
 }
 
 before(async () => {
-  const stubPort = await freePort();
-  await new Promise<void>((r) => stub.listen(stubPort, '127.0.0.1', r));
+  const stubPort = await tmp.serve(stub);
   srv = await bootServer({ root, env: { APPS_DOMAIN: DOMAIN, HOME: home, UPLOAD_FLOOR_GB: '0' } });
   port = Number(new URL(srv.base).port);
   const made = await srv.call('/api/contraptions', { name: 'stub', title: 'Stub', port: stubPort });
@@ -71,9 +71,7 @@ before(async () => {
 });
 after(async () => {
   await srv?.stop();
-  stub.closeAllConnections();
-  stub.close();
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 test('a big file goes into the shared folder in chunks, resuming after a connection breaks off mid-chunk', async () => {

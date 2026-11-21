@@ -31,6 +31,7 @@
 //             the fix's source change was undone. Weaker evidence: the kept hunk may be the fix itself, and a red
 //             may come from a half-undone change that no longer loads (read its failing test names).
 //   skipped   every test in them was skipped (none ran)
+//   error     the runner failed with no failing test (not the 5-min cut), or git did: no evidence
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -72,12 +73,13 @@ type Plan = {
 function plan(args: string[]) {
   const opt = (name: string, dflt: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
   const since = opt('--since', '2026-11-01'), size = Number(opt('--batch', '25')), out = resolve(opt('--out', 'fix-replay'));
+  if (!Number.isInteger(size) || size < 1) throw new Error(`--batch must be a whole number above 0, not ${opt('--batch', '')}`);
   const spec = opt('--spec', join(process.env.HOME ?? '', '.local/share/claude-coordinator/projects/2/shared/project/specs/review-heat-map.md'));
   // Areas only rank the report; without the heat map every fix gets '(no area)'.
   if (!existsSync(spec) || !loadAreas(spec)) console.error(`fix-replay: no areas read from ${spec}, so every fix is '(no area)'`);
   const repo = git('.', 'rev-parse', '--show-toplevel');
   const exists = new Set(git(repo, 'ls-files').split('\n'));
-  // Every commit's files since a week before, for the sibling lookup.
+  // Every commit's files since the cutoff, for the sibling lookup too (a test-first commit before it is missed).
   const log = git(repo, 'log', '--no-merges', `--since=${since}`, '--format=%x00%H%x09%cI%x09%s', '--name-only', 'HEAD');
   const commits = log.split('\0').filter(Boolean).map((chunk) => {
     const [head, ...files] = chunk.split('\n').filter(Boolean);
@@ -117,11 +119,20 @@ function plan(args: string[]) {
   console.log(`${plans.length} fix commits since ${since} in ${n} batches of ${size} (${out}); tests: own ${by('own')}, sibling ${by('sibling')}, none ${by('none')}; no source: ${plans.filter((p) => !p.src.length).length}`);
 }
 
+// What a run says about the fix. Red needs a failing test (or the 5-min cut: a hang that came back) with the fix undone
+// and a passing one without it; a runner that died with nothing failing is an error, not evidence.
+export function verdict(undone: Pick<Run, 'code' | 'pass' | 'fail'>, clean?: Pick<Run, 'code' | 'pass' | 'fail'>) {
+  if (undone.code === 0) return undone.pass + undone.fail === 0 ? 'skipped' : 'green';
+  if (!undone.fail && undone.code !== 124) return 'error';
+  if (!clean) return 'needs-clean';
+  return clean.code === 0 && clean.pass > 0 ? 'red' : 'red-both';
+}
+
 type Run = { code: number | null; pass: number; fail: number; skipped: number; failed: string[]; secs: number; tail?: string };
 function runTests(cwd: string, files: string[]): Run {
   const started = Date.now();
   const conc = String(Math.max(1, Math.floor(availableParallelism() / 2)));
-  const r = spawnSync('timeout', ['300', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000',
+  const r = spawnSync('timeout', ['-k', '10', '300', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000',
     `--test-concurrency=${conc}`, '--test-global-setup=test/leak-guard.ts', ...files],
   { cwd, encoding: 'utf8', maxBuffer: 256 << 20, env: { ...process.env, CITADEL_HEAVY_HELD: '1' } });
   const out = (r.stdout ?? '') + (r.stderr ?? '');
@@ -153,8 +164,8 @@ function run(args: string[]) {
     if (!p.src.length) { say({ ...head, outcome: 'no-source' }); continue; }
     if (!p.tests.length) { say({ ...head, outcome: 'no-test', src: p.src }); continue; }
     const wt = join(scratch, `wt${k++}`);
-    git(repo, 'worktree', 'add', '--detach', '--quiet', wt, base);
     try {
+      git(repo, 'worktree', 'add', '--detach', '--quiet', wt, base);
       // A whole undo first; when it conflicts, a partial one: -X ours keeps today's code in the clashing hunks only.
       let rev = gitTry(wt, 'revert', '--no-commit', '--no-edit', p.sha);
       const restoreTests = () => {
@@ -189,17 +200,17 @@ function run(args: string[]) {
       const stat = git(wt, 'diff', '--cached', '--shortstat', base);
       // The tests that exist today; a test file the fix deleted again since is gone already.
       const tests = p.tests.filter((f) => existsSync(join(wt, f)));
+      // None left: node --test with no files would run the whole of test/.
+      if (!tests.length) { say({ ...head, outcome: 'no-test', src: p.src, gone: p.tests }); continue; }
       // FIX_REPLAY_DRY=1 stops before the tests: the undo alone is cheap git, fine on perigee, and sorts out no-apply.
       if (process.env.FIX_REPLAY_DRY) { say({ ...head, outcome: pre + 'applies', share, conflicts, undo: stat, changedSrc, tests }); continue; }
       const undone = runTests(wt, tests);
-      let outcome: string, clean: Run | undefined;
-      if (undone.pass + undone.fail === 0 && undone.code === 0) outcome = 'skipped';
-      else if (undone.code === 0) outcome = 'green';
-      else {
+      let outcome = verdict(undone), clean: Run | undefined;
+      if (outcome === 'needs-clean') {
         // Red with the fix undone: is it green on today's tree? Only then does red mean the tests guard the fix.
         git(wt, 'reset', '--hard', '--quiet', base);
         clean = runTests(wt, tests);
-        outcome = clean.code === 0 ? 'red' : 'red-both';
+        outcome = verdict(undone, clean);
       }
       say({ ...head, outcome: pre + outcome, share, conflicts, undo: stat, changedSrc, undone, clean, secs: Math.round((Date.now() - t0) / 1000) });
     } catch (e: any) {
@@ -214,7 +225,7 @@ function run(args: string[]) {
 
 function tally(files: string[]) {
   const rows = files.flatMap((f) => readFileSync(f, 'utf8').split('\n'))
-    .map((l) => l.replace(/^.*?FIXREPLAY /, (m) => (m.endsWith('FIXREPLAY ') ? '' : m))).filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+    .filter((l) => l.includes('FIXREPLAY {')).flatMap((l) => { try { return [JSON.parse(l.slice(l.indexOf('FIXREPLAY {') + 10))]; } catch { return []; } });
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
   console.log(JSON.stringify({ total: rows.length, ...counts }));

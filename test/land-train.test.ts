@@ -378,7 +378,7 @@ test('a bisect run killed from outside twice before any test failed refuses nobo
 
 // #1393: a rerun alone killed from outside gives that file no label, but the confirmed failure still names its suspect.
 test('a file whose rerun alone was killed from outside names no suspect: only the confirmed failure\'s ship is refused', async () => {
-  const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', 'red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'killed-rerun' });
+  const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', '// red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'killed-rerun' });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red/);
   assert.equal(done[3].status, 1, done[3].stderr);

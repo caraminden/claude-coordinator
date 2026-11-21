@@ -9,12 +9,13 @@ import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
 import { SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial } from '../src/seam-trial.ts';
-import { jsonLines, lines, stopTurns, testPins, until } from './helpers.ts';
+import { jsonLines, lines, settled, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'fresh-session-'));
 after(async () => {
   await stopTurns(root);
+  await settled(); // a turn's session save still writing state.db would make the delete fail (ENOTEMPTY)
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
@@ -309,9 +310,9 @@ test('a fresh start that cannot run a turn gives up once, not every minute', asy
   runner.placeFor = () => ({ refused: 'No Claude login for this turn.' });
   try {
     runner.freshSweep(now);
-    await new Promise((r) => setTimeout(r, 50)); // its lane frees up
+    await runner.onLane(id, 'the test', () => {}); // its lane frees up: the refused start has run
     runner.freshSweep(now + 60_000);
-    await new Promise((r) => setTimeout(r, 50));
+    await runner.onLane(id, 'the test', () => {});
   } finally {
     runner.placeFor = undefined;
   }
@@ -373,9 +374,8 @@ test('61k of context: an idle Taskmaster hands off, one whose turn just ended do
     await started(working);
     await endTurn(working, 'ok');
     await waitIdle(working);
-    // Its save, after which a fresh start would run: a worker thread that takes most of a second on a loaded box.
-    await until('its save', () => store.getSetting(`saving:${working}`) == null);
-    await new Promise((r) => setTimeout(r, 100));
+    // Its save (a worker thread that takes most of a second on a loaded box), after which a fresh start would already have begun.
+    await settled();
     assert.equal(runner.isRunning(working), false);
     assert.equal(runner.view(store.getTicket(working)!).fresh_pending, false);
     // The same 61k, once it has sat idle, does hand off.
@@ -398,8 +398,7 @@ test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does 
     await started(small);
     await endTurn(small, 'ok');
     await waitIdle(small);
-    await until('its save', () => store.getSetting(`saving:${small}`) == null); // after which a fresh start would run
-    await new Promise((r) => setTimeout(r, 100));
+    await settled(); // its save, after which a fresh start would already have begun
     assert.equal(runner.isRunning(small), false);
     assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
 
@@ -433,8 +432,7 @@ test("a minion's turn past 150k never hands off", async () => {
     await started(t.id);
     await endTurn(t.id, 'ok');
     await waitIdle(t.id);
-    await until('its save', () => store.getSetting(`saving:${t.id}`) == null); // after which a fresh start would run
-    await new Promise((r) => setTimeout(r, 100));
+    await settled(); // its save, after which a fresh start would already have begun
     assert.equal(runner.isRunning(t.id), false);
     assert.equal(store.getSetting(`fresh:${t.id}`), null);
   } finally {
@@ -515,8 +513,7 @@ test('a failed handoff that leaves it big does not loop; the next real turn hand
     await started(id);
     await endTurn(id, 'ok');
     await waitIdle(id);
-    await until('its save', () => store.getSetting(`saving:${id}`) == null); // after which another fresh start would run
-    await new Promise((r) => setTimeout(r, 100));
+    await settled(); // its save, after which a fresh start would already have begun
     assert.equal(runner.isRunning(id), false);
     assert.equal(callCount(), count + 2, 'the turn and the handoff, and nothing after');
     assert.equal(store.getTicket(id)!.session_id, null);
@@ -609,7 +606,7 @@ test('seam trial: a handoff with carry_on false, or one whose minion waits on pe
     if (wait === 'state') store.updateTicket(id, { state: 'ready' });
     await endTurn(id, 'ok');
     await waitIdle(id);
-    await new Promise((r) => setTimeout(r, 200));
+    await settled(); // its save, after which a fresh start would already have begun
     assert.equal(store.getTicket(id)!.session_id, null, wait);
     assert.equal(runner.isRunning(id), false, wait);
     assert.equal(callCount(), count, wait);

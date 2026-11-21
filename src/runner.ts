@@ -23,6 +23,7 @@ import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, typ
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
+import { track } from './settled.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
@@ -1387,11 +1388,11 @@ export class Runner {
    */
   saveIdleSession(ticketId: number, configDir: string): Promise<void> | null {
     if (this.lanes.busy(ticketId)) return null;
-    return this.lanes.run(ticketId, 'session sweep', () => {
+    return track('session saves', this.lanes.run(ticketId, 'session sweep', () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (ticket?.session_id && project) return this.saveSession(this.store, ticket, project, configDir, null);
-    });
+    }));
   }
 
   /**
@@ -3731,8 +3732,12 @@ export class Runner {
   }
 
 
-  /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. */
-  private async saveAfterTurn(ticketId: number, configDir: string, had: Set<string> | null) {
+  /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. Counted for settled() (#1437). */
+  private saveAfterTurn(ticketId: number, configDir: string, had: Set<string> | null) {
+    return track('session saves', this.saveAfterTurnNow(ticketId, configDir, had));
+  }
+
+  private async saveAfterTurnNow(ticketId: number, configDir: string, had: Set<string> | null) {
     try {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);

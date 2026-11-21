@@ -233,7 +233,7 @@ type Job = { kind: 'restore'; configDir: string; paths: string[] } | { kind: 'pu
 
 /** Run a job on a worker thread of its own, with its own connection to state.db. */
 function sessionWorker(statePath: string, job: Job): Promise<unknown> {
-  return track(job.kind === 'put' ? 'session saves' : 'session restores', new Promise((resolve, reject) => {
+  return track(job.kind === 'put' ? 'session save threads' : 'session restore threads', new Promise((resolve, reject) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: { sessionJob: { statePath, job } } });
     worker.once('message', resolve);
     worker.once('error', reject);

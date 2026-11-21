@@ -707,6 +707,7 @@ export class AppServices {
 
   /** A deploy cut short twice may have died with the app drained and stopped: start its service (a no-op if it runs). */
   async startAfterCut(row: ContraptionRow): Promise<boolean> {
+    if (this.busy.has(row.name)) return false;
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) return false;
     await this.must('start', main);

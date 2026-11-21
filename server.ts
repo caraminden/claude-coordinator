@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createConnection, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
@@ -84,6 +84,7 @@ import { AppServices, folderHolds, manifestOn, serviceOptions, ServiceError } fr
 import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
+import { sweepOrphanTmp } from './src/tmp-sweep.ts';
 import { sweepKept } from './src/replay-keep.ts';
 import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
@@ -727,6 +728,9 @@ if (!BOOT_CHECK && !PREVIEW) {
     if (!(await pressure.gate('worktree sweep'))) { setTimeout(() => void sweepBuild.run(), 60_000).unref(); return; }
     await runner.sweepBuildOutput();
     await runner.sweepWorktrees();
+    // Scratch a killed ship, lint or heavy command left in perigee's RAM-backed /tmp (#1339).
+    const orphans = sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
+    if (orphans.length) console.log(`Removed ${orphans.length} orphaned scratch folder${orphans.length === 1 ? '' : 's'} (${orphans.map((d) => basename(d)).join(', ')}).`);
     // The shared Gradle build cache (#1153) under its cap.
     const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
     if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);

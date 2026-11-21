@@ -45,6 +45,8 @@ $profiles = @(
 # A plain string: PSScriptAnalyzer drops a rule whose setting is a PowerShell-wrapped one, such as Join-Path gives, without a word.
 $profileDir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "lint-ps1-$PID")
 $null = New-Item -ItemType Directory -Force -Path $profileDir
+# Removed on every way out, an exit 2 and a thrown error included: a leaked folder sits in /tmp, which is RAM on some boxes (#1339).
+try {
 foreach ($id in $profiles) { Copy-Item (Join-Path $pssa.ModuleBase "compatibility_profiles/$id.json") $profileDir }
 $settings = @{
   Severity = @('Error', 'Warning', 'ParseError')
@@ -99,7 +101,6 @@ if (-not $files.Count) {
   Write-Output "lint-ps1: couldn't run: no .ps1 files matched $($Path -join ', ')"
   exit 2
 }
-try {
 foreach ($file in $files) {
   $tokens = $null
   $errors = $null

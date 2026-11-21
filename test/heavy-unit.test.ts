@@ -150,3 +150,26 @@ test('a heavy command stops when its turn ends', { skip: !userSystemd && 'no use
   systemctl('stop', turn);
   await until('the heavy command to stop with its turn', () => !existsSync(`/proc/${pid}`));
 });
+
+test("its scope gets a TMPDIR on disk when the caller's is perigee's RAM-backed /tmp, and removes it when the command ends", { skip: inContainer && 'a container runs in place before it asks systemd-run' }, async () => {
+  const bin = join(root, 'bin-tmp');
+  const run = join(root, 'run-tmp');
+  spawnSync('mkdir', ['-p', bin, run]);
+  // A stand-in for systemd-run that runs what follows `--`, so the command's own environment is what is tested.
+  writeFileSync(join(bin, 'systemd-run'), '#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done; shift; exec "$@"\n');
+  chmodSync(join(bin, 'systemd-run'), 0o755);
+  const bus = createServer().listen(join(run, 'bus'));
+  try {
+    const disk = join(root, 'heavy-tmp');
+    const r = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"; touch "$TMPDIR/scratch"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: '/tmp', CITADEL_HEAVY_TMP: disk }), encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const seen = r.stdout.trim();
+    assert.match(seen, new RegExp(`^${disk}/heavy-\\d+$`));
+    assert.equal(existsSync(seen), false, 'its folder is gone once the command ended');
+    // A TMPDIR already on disk stays the caller's.
+    const kept = spawnSync(unitTool, ['sh', '-c', 'echo "$TMPDIR"'], { env: scriptEnv({ PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: run, TMPDIR: root, CITADEL_HEAVY_TMP: disk }), encoding: 'utf8' });
+    assert.equal(kept.stdout.trim(), root);
+  } finally {
+    bus.close();
+  }
+});

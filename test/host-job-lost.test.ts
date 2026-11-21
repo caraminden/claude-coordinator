@@ -48,3 +48,16 @@ test("a lost unit's own journal says whether memory killed it: systemd-oomd, the
   assert.equal(await says("citadel-land-1.service: Failed with result 'signal'."), false);
   assert.equal(await oomKilled('citadel-land-1', async () => { throw new Error('no journalctl'); }), false);
 });
+
+test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; one already on disk is kept (#1339)", async () => {
+  const jobs = new HostJobs(() => false);
+  const run = async (name: string, env: Record<string, string>) => {
+    const dir = join(root, name);
+    jobs.start({ dir, cwd: root, argv: ['sh', '-c', 'echo "$TMPDIR $TMP $TEMP"'], env: { PATH: process.env.PATH!, ...env }, unit: `t-${name}`, description: name, ticketId: 0 });
+    for (let i = 0; i < 100 && !existsSync(join(dir, 'code')); i++) await new Promise((r) => setTimeout(r, 50));
+    return readFileSync(join(dir, 'output.log'), 'utf8').trim();
+  };
+  assert.equal(await run('tmpfs', { TMPDIR: '/tmp' }), `${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')}`);
+  assert.match(await run('unset', {}), new RegExp(`^${join(root, 'unset', 'tmp')} `));
+  assert.match(await run('disk', { TMPDIR: root }), new RegExp(`^${root}\\s*$`));
+});

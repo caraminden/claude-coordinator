@@ -58,6 +58,11 @@ async function heardLost(dir: string) {
   jobLost.hear(dir, `${dir}${unit ? ` (${unit})` : ''}: ${oom ? 'killed for memory (out of memory, says the journal)' : 'ended with no exit code (killed from outside, stopped, or cut off by a restart)'}`);
 }
 
+/** A TMPDIR the job's env names that isn't perigee's tmpfs (/tmp, /var/tmp, /dev/shm, /run). */
+function onDisk(tmp: string | undefined): boolean {
+  return !!tmp && !/^\/(tmp|var\/tmp|dev\/shm|run)(\/|$)/.test(tmp);
+}
+
 export class HostJobs {
   /** Jobs running as the server's child (no units, or systemd-run failed): a restart would cut them off. */
   private children = new Set<ChildProcess>();
@@ -85,6 +90,13 @@ export class HostJobs {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const lines = Object.entries(job.env).filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k)).map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
+    // Scratch on disk, never in perigee's RAM-backed /tmp (#1339): boot-check's database copy and a test run's files
+    // otherwise sit there until the job's end, and for good when it is killed. A TMPDIR already on disk stays.
+    if (!onDisk(job.env.TMPDIR)) {
+      const tmp = join(dir, 'tmp');
+      mkdirSync(tmp, { mode: 0o700 });
+      lines.push(...['TMPDIR', 'TMP', 'TEMP'].map((k) => `export ${k}=${quote(tmp)}\n`));
+    }
     writeFileSync(join(dir, 'env'), lines.join(''), { mode: 0o600 });
     writeFileSync(join(dir, 'cmd'), `set -- ${job.argv.map(quote).join(' ')}\n`);
     writeFileSync(join(dir, 'wrapper.sh'), WRAPPER);

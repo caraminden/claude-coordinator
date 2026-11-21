@@ -36,7 +36,10 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
     const broken = join(dir, 'broken.ps1');
     writeFileSync(broken, "if ($true) { Write-Output 'x'\n");
     const files = [...ps1s('tools/ci-runner'), ...ps1s(kit), ...ps1s('kit/skills/run-on-windows/scripts/wco'), ...ps1s('public'), ...['gpu.ps1', 'gpu-host.ps1', 'add-scheme.ps1'].map((f) => join(root, 'tools/win-test-box', f))];
-    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, ...files, bad, broken], { encoding: 'utf8' });
+    const scratch = join(dir, 'scratch');
+    mkdirSync(scratch);
+    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, ...files, bad, broken], { encoding: 'utf8', env: { ...process.env, TMPDIR: scratch } });
+    assert.deepEqual(readdirSync(scratch), [], 'lint-ps1 left its profile folder behind');
     const out = r.stdout + r.stderr;
     assert.equal(r.status, 1, out);
     const lines = out.split('\n').filter((l) => /:\d+:\d+: /.test(l));
@@ -54,10 +57,14 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
 test('a path that matches no files is exit 2, not clean', { skip, timeout: 120_000 }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-lint-'));
   try {
-    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, join(dir, '*.ps1')], { encoding: 'utf8' });
+    // GetTempPath() reads TMPDIR: the profile folder it makes lands in `scratch`, where a leak shows (#1339: 84 of them filled /tmp).
+    const scratch = join(dir, 'scratch');
+    mkdirSync(scratch);
+    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, join(dir, '*.ps1')], { encoding: 'utf8', env: { ...process.env, TMPDIR: scratch } });
     const out = r.stdout + r.stderr;
     assert.equal(r.status, 2, out);
     assert.match(out, /lint-ps1: couldn't run: no \.ps1 files matched/);
+    assert.deepEqual(readdirSync(scratch), [], 'lint-ps1 left its profile folder behind');
     assert.doesNotMatch(out, /clean/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

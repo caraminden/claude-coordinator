@@ -1679,6 +1679,8 @@ export const ticketRoutes: Route[] = [
     async handler({ res, app, ticket, params, session }) {
       const row = app.store.getDelivery(Number(params.wait));
       if (!row || row.to_kind !== 'minion' || row.to_id !== ticket.id) throw new HttpError(404, 'No such wait on this minion');
+      // A chain's row is its held brief: dropping it would leave the minion parked with nothing to start it.
+      if (row.kind === 'chain') throw new HttpError(409, 'That wait is this minion\'s brief: Start now starts it, or dismiss the minion');
       if (!app.outbox?.cancel(row.id, `cancelled by ${session.name}`)) throw new HttpError(409, 'It already went out or was cancelled');
       app.runner.broadcastTicket(ticket.id);
       return json(res, 200, { cancelled: row.id });

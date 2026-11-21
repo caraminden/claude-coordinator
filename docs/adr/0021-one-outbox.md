@@ -95,7 +95,9 @@ and words (`wake_when_live`, `wake_at`, `relay_when_live`, `wake_when_runners_ba
 - **Per-target order:** rows for one target are delivered in `id` order, one pass at a time, through the runner's
   existing per-minion lane (`runner.onLane`), so a chain's brief and a wake for the same minion never cross. Each kind
   has one lane owner: `startChained` already takes the lane itself, so the outbox calls it from outside the lane,
-  never from inside (`src/lanes.ts` would deadlock).
+  never from inside (`src/lanes.ts` would deadlock). As built (step 3, #1389): the `chain` kind's deliver runs
+  `chainedStep`, the lane body without the lane, inside the outbox's own lane step; `startChained` keeps taking the
+  lane for Start now and Unpark.
 - **A closed target is never claimed.** Delivery re-reads the target's state when it claims a row, and skips a
   dismissed one.
 - **The outbox never decides whether a turn runs.** It hands the message to the runner (`runner.send`, a Taskmaster

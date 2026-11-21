@@ -33,3 +33,13 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   assert.equal(rows.at(-1)!.id, gone.id);
   assert.equal(rows.at(-1)!.reason, 'minion dismissed');
 });
+
+test('a chain row (its held brief) shows its leader and has no Cancel: Start now or dismiss instead', () => {
+  const store = new Store(join(root, 'c.db'));
+  const p = store.createProject('P', null);
+  const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const a = mk(), lead = mk();
+  store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: a.id, set_by: 'Taskmaster', when_kind: 'merged', when_arg: { after: lead.id }, payload: { message: 'go', reason: 'its work' } }, NOW);
+  const [row] = waitsFor(store, store.getTicket(a.id)!, () => [], NOW);
+  assert.deepEqual([row.chip, row.what, row.cancellable], [`⇢ #${lead.number}`, 'its work', false]);
+});

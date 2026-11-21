@@ -623,6 +623,8 @@ export class LiveWaiters {
    */
   private async checkChainRows(outbox: Outbox): Promise<number> {
     this.migrateChains();
+    // A deleted follower's chain goes, as the old check dropped it (the outbox only holds a dismissed one).
+    for (const r of this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held'] })) if (!this.store.getTicket(r.to_id)) outbox.cancel(r.id, 'its minion was deleted');
     const open = (r: Delivery) => this.store.getTicket(r.to_id)?.status !== 'closed' && !!this.store.getTicket(r.to_id);
     const ours = (r: Delivery) => (r.state === 'waiting' ? r.met_at == null : r.state === 'held' && r.reason !== HELD_CLOSED) && open(r);
     const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held'] }).filter(ours);

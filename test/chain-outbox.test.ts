@@ -293,4 +293,10 @@ test('a dismissed follower\'s chain is held 3 days and goes on after a reopen, t
   s.now.t += HOLD_MS + 1;
   await s.outbox.poke({ type: 'tick' });
   assert.equal(rows(other.id)[0].state, 'dropped');
+
+  // A deleted follower's chain goes at the next check, as the old key's did (no row is left waiting for good).
+  const gone = await chain(s.waiters, minion().id);
+  store.deleteTicket(gone.id);
+  await s.waiters.check();
+  assert.deepEqual([rows(gone.id)[0].state, rows(gone.id)[0].reason], ['dropped', 'its minion was deleted']);
 });

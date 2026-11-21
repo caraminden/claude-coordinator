@@ -186,7 +186,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       const timed = minion(c, 'Check the nightly run', { state: 'parked', note: 'waking at 06:00' });
       row(timed, { when_arg: at(9), due: at(9), payload: { note: 'check the nightly run' } });
       const chained = minion(c, 'Follow-up docs', { state: 'parked' });
-      row(chained, { kind: 'chain', when_kind: 'live', when_arg: { ticket: lead.id }, payload: { text: `after #${lead.number}` } });
+      row(chained, { kind: 'chain', when_kind: 'live', when_arg: { after: lead.id, base: null }, set_by: 'Taskmaster', dedupe_key: String(chained.id), payload: { message: 'Write the follow-up docs', from: 'Taskmaster', reason: `#${lead.number} Ship line fix's work is live` } });
       const ev = minion(c, 'Land when runners return', { state: 'parked' });
       row(ev, { kind: 'runners_back', when_kind: 'runners', when_arg: 'seeded', payload: { reason: 'CI gave no verdict' } });
       const dropped = minion(c, 'A cancelled wait');

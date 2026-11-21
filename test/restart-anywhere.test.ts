@@ -37,7 +37,7 @@ import { Store } from '../src/db.ts';
 import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Outbox } from '../src/outbox.ts';
 import { Runner } from '../src/runner.ts';
-import { TimedWakes } from '../src/wake.ts';
+import { chainedStep, LiveWaiters, TimedWakes } from '../src/wake.ts';
 import { releaseFake, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -58,7 +58,12 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
-type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
+type Ctx = {
+  runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void;
+  /** Chain the minion on another's work (create_ticket's start_after), its brief held in a `chain` row; meetChain is the check finding that work in. */
+  chain: (brief: string) => void; meetChain: () => void;
+  quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner;
+};
 type Flow = {
   name: string;
   /** Runs the one outbox beside each runner (wake_at on it), as server.ts does. */
@@ -67,6 +72,14 @@ type Flow = {
   setup?: (store: Store, projectId: number) => (r: Runner) => void;
   steps: { name: string; run: (c: Ctx) => Promise<void> }[];
 };
+
+/** The outbox's kinds beside a runner, as server.ts registers them: wake_at, and LiveWaiters' (a chain's start sends its brief on the runner). */
+function kinds(store: Store, r: Runner, outbox: Outbox) {
+  const wakes = new TimedWakes(store, outbox);
+  const waiters = new LiveWaiters(store, root, null, () => {}, outbox);
+  waiters.sendBrief = (c, why, repeat) => chainedStep(c, why, { store, runner: r }, repeat);
+  return { wakes, waiters };
+}
 
 const FLOWS: Flow[] = [
   {
@@ -248,6 +261,22 @@ const FLOWS: Flow[] = [
       } },
     ],
   },
+  {
+    name: 'a chained minion\'s brief starts it once its leader\'s work is in',
+    outbox: true,
+    steps: [
+      { name: 'the Taskmaster chains the minion on another\'s work', run: async (c) => {
+        setRelease('ok');
+        c.chain('build part two');
+        await sleep(30);
+      } },
+      { name: 'the leader\'s work ships and the brief starts the minion', run: async (c) => {
+        const before = turnsRun();
+        c.meetChain();
+        await c.quiet('the brief\'s turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
 ];
 
 /** The server dies mid-turn and its turn goes with it, as in auto-resume.test.ts. */
@@ -410,12 +439,14 @@ async function record(flow: Flow) {
   };
   const outboxes: Outbox[] = [];
   let wakes: TimedWakes | null = null;
+  let waiters: LiveWaiters | null = null;
+  const leader = store.createTicket({ project_id: project.id, title: 'L', permission_mode: 'default', created_by: 'Cara' });
   const withOutbox = (r: Runner) => {
     if (!flow.outbox) return r;
     outboxes.at(-1)?.stop();
     const outbox = new Outbox(store, r, { author: 'Citadel' });
     r.onTurnStart = (ticketId, ids) => outbox.turnStarted(ticketId, ids);
-    wakes = new TimedWakes(store, outbox);
+    ({ wakes, waiters } = kinds(store, r, outbox));
     outboxes.push(outbox);
     void outbox.boot();
     return r;
@@ -430,6 +461,14 @@ async function record(flow: Flow) {
     wake: (note, inMs) => {
       rec.log.push({ kind: 'sent', texts: [note], at: rec.cuts.length, step: rec.step });
       wakes!.add(t.id, Date.now() + inMs, note, 'Minion');
+    },
+    chain: (brief) => {
+      rec.log.push({ kind: 'sent', texts: [brief], at: rec.cuts.length, step: rec.step });
+      waiters!.chain({ ticket: t.id, after: leader.id, when: 'merged', message: brief, from: 'Taskmaster', base: null });
+    },
+    meetChain: () => {
+      const [row] = store.listDeliveries({ kind: 'chain', to: t.id, states: ['waiting'] });
+      assert.ok(outboxes.at(-1)!.meet(row.id, { why: `#${leader.number}'s work has shipped` }));
     },
     mail: (from, text) => {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
@@ -489,7 +528,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
   const outbox = flow.outbox ? new Outbox(store, r, { author: 'Citadel' }) : null;
   if (outbox) {
     r.onTurnStart = (ticketId, ids) => outbox.turnStarted(ticketId, ids);
-    new TimedWakes(store, outbox);
+    kinds(store, r, outbox);
   }
   const problems: string[] = [];
   try {
@@ -514,16 +553,19 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     // The outbox's rows still to send: its timer waits on them, or a delivery is queued on the minion's lane.
     const rows = store.listDeliveries({ to: id, states: ['waiting', 'held', 'sending'] });
     const armed = outbox && ((outbox as any).timer || (outbox as any).busy.size);
-    // A sending row is rechecked on its due: sent again (marked) unless the runner still holds it.
-    for (const d of rows) if (d.due == null) problems.push(`delivery #${d.id} is left ${d.state} with no time to look at it again`);
+    // A sending row is rechecked on its due: sent again (marked) unless the runner still holds it. One not yet met waits on its
+    // event (a chain on its leader's work: the check, a dismissal or a deploy meets it), not on a time.
+    const onEvent = (d: (typeof rows)[number]) => d.state !== 'sending' && d.met_at == null && d.when_kind !== 'at';
+    for (const d of rows) if (d.due == null && !onEvent(d)) problems.push(`delivery #${d.id} is left ${d.state} with no time to look at it again`);
     const outboxWait = rows.length && armed ? 'the outbox timer' : null;
     const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && q.coldAt ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : outboxWait;
     // A saved wait is only a wait if its timer is armed (the cold sweep and an unpark come from outside the runner).
     if (limit && !(r as any).limitTimer) problems.push('its usage-limit wait is saved, but no timer is armed to resume it');
     if (net && !(r as any).netTimer) problems.push('its network wait is saved, but no probe is armed');
-    // The one invariant (#1378): every message sent is in a turn that started, in the minion's queue record, or (a wake) in an outbox row still to send.
+    // The one invariant (#1378): every message sent is in a turn that started, in the minion's queue record, or in an outbox row still to send
+    // (armed, or a chain's brief waiting on its leader's work).
     const carried = [...started.flat(), ...queue, ...mail, ...(q.taken ?? []), ...(q.steered ?? []).map((s) => s.msg)].map((m) => m.text);
-    if (armed) carried.push(...rows.map((d) => String(d.payload.note)));
+    carried.push(...rows.filter((d) => armed || onEvent(d)).map((d) => String(d.payload.note ?? d.payload.message)));
     for (const text of rec.held(cut.n)) if (!carried.some((c) => c.includes(text))) problems.push(`lost "${text}": no turn, queue record or outbox row has it`);
     if (!started.length && !waiting) {
       const owed = rec.owed(cut.n);

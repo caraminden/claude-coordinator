@@ -105,6 +105,16 @@ jobs:
           fi
           echo "$dir/$v" >>"$GITHUB_PATH"
           "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
+      # test/desktop-launcher-trial.test.ts builds the kit launcher's trial rules with the .NET 8 SDK (#1396) and skips
+      # without one, so it goes where the test looks (~/.dotnet, as on perigee), in the runner's own home, once.
+      - name: the .NET 8 SDK for the desktop launcher's tests
+        run: |
+          set -euo pipefail
+          if ! "$HOME/.dotnet/dotnet" --list-sdks 2>/dev/null | grep -q '^8\.'; then
+            curl -fsSL -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
+            bash "$RUNNER_TEMP/dotnet-install.sh" --channel 8.0 --install-dir "$HOME/.dotnet" --no-path
+          fi
+          "$HOME/.dotnet/dotnet" --list-sdks
       # Chrome for Testing's headless shell, where test/browser.ts looks for Playwright's (the build perigee has).
       - name: headless Chromium for the browser tests
         run: |

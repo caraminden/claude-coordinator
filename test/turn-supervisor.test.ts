@@ -245,7 +245,7 @@ test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, 
   assert.ok(!existsSync(join(dir, 'spec.json')) && !existsSync(join(dir, `spec.json.${process.pid}`)), 'the claimed spec (it holds the turn\'s token) is gone');
 });
 
-test('a scope that won\'t start: the supervisor gives the turn back and it runs in its wrapper unit, counted as a fallback', async () => {
+test('a scope that won\'t start: the supervisor gives the turn back and it runs in its wrapper unit', async () => {
   const r = await withSupervisor();
   writeFileSync(join(bin, 'no-scope'), '');
   const count = fallbacks.count;
@@ -256,7 +256,7 @@ test('a scope that won\'t start: the supervisor gives the turn back and it runs 
     assert.equal(pidJson(dir).supervisor, undefined, 'not in the supervisor\'s group: its own wrapper unit runs it');
     assert.ok(calls().slice(before).some((c) => c.includes('turn-wrapper.mjs')), 'a wrapper unit started');
     assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group didn't start \(systemd-run exited 1\); the server starts it in a unit of its own/);
-    assert.equal(fallbacks.count, count + 1, 'counted, so /api/health and the admins hear of it');
+    assert.equal(fallbacks.count, count, 'no fallback: the wrapper unit has the turn\'s slice and limits');
     assert.ok(!existsSync(join(dir, 'handback')));
     await finished(r, t);
     assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')));
@@ -276,7 +276,8 @@ test('a supervisor that dies after taking a turn and before starting it: the run
     await until('the supervisor took the turn', () => existsSync(join(dir, `spec.json.${sup.pid}`)));
     process.kill(sup.pid, 'SIGKILL');
     // Its systemd-run, still starting the scope, names the folder: nothing is restarted while it might yet run the turn.
-    await new Promise((res) => setTimeout(res, 300));
+    const ticks = (r as any).turns.get(t.id).ticks;
+    await until('the runner has looked a few times', () => (r as any).turns.get(t.id).ticks > ticks + 5);
     assert.ok(existsSync(join(dir, `spec.json.${sup.pid}`)), 'left alone while its scope may still start');
     rmSync(join(bin, 'hang-scope')); // the scope fails, with no supervisor to give the turn back
     await until('claude has the message', () => seen(t.dir).length === 1);

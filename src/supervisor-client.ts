@@ -31,8 +31,9 @@ export function supervisorSpec(turnsDir: string, unitTag: string, pins: { MCP_DI
     dir: join(turnsDir, '.supervisor', version),
     version,
     code: pins.MCP_DIR,
-    // Restart: a crash comes back within a second and adopts the turns it left. KillMode=process: a turn whose scope
-    // wouldn't start runs in this unit's group, and must outlive that restart too.
+    // Restart: a crash comes back within a second and adopts the turns it left. KillMode=process: a `systemd-run --scope`
+    // it left starting a turn runs on through that restart and starts the turn; the runner, seeing it there, waits for it
+    // (runner.ts rescue).
     systemdRun: ['--user', '--collect', '--quiet', `--unit=citadel-supervisor-${unitTag}-${version.slice(0, 8)}`, `--slice=${TASKMASTER_SLICE}`,
       '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', '-p', 'Restart=on-failure', '-p', 'KillMode=process'],
     env: Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]!])),

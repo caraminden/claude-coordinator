@@ -1669,22 +1669,24 @@ export class Runner {
 
   /**
    * A turn handed to the supervisor whose shell isn't running yet, started in its wrapper unit instead when the
-   * supervisor gave it back (its scope wouldn't start: recorded as a fallback, as a unit that won't start is) or lost it
-   * (it died between taking the turn and starting it: its claimed spec is left, its pid dead).
+   * supervisor gave it back (its scope wouldn't start) or lost it (it died between taking the turn and starting it: its
+   * claimed spec is left, its pid dead). Not a fallback: the wrapper unit has the turn's slice and limits, and a unit
+   * that won't start is counted there (start). Armed too after a hand-off that timed out, as the supervisor may have
+   * taken the turn after all, leaving the wrapper started meanwhile nothing to run.
    */
   private rescue(ticketId: number, live: LiveTurn) {
     if (!live.restart) return;
     const dir = live.dir;
     if (existsSync(join(dir, 'pid.json'))) {
       live.restart = undefined;
-      return fallbacks.started('scope');
+      return;
     }
     let why: string | null = null;
     try {
       why = readFileSync(join(dir, 'handback'), 'utf8');
       rmSync(join(dir, 'handback'), { force: true });
     } catch { /* not given back */ }
-    if (why !== null) fallbacks.record(ticketId, "A turn's scope", why, Date.now(), 'scope');
+    if (why !== null) console.error(`Ticket ${ticketId}: its scope from the turn supervisor didn't start (${why}); it starts in its wrapper unit.`);
     else {
       // Nothing still names the folder: a systemd-run the dead supervisor left starting the turn's scope would run it yet.
       const lost = readdirSync(dir).find((n) => /^spec\.json\.\d+$/.test(n) && !alive(Number(n.slice(10))));
@@ -3188,11 +3190,8 @@ export class Runner {
     // The scope keeps the unit's name, so stopping it by name (signal) reaches it either way.
     if (this.supervisor) {
       live.restart = inUnit;
-      void handTurn(this.supervisorSpec(), dir, scope).then((taken) => {
-        if (taken || !live.restart) return;
-        live.restart = undefined;
-        inUnit();
-      });
+      // Not taken: its wrapper unit starts now, and rescue stays armed until the turn's pid.json is there.
+      void handTurn(this.supervisorSpec(), dir, scope).then((taken) => taken || inUnit());
     } else inUnit();
     return live.ended;
   }

@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPlace, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
+import { APP_NAME } from '../src/appname.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
@@ -231,6 +232,69 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
   assert.equal(runner.isRunning(hers.id), false);
   // Refused, it is dropped, not kept as held mail: kept, it would pick her to pay for every later batch and refuse it too (#1378).
   assert.deepEqual(runner.queue.peek(hers.id).map((m) => m.text), ['fyi']);
+  // And it jams nothing: the next sender's message gets its turn, on their own login (#1509).
+  const started = stubStarts(runner);
+  runner.send(hers.id, 'Josh', 'over to me');
+  await until('his message starts a turn', () => started.length === 1);
+  assert.deepEqual(started, [{ person: josh.id, texts: ['over to me', 'fyi'] }]);
+});
+
+/** Swap the runner's turn start for a record of who each turn would run for and what it carries. */
+const stubStarts = (runner: Runner) => {
+  const started: { person: number | null; texts: string[] }[] = [];
+  (runner as any).startTurn = (_p: unknown, _t: unknown, batch: { text: string }[], person: number | null) => void started.push({ person, texts: batch.map((m) => m.text) });
+  return started;
+};
+
+test("a disabled person's held mail is dropped with a line, and never decides or jams anyone else's turn (#1509 2C1)", async () => {
+  const { store, runner, hers, josh, olive, games } = payerWorld('payer-held-disabled.db');
+  const link = { place: () => ({ host: true as const }), linked: () => 'linked' as const };
+  const asked: (number | null)[] = [];
+  runner.placeFor = (person, warm) => (asked.push(person), turnPlace(store, link, person, warm));
+  const started = stubStarts(runner);
+  // Her minion is parked; Josh writes there (held under his name), and is then disabled.
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'from josh', images: [], parked: '2026-11-21 20:00' }] });
+  store.updateUser(josh.id, { disabled_at: Date.now() });
+  // Olive unparks it (her line): her message gets its turn, on her login; his is dropped, not carried on hers.
+  runner.send(hers.id, 'Olive', 'Unparked you');
+  await until('her message starts a turn', () => started.length === 1);
+  assert.deepEqual(started, [{ person: olive.id, texts: ['Unparked you'] }]);
+  assert.deepEqual(asked, [olive.id], 'his disabled login is never asked for a place');
+  assert.ok(notes(store, hers.id).some((n) => /Josh's login is disabled/.test(n) && /dropped/.test(n)), 'the chat says his message was dropped');
+  assert.ok(!runner.queue.peek(hers.id).length && !runner.queue.get(hers.id).taken?.some((m) => m.text === 'from josh'));
+  // "Deliver now" on only his held mail starts nothing, on anyone's login: it is dropped too (#1270 C3).
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'again', images: [], parked: '2026-11-21 20:05' }] });
+  assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0);
+  assert.equal(started.length, 1);
+  assert.deepEqual(runner.queue.peek(hers.id), []);
+});
+
+test("a wake from no person runs on the minion's own person, not on another person's held mail, signed in or lapsed (#1509 2C2)", async () => {
+  const { store, runner, hers, josh, olive, games } = payerWorld('payer-held-wake.db');
+  let joshSignedIn = false;
+  const link = { place: (uid: number) => (uid === olive.id || joshSignedIn ? { host: true as const } : null), linked: (uid: number) => (uid === olive.id || joshSignedIn ? 'linked' as const : 'expired' as const) };
+  const asked: (number | null)[] = [];
+  runner.placeFor = (person, warm) => (asked.push(person), turnPlace(store, link, person, warm));
+  const started = stubStarts(runner);
+  const held = (text: string) => store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text, images: [], parked: '2026-11-21 20:00' }] });
+  // Josh's sign-in has lapsed: the deploy's wake still runs, on Olive's login, with his mail riding along.
+  held('from josh');
+  runner.send(hers.id, APP_NAME, 'Your deploy is live');
+  await until('the wake asks for a place', () => asked.length === 1);
+  assert.deepEqual(asked, [olive.id], "a lapsed held author isn't asked to pay for the wake");
+  await until('the wake starts a turn', () => started.length === 1);
+  assert.deepEqual(started[0], { person: olive.id, texts: ['Your deploy is live', 'from josh'] });
+  // Signed in, he still doesn't pay for her minion's wake.
+  joshSignedIn = true;
+  held('from josh again');
+  runner.send(hers.id, APP_NAME, 'Your chained brief starts');
+  await until('the second wake starts a turn', () => started.length === 2);
+  assert.deepEqual(started[1], { person: olive.id, texts: ['Your chained brief starts', 'from josh again'] });
+  // With nothing else waiting ("Deliver now"), held mail still names who pays.
+  held('just mine');
+  assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!, 'Josh'), 1);
+  await until('his held mail starts a turn', () => started.length === 3);
+  assert.deepEqual(started[2], { person: josh.id, texts: ['just mine'] });
 });
 
 test('a machine goes to exactly the schemes on its list, even a non-admin\'s, and a new one to none (#303, #438)', () => {

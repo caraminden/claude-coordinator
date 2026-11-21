@@ -553,8 +553,11 @@ function waitChip(t, coord) {
   const shown = live[0] ?? rows[0];
   if (!shown) drawnWaits.delete(t.id);
   if (!shown) return h('span', { class: 'wait-chip empty', 'aria-hidden': 'true' });
+  // Redraw an open popover only when its waits changed: a redraw for nothing (the list's 30 s tick, another minion's
+  // update) replaces its buttons, and a click pressed on the old one and released on the new one is lost.
+  const changed = JSON.stringify(drawnWaits.get(t.id)) !== JSON.stringify(rows);
   drawnWaits.set(t.id, rows);
-  if (waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
+  if (changed && waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
   return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` }, shown.chip, more);

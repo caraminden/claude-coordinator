@@ -84,6 +84,13 @@ test('a wait line is a headline with its first sentence under it; a click opens 
   const more = await page.centre('.why-tip:popover-open .wait-more');
   await click(page, more);
   await waitFor(page, 'the full words', `${line}.querySelector('.wait-sum').textContent.includes('Three and four.')`);
+  // B redraws with the same waits (the list's 30 s tick does this): the open popover keeps its very elements, so a
+  // click pressed before the redraw and released after it still lands (the burn-in race, #1512).
+  await page.eval(`document.querySelector('.thread-row[data-id="102"]').dataset.old = '1'; document.querySelector('.why-tip:popover-open .wait-line-hd').dataset.old = '1'`);
+  await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, updated_at: Date.now() } }) })`);
+  await waitFor(page, 'B\'s row to redraw', `!document.querySelector('.thread-row[data-id="102"]')?.dataset.old`);
+  await page.eval(`new Promise((r) => queueMicrotask(r))`);
+  assert.equal(await page.eval(`document.querySelector('.why-tip:popover-open .wait-line-hd')?.dataset.old`), '1', 'a redraw with nothing new leaves the popover alone');
   // B's waits change (another wait goes): the popover redraws and the open line stays open, without animating again.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: b.outbox_waits.slice(1), updated_at: Date.now() } }) })`);
   await waitFor(page, 'B\'s update', `!${tip}.includes('check the run')`);
@@ -94,6 +101,8 @@ test('a wait line is a headline with its first sentence under it; a click opens 
   await click(page, bare);
   await waitFor(page, 'one open at a time', `document.querySelectorAll('.why-tip:popover-open .wait-line.open').length === 1 && ${open}.textContent.includes('Wakes when abc1234 is live')`);
   assert.equal(await page.eval(`${open}.querySelector('.wait-sum-words')`), null);
-  await click(page, bare);
+  // Opening it moved its header (the other line closed, its summary grows), so find it again once that settles.
+  await waitFor(page, 'the second opening to settle', `document.querySelector('.why-tip:popover-open').getAnimations({ subtree: true }).every((a) => a.playState !== 'running')`);
+  await click(page, await page.centre('.why-tip:popover-open .wait-line.open .wait-line-hd'));
   await waitFor(page, 'closed', `!document.querySelector('.why-tip:popover-open .wait-line.open')`);
 });

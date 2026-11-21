@@ -1412,7 +1412,7 @@ const landHandoffs = new LandHandoffs({
   },
   learned: (id, h) => {
     const t = store.getTicket(id);
-    if (t && h.learned !== undefined) queueLesson(store, DATA_DIR, t, h.learned, h.touched ?? [], 'land');
+    if (t && h.learned !== undefined) queueLesson(store, DATA_DIR, t, h.learned, h.touched ?? [], 'land', (text) => void tellTaskmaster(app, t, text, false, true, 'fyi', true).catch(() => {}));
   },
   runnersBack: (id, reason) => {
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);

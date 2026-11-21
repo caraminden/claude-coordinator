@@ -9,7 +9,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { execFile } from 'node:child_process';
 import type { Store } from './db.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { addShipLessons } from './standard-audits.ts';
+import { projectSharedDir } from './workspace.ts';
 
 /** At most this many lines a ship, and characters a line. */
 export const MAX_LINES = 3;
@@ -125,15 +128,71 @@ export class ShipLessons {
   }
 }
 
+/** A group of lessons from this many different minions wakes the scheme's Taskmaster; an alerted group needs this many more. */
+export const REPEAT_MINIONS = 3;
+/** Only lessons this recent group: a repeat is a live wall, not history. */
+export const REPEAT_WINDOW_MS = 7 * 24 * 3600_000;
+/** Two lines are the same lesson at this word overlap (Jaccard). shortcut: word overlap, not meaning; add the memory index's score when it is back. */
+const SIMILAR = 0.35;
+const STOP = new Set('the and that this with from when then they have has had was were for not but are can will into than its our out you your what which about there their been only also just need needs made make over after before more some such'.split(' '));
+const words = (line: string) => new Set(line.toLowerCase().split(/[^a-z0-9_.\-/]+/).map((w) => w.replace(/^[.\-/]+|[.\-/]+$/g, '')).filter((w) => w.length > 2 && !STOP.has(w)));
+const similar = (a: Set<string>, b: Set<string>) => {
+  let both = 0;
+  for (const w of a) if (b.has(w)) both++;
+  return both / (a.size + b.size - both || 1) >= SIMILAR;
+};
+
+/** Open lessons of the last 7 days grouped by line similarity (single link), each group with its distinct minion numbers. */
+export function lessonGroups(lessons: Lesson[]): { lessons: Lesson[]; minions: number[] }[] {
+  const lines = lessons.map((l) => l.lines.split('\n').filter(Boolean).map(words));
+  const parent = lessons.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < lessons.length; i++) for (let j = 0; j < i; j++) if (lines[i].some((a) => lines[j].some((b) => similar(a, b)))) parent[find(i)] = find(j);
+  const by = new Map<number, Lesson[]>();
+  lessons.forEach((l, i) => by.set(find(i), [...(by.get(find(i)) ?? []), l]));
+  return [...by.values()].map((g) => ({ lessons: g, minions: [...new Set(g.map((l) => l.number ?? -l.id))].sort((a, b) => a - b) }));
+}
+
+type Alerted = { ids: number[]; minions: number };
+
+/**
+ * After a new lesson: if a group of this scheme's open lessons reaches 3 minions, return one alert text (and write a
+ * draft handoff for it) unless that group was alerted already and has not grown by 3 minions. Remembers what it alerted in
+ * a setting, so a repeat is told once. Null when there is nothing to say.
+ */
+export function repeatAlert(store: Store, dataDir: string, projectId: number, now = Date.now()): string | null {
+  const key = `ship_lessons_alerted:${projectId}`;
+  const done = store.getSetting<Alerted[]>(key) ?? [];
+  const open = store.lessons.list(projectId, { since: now - REPEAT_WINDOW_MS, limit: 500 }, now);
+  for (const g of lessonGroups(open)) {
+    if (g.minions.length < REPEAT_MINIONS) continue;
+    const ids = g.lessons.map((l) => l.id);
+    const prior = done.find((d) => d.ids.some((id) => ids.includes(id)));
+    if (prior && g.minions.length < prior.minions + REPEAT_MINIONS) continue;
+    store.setSetting(key, [...done.filter((d) => d !== prior), { ids, minions: g.minions.length }]);
+    const rel = `handoffs/ship-lessons-repeat-${new Date(now).toISOString().slice(0, 10)}-${Math.min(...ids)}.md`;
+    const quote = g.lessons[0].lines.split('\n')[0];
+    const nums = g.minions.map((n) => `#${n}`).join(', ');
+    const file = join(projectSharedDir(dataDir, projectId), rel);
+    void mkdir(join(file, '..'), { recursive: true }).then(() => writeFile(file, `# Handoff: ${quote.slice(0, 80)}\n\n## Goal\nStop the repeated ship lesson below from costing the next minion the same time.\n\n## Their words\nMinions ${nums} each wrote a ship lesson about it:\n${g.lessons.map((l) => `- #${l.number}: ${l.lines.replace(/\n/g, ' / ')}`).join('\n')}\n\n## Done when\n- (fill in: when X, then Y)\n\n## Ruled out or tried\nNothing yet. Mark these lessons taken (ship_lessons tool, ids ${ids.join(', ')}) once this is started.\n\n## Model and effort\nSonnet 5.5 medium unless the fix touches the ship pipeline.\n`)).catch((err) => console.error(`Ship lessons repeat handoff failed: ${err?.message ?? err}`));
+    return `Ship lessons repeat: ${g.minions.length} minions (${nums}) wrote the same lesson, e.g. "${quote}". Draft handoff: ${rel} in the shared folder. Start it or mark the lessons taken (ship_lessons tool, ids ${ids.join(', ')}).`;
+  }
+  return null;
+}
+
 /**
  * Queue a ship's lines (from a clean land or log_learned). The scheme's first real lines add its weekly Ship lessons
  * schedule, once (a deleted one stays deleted). Callers catch: this never blocks a ship.
  */
-export function queueLesson(store: Store, dataDir: string, t: { id: number; project_id: number; number: number | null }, lines: string, files: string[], source: 'land' | 'tool'): Lesson {
+export function queueLesson(store: Store, dataDir: string, t: { id: number; project_id: number; number: number | null }, lines: string, files: string[], source: 'land' | 'tool', notify?: (text: string) => void): Lesson {
   const row = store.lessons.add({ project_id: t.project_id, ticket_id: t.id, number: t.number, lines, files, source });
   if (lines) {
     const added = addShipLessons(store, dataDir, t.project_id);
     if (added) console.log(`Ship lessons (#1119): ${added}`);
+    try {
+      const alert = repeatAlert(store, dataDir, t.project_id);
+      if (alert) notify?.(alert);
+    } catch (err: any) { console.error(`Ship lessons repeat check failed: ${err?.message ?? err}`); }
   }
   return row;
 }

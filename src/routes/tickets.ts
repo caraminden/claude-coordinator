@@ -1454,7 +1454,7 @@ export const ticketRoutes: Route[] = [
       const lines = parseLearned(body.learned);
       if (lines === null) throw new HttpError(400, 'learned is text: up to three lines, or "nothing"');
       const files = ticket.cwd ? await touchedFiles(ticket.cwd) : [];
-      const row = queueLesson(app.store, app.dataDir, ticket, lines, files, 'tool');
+      const row = queueLesson(app.store, app.dataDir, ticket, lines, files, 'tool', (text) => void tellTaskmaster(app, ticket, text, false, true, 'fyi', true).catch(() => {}));
       return json(res, 200, { id: row.id, lines: row.lines, files: row.files.length });
     },
   },

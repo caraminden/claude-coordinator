@@ -177,3 +177,36 @@ test('a handed-off land queues its lines with the files the branch touched; a fa
     await srv.stop();
   }
 });
+
+// #1490: three minions writing the same lesson reach the scheme's Taskmaster once, with a draft handoff.
+test('3 similar lessons from 3 minions alert once; 3 from one minion do not; growth by 3 re-alerts; taking closes them out', () => {
+  const dataDir = mkdtempSync(join(root, 'data-'));
+  const store = newStore();
+  const p = store.createProject('Repeats', null);
+  const sent: string[] = [];
+  const say = (number: number, lines: string) => queueLesson(store, dataDir, { id: 200 + number, project_id: p.id, number }, lines, [], 'land', (t) => sent.push(t));
+  const wall = 'land.sh refuses when the CI queue holds a stale lock file';
+  say(1, wall);
+  say(1, `${wall} again`);
+  say(1, `${wall} once more`);
+  assert.equal(sent.length, 0, 'three lessons from one minion are one voice');
+  say(2, 'the land.sh refusal: a stale lock file in the CI queue');
+  assert.equal(sent.length, 0, 'two minions are not yet three');
+  say(3, 'CI queue stale lock file made land.sh refuse');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /#1, #2, #3/);
+  assert.match(sent[0], /handoffs\/ship-lessons-repeat-.*\.md/);
+  say(4, 'unrelated: the shaders build only on Windows');
+  say(4, 'the screenshot tool needs a display');
+  assert.equal(sent.length, 1, 'no repeat alert');
+  say(4, 'land.sh stale lock file in the CI queue again');
+  say(5, 'land.sh stale lock file in the CI queue');
+  assert.equal(sent.length, 1, 'a group already alerted waits for 3 more minions');
+  say(6, 'land.sh stale lock file in the CI queue');
+  assert.equal(sent.length, 2, 'five minions plus one more is 3 more than the 3 alerted');
+  const ids = store.lessons.list(p.id).filter((l) => /lock/.test(l.lines)).map((l) => l.id);
+  store.lessons.take(p.id, ids, 'proposed');
+  say(7, 'land.sh stale lock file in the CI queue');
+  say(8, 'land.sh stale lock file in the CI queue');
+  assert.equal(sent.length, 2, 'taken lessons no longer count');
+});

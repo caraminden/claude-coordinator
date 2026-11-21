@@ -47,3 +47,31 @@ from the minion, not from the report.
 
 The kit's `templates/land.sh` is unchanged. It runs a scheme's own `CHECK`, which has no "passed alone" signal, and
 Peek's two flakes were `recipes.test` timeouts under load, which are better fixed in that test.
+
+## Amendment, 2026-11-20: known flakes ship without the fresh run (#1419)
+
+Cara, 2026-11-20, about 23:45 PST: "ok, here is a thought, what if we say that known flakes that havent been fixed are
+acceptable and do not block ship trains from going live?" On the Taskmaster's card she picked "Known flakes only" over
+"Any test that passes alone" and "Keep it as today": "Skip the extra run when each failed test has already flaked on other
+ships in the last 2 weeks, or a minion is fixing it. A test flaking for the first time still gets the extra run, because a
+new flake is often caused by the change being shipped."
+
+Why: on Nov 20 and 21, 39 ships went through the fresh run. 20 came back green (about 5 minutes lost each), 16 came back
+red again on flakes and were refused, and 1 got no answer.
+
+- A red in which every failed file passed alone (as above) and every one of them is a known flake goes on as green, with
+  no fresh run, no refusal and, on perigee's fallback, no retry in place (#1360). This holds for a train's run, its
+  retests after suspects and its bisect too, since they all go through the same gate.
+- Known means `tools/known-flakes.ts` says so: the file passed alone on at least one other branch in the last 14 days (the
+  retro log's `flake` lines, which the Test health tab counts; `flake_events` rows keep no branch), counting only
+  sightings since the file's newest commit on main ("havent been fixed": an older one may predate its fix), or an open
+  fix minion has it (`flake_fixes`, read-only). The ship's own branch and its riders' don't count as other branches.
+- A known flake that the ship, or any ship on its train, changed, or that imports what they changed (the suspects' map,
+  `train_suspects_of`), is never excused: it gets the fresh run as before.
+- A file seen for the first time, a file that didn't pass alone, or anything the helper can't read keeps the behaviour above.
+- It says so plainly: `only known flakes failed …, so this goes on as green, with no fresh run`, then
+  `shipped past known flakes <file> (seen on N other branches in 14 days, fix #N)` in the land's output and every
+  rider's, the shipped line, and a `known flake · <branch> · <files> · <run>` retro log line. The `flake` sightings are
+  still written, so the Test health tab keeps counting and the automatic fix minions keep coming.
+- The kit's `templates/land.sh` is still unchanged, for the reason above: a scheme's own `CHECK` gives no "passed alone"
+  signal to know a flake by.

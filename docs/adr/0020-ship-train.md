@@ -17,6 +17,19 @@ the last one in line waited for every run ahead of it.
 - **A red train** is bisected by its prefixes, each assumed green below the first red one. The green part ships. The
   first red ship is refused with its own CI run's failure, as it would be alone. The ships after it go back in line,
   in their places. The front red: every rider goes back in line, and the front is refused as usual.
+- **Suspects before the bisect** (#1346; Cara, 2026-11-20: "we pull out the minions that touched the failing tests
+  as they are vastly more likely to be the culprit and we send them back to minions to investigate and fix. We
+  replace their slots in the current train with the next waiting minions and rerun the tests on the new train"). This
+  puts a step in front of Josh's "Bisect the prefixes" (2026-11-12, #599) and keeps the bisect as the fallback. A red
+  train's real failures (run-tests.sh's labels; a red of flakes only keeps its one fresh run) are pinned on the ships
+  whose change touched each failing test file; failing that, a file it imports by a relative path or names by its
+  path; failing that, a file those import. If every real failure has a suspect, the suspects are refused at once with
+  the failure, worded as likely, not certain, and the train is built again from the others, then the next ships in
+  line, up to the cap, for one more CI run. Green: it all ships. Red again on any of the same tests: the guess was
+  wrong, and the bisect runs on that refilled train (its top is the one commit known red, so the bisect stays sound
+  even if a newcomer did it). Red on new tests only: another round, up to 3. A failure with no suspect, or a log that
+  doesn't label every failed file: the bisect, as before. A suspect that is the front itself: the riders go back in
+  line and the front is refused. An innocent suspect costs its minion one turn and a re-ship, which is accepted.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`
   and `deploy:` lines, so the server posts its shipped line and risk label as for any ship (`src/land.ts`).
@@ -50,6 +63,8 @@ train. Only the gated ships would batch.
 
 Limits we know about:
 
+- shortcut: suspects come from the file paths in each ship's diff and the test's relative imports two levels deep,
+  not from the failure text naming a ship. Upgrade if suspects often miss.
 - shortcut: a ship refused by a bisect waits for the whole bisect (log2 of the train's runs) before it hears. Upgrade
   if trains are often red.
 - shortcut: a rider's flake lines print in the front's output, under the front's branch, so the flake count names the

@@ -30,8 +30,10 @@
 #
 # The ship train (#1166, docs/adr/0020-ship-train.md): at step 2 the landing at the front of the line stacks up to
 # LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
-# main and deploy once for them all. A red train is bisected by its prefixes: the green part ships, the first ship
-# that turned it red is refused with its own failure, and the ships after it stay in line. Each rider waits in line
+# main and deploy once for them all. A red train first refuses the ships whose change touched its really failing tests
+# (train_suspects, #1346) and runs again with the next ships in line in their places; failing that, it is bisected by
+# its prefixes: the green part ships, the first ship that turned it red is refused with its own failure, and the ships
+# after it stay in line. Each rider waits in line
 # as before and reads its verdict from <state>/train/<its ticket> (train_verdict below). Off: LAND_TRAIN=0, or for
 # every landing, touch <state>/train-off.
 #

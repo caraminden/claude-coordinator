@@ -465,6 +465,80 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
   }
 });
 
+// Waiters two or more back look every DEPLOY_QUEUE_NAP s, not every DEPLOY_QUEUE_POLL (#1545): twelve of them looking
+// every second, with a few processes per ticket each look, cost most of a core. $1: the lib's caller-side extras.
+function napper(state: string, label: string, pre = '', extra: Record<string, string> = {}) {
+  const child = spawn('bash', ['-c', `${pre}. "$0"; queue_lock "$1" "$2" || exit $?; echo "$2" >>"$1/order"; queue_done ok`, queueLib, state, label], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', DEPLOY_QUEUE_NAP: '4', ...extra } });
+  let stderr = '';
+  child.stderr!.on('data', (d) => (stderr += d));
+  const exit = new Promise<number | null>((ok) => child.on('close', ok));
+  return { child, exit, stderr: () => stderr };
+}
+test('a waiter further back naps between looks and starts no process but its nap, yet still acts on a reorder, a dead ticket and its wait check within a nap, and the next in line takes its turn at once (#1545)', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const ws: ReturnType<typeof napper>[] = [];
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    const join1 = (label: string, pre = '') => { ws.push(napper(state, label, pre)); return until(`${label}'s ticket`, () => issued(state) === ws.length + 1); };
+    await join1('b');
+    // c traces every command with its subshell depth: a $( ) or a pipe in a look shows as depth 1.
+    await join1('c', `PS4='+$BASH_SUBSHELL '; set -x; `);
+    await join1('d', `queue_wait_check() { [ ! -e '${state}/moved' ] || { echo "queue: main moved under d" >&2; return 1; }; }; `);
+    await join1('e');
+    const [b, c, d, e] = ws;
+    await until('e to say its place', () => /5th in line/.test(e.stderr()));
+    await until('c to nap twice', () => (c.stderr().match(/^\+0 sleep 4$/gm) ?? []).length >= 2, 15_000);
+    const look = c.stderr().split(/^\+0 sleep 4$/m)[1];
+    assert.doesNotMatch(look, /^\++[1-9]/m, `a look back in line started a subshell:\n${look}`);
+    assert.doesNotMatch(c.stderr().split('3rd in line')[1], /^\+0 sleep 0\.05$/m, 'c, two back, never looked at the poll beat');
+
+    const [, , , , te] = tickets(state);
+    const t0 = Date.now();
+    writeFileSync(join(state, 'queue', '.order'), `# Cara moved #5 to the front\n${te}\n`);
+    await until('e to see the reorder', () => /queue: 2nd in line .*\(ahead: a, starting\)/.test(e.stderr().split('Cara moved #5')[1] ?? ''), 6_000);
+    await until('c, further back, to see it too', () => /4th in line/.test(c.stderr().split('Cara moved #5').pop()!), 6_000);
+    assert.ok(Date.now() - t0 < 6_000);
+
+    b.child.kill('SIGKILL');
+    await b.exit;
+    await until('c to move up past the dead ticket', () => /3rd in line/.test(c.stderr().split('Cara moved #5').pop()!), 6_000);
+
+    writeFileSync(join(state, 'moved'), '');
+    assert.equal(await Promise.race([d.exit, new Promise((ok) => setTimeout(() => ok('late'), 6_000))]), 2, d.stderr());
+    assert.match(d.stderr(), /main moved under d/);
+
+    writeFileSync(join(state, 'go'), '');
+    await until('e, next in line, to take the lock', () => order(state).includes('e'), 2_000);
+    assert.equal(await e.exit, 0, e.stderr());
+    assert.equal(await c.exit, 0);
+    assert.deepEqual(order(state), ['a', 'e', 'c']);
+  } finally {
+    writeFileSync(join(state, 'go'), '');
+    for (const w of ws) w.child.kill('SIGKILL');
+  }
+});
+
+test('a waiter further back still gives up on time when nothing moves (#1545)', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', 'sleep 600');
+  const ws: ReturnType<typeof napper>[] = [];
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    ws.push(napper(state, 'b')); // its own stall is the default 15 min, so its leaving doesn't count as c's progress
+    await until("b's ticket", () => issued(state) === 2);
+    const t0 = Date.now();
+    ws.push(napper(state, 'c', '', { DEPLOY_QUEUE_STALL: '3', DEPLOY_QUEUE_NAP: '2' }));
+    assert.equal(await ws[1].exit, 1);
+    const took = Date.now() - t0;
+    assert.ok(took >= 3_000 && took < 6_500, `gave up after ${took} ms`);
+    assert.match(ws[1].stderr(), /nothing has moved for 0 min \(ahead: a, starting; pid \d+, state S; the lock is held\)/);
+  } finally {
+    a.child.kill('SIGKILL');
+    for (const w of ws) w.child.kill('SIGKILL');
+  }
+});
+
 // The Releases page's server lists in .order only the tickets marked "order" (src/waits.ts setOrder): a landing from an
 // older branch waits for every lower ticket, so ranking it ahead of one would leave the two waiting on each other.
 test('a landing from a branch before .order keeps its arrival order, and nobody waits on it forever', { timeout: 60_000 }, async () => {

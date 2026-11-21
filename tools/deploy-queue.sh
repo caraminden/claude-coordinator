@@ -25,41 +25,50 @@
 # inline, so a scheme copies one file: a fix to either belongs in both.
 
 QUEUE_POLL=${DEPLOY_QUEUE_POLL:-1}
+# How often a waiter with two or more ahead of it looks (#1545): nothing it does there needs a second's reaction, and
+# twelve waiters looking every second cost most of a core. The next in line keeps QUEUE_POLL, so it takes its turn at once.
+QUEUE_NAP=${DEPLOY_QUEUE_NAP:-${DEPLOY_QUEUE_POLL:-5}}
 # Give up after this long with no change at the head of the line. The floor is the holder's longest
 # single phase: the test run, 630 s at most (tools/run-tests.sh; its reruns are a phase of their own, 310 s at
 # most); the boot check ends within 6 min.
 QUEUE_STALL=${DEPLOY_QUEUE_STALL:-900}
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 
-# "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart.
+# "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart. With a second
+# argument, into that variable instead: the line's loop runs it for every ticket each pass, and a $( ) is a fork (#1545).
 queue_proc() {
-  local stat
-  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
-  stat=${stat##*) } # the command's name may hold spaces
-  # shellcheck disable=SC2086
-  set -- "$1" $stat
-  # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
-  case $2 in Z | X | x) return 0 ;; esac
-  echo "$1 ${21}"
+  local stat='' r='' into=${2:-}
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
+  if [ -n "$stat" ]; then
+    stat=${stat##*) } # the command's name may hold spaces
+    # shellcheck disable=SC2086
+    set -- "$1" $stat
+    # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
+    case $2 in Z | X | x) ;; *) r="$1 ${21}" ;; esac
+  fi
+  if [ -n "$into" ]; then printf -v "$into" %s "$r"; elif [ -n "$r" ]; then echo "$r"; fi
 }
 
-# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup (#585).
+# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup (#585). A second
+# argument: into that variable, as queue_proc.
 queue_state() {
-  local stat cg
-  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
+  local stat='' cg='' x
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
   stat=${stat##*) }
   stat=${stat%% *}
   # A frozen cgroup (systemctl freeze, a paused container) leaves its processes in state S: its cgroup.events says it.
-  if [[ $stat != [Tt] ]] && cg=$(grep -m 1 '^0::' "/proc/$1/cgroup" 2>/dev/null) &&
-    grep -qx 'frozen 1' "${DEPLOY_QUEUE_CGROUP:-/sys/fs/cgroup}${cg#0::}/cgroup.events" 2>/dev/null; then stat=T; fi
-  echo "$stat"
+  if [ -n "$stat" ] && [[ $stat != [Tt] ]]; then
+    while IFS= read -r x; do [[ $x != 0::* ]] || { cg=${x#0::}; break; }; done 2>/dev/null <"/proc/$1/cgroup"
+    [ -z "$cg" ] || while IFS= read -r x; do [ "$x" != 'frozen 1' ] || stat=T; done 2>/dev/null <"${DEPLOY_QUEUE_CGROUP:-/sys/fs/cgroup}$cg/cgroup.events"
+  fi
+  if [ -n "${2:-}" ]; then printf -v "$2" %s "$stat"; elif [ -n "$stat" ]; then echo "$stat"; fi
 }
 
 # <state>: the queued restart's phase, while its process lives.
 queue_restart() {
-  local l
+  local l p
   mapfile -t l 2>/dev/null <"$1/restart" || return 0
-  [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || return 0
+  [ -n "${l[0]:-}" ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]}" ] || return 0
   echo "${l[1]:-}"
 }
 
@@ -136,13 +145,14 @@ queue_order() {
     if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; fi
   done <"$1/.order" 2>/dev/null || true
 }
-queue_key() {
-  local o seg=0
+queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_proc)
+  local o seg=0 k
   for o in "${QUEUE_OLD[@]}"; do
-    [ "$o" != "$1" ] || { printf '%05d2' "$seg"; return; }
+    [ "$o" != "$1" ] || { printf -v k '%05d2' "$seg"; break; }
     [[ $o > $1 ]] || seg=$((seg + 1))
   done
-  if [ -n "${QUEUE_RANK[$1]:-}" ]; then printf '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf '%05d1%s' "$seg" "$1"; fi
+  if [ -n "${k:-}" ]; then :; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
+  if [ -n "${2:-}" ]; then printf -v "$2" %s "$k"; else printf %s "$k"; fi
 }
 
 queue_ordinal() {
@@ -155,7 +165,7 @@ queue_ordinal() {
 # older than this rule counts it ahead regardless). So it goes right after the next ship, or rides in its train.
 queue_lock() {
   # The stall is timed in microseconds: $SECONDS ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last change (#790).
-  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
+  local q=$1/queue label=$2 n me t l p st ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
   local -A QUEUE_RANK=()
   local QUEUE_OLD=()
   local QUEUE_ORDER_BY=""
@@ -203,23 +213,25 @@ queue_lock() {
       by=$QUEUE_ORDER_BY
       [ -z "$by" ] || echo "queue: $by" >&2
     fi
-    mine=$(queue_key "$n")
+    queue_key "$n" mine
     for t in "$q"/[0-9]*; do
       [[ ${t##*/} =~ ^[0-9]+$ ]] || continue # not a ticket half-written, or the glob itself
       [ "${t##*/}" != "$n" ] || continue
       mapfile -t l 2>/dev/null <"$t" || continue
       # Its process is gone (killed, or its turn was stopped): it leaves the line.
-      if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
+      [ -z "${l[0]:-}" ] || queue_proc "${l[0]%% *}" p
+      if [ -z "${l[0]:-}" ] || [ "$p" != "${l[0]}" ]; then
         rm -f "$t"
         continue
       fi
       # The holder is ahead of everyone; a waiter only if it comes before this one in the line's order.
       if [ "${l[1]:-0}" = 0 ]; then
         [ "${l[6]:-}" != yield ] || continue # it lets the next one go first (QUEUE_YIELD above)
-        key=$(queue_key "${t##*/}")
+        queue_key "${t##*/}" key
         [[ $key < $mine ]] || [ -n "${QUEUE_YIELD:-}" ] || continue
         # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
-        [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
+        queue_state "${l[0]%% *}" st
+        [[ $st != [Tt] ]] || continue
       else
         key=0 took=1 # before any waiter's, so the holder is the head
       fi
@@ -250,7 +262,7 @@ queue_lock() {
       head=""
       for t in "$q"/[0-9]*; do
         [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
-        [ "${l[1]:-0}" != 0 ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]:-}" ] || continue
+        [ "${l[1]:-0}" != 0 ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]:-}" ] || continue
         head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"
         break
       done
@@ -294,7 +306,7 @@ queue_lock() {
       queue_done
       return 1
     fi
-    [ "$ahead" = 0 ] || sleep "$QUEUE_POLL"
+    if [ "$ahead" -gt 1 ]; then sleep "$QUEUE_NAP"; elif [ "$ahead" = 1 ]; then sleep "$QUEUE_POLL"; fi
   done
 }
 

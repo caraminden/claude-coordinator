@@ -207,7 +207,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const docs = new Set([...(refs?.cards ?? []), ...(refs?.settled ?? [])].flatMap((c) => (c.doc ? [c.doc] : [])));
   const choices = refs?.cards ? await cardlessChoices(reply, cfg, docs) : [];
   const asked = proseChoice(reply, status, input.transcript_path);
-  const waiting = !(Array.isArray(status?.replies) && status.replies.length) && postedCard(input.transcript_path) !== true ? waitingNoCard(reply) : null;
+  const waiting = !(Array.isArray(status?.replies) && status.replies.length) && postedCard(input.transcript_path) === false ? waitingNoCard(reply) : null;
   const closing = closingClaim(reply, status, input.transcript_path, refs ? (refs.self ?? null) : undefined);
   if (!asked && !broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !stale.length && !rolled.length && !choices.length && !closing && !waiting) return null;
   if (cfg.nudged) {

@@ -198,7 +198,7 @@ export function staleCards(text: string, settled: SettledCard[]): SettledCard[] 
 /** A sentence that says something waits on a person: "waiting on you", "still yours", "needs your go", "blocked on Cara". */
 const WAITS = /\b(?:wait(?:s|ing)? (?:on|for) (?:you|cara|josh|cody)\b|awaiting (?:your|cara|josh|cody)|still (?:yours|needed from you)|needs? (?:your|cara'?s?|josh'?s?) (?:go|ok|okay|pick|decision|answer|input|sign-?off|approval)|blocked on (?:you|cara|josh|cody)\b|on you to\b)/i;
 /** Negations and "it's done" wording near the match, which let the line through. */
-const NOT_WAITING = /\b(?:will|would|should(?:n't)?|risk|high-risk|allow|reading|read|per|nothing|no(?:thing| one| longer)?|not|never|isn't|aren't|nobody|n't|already|done|resolved|answered|settled|no need)\b/i;
+const NOT_WAITING = /\b(?:until|was|were|had|parked|will|would|should(?:n't)?|risk|high-risk|allow|reading|read|per|nothing|no(?:thing| one| longer)?|not|never|isn't|aren't|nobody|n't|already|done|resolved|answered|settled|no need)\b/i;
 
 /**
  * The first sentence that says something waits on a person, when its paragraph links no card (an `?e=` link)
@@ -221,7 +221,7 @@ export function waitingNoCard(text: string): string | null {
 /** The send-back's line for a waiting claim with no card. */
 export function explainWaiting(sentence: string): string {
   return `Your reply says something waits on a person ("${sentence.slice(0, 120)}") but links no open card. A by-hand step or a prose ask has no object they can answer. `
-    + 'Do one of: link the open card that holds it ([the card](#/p/2/t/394?e=123)); put the step on a card with ask_question, to that person (Done / Later), and link it; or drop the line. '
+    + 'Do one of: link the open card that holds it ([the card](its link)); put the step on a card with ask_question, to that person (Done / Later), and link it; or drop the line. '
     + 'If nothing really waits on them, answer KEEP.';
 }
 

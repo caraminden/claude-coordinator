@@ -251,17 +251,21 @@ test('a reply that says the minion is closing is sent back unless close_self was
 });
 
 test('a reply that says something waits on a person with no card is sent back; a card, a button or a done line lets it through (#1507)', async () => {
+  const none = join(root, 't-1507-none.jsonl');
+  writeFileSync(none, JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }));
+  const send = (last_assistant_message: string) => check({ last_assistant_message, transcript_path: none }, cfg);
   const step = 'Run the command above in a shell.\n\nStill waiting on you: install git-lfs.';
-  const v = await check({ last_assistant_message: step }, cfg);
+  const v = await send(step);
   assert.equal(v?.decision, 'block');
   assert.match(v.reason, /Still waiting on you: install git-lfs/);
   assert.match(v.reason, /ask_question/);
   // The open card linked: passes (a settled one goes through the stale check, tested in card-links.test.ts).
-  assert.equal(await check({ last_assistant_message: 'Still waiting on you: [the card](#/p/2/t/268?e=7).' }, cfg), null);
+  assert.equal(await send('Still waiting on you: [the card](#/p/2/t/268?e=7).'), null);
   // A lone go as a reply button, and lines that say nothing waits.
-  assert.equal(await check({ last_assistant_message: `${step}\n<!-- status: {"state":"ready","note":"x","replies":["Done"]} -->` }, cfg), null);
-  assert.equal(await check({ last_assistant_message: 'Nothing is waiting on you.' }, cfg), null);
-  assert.equal(await check({ last_assistant_message: 'That was waiting on you, and you already ran it.' }, cfg), null);
+  assert.equal(await send(`${step}\n<!-- status: {"state":"ready","note":"x","replies":["Done"]} -->`), null);
+  assert.equal(await send('Nothing is waiting on you.'), null);
+  assert.equal(await send('That was waiting on you, and you already ran it.'), null);
+  assert.equal(await send('Cara answered; it was waiting on you until now.'), null);
   // A card posted this turn covers it.
   const transcript_path = join(root, 't-1507.jsonl');
   writeFileSync(transcript_path, [{ type: 'user', message: { role: 'user', content: 'hi' } }, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'mcp__thread__ask_question', input: {} }] } }].map((l) => JSON.stringify(l)).join('\n'));

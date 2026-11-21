@@ -1226,8 +1226,8 @@ if (!PREVIEW) void safely('startup sweep', async () => {
       await artifacts.scan(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
     }
   }
-  // Copy every thread's Claude session into the database (only what changed since last time), so
-  // threads from before this existed are covered too. Nothing is pruned here: this config dir may be
+  // Copy every open thread's Claude session into the database (only what changed since last time), so
+  // threads from before this existed are covered too; dismissed ones are skipped (#1486). Nothing is pruned here: this config dir may be
   // a fresh one that hasn't had the sessions restored into it yet.
   const configDir = claudeConfigDir(process.env);
   for (const p of store.listProjects()) {

@@ -6,6 +6,7 @@ import { CITADEL_TARGET, type LineEntry } from './releases.ts';
 import { landQueue, schemeLine } from './release-readers.ts';
 import { moveIn, ordinal, writeOrder } from './waits.ts';
 import { HISTORY_MAX, placedKey, readState, shipLineKey, type Placed } from './ship-line-state.ts';
+import { pacificStamp } from './pacific.ts';
 
 export const REASON_MAX = 200;
 
@@ -15,7 +16,7 @@ export interface Mover {
   taskmaster: boolean;
 }
 
-const when = (at: number) => new Date(at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+const when = pacificStamp;
 
 /**
  * Put `moved` where `seqs` places it in scheme `projectId`'s line (the person's drag, or the Taskmaster's order), and record who

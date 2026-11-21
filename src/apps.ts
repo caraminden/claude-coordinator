@@ -53,10 +53,18 @@ export class RestartHolds {
   /** Past this many waiting on one app, a request goes on at once (and fails fast if the app is down). */
   private maxWaiting: number;
   private apps = new Map<string, { holds: number; ended: number; waiting: number; stopped?: boolean }>();
+  /** The hold's clock; a test passes a fake one and moves it (#1444). Polling the port stays on real time. */
+  private now: () => number;
 
-  constructor(holdMs = HOLD_MS, maxWaiting = 200) {
+  constructor(holdMs = HOLD_MS, maxWaiting = 200, now = () => Date.now()) {
     this.holdMs = holdMs;
     this.maxWaiting = maxWaiting;
+    this.now = now;
+  }
+
+  /** How many requests wait on the app now. */
+  waiting(name: string): number {
+    return this.apps.get(name)?.waiting ?? 0;
   }
 
   /** The app is restarting until the returned release is called (once; again does nothing). */
@@ -70,7 +78,7 @@ export class RestartHolds {
       if (done) return;
       done = true;
       app.holds--;
-      app.ended = Date.now();
+      app.ended = this.now();
     };
   }
 
@@ -99,13 +107,13 @@ export class RestartHolds {
    */
   whenUp(name: string, port: number, conn: { once(e: 'close', f: () => void): unknown }, go: (held?: boolean) => void) {
     const app = this.apps.get(name);
-    if (!app || (app.holds === 0 && Date.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return go();
+    if (!app || (app.holds === 0 && this.now() - app.ended >= this.holdMs) || app.waiting >= this.maxWaiting) return go();
     let gone = false;
     conn.once('close', () => (gone = true));
     app.waiting++;
-    const until = Date.now() + this.holdMs;
+    const until = this.now() + this.holdMs;
     const poll = async () => {
-      while (!gone && Date.now() < until && !(await accepts(port, until - Date.now()))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - Date.now()))));
+      while (!gone && this.now() < until && !(await accepts(port, until - this.now()))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - this.now()))));
     };
     void poll().finally(() => {
       app.waiting--;

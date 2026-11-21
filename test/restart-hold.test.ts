@@ -6,8 +6,9 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { RestartHolds } from '../src/apps.ts';
+import { HOLD_MS, RestartHolds } from '../src/apps.ts';
 import { forward } from '../src/proxy.ts';
+import { FakeClock } from './fake-clock.ts';
 import { bootServer, fakeSystemd, freePort, until, type Booted } from './helpers.ts';
 
 const servers: Server[] = [];
@@ -42,28 +43,33 @@ const stop = (s: Server) => new Promise<void>((ok) => {
 /** The proxy in front of it, as AppProxy.serve uses the holds. */
 // The proxy's own retry of a refused GET (#1173, test/proxy-retry.test.ts) is off unless a test asks for it, so these
 // test the hold alone; a held request never retries on top, as in src/apps.ts.
-async function proxy(holds: RestartHolds, port: number, retryMs = 0): Promise<string> {
-  const s = createServer((req, res) => holds.whenUp('fixture', port, res, (held) => forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: held ? 0 : retryMs })));
+// `held` gets, per request path, whether it waited under the hold: the tests check that, not how long it took (#1444).
+async function proxy(holds: RestartHolds, port: number, retryMs = 0, held: Record<string, boolean> = {}): Promise<string> {
+  const s = createServer((req, res) => holds.whenUp('fixture', port, res, (h) => {
+    held[req.url!] = !!h;
+    forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: h ? 0 : retryMs });
+  }));
   servers.push(s);
   const p = await freePort();
   await new Promise<void>((ok) => s.listen(p, '127.0.0.1', () => ok()));
   return `http://127.0.0.1:${p}`;
 }
 
-const timed = async (url: string, init?: RequestInit) => {
-  const t = Date.now();
+const ask = async (url: string, init?: RequestInit) => {
   const res = await fetch(url, { ...init, headers: { Connection: 'close' } });
-  return { status: res.status, body: await res.text(), ms: Date.now() - t };
+  return { status: res.status, body: await res.text() };
 };
 
 test('an app restarting under a stream of requests: none gets a 502, each waits under the hold, a body arrives whole', async () => {
   const port = await freePort();
   let fixture = await app(port);
-  const holds = new RestartHolds(3000);
+  // The hold's clock never moves, so its cap can't end a wait: every request sent in the gap got through because the
+  // app came back, not because the hold gave up.
+  const holds = new RestartHolds(3000, 200, new FakeClock().now);
   const base = await proxy(holds, port);
   // Requests sent before the stop may be on the app's socket when it closes: the kernel resets those, and they can't be
   // replayed (the app may have read them). Every one sent once it stopped listening must get through.
-  const asked: Promise<Awaited<ReturnType<typeof timed>>>[] = [];
+  const asked: Promise<Awaited<ReturnType<typeof ask>>>[] = [];
   let firstAfter = Infinity;
   let down = false;
   let inGap = 0;
@@ -71,67 +77,89 @@ test('an app restarting under a stream of requests: none gets a 502, each waits 
     const n = asked.length;
     if (down) inGap++;
     if (down && firstAfter === Infinity) firstAfter = n;
-    asked.push(n % 3 ? timed(`${base}/apps/fixture/${n}`) : timed(`${base}/apps/fixture/${n}`, { method: 'POST', body: `body ${n}` }));
+    asked.push(n % 3 ? ask(`${base}/apps/fixture/${n}`) : ask(`${base}/apps/fixture/${n}`, { method: 'POST', body: `body ${n}` }));
   }, 20);
-  await new Promise((r) => setTimeout(r, 200));
+  await until('requests flowing before the restart', () => asked.length >= 10);
   const release = holds.hold('fixture');
   const stopped = stop(fixture);
   down = true;
   await stopped;
-  await new Promise((r) => setTimeout(r, 1200));
+  await until('requests sent while the app is down', () => inGap >= 10);
   fixture = await app(port);
   down = false;
   release();
-  await new Promise((r) => setTimeout(r, 300));
+  const back = asked.length;
+  await until('requests sent once it is back', () => asked.length >= back + 10);
   clearInterval(stream);
   const done = await Promise.all(asked);
-  assert.ok(inGap >= 5, `only ${inGap} requests went while the app was down`);
   assert.deepEqual(done.map((d, n) => ({ ...d, n })).filter((d) => d.n >= firstAfter && d.status !== 200), []);
   for (const [n, d] of done.entries()) if (n >= firstAfter && n % 3 === 0) assert.equal(d.body, `got body ${n}`);
-  assert.ok(Math.max(...done.map((d) => d.ms)) < 3000, `the slowest took ${Math.max(...done.map((d) => d.ms))} ms`);
 });
 
-test('an app that is not restarting and not answering: a 502 inside 1 s', async () => {
+test('an app that is not restarting and not answering: a 502 at once, not held', async () => {
   const port = await freePort();
-  const base = await proxy(new RestartHolds(3000), port);
-  const d = await timed(`${base}/apps/fixture/`);
+  const held: Record<string, boolean> = {};
+  const base = await proxy(new RestartHolds(3000, 200, new FakeClock().now), port, 0, held);
+  const d = await ask(`${base}/apps/fixture/`);
   assert.equal(d.status, 502);
   assert.match(d.body, /Fixture is not answering/);
-  assert.ok(d.ms < 1000, `took ${d.ms} ms`);
+  assert.deepEqual(held, { '/apps/fixture/': false }, 'it went straight on, with no wait');
 });
 
 test('a restart that never comes back: the hold ends at its cap with a 502', async () => {
   const port = await freePort();
-  const holds = new RestartHolds(600);
+  const clock = new FakeClock();
+  let reads = 0;
+  const holds = new RestartHolds(600, 200, () => (reads++, clock.now()));
+  const held: Record<string, boolean> = {};
   // With the proxy's retry on: a request that waited out the hold doesn't then retry for another 5 s.
-  const base = await proxy(holds, port, 5000);
+  const base = await proxy(holds, port, 5000, held);
   holds.hold('fixture');
-  const d = await timed(`${base}/apps/fixture/`);
-  assert.equal(d.status, 502);
-  assert.ok(d.ms >= 550 && d.ms < 1500, `took ${d.ms} ms`);
+  const d = ask(`${base}/apps/fixture/`);
+  await until('the request to wait under the hold', () => holds.waiting('fixture') === 1);
+  clock.advance(599);
+  const r = reads;
+  // A whole turn of its poll loop reads the clock 3 times: 4 reads means it saw 599 ms and chose to keep waiting.
+  await until('the hold to look at the clock again', () => reads >= r + 4);
+  assert.deepEqual(held, {}, 'still waiting just before the cap');
+  clock.advance(1);
+  assert.equal((await d).status, 502);
+  assert.deepEqual(held, { '/apps/fixture/': true }, 'it waited under the hold, so the proxy does not retry on top');
 });
 
 test('after the restart ends its grace runs out, then a dead app fails fast again', async () => {
   const port = await freePort();
-  const holds = new RestartHolds(300);
-  const base = await proxy(holds, port);
+  const clock = new FakeClock();
+  const holds = new RestartHolds(300, 200, clock.now);
+  const held: Record<string, boolean> = {};
+  const base = await proxy(holds, port, 0, held);
   holds.hold('fixture')();
-  assert.ok((await timed(`${base}/apps/fixture/`)).ms >= 250);
-  await new Promise((r) => setTimeout(r, 350));
-  assert.ok((await timed(`${base}/apps/fixture/`)).ms < 250);
+  clock.advance(299);
+  const inGrace = ask(`${base}/apps/fixture/a`);
+  await until('the request in the grace to wait', () => holds.waiting('fixture') === 1);
+  clock.advance(1);
+  assert.equal((await ask(`${base}/apps/fixture/b`)).status, 502);
+  assert.deepEqual(held, { '/apps/fixture/b': false }, 'the grace is over: the next one is not held, while the one before still waits');
+  clock.advance(299);
+  assert.equal((await inGrace).status, 502, 'the one asked in the grace waited out its own cap');
+  assert.equal(held['/apps/fixture/a'], true);
 });
 
 test('past the cap on waiting requests, the next one is not held', async () => {
   const port = await freePort();
-  const holds = new RestartHolds(800, 1);
-  const base = await proxy(holds, port);
+  const clock = new FakeClock();
+  const holds = new RestartHolds(800, 1, clock.now);
+  const held: Record<string, boolean> = {};
+  const base = await proxy(holds, port, 0, held);
   holds.hold('fixture');
-  const first = timed(`${base}/apps/fixture/a`);
-  await new Promise((r) => setTimeout(r, 50));
-  const second = await timed(`${base}/apps/fixture/b`);
+  const first = ask(`${base}/apps/fixture/a`);
+  await until('the first request to wait', () => holds.waiting('fixture') === 1);
+  const second = await ask(`${base}/apps/fixture/b`);
   assert.equal(second.status, 502);
-  assert.ok(second.ms < 400, `the second waited ${second.ms} ms`);
-  assert.ok((await first).ms >= 750);
+  assert.deepEqual(held, { '/apps/fixture/b': false }, 'the second went on at once while the first still waits');
+  clock.advance(800);
+  assert.equal((await first).status, 502);
+  assert.equal(held['/apps/fixture/a'], true);
 });
 
 test('through Citadel: a restart from Settings holds the app\'s requests, a stop does not', async () => {
@@ -161,6 +189,7 @@ test('through Citadel: a restart from Settings holds the app\'s requests, a stop
   await until('the restart to begin', () => existsSync(join(root, 'restarting')));
   await stop(fixture);
   const held = [get(), get(), get()];
+  // timing-ok: lets the three requests reach the server's hold first; shorter only makes the check weaker, never red
   await new Promise((r) => setTimeout(r, 800));
   fixture = await app(port);
   assert.equal((await restarted).status, 200);
@@ -170,11 +199,14 @@ test('through Citadel: a restart from Settings holds the app\'s requests, a stop
   await stop(fixture);
   const d = await get();
   assert.equal(d.status, 502);
-  assert.ok(d.ms < 1000, `a stopped app took ${d.ms} ms to fail`);
+  // The server's hold is in another process, so this one stays on real time. A held request can't fail before HOLD_MS
+  // (its port stays shut), so failing sooner proves the stop dropped the hold; no box is slow enough to blur the two.
+  assert.ok(d.ms < HOLD_MS, `a stopped app took ${d.ms} ms to fail: it was held`); // timing-ok: HOLD_MS is the rule's own line
 
   // Started again: a GET while it boots waits for it (the proxy's retry), where a stopped one failed fast.
   assert.equal((await srv.call('/api/contraptions/fixture/service', { action: 'start' })).status, 200);
   const booting = get();
+  // timing-ok: the app comes up after the GET is in flight; shorter only makes the check weaker, never red
   await new Promise((r) => setTimeout(r, 500));
   fixture = await app(port);
   assert.deepEqual([(await booting).status, (await booting).body], [200, 'got ']);

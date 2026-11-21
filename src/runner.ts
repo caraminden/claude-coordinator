@@ -64,6 +64,7 @@ import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
+import { realClock, type Clock, type ClockTimer } from './clock.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -226,9 +227,9 @@ interface LiveTurn {
   container: string | null;
   timer: NodeJS.Timeout;
   ticks: number;
-  stopTimer?: NodeJS.Timeout;
+  stopTimer?: ClockTimer;
   /** A stop's SIGINT-to-SIGTERM wait. */
-  stopGraceTimer?: NodeJS.Timeout;
+  stopGraceTimer?: ClockTimer;
   /** What it last did and the tool calls still open (#906): when it counts as quiet. */
   activity: Activity;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
@@ -870,8 +871,8 @@ export class Runner {
     this.detached = true;
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
-      clearTimeout(t.stopTimer);
-      clearTimeout(t.stopGraceTimer);
+      this.clock.clearTimeout(t.stopTimer);
+      this.clock.clearTimeout(t.stopGraceTimer);
     }
     this.turns.clear();
   }
@@ -2482,10 +2483,12 @@ export class Runner {
   /** How long a stopped claude has after SIGINT to write its result before SIGTERM, and in all before SIGKILL (ms). */
   stopGraceMs = 5_000;
   stopKillMs = 15_000;
+  /** The stop's grace and kill timers run on this; tests pass a fake one (test/fake-clock.ts). */
+  clock: Clock = realClock;
 
   private armKill(live: LiveTurn, ticketId: number) {
-    clearTimeout(live.stopTimer);
-    live.stopTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), this.stopKillMs);
+    this.clock.clearTimeout(live.stopTimer);
+    live.stopTimer = this.clock.setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), this.stopKillMs);
     live.stopTimer.unref();
   }
 
@@ -2496,8 +2499,8 @@ export class Runner {
   private stopSignals(live: LiveTurn, ticketId: number) {
     if (live.stopGraceTimer) return; // a second Stop must not restart the grace period or push the SIGKILL out
     this.signal(live, 'SIGINT');
-    clearTimeout(live.stopGraceTimer);
-    live.stopGraceTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM'), this.stopGraceMs);
+    this.clock.clearTimeout(live.stopGraceTimer);
+    live.stopGraceTimer = this.clock.setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM'), this.stopGraceMs);
     live.stopGraceTimer.unref();
     this.armKill(live, ticketId);
   }
@@ -3496,8 +3499,8 @@ export class Runner {
 
   private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
     clearInterval(live.timer);
-    clearTimeout(live.stopTimer);
-    clearTimeout(live.stopGraceTimer);
+    this.clock.clearTimeout(live.stopTimer);
+    this.clock.clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);
     this.spends.delete(ticketId);
     // Kept for the failure note below, which quotes its stderr.

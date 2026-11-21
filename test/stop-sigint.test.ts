@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
+import { FakeClock } from './fake-clock.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -39,23 +40,37 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 const runner = new Runner(store, () => {}, () => ({}), fake);
 runner.pollMs = 10;
-(runner as any).stopGraceMs = 300;
-(runner as any).stopKillMs = 1500;
+// The grace and kill timers run on a clock the test moves (#1444): what's checked is which signal goes when, in order,
+// not how many real milliseconds a stop took.
+const clock = new FakeClock();
+runner.clock = clock;
+const { stopGraceMs, stopKillMs } = runner;
+let sent: string[] = [];
+const signal = runner.signal.bind(runner);
+runner.signal = (live, sig) => {
+  sent.push(sig);
+  signal(live, sig);
+};
 
-async function stopped(text: string) {
+async function started(text: string) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   runner.send(t.id, 'Cara', text);
   await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
-  const at = Date.now();
-  runner.stop(t.id);
-  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
-  assert.ok(!runner.isRunning(t.id), 'the turn ended');
-  return { id: t.id, took: Date.now() - at, ticket: store.getTicket(t.id)! };
+  sent = [];
+  return t.id;
+}
+
+async function ended(id: number) {
+  await until('the turn to stop', async () => !runner.isRunning(id), 10000);
+  return store.getTicket(id)!;
 }
 
 test('a stopped turn records its result: cost and usage', async () => {
-  const { id, ticket } = await stopped('result-on-sigint');
+  const id = await started('result-on-sigint');
+  runner.stop(id);
+  const ticket = await ended(id);
+  assert.deepEqual(sent, ['SIGINT'], 'SIGINT alone ended it: no time passed, so no SIGTERM');
   assert.equal(ticket.status, 'idle');
   const turns = store.listTurns(id);
   assert.equal(turns.length, 1);
@@ -63,27 +78,40 @@ test('a stopped turn records its result: cost and usage', async () => {
 });
 
 test('a claude that ignores SIGINT still dies by SIGTERM after the grace period', async () => {
-  const { took, ticket } = await stopped('plain');
+  const id = await started('plain');
+  runner.stop(id);
+  assert.deepEqual(sent, ['SIGINT']);
+  assert.deepEqual(clock.pending().map((p) => p.ms), [stopGraceMs, stopKillMs], 'SIGTERM after the grace, SIGKILL after the kill wait');
+  clock.advance(stopGraceMs - 1);
+  assert.deepEqual(sent, ['SIGINT'], 'nothing more before the grace period is up');
+  clock.advance(1);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
+  const ticket = await ended(id);
   assert.equal(ticket.status, 'idle');
-  assert.ok(took >= 250, `waited out the grace period (${took} ms)`);
-  assert.ok(took < 1400, `SIGTERM ended it before the SIGKILL retry (${took} ms)`);
+  assert.deepEqual(clock.pending(), [], 'SIGTERM ended it, and the SIGKILL retry was called off');
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
 });
 
 test('a claude that ignores SIGINT and SIGTERM is SIGKILLed', async () => {
-  const { took, ticket } = await stopped('ignore-sigterm');
+  const id = await started('ignore-sigterm');
+  runner.stop(id);
+  clock.advance(stopGraceMs);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
+  clock.advance(stopKillMs - stopGraceMs);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM', 'SIGKILL'], 'killed by the SIGKILL retry');
+  const ticket = await ended(id);
   assert.equal(ticket.status, 'idle');
-  assert.ok(took >= 1450, `killed by the SIGKILL retry (${took} ms)`);
 });
 
 test('a second Stop does not push the SIGKILL out', async () => {
-  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  store.setTicketDir(t.id, root, null);
-  runner.send(t.id, 'Cara', 'ignore-sigterm');
-  await until('the first claude event', async () => store.listEvents(t.id).some((e) => e.kind === 'claude'), 10000);
-  const at = Date.now();
-  runner.stop(t.id);
-  await new Promise((r) => setTimeout(r, 700));
-  runner.stop(t.id);
-  await until('the turn to stop', async () => !runner.isRunning(t.id), 10000);
-  assert.ok(Date.now() - at < 2100, `killed ${Date.now() - at} ms after the first Stop`);
+  const id = await started('ignore-sigterm');
+  runner.stop(id);
+  clock.advance(stopGraceMs + 700);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
+  runner.stop(id);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM'], 'the second Stop sends nothing new');
+  assert.deepEqual(clock.pending(), [{ ms: stopKillMs, in: stopKillMs - stopGraceMs - 700 }], 'the SIGKILL still comes on the first Stop\'s schedule');
+  clock.advance(stopKillMs - stopGraceMs - 700);
+  assert.deepEqual(sent, ['SIGINT', 'SIGTERM', 'SIGKILL']);
+  await ended(id);
 });

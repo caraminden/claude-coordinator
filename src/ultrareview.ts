@@ -151,7 +151,8 @@ export class UltraReviews {
 
   constructor(deps: Deps) {
     this.deps = deps;
-    this.jobs = new HostJobs(deps.units, TURN_SLICE);
+    // oomd's last pick, as the minion turns beside it are (#1338): a person asked and pays for it.
+    this.jobs = new HostJobs(deps.units, TURN_SLICE, ['-p', 'ManagedOOMPreference=avoid']);
   }
 
   /** Reviews a restart would cut off (runner.hostJobs): ones still cloning, and ones whose CLI fell back to the server's child. */

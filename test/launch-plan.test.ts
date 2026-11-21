@@ -108,7 +108,12 @@ test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's lis
   assert.ok(minionRun.includes('--slice=citadel-turns.slice') && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
   assert.ok(tmRun.includes('--slice=citadel-taskmasters.slice') && !tmRun.includes('--slice=citadel-turns.slice'), tmRun.join(' '));
   assert.equal(tmRun[tmRun.indexOf('ManagedOOMPreference=omit') - 1], '-p');
-  assert.ok(plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!.includes('--slice=citadel-taskmasters.slice'), 'the tools pool Taskmasters call');
+  const poolRun = plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!;
+  assert.ok(poolRun.includes('--slice=citadel-taskmasters.slice'), 'the tools pool Taskmasters call');
+  // systemd-oomd (#1338): a minion turn is its last pick, never its first; the pool every turn's tools go through is never picked.
+  assert.equal(minionRun[minionRun.indexOf('ManagedOOMPreference=avoid') - 1], '-p', minionRun.join(' '));
+  assert.ok(!tmRun.includes('ManagedOOMPreference=avoid'), tmRun.join(' '));
+  assert.equal(poolRun[poolRun.indexOf('ManagedOOMPreference=omit') - 1], '-p', poolRun.join(' '));
   assert.ok(existsSync(new URL('../deploy/citadel-taskmasters.slice', import.meta.url)), 'the slice it names ships in deploy/');
 });
 

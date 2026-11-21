@@ -425,10 +425,11 @@ export function statusPane(onData = () => {}) {
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : citadelTiles(citadel, days, now, shipTimes, draw))));
   };
-  let timer = null, busy = false;
+  let timer = null, busy = false, tried = false;
   const load = async () => {
     timer = null;
-    if (!el.isConnected) return; // read again once the tab shows again
+    if (tried && !el.isConnected) return; // read again once the tab shows again; the first read may start before the page is attached
+    tried = true;
     busy = true;
     try {
       data = await api('api/status');

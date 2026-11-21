@@ -18,7 +18,7 @@ import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
 import { loadingLine, tabs as uiTabs } from './ui/state.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { allSchemes, closeReleases, opening, serverScheme, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage, targetNames } from './releases.js';
+import { allSchemes, closeReleases, opening, serverScheme, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage } from './releases.js';
 import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD } from './status.js';
 
 const REFRESH_MS = 30_000;
@@ -336,7 +336,7 @@ export function releasesShell() {
     const held = s ? s.problems.filter(holdsDeploys) : [];
     const more = releaseTrouble(id);
     const st = held.some((x) => !x.quiet) ? 'down' : held.length || more.length ? 'fix' : 'ready';
-    return { st, line: held.length + more.length ? words(st, held.length + more.length, 'hold') : targetNames(id) || 'all clear' };
+    return { st, line: held.length + more.length ? words(st, held.length + more.length, 'hold') : 'all clear' };
   };
   const worst = (sts) => sts.reduce((w, x) => (RANK[x] > (RANK[w] ?? -1) ? x : w), 'ready');
 

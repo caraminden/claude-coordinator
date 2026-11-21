@@ -283,7 +283,6 @@ export const releasesLoaded = () => loaded;
 export const serverScheme = () => [...schemes].find(([, s]) => s.targets.some((tv) => tv.target.id === CITADEL_TARGET_ID))?.[0] ?? null;
 
 /** A scheme's target names, for its line in the page's list when it has no CI. */
-export const targetNames = (id) => (schemes.get(id)?.targets ?? []).map((tv) => tv.target.name).join(' · ');
 
 /** The server's own deploy: the post-deploy watch is this server's, so only Citadel's card shows it. */
 const CITADEL_TARGET_ID = 'citadel-server';

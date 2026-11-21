@@ -235,7 +235,9 @@ function moveOn() {
   const rows = groups();
   if (rows.has(next)) return; // it still asks something else: stay
   const at = visit.shown.indexOf(next);
-  const after = [...visit.shown.slice(at + 1), ...visit.shown.slice(0, Math.max(at, 0))].find((id) => rows.has(id));
+  // A scheme folded shut on Home is skipped: its rows are still in `shown`, but nothing there opens by itself.
+  const open = (id) => rows.has(id) && !folded.has(visit.last.get(id)?.t.project_id);
+  const after = [...visit.shown.slice(at + 1), ...visit.shown.slice(0, Math.max(at, 0))].find(open);
   const from = next;
   next = null;
   if (after == null) return;

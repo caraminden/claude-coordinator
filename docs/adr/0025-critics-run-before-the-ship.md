@@ -13,12 +13,21 @@ off its ship first and reviews alongside: the code review still runs alongside, 
 - A ship hand-off (`hand_off_land`, and a container's land tool) is refused when the branch matches the `diff:` globs
   of a critic in the scheme's review set and that minion has no run of it on record. An advisory critic needs any
   verdict. A blocking critic needs a pass, which the existing hold (`holds()`) already enforces once a run exists.
-- It applies in every scheme and to every critic that is on, from the review set's data. A critic on trial isn't
-  required, since it only advises until it's calibrated. A build's own ship, its take-in of main and the fix of a
-  rolled-back deploy skip it.
+- It applies in every scheme and to every critic that is on, from the review set's data. Two picks of #1504's, not
+  Cara's, and open to a member's word: a critic on trial isn't required, since it only advises until it's calibrated
+  (this leaves out Peek Auras' `overlay-look`, which matched 15 ships in the replay below); and a build's own ship,
+  its take-in of main and the fix of a rolled-back deploy skip it.
 - A person's go doesn't stand in for the run: the minion can always record one, `ask` included.
 - `diff:` triggers take `lines: <n>`: the critic fires only when the matched files' lines added plus removed come to n
   or more. A replay over the ship record (Nov 20–21, 36 h, 298 Citadel ships) and the 13 person-found UI defects:
   any front-end file, 84 ships, 12 of 13 caught; CSS or HTML touched, 46 ships, 10 of 13; 10+ CSS or HTML lines, 16
   ships, 8 of 13. The two that only the CSS/HTML trigger adds are an interaction bug (#897) and a 3-line colour
   (#728), which a screenshot critic is unlikely to see.
+
+Replay of the gate over the ship record (the same 36 h, every scheme; a ship counts as refused when it matched an on
+critic's globs and its minion had no run of it): Citadel `ui-screenshots` 83 of 299 ships (84 matched, 1 had run it);
+TWIReader `ui-screenshots` 1 of 4; TripPresenter, Genesis Tree, VoiceAnalyzer and Theory of Crafting 0; Peek Auras'
+`overlay-look` would be 15 of 171 if trial critics counted. At Citadel's trigger then (`public/**`, the design system,
+the contraption starter) that is about 55 critic runs a day, twice the handoff's budget of about 25 ($9), so the gate
+ships with the trigger narrowed to 10+ lines of CSS or HTML (about 11 a day, 8 of the 13 caught), set on the entry by
+the Taskmaster once this is live. There was no logging-only week: this replay of the record stands in for it.

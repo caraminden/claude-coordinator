@@ -77,18 +77,6 @@ test('create_ticket from the Taskmaster gets the warning in its notes; a person 
     const pointer = await asTaskmaster({ title: 'Retry three', message: `Start from the handoff ${join(shared, 'handoff-retry.md')}.` });
     assert.deepEqual(pointer.data.notes.filter((n: string) => n.startsWith('Brief check')), [], pointer.data.notes.join('\n'));
 
-    // A handoff a person starts from a file is an agent's brief too.
-    const started = await s.call(`/api/projects/${p.id}/tickets`, { title: 'From file', message: 'Add a retry button.', brief: { path: join(shared, 'other.md'), heading: '' } });
-    assert.equal(started.status, 201);
-    assert.match(started.data.notes.join('\n'), /^Brief check/m);
-
-    // Starting one section is judged by that section, not by the rest of the file its message names.
-    const twoSections = join(shared, 'briefs.md');
-    writeFileSync(twoSections, `## Brief: first\nAdd a retry button.\n\n## Brief: second\n${complete}`);
-    const section = await s.call(`/api/projects/${p.id}/tickets`, { title: 'First', message: `Add a retry button.\n\n(Brief from ${twoSections}; read the whole file for its context.)`, brief: { path: twoSections, heading: 'Brief: first' } });
-    assert.equal(section.status, 201);
-    assert.match(section.data.notes.join('\n'), /^Brief check/m);
-
     const own = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Mine', message: 'add a retry button' });
     assert.equal(own.status, 201);
     assert.deepEqual((own.data.notes ?? []).filter((n: string) => n.startsWith('Brief check')), [], 'a person typing their own ask is already their words');

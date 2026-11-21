@@ -60,8 +60,9 @@ const count = (file: string, table: string) => {
 const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 test('the nightly backup also writes the off-box set, with linked-account secrets stripped', () => {
-  assert.match(run('backup.sh'), /Off-box set: 3 files/);
-  assert.deepEqual(readdirSync(offbox).sort(), [`coordinator-${day}.db`, readdirSync(backups).find((f) => f.startsWith('coordinator-weekly-'))!, 'SHA256SUMS', `state-${day}.db`].sort());
+  assert.match(run('backup.sh'), /Off-box set: 5 files/);
+  const weeklyOf = (kind: string) => readdirSync(backups).find((f) => f.startsWith(`${kind}-weekly-`))!;
+  assert.deepEqual(readdirSync(offbox).sort(), [`coordinator-${day}.db`, weeklyOf('coordinator'), `events-${day}.db`, weeklyOf('events'), 'SHA256SUMS', `state-${day}.db`].sort());
   const daily = join(offbox, `coordinator-${day}.db`);
   assert.deepEqual(kinds(daily), ['claude_runner'], 'only the claude_runner row, which holds no secret, stays');
   assert.ok(!readFileSync(daily).includes(GITHUB_SECRET), 'VACUUM leaves no trace of the stripped rows');
@@ -82,7 +83,7 @@ test('the nightly backup also writes the off-box set, with linked-account secret
   assert.equal((statSync(offbox).mode & 0o777).toString(8), '700');
   assert.equal((statSync(daily).mode & 0o777).toString(8), '600');
   const sums = readFileSync(join(offbox, 'SHA256SUMS'), 'utf8').trim().split('\n');
-  assert.equal(sums.length, 3);
+  assert.equal(sums.length, 5);
   for (const line of sums) {
     const [hash, name] = line.split(/\s+/);
     assert.equal(hash, sha(join(offbox, name)), name);
@@ -116,23 +117,27 @@ test('a backup re-run the same day replaces its off-box copy, and the weekly fol
   assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(daily)}  coordinator-${day}`));
 });
 
-test('once the chat log has its own file, it is backed up daily and weekly and goes off-box as hard links (#1169)', () => {
-  assert.ok(existsSync(join(root, 'events.db')), 'the Store made an empty events.db, which the earlier runs skipped');
+test('the chat log, in its own file, is backed up daily and weekly and goes off-box as hard links (#1169)', () => {
   const db = new DatabaseSync(join(root, 'events.db'));
-  db.exec("CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL); INSERT INTO events VALUES (1, 1, 'note', 'a-chat-line', 0)");
+  db.exec("INSERT INTO events (ticket_id, kind, data, created_at) VALUES (1, 'note', 'a-chat-line', 0)");
+  const rows = (db.prepare('SELECT count(*) AS n FROM events').get() as { n: number }).n;
   db.close();
   assert.match(run('backup.sh'), /chat log to events-\d{4}-\d\d-\d\d\.db/);
   const daily = join(backups, `events-${day}.db`);
-  assert.equal(count(daily, 'events'), 1);
+  assert.equal(count(daily, 'events'), rows);
+  assert.ok(readFileSync(daily).includes('a-chat-line'));
   assert.equal((statSync(daily).mode & 0o777).toString(8), '600');
   const weekly = readdirSync(backups).find((f) => f.startsWith('events-weekly-'))!;
-  assert.equal(statSync(join(backups, weekly)).ino, statSync(daily).ino, 'the weekly is a link to the daily');
+  // The weekly keeps the week's first daily (Sunday's wins), like the main file's, so on a re-run it is the earlier copy.
+  const sunday = execFileSync('date', ['+%u'], { encoding: 'utf8' }).trim() === '7';
+  assert.equal(count(join(backups, weekly), 'events'), sunday ? rows : rows - 1, 'the weekly is the first run\'s daily, or Sunday\'s newest');
   for (const name of [`events-${day}.db`, weekly]) {
-    assert.equal(statSync(join(offbox, name)).ino, statSync(daily).ino, `${name} goes off-box as a link`);
-    assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(daily)}  ${name}`));
+    const file = join(backups, name);
+    assert.equal(statSync(join(offbox, name)).ino, statSync(file).ino, `${name} goes off-box as a link`);
+    assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(file)}  ${name}`));
     const got = serve(`get ${name}`);
     assert.equal(got.status, 0, name);
-    assert.ok(got.stdout.equals(readFileSync(daily)), name);
+    assert.ok(got.stdout.equals(readFileSync(file)), name);
   }
 });
 

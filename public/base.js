@@ -170,6 +170,28 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /**
+ * A redraw of the sidebar while a pointer is pressed in it waits for the release (#1499): it swaps the pressed row for a
+ * new one, the release lands on that, and the click reaches neither link (Cara, 2026-11-21: "it didnt open the minion").
+ * A redraw calls this first and returns when it says true; the held ones run once the click has gone through.
+ */
+let pressedAt = 0;
+const held = new Set();
+export function heldWhilePressed(redraw) {
+  if (!pressedAt || performance.now() - pressedAt > 5000) return false; // a press whose release never came holds nothing
+  held.add(redraw);
+  return true;
+}
+const release = () => {
+  if (!pressedAt) return;
+  pressedAt = 0;
+  // After the click, which the browser sends right after the pointerup.
+  setTimeout(() => { const due = [...held]; held.clear(); for (const fn of due) fn(); });
+};
+globalThis.addEventListener?.('pointerdown', (e) => { if (e.target instanceof Element && e.target.closest('.sidebar')) pressedAt = performance.now(); }, true);
+for (const type of ['pointerup', 'pointercancel']) globalThis.addEventListener?.(type, release, true);
+globalThis.addEventListener?.('blur', release); // the window's own, not captured: a press moves focus, and that blur mustn't count
+
+/**
  * Attributes for a search or filter box so no browser or password manager fills it (#934: a person's name
  * landed in Find in chat unasked). Chromium's address autofill and the managers ignore autocomplete=off, so the
  * token is one nothing recognises (a password field gets new-password, which stops a saved login being filled), the name is neutral, and each manager's own opt-out is set.

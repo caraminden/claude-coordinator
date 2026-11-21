@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -171,7 +171,7 @@ const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Parked' };
 
 export function renderSidebar() {
   const el = document.getElementById('threads');
-  if (!el) return;
+  if (!el || heldWhilePressed(renderSidebar)) return;
   // Each minion's change on its way in a release (#764): its row says which, and a dismissed one stays under Deploying till it's live.
   const all = [...view.tickets.values()].map((t) => {
     const release = pendingRelease(t);

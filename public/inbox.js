@@ -1,6 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
+import { ago, api, h, heldWhilePressed, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { TM_VIEW } from './mine.js';
 import { iconSrc } from './schemes.js';
@@ -198,7 +198,7 @@ export function onSeenItems(projectId) {
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
-  if (view?.kind !== 'project') return;
+  if (view?.kind !== 'project' || heldWhilePressed(renderInbox)) return;
   if (inbox.projectId !== view.projectId) {
     const seen = inboxSeen.get(view.projectId);
     if (!seen) return;

@@ -211,21 +211,22 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   protect is already broken, shouldnt we just fix it?"). At or above the threshold, a change skips
   the go when your minion's `type` is bug and all four hold:
   1. **A test proves it.** A test file that ran red on main's tip and green on your branch. Record
-     it, don't claim it: write or change the test, commit, run that file with your branch's code
-     on the main commit your branch is built on (`git merge-base HEAD main`, e.g. a scratch clone
-     checked out there with your test file copied in) and keep the failing lines it prints, then
-     run it green on your branch. The test file, that main commit's sha and the failing lines are
-     the proof.
+     it, don't claim it: write or change the test (or name one main already has red) and commit.
+     Run your test file against main's code, not your fix: a scratch clone checked out at the main
+     commit your branch is built on (`git merge-base HEAD main`) with only your test file copied in.
+     Keep the failing lines it prints, then run it green on your branch. The test file, that main
+     commit's sha and the failing lines are the proof.
   2. **The deep review is clean:** run deep whatever the diff's size, and nothing real is left
      unfixed.
   3. **No data, no auth:** no migration that changes rows or columns already there, no deletion
-     of data, and no change to `src/auth.ts` or any file Project facts marks as auth.
+     of data, and no change to any file Project facts marks as auth.
   4. **A plain revert undoes it** (two-way door in 4).
   On `hand_off_land`, pass `fix_proof` in place of `go`: `{ test, red_on, red_output, review }`
-  (`review` starts "clean"). The server checks what git can show: type bug, the test file in your
-  worktree, `red_on` on main and in your branch, and a diff with no auth file, migration or SQL
-  that rewrites or deletes data; anything else it refuses for gets the High route. The rest is your
-  word. On a pull-request path, the PR description carries the same proof and the line
+  (`review` starts "clean"). The server checks what git can show: type bug, the test a file your
+  branch commits (changed by it, or a test file), `red_on` on main and in your branch, and a diff
+  with no path named for auth, migration or SQL that rewrites or deletes data; anything it refuses
+  takes the High route. The rest is your word: the red run, the review, a revert, and auth files
+  only Project facts names. On a pull-request path, the PR description carries the same proof and the line
   `Shipped as a fix without a go: <test>`. Members get that one line on the shipped line and the
   Releases row, no card. It never applies where every change waits for a person, and a new rule or
   feature is not a fix, even in a high-risk file.

@@ -24,7 +24,8 @@ original minion with the context if more work needs to happen or if issues are e
   pending-deploy when the restart is still to come. Exit 75 (no CI verdict): parked until the runners are back.
   Anything else, a run a restart cut off included: the minion is woken with the end of the output.
 - Uncommitted work is refused before the minion ends its turn. A high risk needs the person's go named in the
-  call. A message for the minion while the land waits (a person's or a relay) keeps it open. A build
+  call, or (since #1398, Cara, 2026-11-20, "Fixes ship; data still asks") a bug fix's `fix_proof`: a test
+  red on main, a clean deep review, no data or auth (the self-review skill, "The go threshold"). A message for the minion while the land waits (a person's or a relay) keeps it open. A build
   minion's take-in of main (`--into build/<n> --full`) isn't handed off.
 
 ## Consequences

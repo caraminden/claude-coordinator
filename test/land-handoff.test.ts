@@ -604,7 +604,9 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
     assert.equal(noProof.status, 400, 'a high fix with no proof still needs a go');
     assert.match(noProof.error, /ships only on a person's go.*fix_proof instead/);
     assert.match((await handOff({ ...body, fix_proof: { ...proof, red_on: git(cwd, 'rev-parse', 'HEAD') } })).error, /isn't on main/, 'red_on is a commit on main');
-    assert.match((await handOff({ ...body, fix_proof: { ...proof, test: 'test/none.test.ts' } })).error, /isn't in your worktree/);
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, test: 'test/none.test.ts' } })).error, /isn't a file committed in your branch/);
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, test: '.' } })).error, /isn't a file committed in your branch/, 'a folder is no test');
+    assert.match((await handOff({ ...body, fix_proof: { ...proof, test: 'tools/land.sh' } })).error, /neither changed by your branch nor a test file/, 'any file is no test');
     assert.match((await handOff({ ...body, fix_proof: { ...proof, review: '2 findings left' } })).error, /starts with "clean"/);
     assert.match((await handOff({ ...body, fix_proof: { ...proof, red_output: undefined } })).error, /red_output is required/);
     store.setProjectSettings(project.id, { go_from: 'all' });
@@ -628,7 +630,7 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     const line = `Shipped as a fix without a go: test/guard.test.ts (red on ${main.slice(0, 7)})`;
     assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes(line)), 'the shipped line says it shipped without a go');
-    assert.equal(store.getSetting(`nogo_fix:${minion.id}`), line, "the Releases row's line is kept");
+    assert.ok(store.lastShippedNote(minion.id)?.includes(line), 'Releases reads the line from the newest shipped line');
   } finally {
     await srv.stop();
   }

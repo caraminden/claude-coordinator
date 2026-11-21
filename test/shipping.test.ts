@@ -51,6 +51,7 @@ test('shippingLine: the path, the go threshold and try-first, with defaults for 
   assert.doesNotMatch(person, /bug fix/, 'where a person merges every change, a fix waits too');
   assert.match(auto, /A bug fix proving itself .* needs no go; not for data or auth/);
   assert.doesNotMatch(auto, /fix_proof/);
+  assert.doesNotMatch(shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never', skills_off: 'self-review' }, true), /proving itself/, 'the fix route needs the review, so not with self-review off');
   assert.doesNotMatch(shippingLine({ ship_path: 'citadel', go_from: 'all', try_first: 'never' }, true), /bug fix/);
   assert.match(shippingLine({ ship_path: 'citadel', go_from: 'never', try_first: 'never' }, true), /No change waits for a person's go/);
   assert.equal(shippingLine({} as any, true), shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never' }, true));

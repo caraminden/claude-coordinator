@@ -376,3 +376,21 @@ test('a ship train (#1303): the riders are in the release under way, right behin
   assert.equal(n.changes[1].waitingOn, null, 'a rider is being tested, not waiting for a place');
   assert.deepEqual(w.server.read()[0].line.map((e) => e.movable), [false, false, false, false]);
 });
+
+// #1398: a fix shipped without a go says so on its Releases row, read from its newest shipped line; one still on its way
+// with no shipped line yet, or shipped with a go, shows nothing.
+test('Releases: a change that shipped as a fix without a go carries its line', () => {
+  const w = world();
+  const fix = w.minion('Guard fix'), plain = w.minion('Plain');
+  w.ships.set(fix.id, 'main');
+  w.ships.set(plain.id, 'main');
+  w.waits.poll();
+  const releases = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [] });
+  const next = () => releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next!.changes;
+  assert.deepEqual(next().map((c) => c.fix), [undefined, undefined], 'no shipped line yet');
+  const line = 'Shipped as a fix without a go: test/guard.test.ts (red on abc1234)';
+  w.store.addEvent(fix.id, 'note', { text: `Shipped abc1234 "x": Guard fix. Risk high: guard file. ${line}. Live now.` });
+  w.store.addEvent(plain.id, 'note', { text: 'Shipped def5678 "y": Plain. Risk high: guard file. Go: Cara, 3:05 PM PST. Live now.' });
+  w.store.addEvent(fix.id, 'note', { text: 'Shipped and live, so the server dismissed this minion.' });
+  assert.deepEqual(Object.fromEntries(next().map((c) => [c.ticketId, c.fix])), { [fix.id]: line, [plain.id]: undefined });
+});

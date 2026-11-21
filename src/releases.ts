@@ -11,7 +11,7 @@ import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
 import type { FailureDetail, FailureNext, LastTry } from './ship-failures.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
-import { fixKey } from './fix-proof.ts';
+import { fixLineIn } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
 import { behindOld, landPhase, ordinal, ridingOf, TRACK, type LandTicket, type Wait } from './waits.ts';
@@ -275,11 +275,13 @@ export class Releases {
         if (copy) tv.next.link = `/${copy.path}`;
       }
     }
-    // A fix that shipped without a go says so on its row (#1398), where members already look.
+    // A fix that shipped without a go says so on its row (#1398), where members already look: from its newest shipped line,
+    // so a change still in the land line shows nothing yet. shortcut: a minion that ships twice shows its newest ship's
+    // line on both releases; key it by commit if that starts to happen.
     for (const s of byScheme.values()) {
       for (const tv of s.targets) {
         for (const c of [...(tv.next?.changes ?? []), ...[tv.current, ...tv.recent].flatMap((r) => r?.changes ?? [])]) {
-          const fix = this.d.store.getSetting<string>(fixKey(c.ticketId));
+          const fix = fixLineIn(this.d.store.lastShippedNote(c.ticketId) ?? '');
           if (fix) c.fix = fix;
         }
       }

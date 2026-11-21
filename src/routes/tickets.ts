@@ -30,7 +30,7 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
-import { fixProofProblem, parseFixProof } from '../fix-proof.ts';
+import { fixLine, fixProofProblem, parseFixProof } from '../fix-proof.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
@@ -1456,7 +1456,8 @@ export const ticketRoutes: Route[] = [
       const project = app.store.getProject(ticket.project_id);
       const goFrom = project?.go_from ?? 'high';
       const hasGo = typeof body.go === 'string' && !!body.go.trim();
-      if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk)) && !hasGo && body.fix_proof !== undefined && !unlabelled && goFrom !== 'all' && !(project && offSkills(project).includes('self-review'))) {
+      const reviewOff = !!project && offSkills(project).includes('self-review');
+      if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk)) && !hasGo && body.fix_proof !== undefined && !unlabelled && goFrom !== 'all' && !reviewOff) {
         // #1398 (Cara, 2026-11-20, "Fixes ship; data still asks"): a bug fix that proves itself ships with no go, and its
         // shipped line says so. Not where every change waits for a person, nor with no label; data and auth always ask.
         let proof;
@@ -1467,9 +1468,10 @@ export const ticketRoutes: Route[] = [
         }
         const why = await fixProofProblem(ticket.cwd, proof, app.store.props.forTarget('minion', ticket.id).type);
         if (why) throw new HttpError(400, `Not handed off as a fix without a go: ${why}. Ask with a ship card (kind ship) and hand it off with go instead`);
-        h.fix = { test: proof.test, redOn: proof.redOn.slice(0, 12), review: proof.review };
+        // The reason carries the line, so the shipped line says it (and Releases reads it there) without a field in land.ts, a pipeline file.
+        h.reason = `${h.reason.replace(/[.\s]+$/, '')}. ${fixLine(proof)}`;
       } else if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk))) {
-        if (!hasGo) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first${goFrom === 'all' ? '' : '. A bug fix that proves itself passes fix_proof instead (self-review skill, "The go threshold")'}`);
+        if (!hasGo) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first${goFrom === 'all' || reviewOff ? '' : '. A bug fix that proves itself passes fix_proof instead (self-review skill, "The go threshold")'}`);
         h.go = str(body.go, 'Go', 200);
       } else if (body.into === undefined && project && offSkills(project).includes('self-review')) {
         // Cara's Q10 (#1062, ADR 0014): with self-review off nothing labels a change's risk, so every ship waits for a person's go.

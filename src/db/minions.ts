@@ -255,6 +255,13 @@ export const minionQueries = {
     if (fields.title?.includes('status:')) this.noteLooks(id, fields.title, now);
   },
 
+  /** A minion's newest "Shipped …" note (LandHandoffs' shipped line), or null: Releases reads a fix shipped without a go from it (#1398). */
+  lastShippedNote(this: Store, id: number): string | null {
+    // The shipped line names its commit; the dismissal after it ("Shipped and live, so…") starts with Shipped too.
+    const rows = this.db.prepare(`SELECT json_extract(data, '$.text') AS text FROM events WHERE ticket_id = ? AND kind = 'note' AND data LIKE '{"text":"Shipped %' ORDER BY id DESC LIMIT 5`).all(id) as { text: string | null }[];
+    return rows.find((r) => /^Shipped [0-9a-f]{7,40} /.test(r.text ?? ''))?.text ?? null;
+  },
+
   /** Change a ticket's activity line without counting it as new activity. */
   setLastActivity(this: Store, id: number, text: string) {
     this.db.prepare('UPDATE tickets SET last_activity = ? WHERE id = ?').run(text, id);

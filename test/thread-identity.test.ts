@@ -63,7 +63,6 @@ const api = createServer((req, res) => {
   });
 });
 const tmp = tempRoot('thread-identity-');
-after(() => tmp.teardown()); // stops the MCP server and the stand-in API
 const apiPort = await tmp.serve(api);
 
 const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
@@ -77,6 +76,8 @@ const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.t
   },
   stdio: ['pipe', 'pipe', 'inherit'],
 });
+// After the last top-level await: set before one, this hook left the MCP child and API up and the file never exited (#1535).
+after(() => tmp.teardown()); // stops the MCP server and the stand-in API
 const replies = new Map<number, (r: any) => void>();
 createInterface({ input: mcp.stdout! }).on('line', (l) => {
   const r = JSON.parse(l);
@@ -122,7 +123,7 @@ test('wake_when_live posts to its own internal id, which its token may do', asyn
 
 test('wake_when_runners_back posts to its own internal id, which its token may do (#541)', async () => {
   calls.length = 0;
-  respond = () => [201, { label: 'citadel-ci' }];
+  respond = () => [201, { label: 'citadel-ci', labels: ['citadel-ci', 'citadel-ci-linux'] }];
   const r = await tool('wake_when_runners_back', { reason: 'run land again' });
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /citadel-ci or citadel-ci-linux/);

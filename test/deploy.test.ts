@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
@@ -607,10 +607,15 @@ test('deploy.sh retries a report the server never got, but not one it may alread
 });
 
 // The queued restart against a stand-in server and systemctl: commits good (last-good) and target (HEAD).
-async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>, extra: Record<string, string> | ((c: { good: string; target: string }) => Record<string, string>) = {}) {
+async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>, extra: Record<string, string> | ((c: { good: string; target: string }) => Record<string, string>) = {}, goodFile?: string) {
   const live = join(root, `${name}-live`);
   const git = (...args: string[]) => execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  if (goodFile) {
+    mkdirSync(dirname(join(live, goodFile)), { recursive: true });
+    writeFileSync(join(live, goodFile), '');
+    git('add', goodFile);
+  }
   git('commit', '-q', '--allow-empty', '-m', 'good');
   const good = git('rev-parse', 'HEAD');
   git('tag', 'last-good');
@@ -655,7 +660,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
-    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()), sleeps: sleeps() };
+    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()), sleeps: sleeps(), systemctl: existsSync(log) ? readFileSync(log, 'utf8') : '' };
   } finally {
     srv.close();
   }
@@ -670,6 +675,21 @@ test('a restart whose server stays up but silent stops waiting after a short whi
   assert.match(r.stderr, /the server has not answered for 1 s while its unit is up, so it can't say which turns are running: restarting now/);
   assert.equal(r.restarts, 1);
   assert.equal(r.lastGood, r.target);
+});
+
+test("a rollback stops the running turns only when last-good predates turn units, whatever its wrapper's name (#1343)", { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  const rollback = (restarts: number, _n: number, { good }: { good: string }) => (restarts >= 2 ? health(good) : 503);
+  const stops = (r: { systemctl: string }) => r.systemctl.split('\n').filter((l) => /\bstop citadel-turn-/.test(l)).length;
+  const none = await restartWith('units-none', rollback);
+  assert.match(none.stderr, /last-good predates turn units/);
+  assert.equal(stops(none), 1);
+  for (const wrapper of ['src/turn-wrapper.ts', 'src/turn-wrapper.mjs']) {
+    const r = await restartWith(`units-${wrapper.split('.').pop()}`, rollback, {}, wrapper);
+    assert.equal(r.head, r.good, r.stderr);
+    assert.doesNotMatch(r.stderr, /predates turn units/, wrapper);
+    assert.equal(stops(r), 0, `${wrapper}: ${r.systemctl}`);
+  }
 });
 
 test('the restart checks health again a little after the first OK, and rolls back if it has gone (#520)', { timeout: 60_000 }, async () => {

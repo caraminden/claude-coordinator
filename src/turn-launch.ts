@@ -7,7 +7,7 @@ import { chmodSync, cpSync, statSync, existsSync, linkSync, mkdirSync, readdirSy
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { PoolSpec } from './pool-client.ts';
+import type { PoolSpec } from './pool-client.mjs';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
@@ -100,7 +100,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const WORDING = pinnedCopy('wording.ts');
   const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
   const HOOK_RUN = pinnedCopy('hook-run.ts');
-  const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+  const TURN_WRAPPER = pinnedCopy('turn-wrapper.mjs');
   const POOL = pinnedCopy('mcp-pool.ts');
   /** The pool's code and every local file it imports, so a deploy that changes any of it starts a new pool. */
   const closure = (file: string, seen = new Set<string>()): Set<string> => {
@@ -590,7 +590,7 @@ export interface LaunchPlan {
   /** Files for the turn's folder, in the order to write them. */
   files: { name: string; text: string; mode?: number }[];
   spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
-  /** The shared tool server the wrapper keeps up for this turn (src/pool-client.ts); with it, `mcp.json` reaches the pool and `mcp-stdio.json` is the fallback. */
+  /** The shared tool server the wrapper keeps up for this turn (src/pool-client.mjs); with it, `mcp.json` reaches the pool and `mcp-stdio.json` is the fallback. */
   pool?: PoolSpec;
 }
 

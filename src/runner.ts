@@ -1,5 +1,5 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process. Each runs through
-// src/turn-wrapper.ts in a transient systemd unit of its own (or, without units, a detached child),
+// src/turn-wrapper.mjs in a transient systemd unit of its own (or, without units, a detached child),
 // with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
 import { execFile, spawn } from 'node:child_process';
 import { oomKilled } from './host-job.ts';
@@ -151,7 +151,7 @@ interface TurnState {
   stopped?: true;
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
-  /** The turn's folder (see src/turn-wrapper.ts); absent for turns from before they had one. */
+  /** The turn's folder (see src/turn-wrapper.mjs); absent for turns from before they had one. */
   dir?: string;
   /** Its transient unit, or null when it runs as a child of the server (and dies with it). */
   unit?: string | null;
@@ -283,7 +283,7 @@ export { accountUsageKey, usageKey };
 /** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
 const START_GRACE_MS = 60_000;
 
-/** A container turn's wrapper beat (src/turn-wrapper.ts) longer ago than this is stale: checked against /proc then. */
+/** A container turn's wrapper beat (src/turn-wrapper.mjs) longer ago than this is stale: checked against /proc then. */
 const BEAT_STALE_MS = 30_000;
 
 /**
@@ -317,7 +317,7 @@ export function wrapperAlive(dir: string): boolean | null {
 }
 
 /**
- * Whether a process this server can see runs `dir`'s wrapper (turn-launch's `<node> <pin>/turn-wrapper.ts <dir>`). A rootless
+ * Whether a process this server can see runs `dir`'s wrapper (turn-launch's `<node> <pin>/turn-wrapper.mjs <dir>`). A rootless
  * container's processes are in the host's /proc under host pids, so a container turn's wrapper shows here while it lives,
  * stalled or not; once its container or exec dies it doesn't. Only for a stale heartbeat, or a container turn with no pid.json
  * at a restart (reattach): it reads every process's cmdline.
@@ -339,14 +339,15 @@ export function wrapperInProc(dir: string, orStarting = false): boolean {
       continue; // ended meanwhile
     }
     if (argv.at(-1) === '') argv.pop();
-    // `<node> <pin>/turn-wrapper.ts <dir>` exactly: a podman exec or conmon whose argv also ends in dir isn't the wrapper,
-    // unless `orStarting` asks for the podman exec too (one in its own scope outlives the server that ran it).
-    if (argv.at(-1) === dir && (argv.at(-2)?.endsWith('/turn-wrapper.ts') || (orStarting && argv.includes('exec')))) return true;
+    // `<node> <pin>/turn-wrapper.mjs <dir>` exactly (`.ts` before #1343, still running across that deploy): a podman exec or
+    // conmon whose argv also ends in dir isn't the wrapper, unless `orStarting` asks for the podman exec too (one in its own
+    // scope outlives the server that ran it).
+    if (argv.at(-1) === dir && (/\/turn-wrapper\.(mjs|ts)$/.test(argv.at(-2) ?? '') || (orStarting && argv.includes('exec')))) return true;
   }
   return false;
 }
 
-/** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.ts). */
+/** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.mjs). */
 export function unsentSteers(turn: { steered?: Steer[]; dir?: string }): QueuedMessage[] {
   if (!turn.steered?.length || !turn.dir) return [];
   let text: string;

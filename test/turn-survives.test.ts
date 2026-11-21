@@ -10,7 +10,7 @@ import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
-// Turns run in a process of their own (src/turn-wrapper.ts) and write to a turn folder, so a server
+// Turns run in a process of their own (src/turn-wrapper.mjs) and write to a turn folder, so a server
 // that dies mid-turn leaves the turn running, and the next server re-attaches and catches up. Here the
 // wrapper is a detached child, which outlives a Runner just as a unit outlives the service.
 const root = mkdtempSync(join(tmpdir(), 'turn-survives-'));
@@ -234,7 +234,7 @@ test('a command too long to start is reported at once, not as a turn killed a mi
   const dir = mkdtempSync(join(tmpdir(), 'wrapper-e2big-'));
   for (const f of ['prompt.jsonl', 'stream.jsonl', 'stderr.log']) writeFileSync(join(dir, f), '');
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: 'true', args: ['x'.repeat(200 * 1024)], cwd: dir, env: { PATH: process.env.PATH } }));
-  spawnSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'turn-wrapper.ts'), dir]);
+  spawnSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'turn-wrapper.mjs'), dir]);
   const exit = JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8'));
   assert.match(exit.error, /E2BIG/);
   assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /Could not start true: .*E2BIG/);

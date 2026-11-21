@@ -1,7 +1,7 @@
 // The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves
 // the Citadel tools (src/mcp.ts) and the machine links (src/pool-machine.ts) of every turn there, over Claude Code's
 // HTTP MCP transport, in place of two helper processes per turn. A turn is known only by its own token, which its
-// wrapper registers with the pool's key (src/pool-client.ts); each call runs in that turn's env and folder.
+// wrapper registers with the pool's key (src/pool-client.mjs); each call runs in that turn's env and folder.
 // Usage: node mcp-pool.ts <dir> <version>. Exits once no turn has registered for a while.
 import { randomBytes } from 'node:crypto';
 import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { handle } from './mcp.ts';
-import { poolAlive } from './pool-client.ts';
+import { poolAlive } from './pool-client.mjs';
 import { turnStore, type TurnContext } from './pool-context.ts';
 import { dropLinks, machineRequest } from './pool-machine.ts';
 

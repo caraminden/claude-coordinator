@@ -134,7 +134,7 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   const execs = jsonLines(calls);
   const start = execs.find((a) => a[0] === 'exec' && a[1] === '-d');
   assert.equal(start[2], 'citadel-claude-test-2');
-  assert.match(start[4], /turn-wrapper\.ts$/);
+  assert.match(start[4], /turn-wrapper\.mjs$/);
   const env = jsonLines(seen).at(-1).env;
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
@@ -601,15 +601,20 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
   turn('8-2', 0);
   // Frozen with its container at MemoryHigh (#1255): a stale heartbeat, but its wrapper process is still there.
   turn('8-3', 60_000);
-  const frozen = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-3', 'pin', 'turn-wrapper.ts'), join(person, '8-3')], { stdio: 'ignore' });
+  const frozen = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-3', 'pin', 'turn-wrapper.mjs'), join(person, '8-3')], { stdio: 'ignore' });
+  // One started before #1343, whose wrapper was still turn-wrapper.ts.
+  turn('8-4', 60_000);
+  const older = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(person, '8-4', 'pin', 'turn-wrapper.ts'), join(person, '8-4')], { stdio: 'ignore' });
   try {
     runner(inContainer).recover();
   } finally {
     frozen.kill('SIGKILL');
+    older.kill('SIGKILL');
   }
   assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
   assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
   assert.ok(existsSync(join(person, '8-3')), 'a stalled one stays');
+  assert.ok(existsSync(join(person, '8-4')), "a stalled one from before the wrapper was plain JS stays");
   assert.ok(existsSync(person), "the person's folder stays mounted");
 });
 

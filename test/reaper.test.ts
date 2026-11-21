@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { folderOf, guardedCgroup, guardedPids, ownerOf, Reaper, REAPED, scanProcs, shownCommand, startOf, type Proc } from '../src/reaper.ts';
+import { folderOf, guardedCgroup, guardedPids, ownerOf, Reaper, REAPED, scanProcs, shownCommand, startOf, WRAPPER_MARKS, type Proc } from '../src/reaper.ts';
 import { bootServer, until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'reaper-'));
@@ -62,6 +62,15 @@ test('people\'s sessions, terminals, ships, deploys, contraptions and the server
   ];
   const g = guardedPids(procs, { selfPid: 40, wrapperMark: '/turn-wrapper.ts', guardCgroup: guardedCgroup });
   assert.deepEqual([...g].sort((a, b) => a - b), [10, 11, 12, 20, 21, 30, 31, 40, 41]);
+  // The wrapper is plain JS since #1343: a turn started before or after the deploy is guarded by the default marks.
+  const turns = [
+    proc({ pid: 60, ppid: 1, argv: ['node', '/pin/turn-wrapper.mjs', '/turns/8'] }),
+    proc({ pid: 61, ppid: 60, argv: ['claude'] }),
+    proc({ pid: 70, ppid: 1, argv: ['node', '/pin/turn-wrapper.ts', '/turns/9'] }),
+    proc({ pid: 80, ppid: 1, argv: ['node', '/w/other.mjs', '/turns/10'] }),
+  ];
+  const t = guardedPids(turns, { selfPid: 1, wrapperMark: WRAPPER_MARKS, guardCgroup: () => false });
+  assert.deepEqual([...t].sort((a, b) => a - b), [60, 61, 70]);
 });
 
 test('a command line shown to people has its secrets masked', () => {

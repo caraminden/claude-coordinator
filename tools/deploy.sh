@@ -464,7 +464,8 @@ restart() {
   fi
   # Code from before turn units can't re-attach: it would resume turns that still run. Stop them, so
   # it resumes them alone.
-  if ! git_live cat-file -e "$good:src/turn-wrapper.ts" 2>/dev/null; then
+  # (The wrapper is turn-wrapper.mjs since #1343.)
+  if ! git_live cat-file -e "$good:src/turn-wrapper.ts" 2>/dev/null && ! git_live cat-file -e "$good:src/turn-wrapper.mjs" 2>/dev/null; then
     say "last-good predates turn units; stopping the running turns so it resumes them"
     systemctl --user stop "$(turn_units)" || true
   fi

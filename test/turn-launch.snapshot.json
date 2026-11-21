@@ -189,7 +189,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/1-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/1-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/1-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/1-<TIME>"
     ]
    }
@@ -439,7 +439,7 @@
     "-p",
     "UMask=0077",
     "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
-    "<ROOT>/run/turns/2-<TIME>/pin/turn-wrapper.ts",
+    "<ROOT>/run/turns/2-<TIME>/pin/turn-wrapper.mjs",
     "<ROOT>/run/turns/2-<TIME>"
    ]
   ]
@@ -837,7 +837,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/3-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/3-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/3-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/3-<TIME>"
     ]
    }
@@ -1205,7 +1205,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/4-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/4-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/4-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/4-<TIME>"
     ]
    }
@@ -1403,7 +1403,7 @@
     "how": "container citadel-claude-test-2",
     "wrapper": [
      "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-2/5-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/5-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-2/5-<TIME>"
     ]
    }
@@ -1601,7 +1601,7 @@
     "how": "container citadel-claude-test-2",
     "wrapper": [
      "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-2/6-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/6-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-2/6-<TIME>"
     ]
    }
@@ -1815,7 +1815,7 @@
     "how": "container citadel-claude-test-2",
     "wrapper": [
      "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-2/7-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/7-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-2/7-<TIME>"
     ]
    }
@@ -2048,7 +2048,7 @@
     "how": "container citadel-claude-test-2",
     "wrapper": [
      "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-2/8-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/8-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-2/8-<TIME>"
     ]
    }
@@ -2246,7 +2246,7 @@
     "how": "container citadel-claude-test-2",
     "wrapper": [
      "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-2/9-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/9-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-2/9-<TIME>"
     ]
    }
@@ -2460,7 +2460,7 @@
     "how": "container citadel-claude-test-cara",
     "wrapper": [
      "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/person-1/10-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-1/10-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/person-1/10-<TIME>"
     ]
    }
@@ -2666,7 +2666,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/11-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/11-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/11-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/11-<TIME>"
     ]
    }
@@ -2865,7 +2865,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/12-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/12-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/12-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/12-<TIME>"
     ]
    }
@@ -3064,7 +3064,7 @@
     "how": "child",
     "wrapper": [
      "<ROOT>/run/turns/13-<TIME>/pin/bin/citadel-node",
-     "<ROOT>/run/turns/13-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/13-<TIME>/pin/turn-wrapper.mjs",
      "<ROOT>/run/turns/13-<TIME>"
     ]
    }

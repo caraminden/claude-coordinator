@@ -15,7 +15,7 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   in the minion's working directory, with `--resume <session_id>` after the
   first turn. Idle minions cost nothing, and a restart loses nothing.
 - Each turn runs in a transient user unit of its own (`systemd-run`, in
-  `citadel-turns.slice`) through `src/turn-wrapper.ts`, which writes claude's
+  `citadel-turns.slice`) through `src/turn-wrapper.mjs`, which writes claude's
   output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
   leaves running turns alone: the next server re-attaches and catches up, and the
   turns' MCP calls wait for it (up to 2 min). If `systemd-run` fails, the turn
@@ -177,7 +177,7 @@ uses the built-in `node:sqlite`.
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |
-| `src/mcp-pool.ts`, `src/pool-client.ts`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
+| `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
@@ -345,7 +345,7 @@ It mounts the data dir's `projects/`, its own turns' folder `run/turns/person-<u
 (never the host's turns or another person's), the schemes' memory folders,
 Claude Code's versions folder and the tool folders (read-only), and never `~/.ssh`,
 `~/.config/gh`, the server's `~/.claude`, the database or the user bus. A turn goes
-in with `podman exec -d … node src/turn-wrapper.ts`; its liveness is a heartbeat
+in with `podman exec -d … node src/turn-wrapper.mjs`; its liveness is a heartbeat
 file. Usage is kept per person (`usage:user:<id>`). If Anthropic turns the login
 down mid-turn, the link is marked expired and the turn says so. Unlink signs out,
 stops the container and deletes the volume. A turn in a container lands with the

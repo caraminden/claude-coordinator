@@ -139,9 +139,10 @@ export function ownerOf(projectsRoot: string, p: Proc): { projectId: number; tic
 }
 
 /** The pids that are, or are under, a process the reaper never touches (the header's list). */
-export function guardedPids(procs: Proc[], o: { selfPid: number; wrapperMark: string; guardCgroup: (cg: string) => boolean }): Set<number> {
+export function guardedPids(procs: Proc[], o: { selfPid: number; wrapperMark: string | readonly string[]; guardCgroup: (cg: string) => boolean }): Set<number> {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
-  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || !!p.argv.at(-2)?.endsWith(o.wrapperMark);
+  const marks = typeof o.wrapperMark === 'string' ? [o.wrapperMark] : o.wrapperMark;
+  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || marks.some((m) => !!p.argv.at(-2)?.endsWith(m));
   const memo = new Map<number, boolean>();
   const guarded = (p: Proc): boolean => {
     const known = memo.get(p.pid);
@@ -183,8 +184,8 @@ export interface ReaperOptions {
   /** The commit live, for the health rows. */
   commit?: string | null;
   selfPid?: number;
-  /** What a turn wrapper's command line has second to last (src/turn-launch.ts: `<node> <pin>/turn-wrapper.ts <dir>`). */
-  wrapperMark?: string;
+  /** What a turn wrapper's command line has second to last (src/turn-launch.ts: `<node> <pin>/turn-wrapper.mjs <dir>`; `.ts` before #1343). */
+  wrapperMark?: string | readonly string[];
   guardCgroup?: (cgroup: string) => boolean;
   scan?: () => Promise<Proc[]>;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
@@ -199,6 +200,9 @@ export interface Reaped { ticket: number; number: number; scheme: number; pid: n
 /** The health_events kind of a reaped process. */
 export const REAPED = 'reaped';
 
+/** The turn wrapper's file, as a turn started now (.mjs) or before #1343 (.ts) runs it. */
+export const WRAPPER_MARKS = ['/turn-wrapper.mjs', '/turn-wrapper.ts'] as const;
+
 export class Reaper {
   private readonly o: Required<Omit<ReaperOptions, 'commit'>> & { commit: string | null };
   readonly projectsRoot: string;
@@ -209,7 +213,7 @@ export class Reaper {
     try { real = realpathSync(root); } catch { /* not made yet: the path as given */ }
     this.projectsRoot = real;
     this.o = {
-      store: o.store, dataDir: o.dataDir, commit: o.commit ?? null, selfPid: o.selfPid ?? process.pid, wrapperMark: o.wrapperMark ?? '/turn-wrapper.ts',
+      store: o.store, dataDir: o.dataDir, commit: o.commit ?? null, selfPid: o.selfPid ?? process.pid, wrapperMark: o.wrapperMark ?? WRAPPER_MARKS,
       guardCgroup: o.guardCgroup ?? guardedCgroup, scan: o.scan ?? scanProcs, kill: o.kill ?? ((pid, sig) => process.kill(pid, sig)),
       termWaitMs: o.termWaitMs ?? 5000, log: o.log ?? ((l) => console.log(l)),
     };

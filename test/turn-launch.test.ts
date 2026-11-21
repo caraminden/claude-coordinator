@@ -284,7 +284,7 @@ test("a turn gets its scheme's review set as files, named in its turn message, w
 test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Claude Code can reach it from mcp.json', async () => {
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
-  const { readPool } = await import('../src/pool-client.ts');
+  const { readPool } = await import('../src/pool-client.mjs');
   // The pool's calls back to the app go here, never to the live server the runner's env names.
   const app = createServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'));
   await new Promise<void>((r) => app.listen(0, '127.0.0.1', r));

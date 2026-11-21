@@ -11,7 +11,7 @@ import { until } from './wait.ts';
 testPins();
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
-// (src/turn-wrapper.ts) passes them to claude's stdin until the turn's result is out. The fake reads
+// (src/turn-wrapper.mjs) passes them to claude's stdin until the turn's result is out. The fake reads
 // stdin line by line like claude, replies once `release` appears in its folder, and exits at the end
 // of its input (or, with `hold` there, only once that is gone).
 const root = mkdtempSync(join(tmpdir(), 'steer-'));

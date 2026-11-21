@@ -1,5 +1,5 @@
 # The kit desktop launcher's trial rules on real Windows (#1396): probation, the roll back after a crash inside it,
-# and one more try before a build is refused. Each scenario is a made-up install folder under %TEMP%\launcher-trial with
+# one more try before a build is refused, and no try while a copy runs (#1522). Each scenario is a made-up install folder under %TEMP%\launcher-trial with
 # state.json written by hand and builds already unpacked, so no feed is needed (the feed URL refuses at once).
 # -From is a URL folder serving launcher.exe (built from kit/desktop-launcher) and testapp.exe (kit/desktop-launcher/testapp).
 # Prints PASS or FAIL per check and exits with the number failed. While it waits (-Pause seconds) after a roll back, the
@@ -167,6 +167,23 @@ Test-That 'cut: the next start watches it again' (Wait-Log $d 'starting build 10
 Start-Sleep -Seconds 32
 Close-App $d
 Test-That 'cut: closing it passes probation' (Wait-Log $d 'build 10 passed probation' 20)
+Show-Install $d
+Stop-Install $d
+
+# 6. A waiting "file" build isn't tried while a copy of the app runs (a new start would hand off to it, #1522): no strike,
+# and it is tried on the first start with nothing running.
+$d = New-Install 'copy' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' }
+$copy = Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (Join-Path $d 'versions\6') -PassThru
+Start-Sleep -Seconds 2
+$l = Start-Launcher $d
+Test-That 'copy: build 11 waits while a copy runs' (Wait-Log $d 'build 11 waits: a copy of Trial app is already running' 30)
+Test-That 'copy: build 6 starts instead' (Wait-Log $d 'starting build 6' 10)
+[void]$l.WaitForExit(30000)
+Stop-Install $d
+$s = Get-State $d
+Test-That 'copy: 11 still waits, with no strike' ($s.current.id -eq 6 -and $s.pending.id -eq 11 -and -not ($s.struck -contains 11) -and -not ($s.failed -contains 11))
+$l = Start-Launcher $d
+Test-That 'copy: with nothing running, 11 is tried' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
 Show-Install $d
 Stop-Install $d
 

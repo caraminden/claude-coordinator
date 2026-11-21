@@ -4,7 +4,7 @@
 // start: a fresh folder under $TMPDIR, the live database (or the given file) copied in read-only in one
 // read transaction and scrubbed as a preview's copy is (or none), a free port, server.ts in preview mode
 // (no turns, no pushes, no new minions), and it prints the URL, a sign-in and the pid. A second start
-// replaces the first. stop: ends that pid, only that one, and removes the folder. Never by name: every
+// replaces the first, and it stops itself after an hour unused (status then says it has exited). stop: ends that pid, only that one, and removes the folder. Never by name: every
 // turn and Citadel itself run as one account.
 // env: shell lines for a script, `eval "$(citadel-dev-copy env)"` (DEV_URL, DEV_COOKIE, DEV_PID: the names
 // tools/ui-shot.ts reads). seed: adds a named state (tools/dev-seeds.ts) to the running copy, works on
@@ -26,6 +26,8 @@ import { previewEnv, scrub } from '../src/previews.ts';
 
 const BOOT_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 8000;
+// It stops itself after an hour nothing asked it anything, as an unused preview does (#1365); a test sets it shorter.
+const IDLE_EXIT_MS = Number(process.env.DEV_COPY_IDLE_MS) || 60 * 60_000;
 const USAGE = 'usage: citadel-dev-copy start [--data copy|empty|<file.db>] [--apps-hosts] | status [--json] | env | seed <scenario>... | seed --list | stop';
 
 interface State { pid: number; started: string; holder: number; port: number; url: string; login: string; password: string; cookie: string; data: string; worktree: string }
@@ -126,7 +128,7 @@ async function start(args: string[]): Promise<void> {
   // In a scope of its own in citadel-heavy.slice (#1298), bound to this turn, so a server that runs out of memory doesn't
   // end the turn. heavy-unit needs the user bus to start it; the server itself gets the preview's env without it.
   const holder = spawn(join(worktree, 'tools', 'heavy-unit'), ['--exec', '--what', 'dev copy', 'sh', '-c', 'unset XDG_RUNTIME_DIR; "$0" "$1" & echo $! > "$2"; wait $!', process.execPath, server, pidFile], {
-    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR }, detached: true, stdio: ['ignore', log, log],
+    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), IDLE_EXIT_MS: String(IDLE_EXIT_MS), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR }, detached: true, stdio: ['ignore', log, log],
   });
   closeSync(log);
   holder.unref();

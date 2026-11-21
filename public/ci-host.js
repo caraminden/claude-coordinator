@@ -4,6 +4,7 @@
 import { h } from './base.js';
 import { emptyCard, hueRow, meter, pips, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
+import { threadNumberHref } from './threadrefs.js';
 
 const span = (s) => (s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
 const held = (j, now) => span((now - j.since) / 1000);
@@ -46,7 +47,31 @@ export function hostLoadBlock(l) {
       : emptyCard('No heavy jobs this week', 'Builds and test runs that take a slot show here with how long they waited.', { mark: '·', hue: 'muted' }));
 
   return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'),
-    h('div', { class: 'settings-rows' }, slots, line, week));
+    h('div', { class: 'settings-rows' }, slots, line, week, minionsRow(l)));
+}
+
+const minionLink = (m) => h('a', { href: threadNumberHref(m.schemeId ?? m.scheme, m.number) }, `#${m.number}`);
+
+/** What runs from which minion's folders, and what closed minions left that was stopped this week (#1365, src/reaper.ts). */
+function minionsRow(l) {
+  const minions = l.minions ?? [], reaped = l.reaped ?? [];
+  const procs = minions.reduce((a, m) => a + m.procs.length, 0);
+  const leftovers = minions.filter((m) => m.status === 'closed').length;
+  const [row] = settingsRow({ key: 'host-minions', icon: 'box', hue: leftovers ? 'waiting' : 'accent', title: 'Running from minions',
+    summary: [leftovers ? toneChip('warn', `${leftovers} closed`) : toneChip('ok', procs ? `${procs} running` : 'Nothing'),
+      `${minions.length} minions · ${reaped.length} stopped this week`] },
+    minions.length ? showFirst({ key: 'host-minions', items: minions, n: 5, noun: 'minions', wrap: (ms) => h('div', { class: 'hue-rows' }, ...ms.flatMap((m) => [
+      hueRow({ cat: schemeHue(m.scheme), meta: m.status === 'closed' ? 'closed: stops within the hour' : `${m.procs.length} running` }, schemeTag(m.scheme), ' ', minionLink(m), ` ${m.title}`),
+      ...m.procs.map((p) => hueRow({ hue: 'muted', lead: p.pid, meta: `${span(p.cpuS)} CPU · up ${span(p.ageS)}` }, h('code', {}, p.command))),
+    ])) })
+      : emptyCard('Nothing runs from a minion\'s folders', 'Dev servers and other processes a minion starts show here, with their CPU time.', { mark: '·', hue: 'muted' }),
+    h('h4', { class: 'machine-group' }, 'Stopped after their minion closed'),
+    reaped.length ? showFirst({ key: 'host-reaped', items: reaped, n: 5, noun: 'processes', wrap: (rs) => h('div', { class: 'hue-rows' }, ...rs.map((r) =>
+      hueRow({ cat: schemeHue(r.schemeName), meta: `${span(r.cpuS)} CPU · ${new Date(r.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` },
+        schemeTag(r.schemeName), ' ', minionLink({ ...r, schemeId: r.scheme }), ' ', h('code', {}, r.command)))) })
+      : emptyCard('None this week', 'A closed minion\'s leftover processes are stopped at its close or within the hour, and each shows here.'),
+    h('p', { class: 'look-prose' }, 'Closing a minion stops what runs from its worktree and temp folder (TERM, then KILL), by pid, never by name. An open minion\'s processes, a person\'s own shell, ships and deploys are never touched.'));
+  return row;
 }
 
 /** The shown schemes' rows in the waits table, each with its parts (its minions, each app's builds) under it once opened, built

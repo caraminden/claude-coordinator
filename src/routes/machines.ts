@@ -1,6 +1,7 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
 import { appOwners, hostLoad } from '../host-load.ts';
+import { byMinion, REAPED, reapedRows } from '../reaper.ts';
 import { readEmulatorLease } from '../emulator-lease.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -307,10 +308,14 @@ export const machineRoutes: Route[] = [
   // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).
   {
     method: 'GET', path: '/api/host-load', ...people,
-    handler: ({ res, app, session }) => {
+    handler: async ({ res, app, session }) => {
       if (!app.heavyDir) return json(res, 200, null);
       const owners = appOwners(app.store.listContraptions(), (id) => app.store.canSee(session, id), (id) => app.store.getProject(id)?.name);
-      json(res, 200, hostLoad(app.heavyDir, Date.now(), undefined, owners));
+      const canSee = (id: number) => app.store.canSee(session, id);
+      // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
+      const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
+      const reaped = reapedRows(app.store.healthEventsSince([REAPED], Date.now() - 7 * 24 * 3600_000), app.store, canSee);
+      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners), minions, reaped });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

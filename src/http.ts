@@ -32,6 +32,7 @@ import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
+import type { Reaper } from './reaper.ts';
 import type { Releases } from './releases.ts';
 import type { ApkBuilds } from './apk-build.ts';
 import type { DesktopFeeds } from './desktop-feed.ts';
@@ -318,6 +319,8 @@ export interface App {
   ciLoad: CiLoad;
   /** citadel-heavy's folder, for the CI page's host load (#1060); absent in tests that don't need it. */
   heavyDir?: string;
+  /** Closed minions' processes (src/reaper.ts, #1365): what runs from which minion, for the host load; absent in tests that don't need it. */
+  reaper?: Pick<Reaper, 'running'>;
   /** The CI page's snapshot (#968); absent in tests that don't need it. */
   ciHealth?: Pick<CiHealth, 'snapshot'>;
   /** The Status page's data and perigee's memory and disk sampler (#1123); absent in tests that don't need it. */

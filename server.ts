@@ -22,6 +22,7 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { StatusPage, recordBoot } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
+import { Reaper } from './src/reaper.ts';
 import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
@@ -645,6 +646,8 @@ waiters.hold = (c, why) => {
   const coordinator = store.ownerCoordinator(t);
   if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket with start_now starts it with its brief) or dismiss it.`);
 };
+// A closed minion's processes (#1365): its close and an hourly sweep stop them; the host-load page lists them by minion.
+const reaper = new Reaper({ store, dataDir: DATA_DIR, commit: BOOT_COMMIT ?? null });
 if (!BOOT_CHECK) {
   // A dismissal can be what a chained minion waits for.
   const stopPreview = runner.onClose;
@@ -656,8 +659,11 @@ if (!BOOT_CHECK) {
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);
-    return stopped;
+    // What it left running stops too (#1365), once its preview has: by folder and pid, never by name (src/reaper.ts).
+    return Promise.resolve(stopped).then(() => reaper.reap(ticketId)).then(() => {}, (err) => console.error(`Ticket ${ticketId}: reaping its processes failed:`, err));
   };
+  // Anything a close missed (a restart mid-close, a container turn's job re-parented to the container's init), hourly.
+  every('reap closed minions', 3600_000, () => reaper.reap(), 10 * 60_000);
   liveOn(BOOT_COMMIT);
 }
 
@@ -1598,6 +1604,7 @@ const app: App = {
     ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
   ],
   store, runner, auth, waiters, timedWakes, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
+  reaper,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
   get assetVersion() {
@@ -1740,6 +1747,19 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
 
 // Contraptions' websockets, which a restart ends (their pages reconnect): open ones never let server.close finish.
 const upgraded = new Set<Duplex>();
+// A dev copy (tools/dev-copy.ts sets IDLE_EXIT_MS) stops itself once nothing has asked it anything for that long, as an unused preview is stopped (#1365).
+const IDLE_EXIT_MS = PREVIEW ? Number(process.env.IDLE_EXIT_MS) || 0 : 0;
+if (IDLE_EXIT_MS > 0) {
+  let asked = Date.now();
+  const touch = () => { asked = Date.now(); };
+  server.on('request', touch);
+  server.on('upgrade', touch);
+  every('dev copy idle exit', Math.min(60_000, Math.max(1000, IDLE_EXIT_MS / 4)), () => {
+    if (Date.now() - asked < IDLE_EXIT_MS) return;
+    console.log(`Nothing asked this copy anything for ${Math.round(IDLE_EXIT_MS / 60_000)} min, so it stops.`);
+    process.exit(0);
+  });
+}
 server.on('upgrade', (req, socket, head) => {
   upgraded.add(socket);
   socket.once('close', () => upgraded.delete(socket));

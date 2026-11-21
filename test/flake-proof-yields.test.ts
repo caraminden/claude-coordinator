@@ -73,3 +73,16 @@ test('an unreadable GitHub counts as a ship running, and it gives up after the l
   assert.match(out, /could not read/);
   assert.match(out, /starting anyway, niced/);
 });
+
+// CB2 (#1519): a proof where a test skipped proves nothing, so the batch fails; and the workflow installs pwsh before the
+// batches, as tests.yml does, so the .ps1 lint runs rather than skips.
+test('a batch fails when the file skipped a test, and the workflow installs pwsh before its batches', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fp-skip-'));
+  writeFileSync(join(dir, 'x.test.ts'), "import { test } from 'node:test'; test('ok', () => {}); test('needs a tool', { skip: 'no tool' }, () => {});\n");
+  const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '1', '0'], { env: { ...process.env, GH_TOKEN: '' }, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /skipped a test on this runner/);
+  assert.doesNotMatch(r.stdout, /clean runs at once/);
+  const pwsh = yml.indexOf('- name: pwsh and PSScriptAnalyzer'), batch = yml.indexOf('- name: 10 clean runs (1 of 5)');
+  assert.ok(pwsh > 0 && pwsh < batch, 'the pwsh step comes before the first batch');
+});

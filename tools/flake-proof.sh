@@ -38,6 +38,16 @@ pids=()
 for _ in $(seq "$burners"); do nice -n 19 bash -c 'while :; do :; done' & pids+=($!); done
 trap 'kill "${pids[@]}" 2>/dev/null' EXIT
 if [ "$runs" -gt 0 ]; then
+  # A test that skipped (a missing tool, such as pwsh for the .ps1 lint) proves nothing, so one run first must skip none
+  # (#1519 CB2). burn-in.sh keeps no copy's output, so this run is its own.
+  log=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/flake-proof.XXXXXX")
+  (unset NODE_TEST_CONTEXT; "$here/citadel-node" --test --test-force-exit --test-reporter=spec "$file") >"$log" 2>&1
+  if ! grep -q '^ℹ skipped 0$' "$log"; then
+    grep -E '^ *﹣|^ℹ (skipped|fail)' "$log" | head -n 20
+    rm -f "$log"
+    echo "flake-proof: $file skipped a test on this runner (the lines with ﹣ above), so it proves nothing: install what it needs"; exit 1
+  fi
+  rm -f "$log"
   BURN_IN_NICE='nice -n 19' "$here/burn-in.sh" "$file" "$runs" || { echo "flake-proof: $file failed in its batch of $runs copies at once under load"; exit 1; }
 fi
 echo "flake-proof: $file: $runs clean runs at once under load"

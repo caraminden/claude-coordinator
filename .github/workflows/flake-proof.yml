@@ -64,6 +64,19 @@ jobs:
           FILE: ${{ inputs.file }}
         run: |
           case "$FILE" in test/*.test.ts) [ -f "$FILE" ] || { echo "no such file: $FILE"; exit 1; } ;; *) echo "not a test file: $FILE"; exit 1 ;; esac
+      # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
+      # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
+      - name: pwsh and PSScriptAnalyzer for the .ps1 lint
+        run: |
+          set -euo pipefail
+          v=7.6.9 dir=$HOME/.local/pwsh
+          if [ ! -x "$dir/$v/pwsh" ]; then
+            mkdir -p "$dir/$v"
+            curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C "$dir/$v"
+            chmod +x "$dir/$v/pwsh"
+          fi
+          echo "$dir/$v" >>"$GITHUB_PATH"
+          "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
       - name: 10 clean runs (1 of 5)
         env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
         run: tools/flake-proof.sh "$FILE" 10

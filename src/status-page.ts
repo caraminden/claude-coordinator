@@ -11,6 +11,7 @@ import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
 import { pressure } from './pressure.ts';
+import { readLedger, cpuTable, cpuHours, CPU_GROUPS, type CpuWindow, type CpuHour } from './cpu-ledger.ts';
 import { stopEvent, type StopMark } from './sd-watchdog.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
@@ -176,6 +177,8 @@ export interface StatusDeps {
   /** Memory-limit storms still going (#1280, src/memory-storms.ts); the ones that ended are 'memory-high' health events. */
   storms?: () => Storm[];
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
+  /** The CPU ledger reading (#1332); the real cgroups unless a test says otherwise. */
+  cpuLedger?: () => Promise<unknown>;
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
@@ -209,10 +212,12 @@ export class StatusPage {
         return { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
       }))(this.deps.dataDir);
       const psi = await pressure.read();
+      const ledger = await (this.deps.cpuLedger ?? readLedger)().catch(() => null);
       const s: HostSample = {
         at: this.now(), mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
         io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
+        cpu_ledger: ledger ? JSON.stringify(ledger) : null,
       };
       this.deps.store.addHostSample(s);
       return s;
@@ -399,6 +404,7 @@ export class StatusPage {
     }
     const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10, ...(psiMax.get(h) ?? [null, null])] as HostPoint);
     const latest = samples.at(-1) ?? null;
+    const cpuWindows = { hour: cpuTable(samples, now, 3_600_000), day: cpuTable(samples, now, 86_400_000), week: cpuTable(samples, now, 7 * 86_400_000) };
     // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
     const cores = this.deps.cores ?? availableParallelism();
     const today = samples.filter((s) => dayOf(s.at) === days.at(-1));
@@ -463,7 +469,7 @@ export class StatusPage {
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
-      host: { series, latest, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 } },
+      host: { series, latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(samples), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
@@ -569,7 +575,9 @@ export interface CitadelStatus {
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
   stalls: { counts: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
-  host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null };
+  host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
+    /** CPU by source (#1332): the last hour, day and week as a table, and the week by hour for the stacked chart. */
+    cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] } };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   /** Every periodic job (#1311): empty for a viewer who can't see Citadel's scheme. */

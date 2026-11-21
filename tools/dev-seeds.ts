@@ -1400,9 +1400,14 @@ mock.boards('#takes', { boards: [
       const db = c.store.db;
       // This copy runs this repo, so the Seeded scheme counts as Citadel's own: its releases are the ships.
       c.store.setProjectRepoDir(c.project.id, process.cwd());
+      const cum: Record<string, number> = {};
+      const rate: Record<string, number> = { server: 0.33, turns: 1.0, taskmasters: 0.15, 'container:2': 0.4, builds: 0.6, godot: 1.1, embed: 0.2, contraptions: 0.1, apps: 0.1, mine: 0.3, others: 0.8 };
+      let forks = 0, busy = 0;
       for (let t = now - 8 * 24 * HOUR; t <= now; t += 15 * 60_000) {
         const wave = Math.sin(t / (6 * HOUR));
-        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6 });
+        for (const k of Object.keys(rate)) cum[k] = (cum[k] ?? 0) + rate[k] * (1 + 0.6 * wave) * 15 * 60e6;
+        forks += 900 * 8; busy += 4.6 * 900 * 1000;
+        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6, cpu_ledger: JSON.stringify({ v: 1, s: Object.fromEntries(Object.entries(cum).map(([k, v]) => [k, [Math.round(v), Math.round(v * 0.3)]])), h: [Math.round(busy), Math.round(busy * 0.26), Math.round(busy * 0.03), forks] }) });
       }
       const sha = (n: number) => `${n}`.repeat(40).slice(0, 40);
       c.store.addHealthEvent('boot', now - 6 * 24 * HOUR, sha(1), 'a ship: new code 11111111');

@@ -634,3 +634,29 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 @media (max-width: 800px) {
   .st-tiles { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* CPU by source (#1332): the stacked week and the table under it; dataviz categorical palette, light and dark. */
+.st-cpu { display: grid; gap: var(--space-2); font-size: 0.85em; }
+.st-cpu-chart svg { height: 6rem; overflow: hidden; }
+.st-cpu-bar.g-server, .st-cpu-legend .g-server::before { fill: #2a78d6; background: #2a78d6; }
+.st-cpu-bar.g-turns, .st-cpu-legend .g-turns::before { fill: #eb6834; background: #eb6834; }
+.st-cpu-bar.g-containers, .st-cpu-legend .g-containers::before { fill: #1baf7a; background: #1baf7a; }
+.st-cpu-bar.g-builds, .st-cpu-legend .g-builds::before { fill: #eda100; background: #eda100; }
+.st-cpu-bar.g-godot, .st-cpu-legend .g-godot::before { fill: #e87ba4; background: #e87ba4; }
+.st-cpu-bar.g-apps, .st-cpu-legend .g-apps::before { fill: #008300; background: #008300; }
+.st-cpu-bar.g-mine, .st-cpu-legend .g-mine::before { fill: #6250d6; background: #6250d6; }
+.st-cpu-bar.g-others, .st-cpu-legend .g-others::before { fill: #8a8a85; background: #8a8a85; }
+:root[data-theme="dark"] .st-cpu-bar.g-server, :root[data-theme="dark"] .st-cpu-legend .g-server::before { fill: #3987e5; background: #3987e5; }
+:root[data-theme="dark"] .st-cpu-bar.g-turns, :root[data-theme="dark"] .st-cpu-legend .g-turns::before { fill: #d95926; background: #d95926; }
+:root[data-theme="dark"] .st-cpu-bar.g-containers, :root[data-theme="dark"] .st-cpu-legend .g-containers::before { fill: #199e70; background: #199e70; }
+:root[data-theme="dark"] .st-cpu-bar.g-builds, :root[data-theme="dark"] .st-cpu-legend .g-builds::before { fill: #c98500; background: #c98500; }
+:root[data-theme="dark"] .st-cpu-bar.g-godot, :root[data-theme="dark"] .st-cpu-legend .g-godot::before { fill: #d55181; background: #d55181; }
+:root[data-theme="dark"] .st-cpu-bar.g-apps, :root[data-theme="dark"] .st-cpu-legend .g-apps::before { fill: #0ca30c; background: #0ca30c; }
+:root[data-theme="dark"] .st-cpu-bar.g-mine, :root[data-theme="dark"] .st-cpu-legend .g-mine::before { fill: #9085e9; background: #9085e9; }
+.st-cpu-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; }
+.st-cpu-legend span::before { content: ""; display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.35rem; border-radius: 2px; vertical-align: middle; }
+.st-cpu-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.st-cpu-table th, .st-cpu-table td { padding: 0.3rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border, rgba(128,128,128,.25)); }
+.st-cpu-table .num { text-align: right; white-space: nowrap; }
+.st-cpu-table tfoot td { font-weight: 600; }
+@media (max-width: 640px) { .st-cpu-table th:nth-child(2), .st-cpu-table td:nth-child(2), .st-cpu-table th:nth-child(5), .st-cpu-table td:nth-child(5) { display: none; } }

@@ -225,6 +225,44 @@ function jobsTile(jobs, now) {
     { tone: bad.some((j) => j.overdue || flags(j).some(([t]) => t === 'danger')) ? 'bad' : bad.length ? 'warn' : null, wide: true, key: 'jobs', chart: bad.map((j) => `${j.name}: ${flags(j).map((f) => f[1]).join(', ')}${j.error ? ` (${j.error})` : ''}`).join('; ') });
 }
 
+/** CPU by source (#1332): cores each source averaged over the last hour, day and week with its kernel share, and the week by hour as stacked bars. */
+const GROUP_CLASS = ['server', 'turns', 'containers', 'builds', 'godot', 'apps', 'mine', 'others'];
+function cpuTile(cpu, now) {
+  const { windows: w, hours, groups } = cpu;
+  const cores = (x) => (x >= 10 ? x.toFixed(0) : x.toFixed(2));
+  const wk = w.week;
+  const lookup = (win, key) => win.rows.find((r) => r.key === key);
+  const keys = [...new Set([...w.hour.rows, ...w.day.rows, ...w.week.rows].map((r) => r.key))]
+    .sort((a, b) => (lookup(wk, b)?.cores ?? 0) - (lookup(wk, a)?.cores ?? 0));
+  const cell = (win, key) => { const r = lookup(win, key); return h('td', { class: 'num' }, r ? cores(r.cores) : '–'); };
+  const table = h('table', { class: 'st-cpu-table' },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Source'), h('th', { class: 'num' }, 'Hour'), h('th', { class: 'num' }, 'Day'), h('th', { class: 'num' }, 'Week'), h('th', { class: 'num' }, 'Kernel (week)'))),
+    h('tbody', {}, ...keys.map((k) => { const r = lookup(wk, k) ?? lookup(w.day, k) ?? lookup(w.hour, k);
+      return h('tr', {}, h('td', {}, r.label), cell(w.hour, k), cell(w.day, k), cell(w.week, k), h('td', { class: 'num' }, lookup(wk, k) ? `${Math.round(lookup(wk, k).kernel * 100)}%` : '–')); })),
+    h('tfoot', {}, ...(w.hour.host || w.week.host ? [h('tr', {}, h('td', {}, 'Host busy (kernel)'),
+      ...[w.hour, w.day, w.week].map((x) => h('td', { class: 'num' }, x.host ? `${cores(x.host.busy)} (${cores(x.host.kernel)})` : '–')), h('td', {}))] : []),
+    ...(w.week.host ? [h('tr', {}, h('td', {}, 'Waiting on disk · processes started a second'),
+      ...[w.hour, w.day, w.week].map((x) => h('td', { class: 'num' }, x.host ? `${cores(x.host.iowait)} · ${x.host.started.toFixed(1)}` : '–')), h('td', {}))] : [])));
+  const from = now - 7 * 86_400_000, W = 400, H = 90;
+  const per = hours.map((hr) => ({ at: hr.at, vals: groups.map((g) => (hr.seconds ? (hr.groups[g.key] ?? 0) / hr.seconds : 0)) }));
+  const max = Math.max(1, ...per.map((p) => sum(p.vals)));
+  const bw = W / (7 * 24);
+  const bars = per.flatMap((p) => {
+    let y = H;
+    return p.vals.map((v, i) => { const hgt = (v / max) * H; y -= hgt;
+      return hgt > 0.2 ? svg('rect', { x: ((p.at - from) / (7 * 86_400_000)) * W, y: y.toFixed(1), width: Math.max(0.5, bw - 0.3), height: hgt.toFixed(1), class: `st-cpu-bar g-${GROUP_CLASS[i] ?? 'mine'}` }, svg('title', {}, `${when(p.at)}: ${groups[i].label} ${cores(v)} cores`)) : ''; }).filter(Boolean);
+  });
+  const chart = h('figure', { class: 'st-chart st-cpu-chart' },
+    svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Cores used each hour of the week, stacked by source' }, ...bars),
+    h('figcaption', { class: 'st-axis' }, h('span', {}, `up to ${cores(max)} cores`), h('span', {}, 'now')));
+  const legend = h('div', { class: 'st-legend st-cpu-legend' }, ...groups.map((g, i) => h('span', { class: `g-${GROUP_CLASS[i] ?? 'mine'}` }, g.label)));
+  const top = lookup(wk, keys[0]);
+  return tile('CPU by source', top ? `${top.label} ${cores(top.cores)} cores` : 'No reading yet',
+    'Cores each source averaged, from each unit\'s own counters read every 5 minutes; other users as one total',
+    h('div', { class: 'st-cpu' }, chart, legend, table), { wide: true, key: 'cpu-sources',
+      chart: keys.slice(0, 8).map((k) => `${lookup(wk, k)?.label ?? k}: hour ${lookup(w.hour, k) ? cores(lookup(w.hour, k).cores) : '–'}, day ${lookup(w.day, k) ? cores(lookup(w.day, k).cores) : '–'}, week ${lookup(wk, k) ? cores(lookup(wk, k).cores) : '–'}`).join('; ') });
+}
+
 function citadelTiles(c, days, now, ships, redraw) {
   const today = days.length - 1;
   const lastStall = c.stalls.last;
@@ -250,6 +288,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       c.host.peak ? `Peak today ${c.host.peak.load1} at ${pacificClockBare(c.host.peak.at)} · warns when it stays over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
       hourLine(c.host.series, 3, { from, to: now, label: 'load each hour, at its highest', max: Math.max(c.host.cpuWarn * 1.25, ...c.host.series.map((s) => s[3] ?? 0)), rule: c.host.cpuWarn, tip: (v) => `load ${v} at its highest` }),
       { tone: c.verdict.tiles?.includes('cpu') ? 'warn' : null, key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` }),
+    ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
     tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory',
       hourLine(c.host.series.filter((s) => s[4] != null), 4, { from, to: now, label: 'CPU pressure each hour, at its highest', rule: 50, tip: (v) => `CPU pressure ${v}% at its highest` }),
       { tone: host?.cpu_psi != null && (host.cpu_psi >= 50 || (host.mem_psi ?? 0) >= 20) ? 'warn' : null, key: 'pressure', chart: `CPU pressure %, hourly highest: ${perHour(c.host.series, 4)}; memory pressure %: ${perHour(c.host.series, 5)}` }),

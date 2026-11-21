@@ -58,6 +58,8 @@ export interface HostSample {
   /** IO pressure the same way, and swap in use in bytes (#1325); null before it or where it can't be read. */
   io_psi?: number | null;
   swap_used?: number | null;
+  /** Cumulative CPU by source and the host's counters as JSON (#1332, src/cpu-ledger.ts); null before it or when unreadable. */
+  cpu_ledger?: string | null;
 }
 
 export interface ReleaseRow {
@@ -1293,7 +1295,8 @@ CREATE TABLE IF NOT EXISTS host_samples (
   cpu_psi INTEGER,
   mem_psi INTEGER,
   io_psi INTEGER,
-  swap_used INTEGER
+  swap_used INTEGER,
+  cpu_ledger TEXT
 );
 -- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
 CREATE TABLE IF NOT EXISTS flake_events (
@@ -1452,6 +1455,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['host_samples', 'mem_psi', 'ALTER TABLE host_samples ADD COLUMN mem_psi INTEGER'],
   ['host_samples', 'io_psi', 'ALTER TABLE host_samples ADD COLUMN io_psi INTEGER'],
   ['host_samples', 'swap_used', 'ALTER TABLE host_samples ADD COLUMN swap_used INTEGER'],
+  ['host_samples', 'cpu_ledger', 'ALTER TABLE host_samples ADD COLUMN cpu_ledger TEXT'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1643,6 +1647,7 @@ export const SCHEMA_HISTORY = [
   [99, 'usage_counts (#1306)'],
   [100, 'host_samples.io_psi, swap_used (#1325)'],
   [101, 'claim_queue, claim_spans (#1334)'],
+  [102, 'host_samples.cpu_ledger (#1332)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3488,8 +3493,8 @@ export class Store {
 
   /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
   addHostSample(s: HostSample) {
-    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null);
+    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null, s.cpu_ledger ?? null);
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 

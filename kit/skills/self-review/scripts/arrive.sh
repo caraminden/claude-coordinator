@@ -4,7 +4,15 @@
 cap() { head -n "$1"; }
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git repo: run the commands in section 1 by hand"; exit 0; }
 cd "$root" || exit 0
-base=main
+# The base is the first argument, else the build branch this one grew from (a feeder: build/<n>, the newest
+# local one that is an ancestor of HEAD and not yet in main), else main.
+base=${1:-}
+if [ -z "$base" ]; then
+  for b in $(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/heads/build/*'); do
+    if git merge-base --is-ancestor "$b" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$b" main 2>/dev/null; then base=$b; break; fi
+  done
+fi
+[ -n "$base" ] || base=main
 git rev-parse --verify -q "$base" >/dev/null || { echo "no local branch '$base': run the commands in section 1 by hand"; exit 0; }
 echo "branch: $(git rev-parse --abbrev-ref HEAD)  head: $(git rev-parse --short HEAD)  base: $base $(git rev-parse --short $base)"
 dirty=$(git status --porcelain | wc -l | tr -d ' ')

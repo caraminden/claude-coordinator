@@ -30,7 +30,7 @@ line: everything is on, as written here.
 ## Facts at load
 
 These ran when the skill loaded; don't fetch them again unless they say UNCOMMITTED, say a piece is
-missing, show the stat or file list cut (more than about 40 files), or you commit or change files after this point (then re-run the section 1 commands).
+missing, show the stat or file list cut (more than about 40 files), name a base other than the one you build on (a feeder's base is `build/<n>`; run `${CLAUDE_SKILL_DIR}/scripts/arrive.sh build/<n>`), or you commit or change files after this point (then re-run the section 1 commands).
 
 !`${CLAUDE_SKILL_DIR}/scripts/arrive.sh`
 

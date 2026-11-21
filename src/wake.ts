@@ -172,6 +172,16 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined, mis
   };
 }
 
+/** Commits GitHub said it hasn't got (#1454), kept a day across restarts: a branch commit rebased away is asked about once a day, not at every check, and one pushed later is found by the next day. */
+export function missingCommits(store: Store, now = () => Date.now()): { has(key: string): boolean; add(key: string): void } {
+  const KEY = 'github-missing-commits';
+  const read = () => Object.fromEntries(Object.entries(store.getSetting<Record<string, number>>(KEY) ?? {}).filter(([, until]) => until > now()));
+  return {
+    has: (key) => key in read(),
+    add: (key) => store.setSetting(KEY, Object.fromEntries(Object.entries({ ...read(), [key]: now() + 86_400_000 }).slice(-500))),
+  };
+}
+
 /** All waiters, in the settings table so they outlive the restart they wait for. */
 const KEY = 'wake-when-live';
 const CHAINS = 'chained-minions';
@@ -707,7 +717,7 @@ export class LiveWaiters {
       for (const r of this.store.listDeliveries({ kind: 'relay', states: ['waiting'] })) {
         if (r.met_at != null) continue;
         const w = { ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.head };
-        const shipped = (await this.live(w)) ? 'live' : await this.shippedRebased(w);
+        const shipped = (await this.live(w)) ? 'live' : await this.shippedRebased(w, r.created_at);
         if (shipped === 'live') found.push(r);
         else if (shipped === 'dead') this.outbox.cancel(r.id, `#${this.store.getTicket(w.ticket)?.number ?? w.ticket} was dismissed without shipping \`${(w.commit ?? '').slice(0, 7)}\``);
       }
@@ -788,19 +798,18 @@ export class LiveWaiters {
    * and within() can't match it; 'dead' when it was dismissed over 3 days ago without such a ship (a PR may still merge
    * meanwhile); else null.
    */
-  private async shippedRebased(w: Waiter): Promise<'live' | 'dead' | null> {
+  private async shippedRebased(w: Waiter, queued: number): Promise<'live' | 'dead' | null> {
     const t = this.store.getTicket(w.ticket);
     if (!t || !w.commit) return null;
     const scheme = this.store.getProject(t.project_id)?.repo_dir ?? null;
     const ship = this.store.lastShip(t.id);
     let made: string | null = null;
     for (const dir of [scheme, this.repo]) if (dir && !made) made = await git(dir, ['show', '-s', '--format=%ct', `${w.commit}^{commit}`]);
-    if (ship && (!made || Number(made) * 1000 <= ship.at)) {
-      const other = await this.elsewhere(t.id);
-      if (other) return 'live';
-      const full = ship.commit && (await this.resolve(ship.commit, scheme));
-      if (full && (await this.live({ ...w, commit: full }))) return 'live';
-      return null;
+    // A commit neither repo knows (collected away) is dated by when the relay was queued.
+    if (ship && (made ? Number(made) * 1000 : queued) <= ship.at) {
+      if (!ship.commit) return (await this.elsewhere(t.id)) ? 'live' : null; // "Shipped the branch": another scheme's land.sh, with no commit named
+      const full = await this.resolve(ship.commit, scheme);
+      return full && (await this.live({ ...w, commit: full })) ? 'live' : null;
     }
     return t.status === 'closed' && t.closed_at != null && t.closed_at < Date.now() - 3 * 86_400_000 ? 'dead' : null;
   }

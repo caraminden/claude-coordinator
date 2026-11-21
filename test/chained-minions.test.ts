@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge, startChained } from '../src/wake.ts';
+import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, missingCommits, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -734,14 +734,19 @@ test('a commit GitHub says it has not got (422, a branch commit rebased away) is
   const asked = join(root, 'rebased-asked');
   writeFileSync(join(bin, 'gh'), `#!/bin/sh\necho x >> '${asked}'\necho 'gh: No commit found for SHA: ${'c'.repeat(40)} (HTTP 422)' >&2\nexit 1\n`);
   chmodSync(join(bin, 'gh'), 0o755);
-  const kept = new Set<string>(); // what the server keeps in its settings
-  const missing = { has: (k: string) => kept.has(k), add: (k: string) => void kept.add(k) };
+  const db = join(root, 'rebased-away.db');
+  let clock = Date.now();
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   try {
-    assert.equal(await githubPrs(() => undefined, missing).commit(dir, 'c'.repeat(40)), null);
-    assert.equal(await githubPrs(() => undefined, missing).commit(dir, 'c'.repeat(40)), null, 'a fresh lookup, as after a restart');
-    assert.equal((await import('node:fs')).readFileSync(asked, 'utf8').trim().split('\n').length, 1, 'GitHub asked once');
+    const ask = () => githubPrs(() => undefined, missingCommits(new Store(db), () => clock)).commit(dir, 'c'.repeat(40)); // a new store and lookup each time, as after a restart
+    const asks = () => (existsSync(asked) ? readFileSync(asked, 'utf8').trim().split('\n').length : 0);
+    assert.equal(await ask(), null);
+    assert.equal(await ask(), null);
+    assert.equal(asks(), 1, 'GitHub asked once');
+    clock += 86_400_001;
+    await ask();
+    assert.equal(asks(), 2, 'asked again a day on: it may have been pushed since');
   } finally {
     process.env.PATH = path;
   }

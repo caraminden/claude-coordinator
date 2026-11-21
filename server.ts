@@ -49,7 +49,7 @@ import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, chainedStep, fixShipped, githubPrs, LiveWaiters, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
+import { type Chain, chainedStep, fixShipped, githubPrs, LiveWaiters, missingCommits, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { Outbox } from './src/outbox.ts';
 import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
@@ -415,12 +415,7 @@ function ownScheme(): Project | null {
 }
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
-// Commits GitHub said it doesn't have (#1454), kept across restarts so a rebased-away one isn't asked about at every boot.
-const MISSING_COMMITS = 'github-missing-commits';
-waiters.prs = githubPrs(githubOf, {
-  has: (key) => (store.getSetting<string[]>(MISSING_COMMITS) ?? []).includes(key),
-  add: (key) => store.setSetting(MISSING_COMMITS, [...(store.getSetting<string[]>(MISSING_COMMITS) ?? []).filter((k) => k !== key), key].slice(-500)),
-});
+waiters.prs = githubPrs(githubOf, missingCommits(store));
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
 services.githubAs = (c) => {

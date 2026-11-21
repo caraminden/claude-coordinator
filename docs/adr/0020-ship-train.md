@@ -28,8 +28,9 @@ the last one in line waited for every run ahead of it.
   line, up to the cap, for one more CI run (never a ship stacked on a suspect's branch, which would bring its change
   back). Green: it all ships. Red again on any of the same tests: the guess was
   wrong, and the bisect runs on that refilled train (its top is the one commit known red, so the bisect stays sound
-  even if a newcomer did it). Red on new tests only: another round, up to 3. A failure with no suspect, or a log that
-  doesn't label every failed file as a flake or as failed again alone or hung: the bisect, as before. A suspect that is the front itself: the riders go back in
+  even if a newcomer did it). Red on new tests only: another round, up to 3. A file CI didn't rerun alone (run-tests.sh stops rerunning
+  once one is real) may be load, so it names no suspect: if it is real, the refilled train is red on it and the next
+  round sees it. A failure with no suspect, or a log with no confirmed real failure: the bisect, as before. A suspect that is the front itself: the riders go back in
   line and the front is refused. An innocent suspect costs its minion one turn and a re-ship, which is accepted.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`

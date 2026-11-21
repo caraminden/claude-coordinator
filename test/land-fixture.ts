@@ -94,7 +94,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
 // after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline)
-// (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun).
+// (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
+// file not rerun because a real failure already made the run red).
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
@@ -141,7 +142,7 @@ case "$*" in
     case \${FAKE_LOG:-mixed} in
       many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
       *)
-        printf '%b 2 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p"
+        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$([ "\${FAKE_LOG:-mixed}" = after-real ] && echo 3 || echo 2)"
         printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
           printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
@@ -149,6 +150,7 @@ case "$*" in
           printf "%b test/busy.test.ts: not rerun: CI's answer is due (land.sh stops waiting then), so the run counts as a real red\\n" "$p"
         else
           printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
+          [ "\${FAKE_LOG:-mixed}" != after-real ] || printf '%b test/busy.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
         fi ;;
     esac
     printf '%b the run still fails\\n' "$p" ;;

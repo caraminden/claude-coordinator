@@ -1097,16 +1097,17 @@ gate() {
 # on new tests only: another round, up to 3. 0: done (rc as gate's, 1 only for this one alone or a suspect itself), 1:
 # the bisect looks, on the train as it now is (its top red, its log in $failed).
 suspect_tests='' train_refused=' ' train_refused_tips=''
-# The real failures in $failed, one test file a line; fails when there are none, or the log doesn't label every file as
-# a flake or as failed again alone or hung (a file not rerun, or whose rerun stopped, may be either).
+# The real failures in $failed, one test file a line: those that failed again alone, hung, or whose rerun stopped at
+# CI's deadline. A file not rerun may be load or real, so it names no suspect: if it is real, the refilled train is red
+# on it, and the next round sees it. Fails when there are none, or the log doesn't label every failed file.
 train_real() {
   local at n out
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
   n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
   out=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\).*/\2 \1/p' | sort -u -k2)
-  [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] && ! grep -q '^\(rerun alone stopped\|not rerun\) ' <<<"$out" || return 1
-  out=$(grep -v '^failed in the full run, passed alone ' <<<"$out" | sed 's/.* //')
+  [[ $n =~ ^[1-9][0-9]*$ ]] && [ -n "$out" ] && [ "$(wc -l <<<"$out")" = "$n" ] || return 1
+  out=$(sed -n 's/^\(failed again alone\|hung when rerun alone\|rerun alone stopped\) //p' <<<"$out")
   [ -n "$out" ] && echo "$out"
 }
 # <file>: the repo paths it imports by a relative path, as the train's top has it.

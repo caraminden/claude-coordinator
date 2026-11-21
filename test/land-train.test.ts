@@ -163,6 +163,18 @@ test("a failed test file CI didn't rerun alone may be load or real, so it names 
   l.done();
 });
 
+test("a file CI didn't rerun because a real failure already made the run red names no suspect: only the confirmed failure's ship is refused", async () => {
+  const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', 'red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'after-real' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red/);
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[3].stderr, /so it is likely the cause/);
+  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  shipped(l, done[2], 3, 2, 2);
+  assert.equal(l.runs(), 3, "ship 1's, the red train's and the refilled train's");
+  l.done();
+});
+
 test("a train's red of flakes only is unchanged: one fresh run, and a ship that touched the flaky test still rides", async () => {
   const l = await line([{}, {}, { change: ['test/slow.test.ts', 'x\n'] }, {}], { FAKE_FLAKY_PATH: 'test/slow.test.ts', FAKE_LOG: 'flakes' });
   const done = await l.go();

@@ -119,3 +119,12 @@ test('a redraw reuses the Dismissed rows whose minion did not change, and rebuil
   assert.equal(same.filter((x) => !x).length, 1);
   assert.match(await page.eval<string>(`document.querySelectorAll('#threads details.g-closed .thread-row')[0].textContent + document.querySelector('#threads details.g-closed').textContent`), /Renamed/);
 });
+
+test('searching a number shows the minion\'s full row, not a bare link', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the minion\'s row', `document.querySelector('#threads .thread-row.s-running')`);
+  await page.eval(`(() => { const i = document.querySelector('.thread-search'); i.value = '1'; i.dispatchEvent(new Event('input')); })()`);
+  await waitFor(page, 'the result row', `document.querySelector('#threads .thread-row')`);
+  assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row').textContent`), /A running minion/);
+  assert.equal(await page.eval(`document.querySelector('#threads section.column').children.length`), 2); // heading and row only
+});

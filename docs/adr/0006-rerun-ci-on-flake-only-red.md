@@ -30,6 +30,11 @@ never read as the answer.
   more than five failed files, a hang of the whole run, a leak, a skipped test or a failed setup step.
 - Each fresh run writes `flake rerun · <branch> · <files> · green|red|no answer|not started` to the retro log, so the next report can
   count them.
+- A run cut off from outside before any test failed (#1377, 2026-11-20: Node's `Interrupted while running:`, no
+  `✖ failing tests:`, and not run-tests.sh's own hang stop) is no verdict on the commit. It gets the same one fresh run,
+  logged as `cut-off rerun · <branch> · <run> · green|red|no answer|not started`; a second cut-off is no answer (the
+  fallback; in a train's bisect, nobody is refused). A fresh run after a flake-only red that is cut off is no answer too.
+  Run 44859457680 was interrupted at 55 s, and a bisect refused #1302 for it (reports/incident-2026-11-20-1840-cause.md).
 - run-tests.sh is unchanged in what it does: its rerun alone still only labels, and its exit code stays red. A red run of
   the fallback on perigee still refuses at once.
 

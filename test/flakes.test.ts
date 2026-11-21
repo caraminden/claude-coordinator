@@ -120,6 +120,7 @@ test('a third sighting starts exactly one minion; a held fix reopens on the next
   assert.deepEqual([held.state, held.clean_runs], ['held', 50]);
 
   clock += 3_600_000;
+  st.updateTicket(fix.ticket_id!, { status: 'closed' }); // its minion shipped; while it is open, no second starts
   st.addFlakeEvents(project.id, null, null, clock - 1000, [{ file: 'test/two.test.ts', source: 'in CI', detail: '' }]);
   await fx.tick([project]);
   const again = st.flakeFix(project.id, 'test/two.test.ts')!;
@@ -160,4 +161,22 @@ test('three sightings from before the file\'s newest commit start no minion; thr
   for (const h of [4, 3, 2]) st.addFlakeEvents(project.id, null, null, now - h * 3_600_000, [{ file: 'test/old.test.ts', source: 'in CI', detail: '' }]);
   await fx.tick([project]);
   assert.deepEqual(started, ['Flaky test: test/old.test.ts'], 'three after the commit start one as before');
+});
+
+test('a held or closed fix row starts no minion while another open minion names the file, under any title', async () => {
+  const dir = mkdtempSync(join(root, 'owner-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('O', null);
+  const now = Date.now();
+  const file = 'test/ov.test.ts';
+  const other = st.createTicket({ project_id: project.id, title: 'Flaky test: ov.test.ts', permission_mode: 'x', created_by: 'Cara' });
+  const old = st.createTicket({ project_id: project.id, title: 'old', permission_mode: 'x', created_by: 'T' });
+  st.addFlakeFix(project.id, file, old.id, now - 9e6, { state: 'held', held_at: now - 8e6 });
+  for (const h of [3, 2, 1]) st.addFlakeEvents(project.id, null, null, now - h * 1_000_000, [{ file, source: 'in CI', detail: '' }]);
+  const started: string[] = [];
+  const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [],
+    start: async (_p, b) => { started.push(b.title); return { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }; } });
+  await fx.tick([project]);
+  assert.deepEqual(started, [], 'held row, new sightings, but another minion is open on the file');
+  assert.equal(st.flakeFix(project.id, file)!.state, 'held', 'the row is left as it was');
 });

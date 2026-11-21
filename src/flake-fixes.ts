@@ -110,15 +110,19 @@ export class FlakeFixes {
       const fix = store.flakeFix(project.id, file);
       const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS);
       let id: number | null = null;
+      // A live minion already on the file owns it, whatever its title or the fix row's state (#1373 started beside #1349 through the held branch).
+      const base = file.split('/').pop()!;
+      const open = (t: { kind: string; status: string }) => t.kind !== 'coordinator' && t.status !== 'closed';
+      const own = fix?.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
+      const owner = own && open(own) ? own : store.listTickets(project.id).find((t) => open(t) && t.title.includes(base));
+      if (fix && owner) continue;
       if (!fix) {
         if (sights.length < FLAKE_REPEAT) continue;
         // Sightings from before the file's newest commit were of the file as it was: a fix may already have shipped (#1189). Only newer ones count.
         const changed = await (this.d.changedAt ?? ((p, f) => (p.repo_dir ? fileChangedAt(p.repo_dir, f) : Promise.resolve(null))))(project, file);
         if (changed != null && sights.filter((t) => t > changed).length < FLAKE_REPEAT) continue;
         // A minion a person already started from the tab's button owns it: record the fix on that one, start no second.
-        const title = flakeBrief(file, 0, []).title;
-        const mine = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.title === title);
-        if (mine) { store.addFlakeFix(project.id, file, mine.id, now); continue; }
+        if (owner) { store.addFlakeFix(project.id, file, owner.id, now); continue; }
         id = store.addFlakeFix(project.id, file, null, now);
       } else if (fix.state === 'held') {
         if (!sights.some((t) => t > (fix.held_at ?? 0))) continue;

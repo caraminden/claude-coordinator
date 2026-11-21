@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -9,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
-import { lines, stopTurns, testPins } from './helpers.ts';
+import { lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -18,11 +16,9 @@ testPins();
 // did. The fake `claude -p` keeps its transcript under CLAUDE_CONFIG_DIR like the real one, waits for
 // the `go` file before it answers, deletes the config-dir file named in `rm` if there is one, and ends
 // with the `result` file's words (an error unless "ok").
-const root = mkdtempSync(join(tmpdir(), 'minion-lane-'));
-after(async () => {
-  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('minion-lane-');
+const root = tmp.dir;
+after(() => tmp.teardown()); // ends the detached turns before deleting their folders (#271)
 const config = join(root, 'claude');
 process.env.CLAUDE_CONFIG_DIR = config;
 const go = join(root, 'go');
@@ -199,7 +195,7 @@ test("a minion whose turn still runs unfollowed (its wrapper is alive in its fol
   // A turn this server doesn't follow, as #1284's first turn after the second replaced it: its wrapper's arguments name its folder.
   const dir = join(r.turnsDir, `${id}-1`);
   mkdirSync(dir, { recursive: true });
-  const stray = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', dir], { stdio: 'ignore' });
+  const stray = tmp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', dir], { stdio: 'ignore' });
   writeFileSync(join(dir, 'pid.json'), JSON.stringify({ wrapper: stray.pid }));
   writeFileSync(go, '');
   try {

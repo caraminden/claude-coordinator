@@ -1,19 +1,18 @@
 // Semantic memory (#331): what gets indexed, what never does, and that a search never crosses schemes.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Embed } from '../src/memory.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import { agentToken, bootServer, SECRET } from './helpers.ts';
+import { agentToken, bootServer, SECRET, tempRoot } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'memory-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('memory-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 /** A stand-in model: words hashed into 64 buckets, so texts that share words score high. */
 function fakeVec(text: string): Float32Array {
@@ -237,11 +236,9 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     const embedding = (t: string) => [...fakeVec(t.replace(/^Instruct:[\s\S]*?\nQuery: /, ''))];
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data: input.map((t, index) => ({ index, embedding: embedding(t) })) }));
   });
-  await new Promise<void>((r) => fake.listen(0, '127.0.0.1', r));
-  const embedUrl = `http://127.0.0.1:${(fake.address() as { port: number }).port}`;
-  after(() => fake.close());
+  const embedUrl = `http://127.0.0.1:${await tmp.serve(fake)}`;
 
-  const boot = mkdtempSync(join(tmpdir(), 'memory-boot-'));
+  const boot = tmp.path('boot');
   const data = join(boot, 'data');
   mkdirSync(data, { recursive: true });
   const { store, A, B, a1, a2, b1 } = world(join(data, 'coordinator.db'));
@@ -277,7 +274,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 
     // The minion's MCP tool: listed only where memory is on, and answered through the route.
     const mcp = async (memory: boolean, method: string, params: object = {}) => {
-      const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+      const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
         env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, a1.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(a1.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEMORY: memory ? '1' : '' },
         stdio: ['pipe', 'pipe', 'inherit'],
       });
@@ -306,7 +303,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 
     // create_ticket, as the Taskmaster: refused when an open minion reads like the same work, until not_duplicate.
     const create = async (args: object) => {
-      const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+      const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
         env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, tmA.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(tmA.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_MEMORY: '1' },
         stdio: ['pipe', 'pipe', 'inherit'],
       });
@@ -353,7 +350,6 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     for (const texts of [[], ['ok', ''], ['a'.repeat(4001)], Array(17).fill('a'), 'dentist', [3]]) assert.equal((await embedCall({ texts })).status, 400, JSON.stringify(texts).slice(0, 40));
   } finally {
     await srv.stop();
-    rmSync(boot, { recursive: true, force: true });
   }
 });
 

@@ -1,23 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, tempRoot, until, ok, type Booted } from './helpers.ts';
 
 // A minion proposes a machine's notes (#617, Josh: "Minion proposes, owner approves"): a plan card that only the
 // machine's owner or an admin can approve, which saves them through the Machines page's PATCH. Through the real
 // server, with a stand-in `claude -p` that records each turn's token and ends the turn.
-const root = mkdtempSync(join(tmpdir(), 'machine-notes-'));
-const procs: ChildProcess[] = [];
-after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
-});
+const tmp = tempRoot('machine-notes-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
@@ -56,7 +50,7 @@ before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
   base = srv.base;
   cookies.Cara = srv.cookie;
-  procs.push(srv.proc);
+  tmp.track(srv.proc);
   const project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'P' } });
   for (const name of ['Josh', 'Dana']) {
     const made = await call('Cara', '/api/people', { method: 'POST', body: { name } });
@@ -146,7 +140,7 @@ test('approving writes the notes through the PATCH path, unless they changed sin
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, with the machines it got. */
 async function mcp(method: string, params: object, machines: string) {
-  const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: live(), COORDINATOR_PROJECT: String(ticket.project_id),
       COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MACHINES: machines,

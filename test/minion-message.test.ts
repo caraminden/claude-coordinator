@@ -1,23 +1,22 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
 
 // Minions message each other directly (#783): message_minion and read_minion through the real MCP server
 // and the routes behind them. Every message here is wake: false, so no turn starts (the server's claude is
 // /bin/false); the wake rules themselves are runner.guard's, tested in cold-mail and parked-hold.
-const root = mkdtempSync(join(tmpdir(), 'minion-message-'));
+const tmp = tempRoot('minion-message-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 after(async () => {
-  if (srv) await stopProcs([srv.proc]);
-  rmSync(root, { recursive: true, force: true });
+  if (srv) await srv.stop();
+  await tmp.teardown();
 });
 
 const store = new Store(join(data, 'coordinator.db'));
@@ -47,7 +46,7 @@ before(async () => {
 });
 
 async function tool(from: number, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(from),
       COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(from), COORDINATOR_ROLE: 'thread',

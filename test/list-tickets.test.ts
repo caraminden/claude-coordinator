@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -9,16 +8,17 @@ import { Auth } from '../src/auth.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs, tempRoot } from './helpers.ts';
 
 // A minion lists its own scheme's minions, read-only (#143): list_tickets through the real MCP server,
 // and the route behind it, which gives a minion only the line's fields and never another scheme.
-const root = mkdtempSync(join(tmpdir(), 'list-tickets-'));
+const tmp = tempRoot('list-tickets-');
+const root = tmp.dir;
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
 after(async () => {
   if (srv) await stopProcs([srv.proc]);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 const store = new Store(join(data, 'coordinator.db'));
@@ -57,7 +57,7 @@ before(async () => {
 });
 
 async function tool(name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(M1.id),
       COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(M1.id), COORDINATOR_ROLE: 'thread',

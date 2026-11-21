@@ -2,27 +2,25 @@
 // the host) on one pinned version, reached over Claude Code's HTTP MCP transport. Each turn is known only by its own
 // token, which its wrapper registers (src/pool-client.mjs); a turn's machines are reached lazily from a remembered tool list.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ensurePool, keepTurn, readPool, registerTurn, type PoolInfo, type PoolSpec } from '../src/pool-client.mjs';
-import { REPO, until } from './helpers.ts';
+import { REPO, tempRoot, until } from './helpers.ts';
 
-const roots: string[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
+const tmp = tempRoot('mcp-pool-');
+let nRoots = 0;
 const pools: number[] = [];
 after(async () => {
   for (const pid of pools) try { process.kill(pid, 'SIGKILL'); } catch {}
-  for (const s of servers) s.closeAllConnections(), s.close();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 function root(): string {
-  const d = mkdtempSync(join(tmpdir(), 'mcp-pool-'));
-  roots.push(d);
+  const d = tmp.path(`r${nRoots++}`);
+  mkdirSync(d);
   return d;
 }
 
@@ -61,9 +59,8 @@ async function fakeApp() {
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ number: 1, title: 't', status: 'idle' }));
     });
   });
-  servers.push(srv);
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  return { base: `http://127.0.0.1:${(srv.address() as AddressInfo).port}`, calls, machine };
+  const port = await tmp.serve(srv);
+  return { base: `http://127.0.0.1:${port}`, calls, machine };
 }
 
 /** Short TTL and idle times so the version test sees a pool exit; `long` keeps turns registered through slow steps. */
@@ -164,8 +161,7 @@ test('two pools started at once for one place and version end as one: the later 
   const r = root();
   const s = spec(r, 'v1', undefined, true);
   mkdirSync(s.dir, { recursive: true });
-  const { spawn } = await import('node:child_process');
-  const kids = [0, 1].map(() => spawn(s.node, [s.script, s.dir, s.version], { env: s.env, stdio: 'ignore' }));
+  const kids = [0, 1].map(() => tmp.spawn(s.node, [s.script, s.dir, s.version], { env: s.env, stdio: 'ignore' }));
   for (const k of kids) pools.push(k.pid!);
   await until('a pool is on record', () => readPool(s.dir) !== null, 20_000);
   await until('one of them has stepped aside', () => kids.some((k) => k.exitCode !== null), 20_000);
@@ -260,8 +256,7 @@ test('a turn whose pool won\'t start runs with its own helpers instead (the stdi
   writeFileSync(join(dir, 'prompt.jsonl'), '{}\n');
   const broken = { dir: join(r, 'pool', 'v1'), script: join(r, 'no-such-pool.ts'), node: process.execPath, version: 'v1', env: { PATH: process.env.PATH ?? '' } };
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json'), '-p'], cwd: r, env: { PATH: process.env.PATH, COORDINATOR_TOKEN: 'tok' }, pool: broken }));
-  const { spawn } = await import('node:child_process');
-  const w = spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
+  const w = tmp.spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
   await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 45_000); // the wrapper gives the pool 20 s to start
   w.kill();
   const seen = JSON.parse(readFileSync(join(r, 'argv.json'), 'utf8'));
@@ -284,8 +279,7 @@ test('a turn whose pool starts gets its port, and its wrapper registers it', asy
   writeFileSync(join(dir, 'prompt.jsonl'), '{}\n');
   const s = spec(r);
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json')], cwd: r, env: { ...turn(app.base, 44, 1).env, PATH: process.env.PATH, COORDINATOR_TOKEN: 'tok-w' }, pool: s }));
-  const { spawn } = await import('node:child_process');
-  const w = spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
+  const w = tmp.spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
   await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 20_000);
   w.kill();
   const pool = readPool(s.dir);
@@ -310,8 +304,7 @@ async function wrapperWith(mcp: object | null, stdio: boolean, env: Record<strin
   if (mcp) writeFileSync(join(dir, 'mcp.json'), JSON.stringify(mcp));
   if (stdio) writeFileSync(join(dir, 'mcp-stdio.json'), JSON.stringify({ mcpServers: { thread: { type: 'stdio', command: 'node', args: ['mcp.ts'] } } }));
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json'), '-p'], cwd: r, env: { PATH: process.env.PATH, ...env } }));
-  const { spawn } = await import('node:child_process');
-  const w = spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
+  const w = tmp.spawn(process.execPath, [join(REPO, 'src', 'turn-wrapper.mjs'), dir], { stdio: 'ignore' });
   await until('the turn ended', () => existsSync(join(dir, 'exit.json')), 20_000);
   w.kill();
   assert.equal(JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')).code, 0);

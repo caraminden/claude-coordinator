@@ -1,20 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { inOrder, moved } from '../public/reorder.js';
-import { listeningPort, stopTurns, stopProcs } from './helpers.ts';
+import { listeningPort, tempRoot } from './helpers.ts';
 
 // Dragging the schemes shelf or the app rail into your own order (#649): saved per person, followed by the lists.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'list-order-'));
-const procs: ChildProcess[] = [];
+const tmp = tempRoot('list-order-');
+const root = tmp.dir;
 after(async () => {
-  await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown();
 });
 
 let base = '';
@@ -32,14 +27,13 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
 let joshId = 0;
 let caraId = 0;
 before(async () => {
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
+  const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  procs.push(server);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),

@@ -1,14 +1,14 @@
 // The generative media tools a minion is offered (#717 OpenRouter, #733 Codex): what they say first, and generate_image_codex's run.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
+import { tempRoot } from './helpers.ts';
 
-const root = mkdtempSync(join(tmpdir(), 'media-tools-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+const tmp = tempRoot('media-tools-');
+const root = tmp.dir;
+after(() => tmp.teardown());
 
 // A stand-in for the pinned citadel-codex-review: logs its argv and stdin, and answers as FAKE_REVIEW says.
 const fakeLog = join(root, 'review.json');
@@ -28,7 +28,7 @@ process.stderr.write('Codex usage: 5-hour 13%, weekly 30%\\n');
 chmodSync(join(root, 'citadel-codex-review'), 0o755);
 
 async function mcp(env: Record<string, string>, method: string, params: object = {}) {
-  const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: { ...process.env, PATH: `${root}:${process.env.PATH}`, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '2', COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '', ...env },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

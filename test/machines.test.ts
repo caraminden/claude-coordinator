@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import type { ChildProcess } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createInterface } from 'node:readline';
-import { SECRET, agentToken, bootServer, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
+import { SECRET, agentToken, bootServer, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { hashToken, newToken } from '../src/machines.ts';
@@ -15,15 +14,15 @@ import { sealKey, unseal } from '../src/credentials.ts';
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
 // as the MCP client, starting the machine's server from its --mcp-config just as claude would.
 const repo = join(import.meta.dirname, '..');
-const root = mkdtempSync(join(tmpdir(), 'machines-'));
+const tmp = tempRoot('machines-');
+const root = tmp.dir;
 const procs: ChildProcess[] = [];
 after(async () => {
   try {
     await srv?.settled(); // the server's last writes land before it is stopped and its folder deleted (#1437)
   } finally {
     await stopProcs(procs);
-    await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
-    rmSync(root, { recursive: true, force: true });
+    await tmp.teardown(); // ends the detached turns (#271) and what names the folder, then deletes it
   }
 });
 
@@ -229,7 +228,7 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${(await turnNow('by hand')).token}` } });
   assert.equal(opened.status, 503);
 
-  // The agent that starts these dies with the test and leaves them running. Their command line names root, so stopTurns ends them and leak-guard sees any that escape (#515).
+  // The agent that starts these dies with the test and leaves them running. Their command line names root, so teardown ends them and leak-guard sees any that escape (#515).
   const stuckMarker = join(root, 'stuck-stand-in');
   // A server its owner adds to the file shows up to tick without restarting anything.
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, second: { run: [process.execPath, mcpServer] } } }));
@@ -580,11 +579,10 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   const tools = async (project: any, asker: number) => {
     const tm = (await call(`/api/projects/${project.id}`)).coordinator.id;
     store.setSetting(askerKey(tm), asker);
-    const child = spawn(process.execPath, [join(repo, 'src', 'mcp.ts')], {
+    const child = tmp.spawn(process.execPath, [join(repo, 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_ROLE: 'coordinator', COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(project.id) },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
-    procs.push(child);
     const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
     let n = 0;
     const use = async (name: string, args: object = {}) => {

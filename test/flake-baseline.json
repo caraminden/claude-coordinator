@@ -389,12 +389,6 @@
    "ok": 0
   }
  },
- "list-tickets.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "loop-guard.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -423,12 +417,6 @@
    "ok": 0
   }
  },
- "machine-notes-cards.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  }
- },
  "machine-setup-browser.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -446,10 +434,6 @@
   }
  },
  "machines.test.ts": {
-  "rmTemp": {
-   "n": 1,
-   "ok": 0
-  },
   "shortUntil": {
    "n": 2,
    "ok": 0
@@ -494,10 +478,6 @@
   }
  },
  "memory.test.ts": {
-  "rmTemp": {
-   "n": 2,
-   "ok": 0
-  },
   "sleep": {
    "n": 2,
    "ok": 0
@@ -522,12 +502,6 @@
  "minion-lane.test.ts": {
   "sleep": {
    "n": 3,
-   "ok": 0
-  }
- },
- "minion-message.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },

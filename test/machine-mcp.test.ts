@@ -1,18 +1,14 @@
 // The turn's stand-in for a machine's MCP server (src/machine-mcp.ts), against a fake app: what it does when the
 // app restarts under it, and when the machine's server goes away with a call in flight.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { REPO, stopProcs, until } from './helpers.ts';
+import { REPO, tempRoot, until } from './helpers.ts';
 
-const procs: ChildProcess[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
+const tmp = tempRoot('machine-mcp-');
 after(async () => {
-  await stopProcs(procs);
-  for (const s of servers) s.closeAllConnections(), s.close();
+  await tmp.teardown();
 });
 
 /**
@@ -45,19 +41,16 @@ async function fakeApp(answers: (number | 'open')[]) {
     }
     res.writeHead(404).end();
   });
-  servers.push(srv);
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const base = `http://127.0.0.1:${await tmp.serve(srv)}`;
   const reply = (message: unknown) => state.stream!.write(`data: ${JSON.stringify({ message })}\n\n`);
   return { base, posts, state, reply };
 }
 
 function startProxy(base: string) {
-  const proc = spawn(process.execPath, [`${REPO}/src/machine-mcp.ts`, '5', 'box', 'mcp'], {
+  const proc = tmp.spawn(process.execPath, [`${REPO}/src/machine-mcp.ts`, '5', 'box', 'mcp'], {
     env: { ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: 'tok' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  procs.push(proc);
   const out: any[] = [];
   let err = '';
   createInterface({ input: proc.stdout! }).on('line', (l) => out.push(JSON.parse(l)));

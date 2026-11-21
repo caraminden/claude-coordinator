@@ -12,14 +12,15 @@ const root = mkdtempSync(join(tmpdir(), 'progress-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
 
-// The second of three files waits until the counts say the first is done, then keeps what it saw, and whether a
+// The second of three files waits until the counts say the first is done and it is running (the reporter reads node's
+// events a moment after they happen: waiting only for "1 done" raced its own start), then keeps what it saw, and whether a
 // node --test it started itself would count too (it mustn't: it would write over the run's counts).
 const WATCHER = `import test from 'node:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 test('watch', async () => {
   const f = process.env.CITADEL_TEST_PROGRESS_TO;
   // poll-ok: this runs in a fixture child in a temp dir and can't import ./wait.ts
-  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25));
+  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n3\\nt/b.test.mjs\\n')); i++) await new Promise((r) => setTimeout(r, 25));
   writeFileSync('seen', JSON.stringify({ counts: f && existsSync(f) ? readFileSync(f, 'utf8') : null, inherited: process.env.CITADEL_TEST_PROGRESS ?? null }));
 });
 `;

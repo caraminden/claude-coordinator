@@ -107,6 +107,8 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
   for (const t of line) {
     const log = /^running the tests/.test(t.phase) ? 'land-test' : /^deploying: running the tests/.test(t.phase) ? 'test' : null;
     if (t.got > 0 && log) t.tests = readTestCounts(join(stateDir, `${log}.progress`), t.mtime);
+    // run-tests.sh's reruns name no run in their phase; the full run's file went when it ended, so the one written since is theirs (#1368).
+    else if (t.got > 0 && /^rerunning \d+ failed test file/.test(t.phase)) t.tests = readTestCounts(join(stateDir, 'land-test.progress'), t.mtime) ?? readTestCounts(join(stateDir, 'test.progress'), t.mtime);
   }
   const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
   return { line, took };
@@ -180,6 +182,8 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit' };
   // land.sh runs the suite itself only when CI couldn't answer (its CI FALLBACK, #523).
   if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee' };
+  // tools/run-tests.sh's reruns of the failed files, each alone (#553), on perigee: land.sh's run or deploy.sh's.
+  if (/^rerunning \d+ failed test files?$/.test(p)) return { stage: 'test', word: 'reruns', key: 'reruns', text: 'rerunning the failed test files alone on perigee' };
   if (/^finding the ship that turned the train red/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: 'the train went red in CI: finding the ship that turned it red' };
   if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying' };
   return { stage: 'rebase', word: 'rebase', key: 'rebase', text: p === 'starting' ? 'starting' : 'rebasing onto main' };
@@ -187,8 +191,8 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
 
 // The one-line readout's words for a landing's test phases (#630): the stage and its count say the rest, and the
 // suite's file counts fill its piece of the track.
-const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee', bisect: 'bisecting the red train' };
-const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', ci: 'waiting for CI', tests: 'testing', bisect: 'bisecting', deploy: 'deploying' };
+const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee', reruns: 'failed files rerun alone on perigee', bisect: 'bisecting the red train' };
+const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', ci: 'waiting for CI', tests: 'testing', reruns: 'rerunning failed tests', bisect: 'bisecting', deploy: 'deploying' };
 
 /** A rider's queue phase (tools/land.sh's queue_phase while it rides): the branch of the front it rides with. A rider sent back reads "waiting" again. */
 export const ridingOf = (phase: string): string | null => /^riding in (.+)'s ship train$/.exec(phase.replace(/ since \d\d:\d\d$/, ''))?.[1] ?? null;
@@ -217,7 +221,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       out.set(t.label, {
         kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
         chip: `ship · ${c ? `${c.done}/${c.total}` : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : ph.text}`,
-        ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }), ...(c && { done: c.done, total: c.total }),
+        ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }), ...(c && { done: c.done, total: c.total }), ...(c?.failed && { failed: c.failed }),
         ...(riders.length && { train: train('front') }),
       });
       return;

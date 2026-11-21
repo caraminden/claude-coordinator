@@ -187,7 +187,7 @@ test('the next release carries the holder\'s news, with its minions linked, and 
   assert.deepEqual(asked, [holder.id], 'only the holder\'s log is read');
   assert.deepEqual(n.news, [{ tone: 'bad', text: `#${rider.number} dropped: it turned the train red; back in line: 9999-gone`, refs: { [`#${rider.number}`]: rider.id } }]);
   w.failed.set(holder.id, ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts', 'test/d.test.ts']);
-  assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far in CI: a.test.ts, b.test.ts, c.test.ts +1 more' }, 'CI\'s failures so far, live, last');
+  assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far: a.test.ts, b.test.ts, c.test.ts +1 more' }, 'CI\'s failures so far, live, last');
   w.clearLine();
   w.waits.poll();
   assert.equal(w.server.read()[0].next?.news, undefined, 'nobody holds the line: no news');

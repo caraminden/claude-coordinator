@@ -511,9 +511,9 @@ export class CitadelServer implements Reader {
       if (holder != null && this.d.news) {
         const names = new Map(tickets.flatMap((t) => (t.branch ? [[t.branch, `#${t.number ?? t.id}`] as const] : [])));
         const news = this.d.news(holder, (b) => names.get(b) ?? b.replace(/^ticket\//, ''));
-        // CI's files failed so far, live from its job (POST /api/ci-tests), before land.sh hears of them.
+        // The files failed so far, live from CI's job (POST /api/ci-tests) or perigee's run (its progress file), before land.sh hears of them.
         const failed = this.d.wait(holder)?.failed;
-        if (failed?.length) news.push({ tone: 'bad', text: `Failed so far in CI: ${failed.slice(0, 3).map((f) => f.replace(/^.*\//, '')).join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}` });
+        if (failed?.length) news.push({ tone: 'bad', text: `Failed so far: ${failed.slice(0, 3).map((f) => f.replace(/^.*\//, '')).join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}` });
         const ids = new Map(tickets.map((t) => [`#${t.number ?? t.id}`, t.id]));
         for (const n of news) {
           const refs = Object.fromEntries((n.text.match(/#\d+/g) ?? []).flatMap((r) => (ids.has(r) ? [[r, ids.get(r)!]] : [])));

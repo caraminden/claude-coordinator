@@ -42,13 +42,13 @@ test('fails, then hangs', () => {
   throw new Error('first run fails');
 });
 `;
-// Waits until the run's counts (#545) say the first file is done, then keeps them in seen-progress.
+// Waits until the run's counts (#545) say the first file is done and this one runs, then keeps them in seen-progress.
 FIXTURES['progress.test.mjs'] = `import test from 'node:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 test('watch', async () => {
   const f = process.env.CITADEL_TEST_PROGRESS_TO;
   // poll-ok: this runs in a fixture child in a temp dir and can't import ./wait.ts
-  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25));
+  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n2\\ntest/progress.test.mjs\\n')); i++) await new Promise((r) => setTimeout(r, 25));
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
 `;

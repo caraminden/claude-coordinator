@@ -107,7 +107,7 @@ test('a send that throws is tried again, and a wait added twice is one row', asy
   s2.now.t += RETRY_MINUTES[0] * MIN;
   await s2.outbox.poke({ type: 'tick' });
   assert.equal(s2.r.sent.length, 1);
-  assert.match(s2.r.sent[0].text, /second/);
+  assert.match(s2.r.sent[0].text, /is live now.*second/);
 });
 
 test('a dismissed minion keeps its wait, and it is delivered after the reopen', async () => {

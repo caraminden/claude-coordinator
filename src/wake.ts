@@ -259,6 +259,8 @@ export class LiveWaiters {
       kind: 'wake_when_live',
       migrate: () => this.migrate(),
       describe: (r) => `wake_when_live: ${r.payload.reason}`,
+      // A wait the check already met (its send is being retried) keeps the text it saved: a re-add must not turn it into the bare reason.
+      merge: (row, incoming) => (row.met_at != null ? row.payload : incoming.payload),
       // The check found it live and saved the text (meet); a row whose text is missing was never met.
       deliver: (rows, ctx) => rows.map((r) => ctx.send(r, r.payload.text ?? r.payload.reason)),
     });

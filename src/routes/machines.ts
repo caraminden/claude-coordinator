@@ -13,6 +13,10 @@ import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from 
 import type { Machine } from '../db.ts';
 import { HttpError, json, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
 import { ensureCoordinatorFor } from './projects.ts';
+import { pickFor } from '../../public/model-table.js';
+
+/** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
+const investigating = new Set<string>();
 
 // The agent caps fetch_file at 20 MB too.
 const MAX_MACHINE_UPLOAD = 20_000_000;
@@ -273,6 +277,33 @@ export const machineRoutes: Route[] = [
         return { ...x, fixTicket: { id: v.id, number: v.number, project_id: v.project_id, title: v.title, status: v.status, state: v.state, note: v.note, last_activity: v.last_activity, created_at: v.created_at, updated_at: v.updated_at, closed_at: v.closed_at, steps: v.steps, step_track: v.step_track, wait: v.wait, open_cards: v.open_cards, approvals: v.approvals, server_work: v.server_work, closing: v.closing, queued: v.queued, ship: v.ship } };
       }) }));
       json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now() });
+    },
+  },
+  // Investigate on a CI red (#1491; Cara, 2026-11-21, picked "Investigate button"): starts a fix minion for the red in its own
+  // scheme at once (not a message to the Taskmaster, as a Status tile's does), a bug on the model table's tier, its turns on the
+  // presser's login; its brief is the red's run, link, failing tests and error lines, and the red names it at once.
+  {
+    method: 'POST', path: '/api/projects/:project/ci/investigate', who: ['person'], refuse: 'Only people press Investigate',
+    handler: async ({ req, res, app, project, session }) => {
+      const body = await readJson(req);
+      const workflow = Number(body.workflow);
+      if (!Number.isSafeInteger(workflow) || workflow <= 0) throw new HttpError(400, 'workflow must be a workflow id');
+      const key = `${project.id}:${workflow}`;
+      if (investigating.has(key)) throw new HttpError(409, 'A fix minion for this red is starting already');
+      const brief = app.ciHealth?.redBrief(project, workflow, session.name);
+      if (!brief) throw new HttpError(404, 'That workflow is not red in this scheme');
+      if (brief.open) return json(res, 200, { number: brief.open.number, title: brief.open.title, started: false });
+      investigating.add(key);
+      try {
+        const tier = pickFor('bug');
+        const { id, number } = await app.newMinion(project, { title: brief.title, props: { type: 'bug' }, model: tier.model, effort: tier.effort }, session.name);
+        app.store.updateTicket(id, { person_id: session.uid ?? null });
+        app.runner.send(id, session.name, brief.message, [], { brief: true });
+        app.ciHealth!.named(project, workflow, number);
+        json(res, 201, { number, title: brief.title, started: true });
+      } finally {
+        investigating.delete(key);
+      }
     },
   },
   // The Status page (#1123): Citadel's own health and each app's week, the apps scoped to the schemes they can see.

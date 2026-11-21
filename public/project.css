@@ -529,6 +529,9 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 /* The CI page's overview and Test health in Citadel's look (#1068). */
 .ci-block .ci-detail-line { display: block; margin-top: 0.15rem; font-size: 0.85em; overflow-wrap: anywhere; }
 .ci-block .ci-problem-link { min-height: 1.4em; }
+.ci-fix-part { display: grid; gap: 0.35rem; }
+.ci-investigate { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.6rem; font-size: 0.85em; }
+.ci-investigate .muted { min-width: 0; }
 .ci-block .queue-sub { padding-left: 1.4rem; }
 .ci-block .hue-row-meta .small { white-space: nowrap; }
 .ci-block.ci-bare:not(:first-child) { margin-top: var(--space-3, 0.75rem); }

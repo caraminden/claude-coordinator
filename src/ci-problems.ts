@@ -200,6 +200,8 @@ export interface RedMark {
   failures?: { file: string; name: string; message: string }[];
   /** #1491: the minion credited as the fixer when none names the run: the first after the red whose shipped commit touched a failing test file. */
   fixer?: { ticket: number; sha: string; file: string };
+  /** #1491: the workflow's file (tests.yml), for the Investigate brief. */
+  file?: string;
 }
 /**
  * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at
@@ -284,6 +286,13 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
     why: late ? `its Taskmaster heard at ${clock(told)} and no minion naming run ${mark.run} has started since` : `the newest ${file} verdict on ${branch} is red; its Taskmaster heard at ${clock(told)}`,
     fix: late ? `ask the Taskmaster to start a fix minion naming run ${mark.run}, or add ${file} to the scheme's quiet CI workflows if the red is expected`
       : `the Taskmaster starts a fix minion naming run ${mark.run}; this rings at ${clock(told + RED_FIX_MS)} if none has` };
+}
+
+/** #1491: a red's problem once a person's Investigate started minion #`n` for it, until the next poll's redProblem finds it by the run its title names. */
+export function startedRed(x: Problem, n: number): Problem {
+  const { noFix: _, rerun: __, ...rest } = x;
+  return { ...rest, quiet: true, title: x.title.replace(/(\(run [^)]*\)).*$/, `$1: fix minion #${n} started`), fixMinion: { number: n, closed: false },
+    fix: `#${n} is on it; this clears when the workflow is back to green` };
 }
 
 /** The newest two verdict runs of a workflow's runs on the default branch (newest first): the one to check, and the one before. */

@@ -14,6 +14,8 @@ import {
 import { Contraptions } from '../src/contraptions.ts';
 import type { AlertPart } from '../src/alert-wakes.ts';
 import { Store } from '../src/db.ts';
+import { machineRoutes } from '../src/routes/machines.ts';
+import { Readable } from 'node:stream';
 
 const root = mkdtempSync(join(tmpdir(), 'ci-health-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -1084,6 +1086,79 @@ test("a red credits a minion that names a later run of the same red streak, not 
   const other = w.minion(w.peek.id, 'ticket/4-old');
   w.store.addEvent(other.id, 'user_message', { text: 'Look at run 9600' });
   assert.equal(health.hold(other.id), null);
+});
+
+// #1491 (Cara, 2026-11-21, "Investigate button"): one press on a red in Open problems starts a fix minion in the red's own scheme,
+// briefed from the red, and the red names it at once; Peek Auras, a scheme other than Citadel.
+test('Investigate on a red starts one Sonnet-medium bug minion in its scheme, briefed with the run and its failing tests, and the red names it at once (#1491)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true, log: async () => FLAKE_LOG });
+  const failed = job({ run_id: 9801, name: 'proof', conclusion: 'failure' });
+  w.gh.jobs.set(9801, [failed]);
+  w.gh.mainRuns = [runOf({ id: 9801, event: 'schedule', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: '9801abcdef', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  const peek = w.store.getProject(w.peek.id)!;
+  const josh = w.store.listUsers().find((u) => u.name === 'Josh')!;
+  assert.equal(health.redBrief(peek, 8, 'Josh'), null, 'a workflow that is not red has no brief');
+
+  // The route, as the CI page's button calls it.
+  const route = machineRoutes.find((r) => r.path === '/api/projects/:project/ci/investigate')!;
+  const sent: [number, string, string][] = [];
+  const made: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null }[] = [];
+  const app = {
+    ciHealth: health, store: w.store,
+    runner: { send: (id: number, from: string, text: string) => void sent.push([id, from, text]) },
+    newMinion: async (p: { id: number }, m: (typeof made)[number]) => {
+      made.push(m);
+      const t = w.store.createTicket({ project_id: p.id, title: m.title, permission_mode: 'bypassPermissions', created_by: josh.id } as any);
+      return { id: t.id, number: t.number!, notes: [] };
+    },
+  };
+  const press = async (body: unknown) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
+    const res = { status: 0, body: '', headersSent: false, setHeader() {}, writeHead(s: number) { this.status = s; return this; }, end(b?: string) { this.body = b ?? ''; } };
+    try {
+      await route.handler({ req, res, app, project: peek, session: { name: 'Josh', uid: josh.id } } as any);
+      return { status: res.status, body: JSON.parse(res.body) };
+    } catch (err: any) {
+      return { status: err.status, body: err.message };
+    }
+  };
+  assert.equal((await press({ workflow: 'x' })).status, 400);
+  assert.equal((await press({ workflow: 8 })).status, 404, 'not red, so nothing starts');
+  const first = await press({ workflow: 7 });
+  assert.equal(first.status, 201);
+  assert.equal(made.length, 1);
+  assert.deepEqual([made[0].props, made[0].model, made[0].effort], [{ type: 'bug' }, 'claude-sonnet-5-5', 'medium'], 'a bug, on the model table\'s tier for one');
+  const t = w.store.getTicketByNumber(peek.id, first.body.number)!;
+  assert.equal(t.project_id, peek.id, 'in the red\'s own scheme');
+  assert.equal(t.person_id, josh.id, 'its turns run on the presser\'s login');
+  assert.match(t.title, /desktop\.yml.*\(run 9801\)/);
+  const [[to, from, brief]] = sent;
+  assert.deepEqual([to, from], [t.id, 'Josh']);
+  assert.match(brief, /desktop\.yml is red on main: run 9801 \(https:\/\/github\.com\/[^)]+\/actions\/runs\/9801\)/, 'the workflow and the run link');
+  assert.match(brief, /test\/machine-jobs\.test\.ts › only the owner \(or an admin\) pauses/, 'the failing test');
+  assert.match(brief, /AssertionError \[ERR_ASSERTION\]: Expected values to be strictly deep-equal/, 'its error lines');
+  assert.match(brief, /ci-failures 9801 -R /);
+
+  // Named at once, before any poll: quiet, its minion, no "no fix minion" box.
+  const shown = health.snapshot(() => true).find((s) => s.id === peek.id)!.problems.find((x) => x.key === 'red:7')!;
+  assert.equal(shown.quiet, true);
+  assert.deepEqual(shown.fixMinion, { number: t.number, closed: false });
+  assert.equal(shown.noFix, undefined);
+  assert.match(shown.title, new RegExp(`\\(run 9801, at proof\\): fix minion #${t.number} started$`));
+
+  // A second press starts none: the open one already names the run.
+  const again = await press({ workflow: 7 });
+  assert.deepEqual([again.status, again.body.number, made.length], [200, t.number, 1]);
+
+  // The polls find it by its title: no ring an hour on, and it is the red's held fix minion.
+  await health.tick(NOW + RED_FIX_MS);
+  const item = (k = 'ci.red:7') => w.puts.filter(([, key]) => key === k).at(-1)?.[2];
+  assert.equal(item('ci.open') ?? null, null);
+  assert.match(item()!, new RegExp(`fix minion #${t.number} started`));
+  assert.match(health.hold(t.id)!, /run 9801/);
 });
 
 test("a red's fix minion is held open; once its fix is on main the workflow is dispatched once per fix, and green dismisses it (#1074)", async () => {

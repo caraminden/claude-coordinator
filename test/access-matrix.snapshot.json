@@ -1573,6 +1573,16 @@
   "m1": "400 op must be add, list or remove",
   "m2": "400 op must be add, list or remove"
  },
+ "POST /api/projects/:p/ci/investigate": {
+  "anon": "401 Not logged in",
+  "person": "400 workflow must be a workflow id",
+  "member": "400 workflow must be a workflow id",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Only people press Investigate",
+  "tmB": "403 Only people press Investigate",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/claims": {
   "anon": "401 Not logged in",
   "person": "200",

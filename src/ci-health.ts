@@ -53,7 +53,7 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
 import { failuresIn, ghText } from './flake-evidence.ts';
 
-import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
+import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
 import { LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
@@ -830,6 +830,10 @@ export class CiHealth {
       mark.runs = [...(mark.runs ?? []), ...later].slice(-20);
       save();
     }
+    if (!mark.file && runs[0]) {
+      mark.file = workflowFile(runs[0]);
+      save();
+    }
     if (!mark.failures) {
       const failures = await this.failuresOf(slug, runs.find((r) => r.id === mark.run) ?? ({ id: mark.run } as Run), as);
       if (!failures) return; // GitHub didn't answer: the next poll tries again
@@ -870,6 +874,47 @@ export class CiHealth {
     // shortcut: only node's test runner's failures are read; another runner's red names its files only through its run name.
     if (!out.length) for (const file of new Set(r.display_title?.match(/[\w./-]+\.test\.[cm]?[jt]sx?\b/g) ?? [])) out.push({ file, name: '', message: '' });
     return out.slice(0, 10);
+  }
+
+  /**
+   * #1491 (Cara, 2026-11-21, "Investigate button"): the brief of a fix minion for the scheme's red `workflow`, from its mark: the run
+   * and its link, the streak's later runs, the failing tests and their first error lines. Its title names the run, so the poll's
+   * fixTicket finds it. `open`: an open minion that already names a run of it, so a second press starts none. Null when it isn't red.
+   */
+  redBrief(p: Project, workflow: number, by: string): { title: string; message: string; open: Ticket | null } | null {
+    const mark = this.store.getSetting<Record<string, RedMark>>(`ci-health:red:${p.id}`)?.[String(workflow)];
+    const slug = repoSlug(p.repo_url);
+    if (!mark || !slug) return null;
+    const named = this.fixTicket(p, mark);
+    const branch = this.store.getSetting<CiView>(`ci-health:view:${p.id}`)?.branch ?? 'main';
+    const file = mark.file ?? 'a workflow';
+    const url = runUrl(slug, { id: mark.run } as Run);
+    const fails = mark.failures ?? [];
+    const tests = fails.length
+      ? fails.map((f) => `- ${f.file}${f.name ? ` › ${f.name}` : ''}${f.message ? `\n${f.message.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}`).join('\n')
+      : '- none read yet from its job logs';
+    const message = [
+      `${p.name}'s ${file} is red on ${branch}: run ${mark.run} (${url}), ${pacific(at(mark.at))}${mark.where ? `, at ${mark.where}` : ''}.`,
+      ...(mark.runs?.length ? [`Later red runs of the same streak: ${mark.runs.join(', ')}.`] : []),
+      '',
+      'Failing tests, from the run\'s failed job logs:',
+      tests,
+      '',
+      `\`ci-failures ${mark.run} -R ${slug}\` prints them in full.`,
+      '',
+      `${by} pressed Investigate on this red on the CI page. Find the cause and fix it (the citadel:bug-fixing skill: a failing test first), then ship it. If the red is CI itself (a runner, GitHub) rather than the code, say so and stop. The red clears once ${file} runs green on ${branch} again.`,
+    ].join('\n');
+    return { title: `Fix the red ${file} on ${branch} (run ${mark.run})`, message, open: named?.status !== 'closed' ? named : null };
+  }
+
+  /** #1491: the red names minion #`n`, started by Investigate, at once; the check in 30 s (soon) then finds it by its title. */
+  named(p: Project, workflow: number, n: number) {
+    const saved = this.store.getSetting<Saved>(`ci-health:${p.id}`);
+    const i = saved?.problems?.findIndex((x) => x.key === `red:${workflow}`) ?? -1;
+    if (!saved || i < 0) return;
+    saved.problems![i] = startedRed(saved.problems![i], n);
+    this.store.setSetting(`ci-health:${p.id}`, saved);
+    this.soon(p.id);
   }
 
   /**

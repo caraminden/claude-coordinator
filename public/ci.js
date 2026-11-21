@@ -17,6 +17,7 @@ import { usage } from './core.js';
 import { rowBar, rowState } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
 import { loadingLine, tabs as uiTabs } from './ui/state.js';
+import { optimistic } from './ui/optimistic.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { allSchemes, closeReleases, opening, serverScheme, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage } from './releases.js';
 import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD } from './status.js';
@@ -47,7 +48,7 @@ export function fixBox(x, now = Date.now()) {
     const n = x.noFix;
     return h('div', { class: `ci-fix none${n.late ? ' late' : ''}` },
       h('b', {}, n.late ? 'No fix minion started' : 'No fix minion yet'),
-      h('div', { class: 'muted' }, n.late ? 'This is ringing now: ask the Taskmaster to start one.' : `If none starts, this rings at ${when(n.ringsAt)}.`));
+      h('div', { class: 'muted' }, n.late ? 'This is ringing now: press Investigate to start one.' : `If none starts, this rings at ${when(n.ringsAt)}.`));
   }
   const st = rowState(t, usage, now);
   const barOf = rowBar(t, st);
@@ -97,6 +98,37 @@ const tones = (...cs) => cs.filter(Boolean);
 const whoText = (x) => x.who?.href ? h('a', { href: x.who.href, title: x.who.label }, x.who.label) : h('span', { class: 'muted' }, x.who?.label ?? x.branch ?? '');
 const age = (t) => ago(typeof t === 'number' ? t : Date.parse(t));
 
+/**
+ * Investigate on a CI red (#1491; Cara, 2026-11-21, picked "Investigate button"): one press starts a fix minion for the red in its
+ * scheme (POST …/ci/investigate). The red names it at once and keeps it (`pressed`) until a read shows it, so a read in between drops
+ * nothing; a refusal rolls it back with a toast and Retry. Shown while no open minion is on it: none yet, or the last one closed.
+ */
+const pressed = new Map();
+/** The fix part drawn last per red, so an answer paints the one on screen. */
+const parts = new Map();
+const openFix = (x) => x.fixTicket && x.fixTicket.status !== 'closed';
+function fixPart(s, x) {
+  const k = `${s.id}:${x.key}`;
+  const mine = pressed.get(k);
+  if (mine && openFix(x) && (mine.number == null || x.fixTicket.number === mine.number)) pressed.delete(k);
+  const p = pressed.get(k);
+  const shown = p ? { ...x, fixTicket: { project_id: s.id, number: p.number ?? '…', title: p.title, status: 'running', created_at: p.at, last_activity: p.number ? 'Starting its first turn' : 'Starting a fix minion' } } : x;
+  const box = shown.fixTicket || shown.noFix ? fixBox(shown) : '';
+  if (!x.key.startsWith('red:')) return box;
+  const btn = h('button', { type: 'button', class: 'secondary ci-investigate-btn' }, 'Investigate');
+  const el = h('div', { class: 'ci-fix-part' }, box, openFix(shown) ? '' : h('div', { class: 'ci-investigate' }, btn, h('span', { class: 'muted' }, 'Starts a fix minion with this red\'s failing tests')));
+  parts.set(k, { el, s, x });
+  const paint = () => { const at = parts.get(k); if (at?.el.isConnected) at.el.replaceWith(fixPart(at.s, at.x)); };
+  btn.onclick = () => optimistic({
+    label: 'start a fix minion for this red',
+    key: `ci-investigate:${k}`,
+    apply: () => { pressed.set(k, { at: Date.now(), title: 'Starting a fix minion…' }); paint(); },
+    send: () => api(`api/projects/${s.id}/ci/investigate`, { method: 'POST', body: { workflow: Number(x.key.slice(4)) } }),
+    undo: () => { pressed.delete(k); paint(); },
+  }).then((r) => { pressed.set(k, { at: pressed.get(k)?.at ?? Date.now(), number: r.number, title: r.title }); paint(); }, () => {});
+  return el;
+}
+
 /** Open problems: what happened, why, the fix, and whether it rings. */
 function problemsBlock(s) {
   const ring = s.problems.filter((x) => !x.quiet).length, quiet = s.problems.length - ring;
@@ -105,7 +137,7 @@ function problemsBlock(s) {
   s.problems.length ? statTiles([String(ring), 'ring a person', ring ? 'danger' : 'done'], [String(quiet), 'being handled', quiet ? 'held' : 'done']) : null,
   s.problems.length ? h('div', { class: 'hue-rows' }, ...s.problems.map((x) => hueRow({ hue: x.quiet ? 'held' : 'danger', lead: x.quiet ? 'quiet' : 'rings' },
     h('strong', {}, x.title.replace(/^CI(, [^:]+)?: /, '')),
-    x.fixTicket || x.noFix ? fixBox(x) : '',
+    fixPart(s, x),
     x.why ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Why: '), x.why) : '',
     x.fix ? h('span', { class: 'ci-detail-line' }, h('span', { class: 'muted' }, 'Fix: '), x.fix) : '',
     // The line is always there, so a link arriving moves nothing (#992).

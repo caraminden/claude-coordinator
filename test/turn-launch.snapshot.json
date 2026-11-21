@@ -440,6 +440,8 @@
     "TimeoutStopSec=15",
     "-p",
     "UMask=0077",
+    "-p",
+    "MemoryTHP=madvise",
     "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
     "<ROOT>/run/turns/2-<TIME>/pin/turn-wrapper.mjs",
     "<ROOT>/run/turns/2-<TIME>"

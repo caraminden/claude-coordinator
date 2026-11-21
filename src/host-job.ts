@@ -9,6 +9,7 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSy
 import { open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
+import { THP_PROPS } from './unit-thp.ts';
 
 /** Ships, kit-sync ships and checks, fast-verify and rollbacks (#1280): beside the turns, not crowding their MemoryHigh. */
 export const BUILD_SLICE = 'citadel-builds.slice';
@@ -106,7 +107,7 @@ export class HostJobs {
     if (!this.units()) return this.child(wrapper, dir, job.onChildEnd);
     writeFileSync(join(dir, 'unit'), job.unit); // for jobLost's journal look (#1325)
     this.starting.add(dir);
-    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', ...this.props, `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
+    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${this.slice}`, '-p', 'UMask=0077', ...this.props, ...THP_PROPS, `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
       if (!err) return fallbacks.started();
       fallbacks.record(job.ticketId, job.description, String(stderr).trim() || err.message);

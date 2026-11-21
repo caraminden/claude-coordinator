@@ -53,7 +53,8 @@ test('the brief names the file, the count, the skill and the failing outputs', (
 // A flake fix has to prove it held (#1120).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { FlakeFixes } from '../src/flake-fixes.ts';
-import { cleanRuns, parseRetroFlakes } from '../src/flakes.ts';
+import { execFileSync } from 'node:child_process';
+import { branchShippedAt, cleanRuns, parseRetroFlakes } from '../src/flakes.ts';
 
 test('retro-log lines: each flake line is a sighting, reruns and other lines are not', () => {
   const md = [
@@ -126,6 +127,68 @@ test('a third sighting starts exactly one minion; a held fix reopens on the next
   const again = st.flakeFix(project.id, 'test/two.test.ts')!;
   assert.deepEqual([again.state, again.reopened, again.clean_runs], ['open', 1, 0], 'a re-sighting reopens it');
   assert.equal(started.length, 2, 'and starts a new minion at once');
+});
+
+test('a held fix is reopened only by a sighting after its commit reached main, not one between its proof going green and its ship (#1521, CA1)', async () => {
+  const dir = mkdtempSync(join(root, 'shipgap-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('S', null);
+  const file = 'test/gap.test.ts';
+  let clock = Date.now();
+  const heldAt = clock - 3_600_000;
+  const t = st.createTicket({ project_id: project.id, title: `Flaky test: ${file}`, permission_mode: 'x', created_by: 'T' });
+  st.setTicketDir(t.id, dir, 'ticket/9-fix');
+  st.updateTicket(t.id, { status: 'closed' }); // shipped and seen: a minion closes only then, well after its ship
+  st.addFlakeFix(project.id, file, t.id, heldAt - 3_600_000, { state: 'held', clean_runs: 50, held_at: heldAt });
+  let shipped: number | null | undefined = heldAt + 10 * 60_000; // main got the fix 10 min after its proof went green
+  const asked: string[] = [];
+  const started: string[] = [];
+  const fx = new FlakeFixes({ store: st, sharedDir: () => null, runs: async () => [], jobs: async () => [], now: () => clock,
+    shippedAt: async (_p, branch) => { asked.push(branch); return shipped; },
+    start: async (_p, b) => { started.push(b.title); return { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }; } });
+  st.addFlakeEvents(project.id, null, null, heldAt + 5 * 60_000, [{ file, source: 'in CI', detail: '' }]);
+  await fx.tick([project]);
+  assert.deepEqual(started, [], 'a sighting on a main without the fix yet reopens nothing');
+  assert.equal(st.flakeFix(project.id, file)!.state, 'held');
+  assert.deepEqual(asked, ['ticket/9-fix'], "asked about the fix minion's own branch");
+  st.addFlakeEvents(project.id, null, null, heldAt + 20 * 60_000, [{ file, source: 'in CI', detail: '' }]);
+  await fx.tick([project]);
+  assert.deepEqual(started, [`Flaky test: ${file}`], 'one after the ship reopens it and starts one minion');
+  assert.equal(st.flakeFix(project.id, file)!.reopened, 1);
+
+  // A fix whose minion closed without its commit reaching main never shipped: a sighting after its proof reopens it, as before.
+  const f2 = 'test/never.test.ts';
+  const t2 = st.createTicket({ project_id: project.id, title: 'closed unshipped', permission_mode: 'x', created_by: 'T' });
+  st.setTicketDir(t2.id, dir, 'ticket/10-fix');
+  st.updateTicket(t2.id, { status: 'closed' });
+  st.addFlakeFix(project.id, f2, t2.id, heldAt - 3_600_000, { state: 'held', clean_runs: 50, held_at: heldAt });
+  shipped = null;
+  st.addFlakeEvents(project.id, null, null, heldAt + 5 * 60_000, [{ file: f2, source: 'in CI', detail: '' }]);
+  clock += 1;
+  await fx.tick([project]);
+  assert.equal(st.flakeFix(project.id, f2)!.state, 'open', 'not on main: reopened on the sighting after its proof');
+});
+
+test('shippedAt reads when main first held a branch\'s tip from its reflog; null off main, undefined when the branch is gone (#1521)', async () => {
+  const repo = mkdtempSync(join(root, 'git-'));
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.logAllRefUpdates=true', ...a], { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'a'), '1');
+  git('add', 'a');
+  git('commit', '-qm', 'one');
+  git('checkout', '-qb', 'ticket/1-fix');
+  writeFileSync(join(repo, 'a'), '2');
+  git('commit', '-qam', 'fix', '--date=2020-01-01T00:00:00Z');
+  assert.equal(await branchShippedAt(repo, 'ticket/1-fix'), null, 'not on main yet');
+  assert.equal(await branchShippedAt(repo, 'ticket/nope'), undefined);
+  git('checkout', '-q', 'main');
+  const before = Date.now();
+  git('merge', '-q', '--ff-only', 'ticket/1-fix');
+  const at = await branchShippedAt(repo, 'ticket/1-fix');
+  assert.ok(at != null && at >= Math.floor(before / 1000) * 1000 && at <= Date.now(), `the fast-forward's time, not the commit's: ${at}`);
+  writeFileSync(join(repo, 'a'), '3');
+  git('commit', '-qam', 'later');
+  assert.equal(await branchShippedAt(repo, 'ticket/1-fix'), at, 'a later commit on main leaves it');
 });
 
 test('a minion already on the file (the tab\'s button) is the fix: no second one; and one pass starts at most two', async () => {

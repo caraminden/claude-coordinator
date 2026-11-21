@@ -13,6 +13,30 @@ export function fileChangedAt(repoDir: string, file: string): Promise<number | n
   }));
 }
 
+/**
+ * When the default branch first held `branch`'s tip (ms), from main's reflog (#1521, CA1): land.sh fast-forwards main onto the
+ * rebased branch, so a shipped fix's tip is on main. null: not on main (never shipped); undefined: can't tell (no such branch,
+ * git failed). With the reflog gone it falls back to the tip's commit time, which a rebase at ship time keeps close.
+ */
+export async function branchShippedAt(repoDir: string, branch: string): Promise<number | null | undefined> {
+  const git = (...args: string[]) => new Promise<string | null>((done) => execFile('git', args, { cwd: repoDir, timeout: 15_000, maxBuffer: 16 << 20 }, (err, out) => done(err ? null : String(out))));
+  const tip = (await git('rev-parse', '-q', '--verify', `refs/heads/${branch}^{commit}`))?.trim();
+  if (!tip) return undefined;
+  const after = await git('rev-list', `${tip}..main`);
+  if (after == null) return undefined;
+  if ((await git('merge-base', '--is-ancestor', tip, 'main')) == null) return null;
+  const holds = new Set([tip, ...after.split('\n').filter(Boolean)]);
+  let first: number | null = null;
+  const log = (await git('reflog', 'show', '--date=unix', '--format=%H %gd', 'refs/heads/main')) ?? '';
+  for (const line of log.split('\n')) {
+    const m = /^([0-9a-f]+) \S*@\{(\d+)\}$/.exec(line);
+    if (m && holds.has(m[1])) first = Number(m[2]) * 1000; // newest first: the last one that holds it is the earliest
+  }
+  if (first != null) return first;
+  const sec = Number((await git('log', '-1', '--format=%ct', tip))?.trim());
+  return Number.isFinite(sec) && sec > 0 ? sec * 1000 : undefined;
+}
+
 /** The same-flake alarm (#1245): one test passing alone on this many different branches inside the window wakes the Taskmaster, once per test per day or until its file changes on main. */
 export const ALARM_BRANCHES = 3;
 export const ALARM_WINDOW_MS = 30 * 60_000;

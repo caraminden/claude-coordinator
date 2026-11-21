@@ -928,6 +928,29 @@ test("fast mode: a land's push going red on main wakes no one and makes no item;
   assert.match(told[1], /run 9103 failed on bad0103/);
 });
 
+test("fast mode: a land's push run after a scheduled red keeps its mark; the push going green says back to green and clears it (#1521, CA2)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const told: string[] = [];
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, text: string) => (told.push(text), true) });
+  w.store.setProjectSettings(w.peek.id, { land_mode: 'fast' });
+  const run = (fields: Partial<Run>) => runOf({ workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', ...fields });
+  const marks = () => Object.keys(w.store.getSetting<Record<string, unknown>>(`ci-health:red:${w.peek.id}`) ?? {});
+  w.gh.mainRuns = [run({ id: 9201, event: 'schedule', head_sha: 'bad0201fff', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  assert.equal(told.length, 1, 'the scheduled red is told');
+  assert.deepEqual(marks(), ['7']);
+  w.gh.mainRuns = [run({ id: 9202, event: 'push', head_sha: 'bad0202fff', created_at: iso(10 * MIN), updated_at: iso(9 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + MIN);
+  assert.deepEqual(marks(), ['7'], "a land's push red doesn't make the workflow quieted: the scheduled red's mark stays");
+  assert.equal(told.length, 1, 'and the push red tells no one');
+  w.gh.mainRuns = [run({ id: 9203, event: 'push', conclusion: 'success', head_sha: 'good203fff', created_at: iso(5 * MIN), updated_at: iso(4 * MIN) }), ...w.gh.mainRuns];
+  await health.tick(NOW + 2 * MIN);
+  assert.deepEqual(marks(), [], 'a green run clears it');
+  assert.equal(told.length, 2, told.join('\n'));
+  assert.match(told[1], /back to green on main: .*runs\/9203 .*after run 9201 failed\.$/);
+});
+
 test("a citadel-heavy job's red is the minion's own command, not main's: it wakes no one and makes no item, even watched (#1254)", async () => {
   const w = outsideWorld();
   w.quietDelve();

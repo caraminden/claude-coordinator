@@ -12,7 +12,7 @@ import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
 import { classifyFlake } from './flake-evidence.ts';
-import { ALARM_QUIET_MS, ALARM_WINDOW_MS, FLAKE_REPEAT, sameFlake, suspectCommits, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
+import { ALARM_QUIET_MS, ALARM_WINDOW_MS, branchShippedAt, FLAKE_REPEAT, sameFlake, suspectCommits, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
 /** Minions one scheme's pass starts at most. */
@@ -35,6 +35,8 @@ export interface FlakeFixDeps {
   changedAt?: (project: Project, file: string) => Promise<number | null>;
   /** Wake the scheme's Taskmaster with the same-flake alarm (#1245); true once the send went through. */
   wake?: (project: Project, text: string) => boolean;
+  /** When main first held a fix minion's branch tip (ms); null when it isn't on main, undefined when it can't tell (default: git in the scheme's repo, #1521). */
+  shippedAt?: (project: Project, branch: string) => Promise<number | null | undefined>;
   /** The commits most likely to have brought the flake (default: git in the scheme's repo). */
   suspect?: (project: Project, file: string, firstAt: number) => Promise<string | null>;
   /** The failing test's name and error from the CI run behind a flake line (#1438); null when the log can't say. server.ts reads the scheme's GitHub repo with gh; without it no row keeps one. */
@@ -142,7 +144,13 @@ export class FlakeFixes {
         if (owner) { store.addFlakeFix(project.id, file, owner.id, now); continue; }
         id = store.addFlakeFix(project.id, file, null, now);
       } else if (fix.state === 'held') {
-        if (!sights.some((t) => t > (fix.held_at ?? 0))) continue;
+        // #1521 (CA1): only its own closed minion lets a held fix get here (an open one owns it, above), and a minion closes once
+        // seen, so a sighting between its proof going green and its commit reaching main was of main without the fix. Off main
+        // (it never shipped) or unknown: from its proof, as before.
+        const branch = fix.ticket_id == null ? undefined : store.getTicket(fix.ticket_id)?.branch;
+        const shipped = branch ? await (this.d.shippedAt ?? ((p, b) => (p.repo_dir ? branchShippedAt(p.repo_dir, b) : Promise.resolve(undefined))))(project, branch) : undefined;
+        const since = Math.max(fix.held_at ?? 0, shipped ?? 0);
+        if (!sights.some((t) => t > since)) continue;
         store.updateFlakeFix(fix.id, { state: 'open', reopened: fix.reopened + 1, clean_runs: 0, held_at: null, proof_run: null, started_at: now, ticket_id: null });
         id = fix.id;
       } else {
@@ -185,18 +193,6 @@ export class FlakeFixes {
     }
   }
 
-  /** Fix #1009 held machine-agent-jobs before it flaked again: recorded once, so its next sighting reopens it from the real log. */
-  seedPast(project: Project) {
-    const { store } = this.d;
-    const key = 'flake-fixes:seeded-1009';
-    if (store.getSetting<boolean>(key)) return;
-    const t = store.listTickets(project.id).find((x) => x.number === 1009 && x.title === 'Fix the repeat flaky tests' && x.status === 'closed');
-    store.setSetting(key, true);
-    const file = 'test/machine-agent-jobs.test.ts';
-    if (!t || !t.closed_at || store.flakeFix(project.id, file)) return;
-    store.addFlakeFix(project.id, file, t.id, t.created_at, { state: 'held', clean_runs: 0, held_at: t.closed_at });
-  }
-
   async tick(projects: Project[]): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -204,7 +200,6 @@ export class FlakeFixes {
       const now = (this.d.now ?? Date.now)();
       for (const p of projects) {
         try {
-          this.seedPast(p);
           await this.ingest(p, now);
           await this.alarm(p, now);
           await this.escalate(p, now);

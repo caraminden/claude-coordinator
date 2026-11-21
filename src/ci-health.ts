@@ -712,7 +712,9 @@ export class CiHealth {
     // the Taskmaster nor makes an item. Scheduled and dispatched reds still do, and so does a workflow the scheme watches.
     const landed = (r: Run) => p.land_mode === 'fast' && r.event === 'push';
     // A heavy job's red is the minion's own (its command failed), not main's, even if ci_watch lists it.
-    const watched = (r: Run) => workflowFile(r) !== HEAVY_WORKFLOW && (watch.has(workflowFile(r)) || (!landed(r) && !quiet.has(workflowFile(r))));
+    // #1521 (CA2): quieted is the workflow's setting, never a run's trigger, so a land's push in fast mode can't wipe a scheduled red's mark.
+    const quieted = (r: Run) => workflowFile(r) === HEAVY_WORKFLOW || (!watch.has(workflowFile(r)) && quiet.has(workflowFile(r)));
+    const watched = (r: Run) => !quieted(r) && (watch.has(workflowFile(r)) || !landed(r));
     const save = () => {
       // Ids GitHub no longer lists are dropped, but only when the list was read, so a bad answer can't forget them.
       this.store.setSetting(key, Array.isArray(dispatched) ? [...told].filter((id) => listed.some((r) => r.id === id)) : [...told]);
@@ -761,7 +763,7 @@ export class CiHealth {
     // A workflow quieted since it went red: its mark goes, with no message (the scheme said the red is expected).
     for (const w of Object.keys(red)) {
       const r = newest(w);
-      if (r && !watched(r)) delete red[w];
+      if (r && quieted(r)) delete red[w];
     }
     save();
     // Back to green: the first green run on the branch after the red one (or the red one re-run green), a push's or a PR merge's too.
@@ -769,7 +771,7 @@ export class CiHealth {
       const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]
         .filter((r) => r.status === 'completed' && r.conclusion === 'success' && (at(r.created_at) > at(was.at) || r.id === was.run)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
       if (!green) continue;
-      if (watched(green) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
+      if (!quieted(green) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
       delete red[w];
       save();
       // #1074: its fix minion was held open on this; deleted first, so the hold is gone as it closes.

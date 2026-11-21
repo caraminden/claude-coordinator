@@ -137,7 +137,8 @@ try {
   server.stdout!.on('data', (d) => (log += d));
   server.stderr!.on('data', (d) => (log += d));
   // The checkout's server.ts is the one being deployed, so it reports the port it bound.
-  // Each step's limit is sized for a quiet box and stretched by the load when it starts (src/load-stretch.ts, #1514).
+  // Each step's limit is sized for a quiet box and stretched by the load when it starts (src/load-stretch.ts, #1514);
+  // the backstop above still bounds all the steps together at 3 minutes.
   const boot = loadStretch();
   const base = `http://127.0.0.1:${await listeningPort(server, boot.ms(20_000)).catch((err) => fail(err.message + boot.why))}`;
 

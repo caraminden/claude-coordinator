@@ -13,7 +13,8 @@ const STUB = `<script>
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const w = (id, chip, what, extra) => ({ id, state: 'waiting', chip, what, cancellable: true, ...extra });
   window.a = { id: 101, project_id: 1, kind: 'ticket', number: 1, title: 'Minion A', status: 'parked', updated_at: now, created_at: now - 600_000, outbox_waits: [w(1, '⇢ #2', 'the deploy of #2')] };
-  window.b = { id: 102, project_id: 1, kind: 'ticket', number: 2, title: 'Minion B', status: 'parked', updated_at: now - 1, created_at: now - 600_000, outbox_waits: [w(2, '⏱ 01:32', 'check the run'), w(3, '⇢ event', 'a second wait')] };
+  const relay = { headline: 'Note from #1 once its change is live', line: 'Main is green again.', text: 'Main is green again. One. Two. Three and four.', facts: ['Set by #1 at 12:54 PST', 'waits for fa4fb3f to go live'], link: { project: 1, number: 1 } };
+  window.b = { id: 102, project_id: 1, kind: 'ticket', number: 2, title: 'Minion B', status: 'parked', updated_at: now - 1, created_at: now - 600_000, outbox_waits: [w(2, '⏱ 01:32', 'check the run'), w(3, '⇢ #1', 'a second wait', relay), w(4, '⇢ live', 'x', { headline: 'Wakes when abc1234 is live', line: '', text: '', facts: [] })] };
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   window.fetch = async (input) => {
     const url = new URL(typeof input === 'string' ? input : input.url, location.href);
@@ -34,6 +35,12 @@ let browser: Browser;
 before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
 after(async () => { await browser?.close(); await app?.close(); });
 
+/** A real click: move there, press, release. */
+async function click(page: Awaited<ReturnType<Browser['page']>>, at: { x: number; y: number }) {
+  await page.mouse(at.x, at.y);
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', buttons: 1, clickCount: 1 });
+}
+
 const tip = `(document.querySelector('.why-tip:popover-open')?.textContent ?? '')`;
 
 test('a minion with two waits shows one line each in one popover, and it stays on its minion through another minion\'s change', { skip }, async () => {
@@ -42,13 +49,51 @@ test('a minion with two waits shows one line each in one popover, and it stays o
   const c = await page.centre('.wait-chip[data-wait-id="102"]');
   await page.mouse(c.x, c.y);
   await waitFor(page, 'the popover', `${tip}.includes('check the run')`);
-  assert.equal(await page.eval(`document.querySelectorAll('.why-tip:popover-open .wait-line').length`), 2);
+  assert.equal(await page.eval(`document.querySelectorAll('.why-tip:popover-open .wait-line').length`), 3);
   // Another minion's wait changes (a cancelled one appears) while the popover is open: the list redraws, the popover stays on B.
   // (Cause of the jump Cara saw, 2026-11-21: a redraw re-finds the open chip by its data-tip* attributes, and the wait chip had none, so it matched the first chip in the list.)
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...a, outbox_waits: [{ id: 9, state: 'dropped', chip: '⏱ 01:32', what: 'cancelled wake', reason: 'cancelled' }] } }) })`);
   await waitFor(page, 'the redraw', `document.querySelector('.thread-row[data-id="101"]')?.textContent.includes('01:32')`);
-  assert.ok(await page.eval<boolean>(`${tip}.includes('check the run') && ${tip}.includes('a second wait') && !${tip}.includes('cancelled wake')`));
+  assert.ok(await page.eval<boolean>(`${tip}.includes('check the run') && ${tip}.includes('Note from #1') && !${tip}.includes('cancelled wake')`));
   // B's own change shows in the open popover.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: [b.outbox_waits[1]], updated_at: Date.now() } }) })`);
-  await waitFor(page, 'B\'s update', `!${tip}.includes('check the run') && ${tip}.includes('a second wait')`);
+  await waitFor(page, 'B\'s update', `!${tip}.includes('check the run') && ${tip}.includes('Note from #1')`);
+});
+
+// #1512 (Cara, 2026-11-21: "a headline single sentence description, and then clicking it opens a few sentence summary"; take A, opens in place).
+test('a wait line is a headline with its first sentence under it; a click opens its summary in place, and it stays open through a redraw', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the chips', `document.querySelectorAll('.wait-chip[data-wait-id="102"]').length === 1`);
+  const c = await page.centre('.wait-chip[data-wait-id="102"]');
+  await click(page, c);
+  await waitFor(page, 'the popover', `${tip}.includes('Note from #1 once its change is live')`);
+  const line = `document.querySelectorAll('.why-tip:popover-open .wait-line')[1]`;
+  assert.equal(await page.eval(`${line}.querySelector('.wait-line-meta')?.textContent`), 'Main is green again.');
+  assert.equal(await page.eval(`document.querySelectorAll('.why-tip:popover-open .wait-sum').length`), 0, 'nothing opens by itself');
+  // An old-shape row (no headline) still reads: its words are the headline.
+  assert.match(await page.eval<string>(`document.querySelectorAll('.why-tip:popover-open .wait-line')[0].textContent`), /check the run/);
+  const hd = await page.centre('.why-tip:popover-open .wait-line:nth-child(2) .wait-line-hd');
+  await click(page, hd);
+  await waitFor(page, 'the summary', `!!${line}.querySelector('.wait-sum')`);
+  const sum = await page.eval<string>(`${line}.querySelector('.wait-sum').textContent`);
+  assert.ok(sum.includes('Main is green again. One. Two.') && !sum.includes('Three') && sum.includes('Show all'), sum);
+  assert.ok(sum.includes('Set by #1 at 12:54 PST · waits for fa4fb3f to go live'), sum);
+  assert.equal(await page.eval(`${line}.querySelector('.wait-sum a')?.getAttribute('href')`), '#/p/1/t/1');
+  assert.equal(await page.eval(`${line}.querySelector('.wait-line-hd').getAttribute('aria-expanded')`), 'true');
+  await waitFor(page, 'the opening to settle', `document.querySelector('.why-tip:popover-open').getAnimations({ subtree: true }).every((a) => a.playState !== 'running')`);
+  const more = await page.centre('.why-tip:popover-open .wait-more');
+  await click(page, more);
+  await waitFor(page, 'the full words', `${line}.querySelector('.wait-sum').textContent.includes('Three and four.')`);
+  // B's waits change (another wait goes): the popover redraws and the open line stays open, without animating again.
+  await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: b.outbox_waits.slice(1), updated_at: Date.now() } }) })`);
+  await waitFor(page, 'B\'s update', `!${tip}.includes('check the run')`);
+  const open = `document.querySelector('.why-tip:popover-open .wait-line.open')`;
+  assert.ok(await page.eval<boolean>(`!!${open}?.textContent.includes('Three and four.') && !${open}.classList.contains('opening')`));
+  // A wait with no words of its own opens to its facts alone; a second click closes it.
+  const bare = await page.centre('.why-tip:popover-open .wait-line:nth-child(2) .wait-line-hd');
+  await click(page, bare);
+  await waitFor(page, 'one open at a time', `document.querySelectorAll('.why-tip:popover-open .wait-line.open').length === 1 && ${open}.textContent.includes('Wakes when abc1234 is live')`);
+  assert.equal(await page.eval(`${open}.querySelector('.wait-sum-words')`), null);
+  await click(page, bare);
+  await waitFor(page, 'closed', `!document.querySelector('.why-tip:popover-open .wait-line.open')`);
 });

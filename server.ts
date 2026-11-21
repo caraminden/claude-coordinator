@@ -739,9 +739,12 @@ for (const fn of ['addDelivery', 'updateDelivery'] as const) {
   };
 }
 runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
-  ...waiters.chains().filter((c) => c.ticket === id && c.id == null && !c.held).map((c) => ({ kind: 'chain', chip: `⇢ #${store.getTicket(c.after)?.number ?? c.after}`, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null })),
-  ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
-  ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ event', what: w.reason, set_by: `minion:${id}`, since: null })),
+  ...waiters.chains().filter((c) => c.ticket === id && c.id == null && !c.held).map((c) => {
+    const lead = store.getTicket(c.after), n = `#${lead?.number ?? c.after}`;
+    return { kind: 'chain', chip: `⇢ ${n}`, headline: `Starts when ${n} ships`, link: lead ? { project: lead.project_id, number: lead.number } : null, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null };
+  }),
+  ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ live', headline: w.commit ? `Wakes when ${w.commit.slice(0, 7)} is live` : 'Wakes after the next deploy', what: w.reason, set_by: `minion:${id}`, since: null })),
+  ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ CI', what: w.reason, set_by: `minion:${id}`, since: null })),
 ]);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {

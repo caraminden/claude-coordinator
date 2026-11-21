@@ -543,7 +543,7 @@ function stateChip(t, st) {
 
 /**
  * What the minion waits for (ADR 0021 step 7, #1387; Cara picked take C, 2026-11-20): `⏱ 06:00` for a timed wake, `⇢ #1177`
- * for another minion's work, `⇢ event` otherwise. A tap opens the waits with Cancel. Its slot is always drawn (hidden when
+ * for another minion (its work, or a note from it), `⇢ live` for a commit, `⇢ event` only for a kind nobody named. A tap opens the waits with Cancel. Its slot is always drawn (hidden when
  * empty) so a wait coming or going moves nothing; the Taskmaster's own waits are shown in its chat, not here.
  */
 const waitTips = { tips: null };
@@ -557,20 +557,49 @@ function waitChip(t, coord) {
   if (waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
-  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.what).join('; ')}` }, shown.chip, more);
+  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` }, shown.chip, more);
 }
 export const drawnWaits = new Map();
-/** One line a wait, all of a minion's at once (Cara, 2026-11-21: "cut all the details and have a single line for each"): its chip, a short what, a small cancel. */
+/**
+ * One line a wait, all of a minion's at once (Cara, 2026-11-21: "cut all the details and have a single line for each"). Each
+ * line is a headline Citadel builds from the wait (#1512, her take A), with the waiter's first sentence under it; a click opens
+ * its summary in place: the waiter's words, who set it and when, a link to the minion it names, and Cancel.
+ */
 export function waitBody(id) {
   const rows = drawnWaits.get(id);
   if (!rows) return null;
-  const short = (s) => (s.length > 90 ? `${s.slice(0, 89)}…` : s);
+  const opening = waitOpening.get(id);
+  waitOpening.delete(id);
   return h('div', { class: 'why wait-lines' }, rows.map((w) => {
     const gone = w.state === 'dropped' || w.state === 'failed';
-    return h('div', { class: `wait-line${gone ? ' gone' : ''}` },
-      h('b', { class: 'wait-line-chip' }, w.chip), h('span', { class: 'wait-line-what' }, short(w.what), gone ? ` (${w.reason ?? w.state})` : ''),
-      w.cancellable ? h('button', { type: 'button', class: 'wait-cancel', title: 'Cancel this wait', 'aria-label': 'Cancel this wait', onclick: () => cancelWait(id, w) }, '×') : '');
+    const key = waitKey(w), open = waitOpen.get(id) === key;
+    return h('div', { class: `wait-line${gone ? ' gone' : ''}${open ? ' open' : ''}${open && opening === key ? ' opening' : ''}` },
+      h('button', { type: 'button', class: 'wait-line-hd', 'data-wait-key': key, 'aria-expanded': String(open), onclick: () => toggleWait(id, key) },
+        h('b', { class: 'wait-line-chip' }, w.chip),
+        h('span', { class: 'wait-line-hl' }, w.headline ?? w.what, gone ? ` (${w.reason ?? w.state})` : ''),
+        h('span', { class: 'wait-line-chev', 'aria-hidden': 'true' }, '▸'),
+        w.headline && w.line ? h('span', { class: 'wait-line-meta' }, w.line) : ''),
+      open ? waitSummary(id, w, gone) : '');
   }));
+}
+/** The open line per minion (by wait id), so a redraw keeps it open; and the one just clicked, which animates once. */
+const waitOpen = new Map(), waitOpening = new Map(), waitAll = new Set();
+const waitKey = (w) => String(w.id ?? `${w.kind}:${w.what}`);
+function toggleWait(id, key) {
+  if (waitOpen.get(id) === key) waitOpen.delete(id);
+  else { waitOpen.set(id, key); waitOpening.set(id, key); }
+  waitTips.tips?.refresh();
+  document.querySelector(`.why-tip:popover-open .wait-line-hd[data-wait-key="${CSS.escape(key)}"]`)?.focus();
+}
+const sentences = (t) => t.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/g) ?? [t];
+function waitSummary(id, w, gone) {
+  const text = w.text ?? w.what ?? '', all = sentences(text), key = waitKey(w), full = waitAll.has(key) || all.length <= 3;
+  return h('div', { class: 'wait-sum' }, h('div', { class: 'wait-sum-in' },
+    text ? h('p', { class: 'wait-sum-words' }, full ? text : all.slice(0, 3).join('').trim(), full ? '' : [' ', h('button', { type: 'button', class: 'wait-more', onclick: () => { waitAll.add(key); waitTips.tips?.refresh(); } }, 'Show all')]) : '',
+    h('p', { class: 'wait-facts' },
+      (w.facts ?? []).join(' · '),
+      w.link ? [w.facts?.length ? ' · ' : '', h('a', { href: `#/p/${w.link.project}/t/${w.link.number}`, onclick: () => waitTips.tips?.close() }, `Open #${w.link.number}`)] : '',
+      w.cancellable && !gone ? h('button', { type: 'button', class: 'wait-cancel', onclick: () => cancelWait(id, w) }, 'Cancel') : '')));
 }
 function cancelWait(id, w) {
   const was = { state: w.state, reason: w.reason, cancellable: w.cancellable };

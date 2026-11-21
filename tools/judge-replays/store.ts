@@ -4,7 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../../src/db.ts';
+import { Store, type Ticket } from '../../src/db.ts';
 
 export const LIVE_DB = join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'coordinator.db');
 
@@ -21,4 +21,21 @@ export function replayStore(path: string, shadow: string[], seed: Record<string,
   const store = Object.create(Store.prototype) as Store;
   (store as unknown as { db: DatabaseSync }).db = db;
   return store;
+}
+
+/**
+ * The scheme's minions as they were at `now()`: none made later, and one closed later still open. `extra` are the ones the
+ * replay itself started, always open. Each scheme's list is read once per `now`: a judge may list them per file it checks.
+ */
+export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = []) {
+  const then = (t: Ticket): Ticket | undefined =>
+    t.created_at > now() ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t;
+  const list = store.listTickets.bind(store);
+  const get = store.getTicket.bind(store);
+  const read = new Map<number, { at: number; rows: Ticket[] }>();
+  store.listTickets = (pid: number) => {
+    if (read.get(pid)?.at !== now()) read.set(pid, { at: now(), rows: list(pid).flatMap((t) => then(t) ?? []) });
+    return [...extra.filter((t) => t.project_id === pid), ...read.get(pid)!.rows];
+  };
+  store.getTicket = (id: number) => extra.find((t) => t.id === id) ?? (() => { const t = get(id); return t && then(t); })();
 }

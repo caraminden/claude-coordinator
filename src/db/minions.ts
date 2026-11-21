@@ -314,9 +314,10 @@ export const minionQueries = {
    * #1491: the scheme's minions (not its Taskmasters, which hear of every red) whose chat (people's messages and Claude's own
    * words, not tool output) names any of `needles`, among events after `afterId`; and the newest event id read, for the next
    * call to start from. It reads 500 ids back from `afterId`: an id is handed out before its row is written (reserveEventId).
+   * `atMost` caps the newest id read, for a replay of the past (#1503, tools/judge-replays/ci-red.ts).
    */
-  minionsNaming(this: Store, projectId: number, needles: string[], afterId: number): { ids: number[]; upTo: number } {
-    const upTo = (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0;
+  minionsNaming(this: Store, projectId: number, needles: string[], afterId: number, atMost = Infinity): { ids: number[]; upTo: number } {
+    const upTo = Math.min(atMost, (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0);
     if (!needles.length || upTo <= afterId) return { ids: [], upTo: Math.max(upTo, afterId) };
     const like = needles.map((n) => `%${n.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     const rows = this.db.prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e JOIN tickets t ON t.id = e.ticket_id

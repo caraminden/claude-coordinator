@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { FlakeFixes } from '../../src/flake-fixes.ts';
 import type { Project, Ticket } from '../../src/db.ts';
 import { projectSharedDir } from '../../src/workspace.ts';
-import { replayStore } from './store.ts';
+import { minionsAsOf, replayStore } from './store.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
 import { dirname } from 'node:path';
 
@@ -30,18 +30,9 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   const projects = store.listProjects().filter((p) => p.repo_dir && (ctx.scheme == null || p.id === ctx.scheme));
   let now = start;
   let warm = true;
-  // Minions as they were at `now`; the ones the replay starts get negative ids and stay open.
+  // The minions it starts get negative ids and stay open.
   const started: Ticket[] = [];
-  const asThen = (t: Ticket): Ticket | undefined => (t.created_at > now ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now ? { ...t, status: 'working' } as Ticket : t);
-  const listTickets = store.listTickets.bind(store);
-  const getTicket = store.getTicket.bind(store);
-  // Read once a pass: escalate lists them for every flaky file, and a scheme has thousands.
-  const listed = new Map<number, { at: number; rows: Ticket[] }>();
-  store.listTickets = (pid: number) => {
-    if (listed.get(pid)?.at !== now) listed.set(pid, { at: now, rows: listTickets(pid).flatMap((t) => asThen(t) ?? []) });
-    return [...started.filter((t) => t.project_id === pid), ...listed.get(pid)!.rows];
-  };
-  store.getTicket = (id: number) => (id < 0 ? started.find((t) => t.id === id) : (() => { const t = getTicket(id); return t && asThen(t); })());
+  minionsAsOf(store, () => now, started);
   const hits: Act[] = [];
   const history = new Map<number, Map<string, number[]>>();
   const commitsOf = (p: Project) => {

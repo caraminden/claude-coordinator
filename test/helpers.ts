@@ -176,7 +176,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   const data = join(root, 'data');
   const proc = spawn(process.execPath, [opts.script ?? join(REPO, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false', CITADEL_PSI_CPU: '/nonexistent/psi', CITADEL_PSI_MEMORY: '/nonexistent/psi', // a booted test server never reads the real box's pressure (#1301/#1302): a busy box would pause its indexers and hold its scheduled runs
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       // No scheme has id 0, so none is indexed: a test server never calls the box's live embedding service.
       CITADEL_MEMORY_SCHEMES: '0',

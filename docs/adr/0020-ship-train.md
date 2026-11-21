@@ -31,7 +31,22 @@ the last one in line waited for every run ahead of it.
   even if a newcomer did it). Red on new tests only: another round, up to 3. A file CI didn't rerun alone (run-tests.sh stops rerunning
   once one is real) may be load, so it names no suspect: if it is real, the refilled train is red on it and the next
   round sees it. A failure with no suspect, or a log with no confirmed real failure: the bisect, as before. A suspect that is the front itself: the riders go back in
-  line and the front is refused. An innocent suspect costs its minion one turn and a re-ship, which is accepted.
+  line and the front is refused (since #1403 only when perigee confirms it, below). An innocent suspect costs its minion one turn and a re-ship, which is accepted.
+- **Suspects confirmed on perigee first** (#1403; Cara, 2026-11-20, picked "Confirm suspects first": "Before refusing a
+  ship blamed for a red run, re-run that one failing test on perigee with only that ship. Innocent ships stay in
+  line"). On Nov 20 the nearest-level files rule blamed a ship that touched a hub (`src/db.ts`) three trains running,
+  while the culprit sat a level further out (6 innocent refusals; shared `reports/incident-2026-11-20-2106-cause.md`).
+  Now each real failure first runs alone on perigee, one file, niced: red at the train's top and green on main, the
+  train's prefixes are bisected with that file (seconds a step), and the ship whose commit turns it red is the
+  confirmed cause, refused at once, once a second run on each side agrees (red with it, green just before it; a
+  timeout is no answer), so one load failure can't pin an innocent ship. That is "with only that ship" read as "the train up to that ship, with and
+  without it", so a clash with an earlier rider is caught too. A file perigee can't fail alone (passes at the top,
+  fails on main too) falls back to the files rule, but that suspect is now only held off the train, not refused (a guess naming more than one ship goes to the bisect,
+  since a green run without them all can't tell which did it):
+  green, or red on other tests only, refuses them; red again on one of their tests (with any of run-tests' labels, a
+  file not rerun included) puts them back in line unrefused, and the bisect runs if a real failure came back (else
+  another round). A guessed suspect that is the front itself can't wait off its own train, so the bisect looks.
+  So the "accepted" innocent refusal above no longer happens.
 - **Each ship keeps its own line**: its branch moves to its own train commit before the deploy, so the release row
   that the deploy writes (`src/releases.ts` landedIn) lists it. Its own land.sh then prints its own `main is now at`
   and `deploy:` lines, so the server posts its shipped line and risk label as for any ship (`src/land.ts`).

@@ -93,10 +93,11 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
-// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, or due: one file left unrerun at CI's deadline); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
+// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, due: one file left unrerun at CI's deadline, or swap: the first red as mixed, later reds a new real failure with test/real.test.ts not rerun); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
 // file not rerun because a real failure already made the run red).
-// FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
+// FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_RED_TEXT: the same for
+// a commit with that text in any file (#1403); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
 // FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
@@ -138,6 +139,7 @@ case "$*" in
     [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
     # (a commit GitHub hasn't got yet has no run)
     if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
+    if [ -n "\${FAKE_RED_TEXT:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" grep -qF "\$FAKE_RED_TEXT" "$sha" 2>/dev/null && st=red || st=green; fi
     if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi
     [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
@@ -196,15 +198,20 @@ case "$*" in
     fi
     echo "not ok 1 - the red test's output (run $3)"
     p="$p run-tests:"
-    case \${FAKE_LOG:-mixed} in
+    lg=\${FAKE_LOG:-mixed}
+    if [ "$lg" = swap ]; then [ -e "${calls}.swap" ] || echo "$3" >"${calls}.swap"; [ "$(cat "${calls}.swap")" = "$3" ] || lg=swapped; fi
+    case $lg in
       many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
       *)
-        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$(case \${FAKE_LOG:-mixed} in after-real | killed-rerun) echo 3 ;; *) echo 2 ;; esac)"
+        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$(case $lg in after-real | killed-rerun | swapped) echo 3 ;; *) echo 2 ;; esac)"
         printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
           printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         elif [ "\${FAKE_LOG:-mixed}" = due ]; then
           printf "%b test/busy.test.ts: not rerun: CI's answer is due (land.sh stops waiting then), so the run counts as a real red\\n" "$p"
+        elif [ "$lg" = swapped ]; then # a later red: a new real failure first, so test/real.test.ts isn't rerun
+          printf '%b test/other.test.ts: failed again alone: a real failure\\n' "$p"
+          printf '%b test/real.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
         else
           printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
           [ "\${FAKE_LOG:-mixed}" != after-real ] || printf '%b test/busy.test.ts: not rerun: a real failure already makes this run red\\n' "$p"

@@ -274,6 +274,20 @@ test('a failing test that fails alone here pins the ship that turns it red: the 
 
 // A guard test that scans files rather than importing them (test/one-pacific.test.ts on Nov 20, 23:03 PST): the files
 // guess can never name a ship for it, but run alone here on the train's prefixes it still names the one that turns it red.
+test("a guard that names the file behind its failure: the ship that changed that file is the suspect, not the one that changed what the guard reads (#1451)", async () => {
+  const l = await line([{}, {}, { change: ['test/flake-baseline.json', '{"a":2}\n'] }, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], { FAKE_RED_PATH: 'test/loop-lag.test.ts', FAKE_RED_NAMES: 'loop-lag.test.ts:22 5 `sleep` hits, the baseline allows 3' }, (r) => {
+    mkdirSync(join(r.source, 'test'), { recursive: true });
+    writeFileSync(join(r.source, 'test', 'flake-baseline.json'), '{"a":1}\n');
+    r.commit(r.source, 'test/real.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/flake-baseline.json');\n");
+  });
+  const done = await l.go();
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
+  assert.doesNotMatch(done[1].stderr, /#3 \(|bisect/, 'the ship that changed the baseline is no suspect');
+  assert.equal(done[3].status, 1, done[3].stderr);
+  for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  l.done();
+});
+
 test('a scan-style guard test that imports nothing still pins the ship that turns it red, with no bisect (#1403)', async () => {
   const l = await line([{}, {}, { change: ['public/other.js', 'x\n'] }, { change: ['public/sidebar.js', "const at = 'props.propose';\n"] }, {}], { FAKE_RED_TEXT: 'props.propose' }, (r) => {
     mkdirSync(join(r.source, 'public'));

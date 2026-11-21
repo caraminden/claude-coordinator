@@ -64,6 +64,15 @@ export const deliveryQueries = {
 
   /** Change a row, only if it is still in one of `from` (when given). True if it changed: a claim that lost says false. */
   updateDelivery(this: Store, id: number, patch: DeliveryPatch, from?: DeliveryState[], now = Date.now()): boolean {
+    // A row going back to waiting or held while a twin with its dedupe key already is would break the unique index and
+    // abort the outbox pass (#1431): it is dropped as the twin's duplicate instead (the twin carries the newer payload).
+    if (patch.state === 'waiting' || patch.state === 'held') {
+      const me = this.db.prepare('SELECT kind, dedupe_key, state FROM deliveries WHERE id = ?').get(id) as { kind: string; dedupe_key: string | null; state: string } | undefined;
+      if (me?.dedupe_key != null && (!from?.length || from.includes(me.state as DeliveryState)) && !['waiting', 'held'].includes(me.state)) {
+        const twin = this.db.prepare("SELECT 1 FROM deliveries WHERE kind = ? AND dedupe_key = ? AND state IN ('waiting', 'held') AND id != ?").get(me.kind, me.dedupe_key, id);
+        if (twin) patch = { state: 'dropped', reason: 'a newer row with the same key is waiting' };
+      }
+    }
     const keys = Object.keys(patch).filter((k) => PATCHABLE.has(k));
     const vals = keys.map((k) => (k === 'payload' || k === 'when_arg' ? JSON.stringify((patch as any)[k]) : (patch as any)[k]));
     const guard = from?.length ? ` AND state IN (${from.map(() => '?').join(', ')})` : '';

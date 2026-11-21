@@ -150,3 +150,34 @@ test('waits saved in the old key move into the table at boot, none dropped', asy
   await s.outbox.poke({ type: 'tick' });
   assert.equal(rows(a).length + rows(b).length, 2, 'a second pass adds none');
 });
+
+test('a re-add while the row is sending leaves one row, and the retry or boot leftover does not abort the pass (#1431)', async () => {
+  const before = commit();
+  const pending = commit();
+  const id = minion();
+  const other = minion();
+  const s = server(before);
+  await s.outbox.boot();
+  await s.waiters.add(id, pending, 'first');
+  assert.equal(await s.waiters.check(), 0);
+  s.outbox.stop();
+  const t = server(pending);
+  await t.outbox.boot();
+  assert.equal(await t.waiters.check(), 1);
+  await t.outbox.poke({ type: 'tick' });
+  assert.equal(rows(id)[0].state, 'sending'); // handed to the runner, its turn not started
+  const add = (to: number, reason: string) =>
+    t.outbox.add({ project_id: project.id, kind: 'wake_when_live', to_kind: 'minion', to_id: to, when_kind: 'live', when_arg: pending, payload: { reason, since: pending }, set_by: `minion:${to}`, dedupe_key: `${to}:${pending}` });
+  add(id, 'second'); // a fresh waiting twin of the sending row
+  add(other, 'other');
+  assert.equal(rows(id).length, 2);
+  for (const r of store.listDeliveries({ kind: 'wake_when_live', states: ['waiting'] })) store.updateDelivery(r.id, { met_at: t.now.t, due: t.now.t }, ['waiting'], t.now.t);
+
+  t.now.t += 10 * MIN; // the runner dropped the sending row: it goes back to waiting beside its twin
+  const errors: string[] = [];
+  (t.outbox as any).opts.log = (m: string) => errors.push(m);
+  await t.outbox.poke({ type: 'tick' });
+  assert.deepEqual(errors, []);
+  assert.equal(rows(id).filter((r) => r.state === 'waiting' || r.state === 'held' || r.state === 'sending').length <= 1, true);
+  assert.equal(t.r.sent.some((x) => x.id === other), true, 'the other due row in the pass is still sent');
+});

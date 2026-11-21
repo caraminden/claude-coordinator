@@ -238,6 +238,8 @@ interface LiveTurn {
   end: () => void;
   /** What the config dir held when the turn started, which its save may prune (null: nothing; a re-attached turn doesn't know). */
   had: Set<string> | null;
+  /** Handed to the turn supervisor and its shell not yet running (#1343): starts its wrapper unit, should the supervisor give it back or lose it. */
+  restart?: () => void;
 }
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
@@ -314,6 +316,21 @@ export function wrapperAlive(dir: string): boolean | null {
     return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(dir);
   } catch {
     return existsSync('/proc/self') ? false : alive(pid);
+  }
+}
+
+/** Whether a process this server can see has `arg` as one of its arguments; reads every process's cmdline. */
+function argInProc(arg: string): boolean {
+  try {
+    return readdirSync('/proc').some((pid) => {
+      try {
+        return /^\d+$/.test(pid) && readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(arg);
+      } catch {
+        return false; // ended meanwhile
+      }
+    });
+  } catch {
+    return false;
   }
 }
 
@@ -1469,6 +1486,8 @@ export class Runner {
    * ended before the restart, so it isn't 'running'.
    */
   recover() {
+    // Up before the first turn, so it doesn't start in a wrapper for want of one (a deploy brings a new version).
+    if (this.supervisor) ensureSupervisor(this.supervisorSpec());
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
@@ -1646,6 +1665,35 @@ export class Runner {
       return;
     }
     if (sup !== undefined && !supervisorAlive(sup)) ensureSupervisor(this.supervisorSpec());
+  }
+
+  /**
+   * A turn handed to the supervisor whose shell isn't running yet, started in its wrapper unit instead when the
+   * supervisor gave it back (its scope wouldn't start: recorded as a fallback, as a unit that won't start is) or lost it
+   * (it died between taking the turn and starting it: its claimed spec is left, its pid dead).
+   */
+  private rescue(ticketId: number, live: LiveTurn) {
+    if (!live.restart) return;
+    const dir = live.dir;
+    if (existsSync(join(dir, 'pid.json'))) {
+      live.restart = undefined;
+      return fallbacks.started('scope');
+    }
+    let why: string | null = null;
+    try {
+      why = readFileSync(join(dir, 'handback'), 'utf8');
+      rmSync(join(dir, 'handback'), { force: true });
+    } catch { /* not given back */ }
+    if (why !== null) fallbacks.record(ticketId, "A turn's scope", why, Date.now(), 'scope');
+    else {
+      // Nothing still names the folder: a systemd-run the dead supervisor left starting the turn's scope would run it yet.
+      const lost = readdirSync(dir).find((n) => /^spec\.json\.\d+$/.test(n) && !alive(Number(n.slice(10))));
+      if (!lost || argInProc(dir)) return;
+      renameSync(join(dir, lost), join(dir, 'spec.json'));
+    }
+    const restart = live.restart;
+    live.restart = undefined;
+    restart();
   }
 
   /** Whether a followed turn's process may still be running: started, or still starting. */
@@ -2369,8 +2417,11 @@ export class Runner {
     if (live.container) return { verdict: 'unknown', text: "This turn runs in a container, so the server can't look at its process." };
     let pid: number | null = null;
     try {
-      pid = Number(JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude) || null;
-    } catch { /* not started yet */ }
+      const p = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
+      pid = Number(p.claude) || null;
+      // A supervisor turn's `claude` is its shell (#1343, turn-run.mjs SHIM), the process group to signal; claude is its one child.
+      if (pid && p.supervisor) pid = Number(readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/)[0]) || pid;
+    } catch { /* not started yet, or just ended */ }
     return checkProcess(pid);
   }
 
@@ -3135,8 +3186,14 @@ export class Runner {
       this.spawnWrapper(wrapper, dir);
     });
     // The scope keeps the unit's name, so stopping it by name (signal) reaches it either way.
-    if (this.supervisor) void handTurn(this.supervisorSpec(), dir, scope).then((taken) => taken || inUnit());
-    else inUnit();
+    if (this.supervisor) {
+      live.restart = inUnit;
+      void handTurn(this.supervisorSpec(), dir, scope).then((taken) => {
+        if (taken || !live.restart) return;
+        live.restart = undefined;
+        inUnit();
+      });
+    } else inUnit();
     return live.ended;
   }
 
@@ -3369,6 +3426,7 @@ export class Runner {
         this.stopSignals(live, ticketId);
       }
       if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
+      this.rescue(ticketId, live);
       // Gone without a word: killed with its unit (out of memory, say).
       if (++live.ticks % 20 === 0) {
         if (this.gone(live)) {

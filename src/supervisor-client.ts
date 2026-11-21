@@ -112,9 +112,10 @@ function pruneOld(spec: SupervisorSpec, now: number) {
 /**
  * Hand the turn in `dir` (its spec.json written) to the supervisor, to run in a scope from `scope`. True once it has
  * taken it; false, at once, when none runs (starting one for later turns), and within `timeoutMs` when it doesn't answer
- * or refuses: the runner then starts the turn's wrapper, and the spec.json claim lets only one of them run it.
+ * or refuses: the runner then starts the turn's wrapper, and the spec.json claim lets only one of them run it. It answers
+ * on loopback as soon as it has renamed spec.json, so a short wait is all a hung one costs a turn.
  */
-export function handTurn(spec: SupervisorSpec, dir: string, scope: string[], timeoutMs = 2_000): Promise<boolean> {
+export function handTurn(spec: SupervisorSpec, dir: string, scope: string[], timeoutMs = 500): Promise<boolean> {
   const s = readSupervisor(spec.dir);
   if (!s || s.version !== spec.version) {
     ensureSupervisor(spec);

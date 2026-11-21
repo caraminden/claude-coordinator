@@ -1,7 +1,10 @@
 // One turn's `claude -p`, as both the per-turn wrapper (src/turn-wrapper.mjs) and the shared supervisor
 // (src/turn-supervisor.mjs, #1343) run it. Plain JS, like them: a .ts file makes node load its type stripper.
 // The turn's folder holds:
-//   spec.json     in: the command, args, cwd and env (claimed by renaming and deleted once read, as the env holds the turn's token)
+//   spec.json     in: the command, args, cwd and env (claimed by renaming to spec.json.<pid>, deleted once the turn runs, as
+//                 the env holds the turn's token)
+//   handback      out: why the supervisor gave the turn back (its scope wouldn't start), spec.json put back: the runner
+//                 starts its wrapper unit
 //   prompt.jsonl  in: the turn's first message, written to claude's stdin
 //   steer.jsonl   in: messages that steer the running turn, one stream-json line each, appended by the runner
 //   steer.sent    out: bytes of steer.jsonl passed to claude; the runner queues the rest for the next turn
@@ -26,22 +29,31 @@ export function put(dir, name, data) {
 }
 
 /**
- * Take the turn's spec.json, or null if another starter took it first: the rename lets only one of the supervisor
- * and a fallback wrapper start the turn (#1343).
- * @param {string} dir @returns {TurnSpec | null}
+ * Take the turn's spec.json, renamed to `file` (spec.json.<pid>), or null if another starter took it first: the rename
+ * lets only one of the supervisor and a fallback wrapper start the turn (#1343). The supervisor keeps `file` until the
+ * turn's shell runs, so a turn it loses before then (it died, or the scope wouldn't start) can be started again.
+ * @param {string} dir @returns {{ spec: TurnSpec, file: string } | null}
  */
-export function claimSpec(dir) {
-  const mine = join(dir, `spec.json.${process.pid}`);
+export function takeSpec(dir) {
+  const file = join(dir, `spec.json.${process.pid}`);
   try {
-    renameSync(join(dir, 'spec.json'), mine);
+    renameSync(join(dir, 'spec.json'), file);
   } catch {
     return null;
   }
   try {
-    return JSON.parse(readFileSync(mine, 'utf8'));
-  } finally {
-    rmSync(mine, { force: true });
+    return { spec: JSON.parse(readFileSync(file, 'utf8')), file };
+  } catch (err) {
+    rmSync(file, { force: true });
+    throw err;
   }
+}
+
+/** takeSpec, the file deleted at once (the env holds the turn's token): the wrapper's. @param {string} dir @returns {TurnSpec | null} */
+export function claimSpec(dir) {
+  const taken = takeSpec(dir);
+  if (taken) rmSync(taken.file, { force: true });
+  return taken && taken.spec;
 }
 
 /**

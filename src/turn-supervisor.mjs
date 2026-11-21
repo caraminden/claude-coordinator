@@ -14,16 +14,18 @@
 // and its version. Plain JS, like the wrapper: a .ts file makes node load its type stripper.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
-import { SHIM, claimSpec, feeder, keepPooled, prepare, put } from './turn-run.mjs';
+import { SHIM, feeder, keepPooled, prepare, put, takeSpec } from './turn-run.mjs';
 
 const [home, version] = process.argv.slice(2);
 const turnsDir = dirname(dirname(home));
 const key = randomBytes(24).toString('hex');
-/** Idle this long with no turns, it exits; much sooner once a newer version's supervisor runs. */
-const IDLE_MS = Number(process.env.CITADEL_SUPERVISOR_IDLE_MS) || 30 * 60_000;
+/**
+ * Idle this long with no turns once a newer version's supervisor runs (a deploy or a roll back), it exits. The current
+ * one stays up, so a turn never starts in a wrapper for want of one.
+ */
 const SUPERSEDED_IDLE_MS = 60_000;
 /** How often it looks for turns a supervisor that died left running. */
 const ADOPT_EVERY_MS = Number(process.env.CITADEL_SUPERVISOR_ADOPT_MS) || 15_000;
@@ -31,7 +33,8 @@ const ADOPT_EVERY_MS = Number(process.env.CITADEL_SUPERVISOR_ADOPT_MS) || 15_000
 /**
  * One turn it runs. `feed` steers claude's stdin until the reply is out; an adopted turn has none (its stdin went
  * with the supervisor that started it) and is watched by pid instead of by its child's exit.
- * @typedef {{ dir: string, pid: number | null, pooled: import('./turn-run.mjs').PoolTurn | null, feed: (() => boolean) | null, adopted: boolean, busy?: boolean }} Turn
+ * `claim` is its spec.json, renamed, until its shell runs (turn-run.mjs takeSpec).
+ * @typedef {{ dir: string, pid: number | null, pooled: import('./turn-run.mjs').PoolTurn | null, feed: (() => boolean) | null, adopted: boolean, busy?: boolean, claim?: string | null }} Turn
  */
 /** @type {Map<string, Turn>} */
 const turns = new Map();
@@ -40,8 +43,16 @@ let closing = false;
 
 /** @param {Turn} t */
 function forget(t) {
+  release(t);
   turns.delete(t.dir);
   if (!turns.size) idleSince = Date.now();
+}
+
+/** The turn's shell runs (or never will): its claimed spec, which holds its token, goes. @param {Turn} t */
+function release(t) {
+  if (!t.claim) return;
+  rmSync(t.claim, { force: true });
+  t.claim = null;
 }
 
 /** Write a turn's file unless its folder is gone (the runner finished the turn). @param {string} dir @param {string} name @param {string} data */
@@ -61,8 +72,26 @@ function failed(t, command, err) {
 }
 
 /**
+ * Give the turn back to the runner, which starts it in a wrapper unit of its own (runner.ts rescue): its scope wouldn't
+ * start, and a turn run here would sit in the supervisor's group, outside the turns' slice and its limits.
+ * @param {Turn} t @param {string} why
+ */
+function handBack(t, why) {
+  try {
+    appendFileSync(join(t.dir, 'stderr.log'), `This turn's own memory group didn't start (${why}); the server starts it in a unit of its own.\n`);
+    if (!t.claim) throw new Error('its spec is gone');
+    renameSync(t.claim, join(t.dir, 'spec.json'));
+    t.claim = null;
+    put(t.dir, 'handback', why);
+    forget(t);
+  } catch (e) {
+    failed(t, 'its scope', /** @type {Error} */ (e));
+  }
+}
+
+/**
  * Start the turn's shell, in its own scope when `scope` (systemd-run's arguments) is given. A scope that won't start
- * (the shell never ran: no pid.json) runs the turn without one, as the runner runs a turn whose unit won't start.
+ * (the shell never ran: no pid.json) goes back to the runner (handBack).
  * @param {Turn} t @param {import('./turn-run.mjs').TurnSpec} spec @param {string[]} scope
  */
 function start(t, spec, scope) {
@@ -86,23 +115,16 @@ function start(t, spec, scope) {
     if (err >= 0) closeSync(err);
   }
   let over = false;
-  /** @param {string} why */
-  const unscoped = (why) => {
-    try {
-      appendFileSync(join(dir, 'stderr.log'), `This turn's own memory group didn't start (${why}); it runs in the turn supervisor's.\n`);
-    } catch {}
-    start(t, spec, []);
-  };
   child.on('error', (e) => {
     if (over) return;
     over = true;
-    if (scope.length && existsSync(dir) && !existsSync(join(dir, 'pid.json'))) unscoped(e.message);
+    if (scope.length && existsSync(dir) && !existsSync(join(dir, 'pid.json'))) handBack(t, e.message);
     else failed(t, spec.command, e);
   });
   child.on('exit', (code, signal) => {
     if (over) return;
     over = true;
-    if (scope.length && signal === null && existsSync(dir) && !existsSync(join(dir, 'pid.json')) && !existsSync(join(dir, 'exit.json'))) return unscoped(`systemd-run exited ${code}`);
+    if (scope.length && signal === null && existsSync(dir) && !existsSync(join(dir, 'pid.json')) && !existsSync(join(dir, 'exit.json'))) return handBack(t, `systemd-run exited ${code}`);
     // The shell records claude's exit itself; this covers a shell killed outright (SIGKILL), or one that never ran.
     if (!existsSync(join(dir, 'exit.json'))) putIfThere(dir, 'exit.json', JSON.stringify({ code, signal }));
     forget(t);
@@ -111,10 +133,10 @@ function start(t, spec, scope) {
   t.feed = feeder(dir, child.stdin);
 }
 
-/** @param {string} dir @param {string[]} scope @param {import('./turn-run.mjs').TurnSpec} spec */
-async function run(dir, scope, spec) {
+/** @param {string} dir @param {string[]} scope @param {import('./turn-run.mjs').TurnSpec} spec @param {string} claim */
+async function run(dir, scope, spec, claim) {
   /** @type {Turn} */
-  const t = { dir, pid: null, pooled: null, feed: null, adopted: false };
+  const t = { dir, pid: null, pooled: null, feed: null, adopted: false, claim };
   turns.set(dir, t);
   try {
     t.pooled = await prepare(dir, spec);
@@ -123,7 +145,12 @@ async function run(dir, scope, spec) {
   } catch (e) {
     return failed(t, spec.command, /** @type {Error} */ (e));
   }
-  start(t, spec, scope);
+  try {
+    start(t, spec, scope);
+  } catch (e) {
+    // Its folder went mid-start (the runner finished the turn), say: one turn's trouble never takes the others down.
+    failed(t, spec.command, /** @type {Error} */ (e));
+  }
 }
 
 /** `pid` runs a turn supervisor. @param {number} pid */
@@ -203,6 +230,10 @@ function superseded() {
   }
 }
 
+// One turn's trouble never stops the turns it runs: logged to its unit's journal instead.
+process.on('uncaughtException', (e) => console.error('turn supervisor:', e));
+process.on('unhandledRejection', (e) => console.error('turn supervisor:', e));
+
 const server = createServer((req, res) => {
   const reply = (/** @type {number} */ status, /** @type {object} */ body) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
   if (req.method === 'GET' && req.url === '/health') return reply(200, { pid: process.pid, version, turns: turns.size });
@@ -220,10 +251,15 @@ const server = createServer((req, res) => {
     }
     if (typeof dir !== 'string' || dirname(dir) !== turnsDir || !Array.isArray(scope) || !scope.every((a) => typeof a === 'string')) return reply(400, { error: 'bad turn' });
     // Taken here, before the answer: the runner starts the wrapper when it gets none, and only one of them can claim it.
-    const spec = claimSpec(dir);
-    if (!spec) return reply(409, { error: 'no spec.json' });
+    let taken;
+    try {
+      taken = takeSpec(dir);
+    } catch {
+      return reply(400, { error: "spec.json can't be read" });
+    }
+    if (!taken) return reply(409, { error: 'no spec.json' });
     reply(200, { ok: true });
-    void run(dir, scope, spec);
+    void run(dir, scope, taken.spec, taken.file);
   });
 });
 server.listen(0, '127.0.0.1', () => {
@@ -232,9 +268,17 @@ server.listen(0, '127.0.0.1', () => {
   adopt();
 });
 
-// claude's stdin: the prompt, then steers until the reply is out.
+// claude's stdin: the prompt, then steers until the reply is out. A turn whose shell runs no longer needs its spec.
 setInterval(() => {
-  for (const t of turns.values()) if (t.feed && !t.feed()) t.feed = null;
+  for (const t of turns.values()) {
+    try {
+      if (t.claim && existsSync(join(t.dir, 'pid.json'))) release(t);
+      if (t.feed && !t.feed()) t.feed = null;
+    } catch (e) {
+      // A full disk writing steer.sent, say: tried again next tick, and never the other turns' trouble.
+      console.error(`Turn ${t.dir}: ${/** @type {Error} */ (e).message}`);
+    }
+  }
 }, 250).unref();
 // Each pooled turn re-registered with its place's shared tool server, which is started again if it died.
 setInterval(() => {
@@ -261,7 +305,7 @@ setInterval(() => {
   adopt();
   if (turns.size || closing) return;
   const idle = Date.now() - idleSince;
-  if (idle < SUPERSEDED_IDLE_MS || (idle < IDLE_MS && !superseded())) return;
+  if (idle < SUPERSEDED_IDLE_MS || !superseded()) return;
   closing = true;
   server.close();
   try {

@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { fallbacks } from '../src/fallbacks.ts';
 import { claimSpec } from '../src/turn-run.mjs';
-import { handTurn, readSupervisor, supervisorSpec } from '../src/supervisor-client.ts';
+import { readSupervisor } from '../src/supervisor-client.ts';
 import { lines, stopProcs, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
-const pins = testPins();
+testPins(); // the turn files the runner and its supervisor run from
 
 // The shared turn supervisor (#1343, src/turn-supervisor.mjs) runs host turns' claude in place of a node wrapper per
 // turn. These run it through the runner with a stand-in systemd-run on PATH (CI runners have no user systemd): a
@@ -44,8 +45,10 @@ while [ $# -gt 0 ]; do case $1 in
   -*) ;;
   *) break;;
 esac; shift; done
-# The real one turns a command's \$\$ into \$ unless told not to.
-if [ -n "$scope" ]; then [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
+# The real one turns a command's \$\$ into \$ unless told not to. hang-scope: a scope slow to start, failing once it goes.
+if [ -n "$scope" ]; then
+  while [ -f "${bin}/hang-scope" ]; do sleep 0.05; [ -f "${bin}/hang-scope" ] || exit 1; done
+  [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
 `);
 writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "systemctl $*" >> "${bin}/calls"\n`);
@@ -67,6 +70,13 @@ rl.on('line', (l) => {
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'got ' + text }] } }));
 });
 rl.on('close', () => { closed = true; appendFileSync('closed.txt', 'x\\n'); });
+// cmd: a command the turn runs, started late enough (2 s on) to count as one (quiet.ts checkProcess).
+let cmd = null;
+if (existsSync('cmd')) setTimeout(() => {
+  cmd = require('node:child_process').spawn('/bin/sh', ['-c', 'while :; do sleep 0.2; done'], { stdio: 'ignore' });
+  writeFileSync('cmd.started', '');
+}, 2500);
+process.on('exit', () => cmd && cmd.kill());
 setInterval(() => {
   if (!replied && existsSync('release')) {
     replied = true;
@@ -178,68 +188,130 @@ test('a supervisor killed mid-turn: the turn finishes and its reply is recorded,
   rmSync(join(t.dir, 'release'), { force: true });
 });
 
-test('a turn the supervisor can\'t take starts in its wrapper at once', async () => {
-  const r = server();
+/** Point the runner's supervisor.json at a stand-in that seems to run, at `port`, for the length of `fn`. */
+async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
   const s = spec(r);
   mkdirSync(s.dir, { recursive: true });
-  // A supervisor that seems to run, at a port nothing listens on.
   const stray = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', 'turn-supervisor'], { stdio: 'ignore' });
   procs.push(stray);
+  const saved = existsSync(join(s.dir, 'supervisor.json')) ? readFileSync(join(s.dir, 'supervisor.json'), 'utf8') : null;
+  writeFileSync(join(s.dir, 'supervisor.json'), JSON.stringify({ pid: stray.pid, port, key: 'k', version: s.version }));
+  try {
+    await fn();
+  } finally {
+    if (saved) writeFileSync(join(s.dir, 'supervisor.json'), saved);
+    else rmSync(join(s.dir, 'supervisor.json'), { force: true });
+  }
+}
+
+test('a turn the supervisor can\'t take starts in its wrapper at once', async () => {
+  const r = server();
+  // Nothing listens on the port.
   const port = await new Promise<number>((res) => {
     const probe = createServer().listen(0, '127.0.0.1', () => {
       const p = (probe.address() as { port: number }).port;
       probe.close(() => res(p));
     });
   });
-  const saved = existsSync(join(s.dir, 'supervisor.json')) ? readFileSync(join(s.dir, 'supervisor.json'), 'utf8') : null;
-  writeFileSync(join(s.dir, 'supervisor.json'), JSON.stringify({ pid: stray.pid, port, key: 'k', version: s.version }));
-  try {
+  await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
     assert.ok(Date.now() - t0 < 1_500, `started in ${Date.now() - t0} ms`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
-  } finally {
-    if (saved) writeFileSync(join(s.dir, 'supervisor.json'), saved);
-    else rmSync(join(s.dir, 'supervisor.json'), { force: true });
-  }
+  });
 });
 
 test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, and the spec\'s claim lets only one run the turn', async () => {
-  const dir = join(turnsDir, '99-1');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: 'true', args: [], cwd: root, env: {} }));
-  const s = supervisorSpec(join(root, 'hung'), 'test', pins);
-  mkdirSync(s.dir, { recursive: true });
-  const stray = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', 'turn-supervisor'], { stdio: 'ignore' });
-  procs.push(stray);
+  const r = server();
   const hung = createServer(() => {}); // takes the request and never answers
   servers.push(hung);
   const port = await new Promise<number>((res) => hung.listen(0, '127.0.0.1', () => res((hung.address() as { port: number }).port)));
-  writeFileSync(join(s.dir, 'supervisor.json'), JSON.stringify({ pid: stray.pid, port, key: 'k', version: s.version }));
-  const t0 = Date.now();
-  assert.equal(await handTurn(s, dir, [], 300), false);
-  assert.ok(Date.now() - t0 < 1_000);
+  await standIn(r, port, async () => {
+    const t = newTicket();
+    const t0 = Date.now();
+    const dir = await started(r, t);
+    assert.ok(Date.now() - t0 < 1_500, `started in ${Date.now() - t0} ms: the wait for an answer is short`);
+    assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
+    await finished(r, t);
+  });
   // Whoever renames spec.json first runs the turn; the other finds it gone.
+  const dir = join(turnsDir, '99-1');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: 'true', args: [], cwd: root, env: {} }));
   assert.equal(claimSpec(dir)?.command, 'true');
   assert.equal(claimSpec(dir), null);
-  assert.ok(!existsSync(join(dir, 'spec.json')), 'the claimed spec (it holds the turn\'s token) is gone');
+  assert.ok(!existsSync(join(dir, 'spec.json')) && !existsSync(join(dir, `spec.json.${process.pid}`)), 'the claimed spec (it holds the turn\'s token) is gone');
 });
 
-test('a scope that won\'t start: the turn runs in the supervisor\'s group instead, and says so', async () => {
+test('a scope that won\'t start: the supervisor gives the turn back and it runs in its wrapper unit, counted as a fallback', async () => {
   const r = await withSupervisor();
   writeFileSync(join(bin, 'no-scope'), '');
+  const count = fallbacks.count;
   try {
     const t = newTicket();
+    const before = calls().length;
     const dir = await started(r, t);
-    assert.equal(pidJson(dir).supervisor, readSupervisor(spec(r).dir)!.pid);
-    assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group didn't start \(systemd-run exited 1\)/);
+    assert.equal(pidJson(dir).supervisor, undefined, 'not in the supervisor\'s group: its own wrapper unit runs it');
+    assert.ok(calls().slice(before).some((c) => c.includes('turn-wrapper.mjs')), 'a wrapper unit started');
+    assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group didn't start \(systemd-run exited 1\); the server starts it in a unit of its own/);
+    assert.equal(fallbacks.count, count + 1, 'counted, so /api/health and the admins hear of it');
+    assert.ok(!existsSync(join(dir, 'handback')));
     await finished(r, t);
     assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')));
   } finally {
     rmSync(join(bin, 'no-scope'));
   }
+});
+
+test('a supervisor that dies after taking a turn and before starting it: the runner starts the turn in its wrapper', async () => {
+  const r = await withSupervisor();
+  const sup = readSupervisor(spec(r).dir)!;
+  writeFileSync(join(bin, 'hang-scope'), '');
+  try {
+    const t = newTicket();
+    r.send(t.id, 'Cara', 'build it');
+    const dir = turnDir(r, t.id);
+    await until('the supervisor took the turn', () => existsSync(join(dir, `spec.json.${sup.pid}`)));
+    process.kill(sup.pid, 'SIGKILL');
+    // Its systemd-run, still starting the scope, names the folder: nothing is restarted while it might yet run the turn.
+    await new Promise((res) => setTimeout(res, 300));
+    assert.ok(existsSync(join(dir, `spec.json.${sup.pid}`)), 'left alone while its scope may still start');
+    rmSync(join(bin, 'hang-scope')); // the scope fails, with no supervisor to give the turn back
+    await until('claude has the message', () => seen(t.dir).length === 1);
+    await until('pid.json', () => existsSync(join(dir, 'pid.json')));
+    assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
+    await finished(r, t);
+    assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')));
+  } finally {
+    rmSync(join(bin, 'hang-scope'), { force: true });
+  }
+});
+
+test('"Is this still going?" on a supervisor turn names the command claude runs, under the turn\'s shell', async () => {
+  const r = await withSupervisor();
+  const t = newTicket();
+  writeFileSync(join(t.dir, 'cmd'), '');
+  try {
+    const dir = await started(r, t);
+    assert.ok(pidJson(dir).supervisor);
+    await until('the command runs', () => existsSync(join(t.dir, 'cmd.started')));
+    const check = await r.checkTurn(t.id);
+    assert.match(check?.text ?? '', /while :; do sleep/, JSON.stringify(check));
+    await finished(r, t);
+  } finally {
+    rmSync(join(t.dir, 'cmd'), { force: true });
+  }
+});
+
+test('the runner starts its supervisor when it starts, before any turn', async () => {
+  const r = server();
+  (r as any).turnsDir = join(root, 'warm');
+  mkdirSync(join(root, 'warm'));
+  assert.equal(readSupervisor(spec(r).dir), null);
+  r.recover();
+  await until('the supervisor is up', () => !!readSupervisor(spec(r).dir));
 });
 
 test('Stop ends a supervisor turn: its scope by name, and claude by its process group', async () => {

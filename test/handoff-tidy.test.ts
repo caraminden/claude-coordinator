@@ -88,3 +88,16 @@ test('the indexer files the handoff when its minion closes, and search still fin
   const hit = (store.minionIndex.search(project, 'zebrafish') as any[]).find((h) => h.kind === 'handoff');
   assert.equal(hit.name, 'shipped/qp-thing.md');
 });
+
+test('a name clash in shipped/ never overwrites, and only a top line marks not picked', async () => {
+  const { shared, file } = setup();
+  const { moveFile } = await import('../src/handoff-tidy.ts');
+  file('x.md', 'one');
+  moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  file('x.md', 'two');
+  const a = moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  file('x.md', 'three');
+  const b = moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  assert.notEqual(a, b);
+  assert.equal(markedNotPicked('# H\nGoal\n\n1\n2\n3\n4\n- Not picked: option B'), false);
+});

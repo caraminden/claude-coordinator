@@ -15,7 +15,7 @@ export const NOT_PICKED = 'handoffs/not-picked';
 export const isLoose = (rel: string) => /^handoffs\/[^/]+\.md$/.test(rel);
 
 /** A file that says up top it was not picked ("**Not picked (2026-11-12): …**"): it goes to not-picked/, not shipped/. */
-export const markedNotPicked = (text: string) => /^[\s>*_#-]*not picked\b/im.test(text);
+export const markedNotPicked = (text: string) => text.split('\n').filter((l) => l.trim()).slice(0, 6).some((l) => /^[\s>*_#-]*not picked\b/i.test(l));
 
 export interface Keep { rel: string; why: string }
 
@@ -44,7 +44,9 @@ export function whyKeep(store: Store, projectId: number, shared: string, rel: st
 export function moveFile(shared: string, rel: string, dest: string): string {
   mkdirSync(join(shared, dest), { recursive: true });
   let to = `${dest}/${basename(rel)}`;
-  if (existsSync(join(shared, to))) to = `${dest}/${new Date(statSync(join(shared, rel)).mtimeMs).toISOString().slice(0, 10)}-${basename(rel)}`;
+  // A clash never overwrites: the mtime day, then a counter, in front of the name.
+  const day = new Date(statSync(join(shared, rel)).mtimeMs).toISOString().slice(0, 10);
+  for (let n = 0; existsSync(join(shared, to)); n++) to = `${dest}/${day}${n ? `-${n}` : ''}-${basename(rel)}`;
   renameSync(join(shared, rel), join(shared, to));
   return to;
 }

@@ -1024,6 +1024,21 @@ const PUBLISH_RELEASE = () => ({
   },
 });
 
+/** A Taskmaster's reorder of its scheme's ship line (#1358; src/ship-line.ts): the Releases page's drag, with a reason. */
+const ORDER_SHIP_LINE = {
+  name: 'order_ship_line',
+  description: `Move one waiting ship in this scheme's ship line (the changes waiting to ship, as the Releases page shows them), to the front or ahead of another waiting ship, as dragging it on the Releases page does. Your reason shows on that page and in the line's history, so give one. It is refused for a ship a person placed (it stays where they put it until it ships), for a move that would pass such a ship, for one whose land script is too old to be moved, and for any ship not waiting in this scheme's line. The ship holding the lock keeps it. Only a Taskmaster calls it.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      ship: { type: 'integer', description: 'The minion number of the waiting ship to move.' },
+      before: { type: 'integer', description: 'The minion number of the waiting ship it should go just ahead of; leave out to put it first among the waiting ships.' },
+      reason: { type: 'string', description: `One line on why it goes there, at most 200 characters.` },
+    },
+    required: ['ship', 'reason'],
+  },
+};
+
 /** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
 const PUBLISH_DESKTOP = {
   name: 'publish_desktop',
@@ -2113,6 +2128,8 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'publish_desktop':
       return (await call('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
+    case 'order_ship_line':
+      return (await call('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
     case 'publish_release':
       return (await call('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
@@ -2499,7 +2516,7 @@ function toolListAll() {
   const deploy = [...(C().APP_INSTRUCTIONS || C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION()] : []), ...(C().HOME_CONTRAPTIONS.length ? [PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : [])];
   const memory = [...(C().MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
-  if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+  if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
 }
 

@@ -1993,6 +1993,16 @@
   "m1": "400 contraption is required",
   "m2": "400 contraption is required"
  },
+ "POST /api/projects/:p/releases/ship-line": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster orders its ship line",
+  "member": "403 Only a scheme's Taskmaster orders its ship line",
+  "outsider": "403 Only a scheme's Taskmaster orders its ship line",
+  "tmA": "400 reason is required",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/repo-setup": {
   "anon": "401 Not logged in",
   "person": "200",

@@ -11,9 +11,7 @@ import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
 import { clientIp, HttpError, isSecure, json, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { optOutKey } from '../replay-keep.ts';
-import { ordinal, writeOrder } from '../waits.ts';
-import { CITADEL_TARGET } from '../releases.ts';
-import { landQueue, schemeLine } from '../release-readers.ts';
+import { moveShip, REASON_MAX, seqsFor } from '../ship-line.ts';
 import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
 
 const MAX_CLIENTS = 100;
@@ -252,36 +250,43 @@ export const appRoutes: Route[] = [
   // one gets released next"): any member of the scheme whose line it is sets the order of the landings waiting in it,
   // `order` their line tickets front first; the holder keeps the lock. `moved` is the one dragged or sent to land next, for
   // the line in each waiting landing's output and the server log saying who moved what.
-  { method: 'POST', path: '/api/releases/land-order', who: ['person'], handler: async ({ req, res, app: { store, releases, waits }, session }) => {
+  { method: 'POST', path: '/api/releases/land-order', who: ['person'], handler: async ({ req, res, app, session }) => {
+    const { store } = app;
     const body = await readJson(req);
     const projectId = Number(body?.projectId);
     if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
     const seqs = body?.order;
     if (!Array.isArray(seqs) || seqs.length > 200 || !seqs.every((n) => Number.isInteger(n) && n > 0)) throw new HttpError(400, 'order must be a list of line tickets');
-    const targets = releases.view((id) => id === projectId)[0]?.targets ?? [];
-    const line = targets.flatMap((t) => t.line);
-    // Citadel's own line is the deploy queue's (#1002); any other scheme's is its copy of the kit's land template (#1007).
-    const own = targets.some((t) => t.target.id === CITADEL_TARGET);
-    const repo = store.getProject(projectId)?.repo_dir;
-    if ((own ? !waits : !repo) || !line.length) throw new HttpError(404, 'This scheme has no ship line here');
-    const moved = line.find((e) => e.seq === body?.moved && !e.holds);
-    if (!moved) throw new HttpError(409, 'That change is no longer waiting in line to ship');
-    if (!moved.movable) throw new HttpError(409, `${moved.name}: ${moved.why ?? 'it can\'t move'}`);
+    const movedSeq = Number(body?.moved);
     const who = store.getUser(session.uid as number)?.name ?? 'a member';
-    // Its place in the order written: a target shows only part of the line, so where it's dropped there isn't always that.
-    const note = (order: number[]) => {
-      const place = order.indexOf(moved.seq);
-      return `${who} moved ${moved.name} ${place === 0 ? 'to ship next' : `to ${ordinal(place + 1)} of the changes waiting to ship`}`;
-    };
-    let order: number[];
-    try {
-      order = own ? waits!.setOrder(seqs, note, moved.seq) : writeOrder(landQueue(repo!), schemeLine(repo!), seqs, note, moved.seq);
-    } catch (err) {
-      throw new HttpError(409, (err as Error).message);
-    }
-    console.log(`Land line: ${note(order)} (${order.join(', ')})`);
-    releases.poll();
+    // A person's move wins: it pins the ship until it ships, and no Taskmaster moves it or passes it (#1358).
+    const order = moveShip(app, projectId, movedSeq, seqs, { name: who, taskmaster: false });
     return json(res, 200, { order });
+  } },
+  // order_ship_line (#1358; Cara, 2026-11-20: "can I authorize you to take some agency over the ordering? Unless a user
+  // explicitly moves the order, you (and other taskmasters in their schemes) should have the power to gauge the priority of
+  // ships and order them commensurately"): a scheme's Taskmaster moves one waiting ship, by the same path as the drag above,
+  // with a reason. A ship a person placed stays put, and nothing passes it.
+  { method: 'POST', path: '/api/projects/:project/releases/ship-line', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster orders its ship line", handler: async ({ req, res, app, project, params }) => {
+    const body = await readJson(req);
+    const num = (v: unknown, field: string) => {
+      const n = Number(String(v ?? '').replace(/^#/, ''));
+      if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `${field} must be a minion number like 1234`);
+      return n;
+    };
+    const reason = str(body?.reason, 'reason', REASON_MAX).replace(/\s+/g, ' ');
+    if (!reason) throw new HttpError(400, 'reason is required: why this ship goes where it does');
+    const waiting = (app.releases.poll(), app.releases.view((id) => id === project.id)[0]?.targets.flatMap((t) => t.line) ?? []);
+    const find = (n: number) => {
+      const e = waiting.find((x) => !x.holds && x.name === `#${n}`);
+      if (!e) throw new HttpError(409, `#${n} is not waiting in this scheme's ship line`);
+      return e;
+    };
+    const ship = find(num(body?.ship, 'ship'));
+    const ahead = body?.before == null ? undefined : find(num(body.before, 'before'));
+    const seqs = seqsFor(waiting, ship.seq, ahead?.seq);
+    const order = moveShip(app, project.id, ship.seq, seqs, { name: `${project.name} Taskmaster`, taskmaster: true }, reason);
+    return json(res, 200, { order, said: `Moved ${ship.name}: ${order.indexOf(ship.seq) === 0 ? 'it ships next' : `now ${order.indexOf(ship.seq) + 1} of ${order.length} waiting`}.` });
   } },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
   { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {

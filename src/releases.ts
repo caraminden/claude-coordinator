@@ -5,6 +5,7 @@
 // they run its code, else to the scheme, so a scheme with no target still lists them.
 // Served at GET /api/releases and sent as a `releases` event per scheme when its part changes. Importing it
 // starts nothing: server.ts calls poll() and live().
+import { placedKey, readState, type Placed } from './ship-line-state.ts';
 import type { DeployInfo } from './auto-deploy.ts';
 import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
@@ -111,6 +112,8 @@ export interface LineEntry {
   movable: boolean;
   /** Why a waiting one can't move (#1007), shown on its row. */
   why?: string;
+  /** Who last placed it (#1358): a person's drag (pinned: a Taskmaster won't move it) or a Taskmaster's move with its reason. */
+  placed?: Placed;
   stage: string;
   since: number;
 }
@@ -231,6 +234,11 @@ export class Releases {
       const releaseKey = this.d.releaseKey?.(t);
       const rollback = this.d.rollback?.(t, views);
       scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}), ...(rollback ? { rollback } : {}) });
+    }
+    // Who placed the waiting ships (#1358), for the line's rows.
+    for (const s of byScheme.values()) {
+      const { placed } = readState(this.d.store, s.projectId);
+      for (const tv of s.targets) tv.line = tv.line.map((e) => (!e.holds && placed[placedKey(e)] ? { ...e, placed: placed[placedKey(e)] } : e));
     }
     for (const [id, list] of copies) {
       for (const c of list) {

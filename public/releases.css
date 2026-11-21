@@ -165,7 +165,7 @@ b.waits { color: var(--held); }
 /* The land line's waiting rows move (#1002): dragged (public/reorder.js), or sent to the front with Land next. */
 .rel-change.movable { cursor: grab; touch-action: pan-y; }
 .rel-change .land-next { margin-left: auto; padding: 0.2rem 0.7rem; font-size: 0.92em; }
-.rel-change .stuck { flex-basis: 100%; font-size: 0.92em; }
+.rel-change .stuck, .rel-change .placed { flex-basis: 100%; font-size: 0.92em; }
 
 /* Claims and the post-deploy watch (#1060) */
 .rel-claims, .rel-watch { margin: 0 0 var(--space-3); }

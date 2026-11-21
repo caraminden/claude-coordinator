@@ -19,7 +19,7 @@ export const WRITES = [
   'endContraptionTurn', 'putTurnAudit', 'setTurnVerdict', 'sweepTurnAudit', 'deleteTurnAudit', 'setProjectHidden', 'setListOrder', 'setSeenItems', 'deleteProject', 'setTicketDir', 'deleteTicket',
   'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
-  'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting',
+  'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
   'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
@@ -212,6 +212,10 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       if (req && !req.done) req.seq = n;
       if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
       else if (name === 'deleteSetting') unwritten.set(args[0], { seq: n, json: null });
+      else if (name === 'setSettings') {
+        for (const [k, v] of Object.entries(args[0] as Record<string, unknown>)) unwritten.set(k, { seq: n, json: JSON.stringify(v) });
+        for (const k of (args[1] as string[] | undefined) ?? []) unwritten.set(k, { seq: n, json: null });
+      }
       // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
       else if (name === 'autoCheckpoint') exec(`PRAGMA wal_autocheckpoint = ${args[0] ? 1000 : 0}`);
       FORGETS[name]?.(store, args);

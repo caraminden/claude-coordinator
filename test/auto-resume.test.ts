@@ -25,7 +25,10 @@ writeFileSync(
   `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
 process.on('SIGTERM', () => {});
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => appendFileSync(${JSON.stringify(prompts)}, input + '\\n'));
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
+  appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
+  console.log(JSON.stringify({ type: 'system', subtype: 'init' })); // as claude does once it has the prompt
+});
 const wait = setInterval(() => {
   if (!existsSync(${JSON.stringify(join(root, 'release'))})) return;
   clearInterval(wait);
@@ -57,6 +60,8 @@ function newTicket() {
 async function crash(r: Runner, id: number) {
   const dir: string = (r as any).turns.get(id).dir;
   await until("existsSync(join(dir, 'pid.json'))", () => existsSync(join(dir, 'pid.json')));
+  // Its first line is in: claude had the prompt, so it resumes (a turn killed before that reruns its batch, #1364).
+  await until('the first line', () => !store.getSetting<any>(`turn:${id}`)?.batch);
   r.detachAll();
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
   for (const pid of [wrapper, -claude]) {

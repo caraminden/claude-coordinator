@@ -21,10 +21,11 @@
 //
 // To cover a new flow, add one entry to FLOWS: a name, an optional setup (accounts, say), and steps. Each step does one
 // thing from outside the runner (a message, a turn's end, a timer firing) and waits for the runner to go quiet.
-// RESTART_ANYWHERE_STRICT=1 cuts after every single write as well, a hard crash's points: it lists the gaps only a crash
-// (not a restart) can reach, and is expected to fail. RESTART_ANYWHERE_ONLY=<flow name> runs one flow; RESTART_ANYWHERE_DEBUG=1 prints each flow's cuts and what it sent.
-// On the server the write worker drains its queue before a restart exits (src/db-writer.ts), so a task's writes land
-// whole there too; only a hard crash (power, the OOM killer) can stop between two writes of one task, which this skips.
+// It also cuts after every single write, a hard crash's points (power, the OOM killer), since #1364 closed the gaps only a
+// crash (not a restart) could reach; RESTART_ANYWHERE_LOOSE=1 cuts at task boundaries alone. RESTART_ANYWHERE_ONLY=<flow name> runs one flow; RESTART_ANYWHERE_DEBUG=1 prints each flow's cuts and what it sent.
+// On the server the write worker drains its queue before a restart exits (src/db-writer.ts), so a restart lands between
+// tasks; only a hard crash can stop between two writes of one task, so writes that must land together share a commit
+// (Store.setSettings).
 import assert from 'node:assert/strict';
 import { createHook } from 'node:async_hooks';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -276,7 +277,7 @@ class Recorder {
     this.changes = () => Number((q.get() as { n: number }).n);
     this.last = this.changes();
     this.describe(); // the starting point, so the first cut's label says only what changed
-    if (process.env.RESTART_ANYWHERE_STRICT) {
+    if (!process.env.RESTART_ANYWHERE_LOOSE) {
       const s = store as any;
       for (const name of [...WRITES, ...VALUE_WRITES, 'putClaudeState'].filter((n) => typeof s[n] === 'function')) {
         const write = s[name].bind(store);

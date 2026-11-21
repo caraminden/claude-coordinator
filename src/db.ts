@@ -19,6 +19,7 @@ import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { deliveryQueries } from './db/deliveries.ts';
+import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
 
@@ -3864,9 +3865,9 @@ export class Store {
  */
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
-type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries;
+type Areas = typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof settingQueries & typeof viewQueries & typeof deliveryQueries & typeof ciNumberQueries;
 export interface Store extends AreaQueries {}
-for (const area of [machineQueries, minionQueries, pushQueries, viewQueries, deliveryQueries, ciNumberQueries]) {
+for (const area of [machineQueries, minionQueries, pushQueries, settingQueries, viewQueries, deliveryQueries, ciNumberQueries]) {
   for (const [name, d] of Object.entries(Object.getOwnPropertyDescriptors(area))) {
     if (name in Store.prototype) throw new Error(`Store.${name} is defined twice: in src/db.ts and src/db/, or in two area files`);
     Object.defineProperty(Store.prototype, name, { ...d, enumerable: false });

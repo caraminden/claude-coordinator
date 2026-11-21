@@ -183,13 +183,14 @@ export class Relay {
   mail(to: number, author: string, text: string, from?: number, cold = false, need?: string, note = false) {
     const { store } = this.d;
     // `note` marks Citadel's own (leaveMail), so the chat's held-mail card can offer "never hold notes" (#1067).
-    const row = this.d.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}), ...(note ? { note: true } : {}) });
-    if (cold && !store.getSetting<number>(coldKey(to))) store.setSetting(coldKey(to), this.d.now());
     const sent = pacific(this.d.now());
     const list = store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    list.push({ author: `Held mail from ${author}, sent ${sent}`, text, images: [], id: row.id, ...(cold ? { cold: true as const } : {}), ...(cold && from ? { from } : {}), asker: cold ? this.d.personOf()?.(author, from) ?? null : null });
-    store.setSetting(mailKey(to), list);
+    const item: QueuedMessage = { author: `Held mail from ${author}, sent ${sent}`, text, images: [], ...(cold ? { cold: true as const } : {}), ...(cold && from ? { from } : {}), asker: cold ? this.d.personOf()?.(author, from) ?? null : null };
+    // Saved (with its cold time) before the chat shows it, so a crash between can't lose it (#1364); its event id follows.
+    store.setSettings({ [mailKey(to)]: [...list, item], ...(cold && !store.getSetting<number>(coldKey(to)) ? { [coldKey(to)]: this.d.now() } : {}) });
+    const row = this.d.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}), ...(note ? { note: true } : {}) });
+    store.setSetting(mailKey(to), [...list, { ...item, id: row.id }]);
     // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
     const ticket = store.getTicket(to);
     if (ticket && from) this.d.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, { author, text, from });

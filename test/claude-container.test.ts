@@ -646,6 +646,8 @@ test('Stop ends a container turn whose claude has not started, and never will (C
   r.containerStartMs = 600_000;
   process.env.FAKE_PODMAN_HANGS = '1';
   const dir = () => (r as any).turns.get(id)?.dir as string | undefined;
+  // The earlier hang test leaves its pid file behind; clear it so the wait below sees this turn's exec.
+  rmSync(hungPid, { force: true });
   try {
     r.send(id, 'Josh', 'build it');
     await until("status(id) === 'running'", () => status(id) === 'running');

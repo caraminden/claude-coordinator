@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -169,6 +169,18 @@ function buildHeading(s) {
 
 /** The resting sections' headings (threadgroups.js threadSections). */
 const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Parked' };
+
+let sidebarFrame = 0;
+/**
+ * renderSidebar at most once a frame (#1532): a live message asks for it, a burst of them draws once, and a hidden tab
+ * draws nothing until it is shown (a hidden page runs no frames, so the one request waits). Callers that read the list
+ * right after a redraw (revealActiveRow) keep the synchronous renderSidebar.
+ */
+export function scheduleSidebar() {
+  if (sidebarFrame) return;
+  const run = () => { sidebarFrame = 0; if (view?.kind === 'project') renderSidebar(); };
+  sidebarFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : setTimeout(run, 16);
+}
 
 export function renderSidebar() {
   const el = document.getElementById('threads');
@@ -538,7 +550,7 @@ function stateChip(t, st) {
   drawn.set(t.id, { t, st });
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
   return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': `${st.cell}: ${st.label}` },
-    st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
+    st.pulse ? h('i', { class: 'pulse', style: phase(1600) }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
 }
 
 /**

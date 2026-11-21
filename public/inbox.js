@@ -1,6 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, heldWhilePressed, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
+import { ago, api, h, heldWhilePressed, phase, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { TM_VIEW } from './mine.js';
 import { iconSrc } from './schemes.js';
@@ -177,7 +177,7 @@ export function schemeCount(p) {
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, shipping, fresh, label } = schemePill(openPill(p, view?.projectId, seenHere));
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
-    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i', { style: phase(900) }), working ? h('b', {}, working) : null) : null,
     shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }

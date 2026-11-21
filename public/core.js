@@ -10,7 +10,7 @@ import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { costSoon } from './cost.js';
-import { homeScheme, openStartScheme, renderSidebar } from './sidebar.js';
+import { homeScheme, openStartScheme, renderSidebar, scheduleSidebar } from './sidebar.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
@@ -405,10 +405,10 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
-      if ('usage' in msg) loadReleases().then((rows) => rows && view?.kind === 'project' && renderSidebar());
+      if ('usage' in msg) loadReleases().then((rows) => rows && view?.kind === 'project' && scheduleSidebar());
       if (msg.stream) {
         presenceHello(msg.stream);
-        if (view?.kind === 'project') renderSidebar();
+        if (view?.kind === 'project') scheduleSidebar();
       }
     }
     if (msg.type === 'hello' || msg.type === 'codex') {
@@ -418,9 +418,10 @@ function connectStream(catchUp = false) {
       renderModelPicker();
     }
     if (msg.type === 'hello' || msg.type === 'usage') {
-      renderUsage(msg.usage);
-      // Rows of minions that hit the usage limit count down to its reset.
-      if (view?.kind === 'project') renderSidebar();
+      // Rows of minions that hit the usage limit count down to its reset: they redraw only when the numbers changed (#1532).
+      const same = msg.usage === undefined || JSON.stringify(msg.usage) === JSON.stringify(usage);
+      renderUsage(same ? undefined : msg.usage); // an unchanged one keeps the object, so the dismissed rows' cache holds
+      if (!same && view?.kind === 'project') scheduleSidebar();
     }
     if (msg.type === 'turn') costSoon();
     if (msg.type === 'notify') desktopNotify(msg);
@@ -444,15 +445,15 @@ function connectStream(catchUp = false) {
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'claims') onClaims(msg);
-    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && renderSidebar());
+    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && scheduleSidebar());
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
-      renderSidebar();
+      scheduleSidebar();
       if (view.id) renderTicketHead();
     }
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'machine_job') onJobUpdate(msg.job);
-    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; renderSidebar(); }
+    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; scheduleSidebar(); }
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
@@ -913,7 +914,7 @@ export function onTicketUpdate(ticket) {
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
   inboxTicket(before, ticket);
-  renderSidebar();
+  scheduleSidebar();
   if (view.id === ticket.id) {
     view.ticket = ticket;
     renderTicketHead();
@@ -957,8 +958,9 @@ export function markSeen(ticketId) {
     try {
       const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
       if (view?.kind !== 'project') return;
+      if (view.seen[ticketId] === seen_at) return; // nothing changed: no second redraw per update (#1532)
       view.seen[ticketId] = seen_at;
-      renderSidebar();
+      scheduleSidebar();
     } catch {}
   }, 800));
 }

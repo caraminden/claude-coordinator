@@ -206,6 +206,9 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+/** An inline `animation-delay` that puts a looping animation of `ms` per turn at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). */
+export const phase = (ms) => `animation-delay: -${Date.now() % ms}ms`;
+
 /**
  * A redraw of the sidebar (or Home's list, its own page on a phone) while a pointer is pressed in it waits for the release
  * (#1499): it swaps the pressed row for a new one, the release lands on that, and the click reaches neither link (Cara,

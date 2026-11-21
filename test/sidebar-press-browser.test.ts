@@ -56,3 +56,22 @@ for (const [where, selector] of [['the minion list', '#threads .thread-row[data-
     assert.equal(await page.eval<string>('location.hash'), '#/p/1/t/1');
   });
 }
+
+// #1532: a burst of live messages draws the list once, not once a message.
+test('ten ticket messages in one frame redraw the minion list once', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1/t/2`, { width: 1280, height: 800 });
+  await waitFor(page, 'the rows', `!!document.querySelector('#threads .thread-row[data-id="102"]')`);
+  const draws = await page.eval<number[]>(`(async () => {
+    for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r)); // the first load's own redraws settle
+    const row = () => document.querySelector('#threads .thread-row[data-id="102"]');
+    let swaps = 0, last = row();
+    const count = () => { if (row() !== last) { swaps++; last = row(); } };
+    for (let i = 0; i < 10; i++) es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, last_activity: 'Step ' + i, updated_at: Date.now() + i } }) });
+    count();
+    const sync = swaps; // nothing drawn inside the handler
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    count();
+    return [sync, swaps];
+  })()`);
+  assert.deepEqual(draws, [0, 1], 'drawn once, a frame later, for the whole burst');
+});

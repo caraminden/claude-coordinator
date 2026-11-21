@@ -57,6 +57,8 @@ after(async () => {
   await app?.close();
 });
 
+// The list now draws a frame after a message (#1532).
+const frame = (page: any) => page.eval(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
 const closedRows = `document.querySelectorAll('#threads details.g-closed .thread-row').length`;
 
 test('a shut Dismissed list builds no rows, at first or when minion updates redraw the list', { skip }, async () => {
@@ -65,6 +67,7 @@ test('a shut Dismissed list builds no rows, at first or when minion updates redr
   assert.equal(await page.eval(closedRows), 0);
   // No timing here (a slow runner would flake it): tools/typing-lag.ts measures the redraws. Before the fix each update took about 250 ms.
   await page.eval(`(() => { for (let n = 1; n <= 20; n++) es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'Running commands ' + n, updated_at: Date.now() } }) }); })()`);
+  await frame(page);
   assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row.s-running').textContent`), /Running commands 20/);
   assert.equal(await page.eval(closedRows), 0);
 });
@@ -90,6 +93,7 @@ test('opening the Dismissed list builds its rows, each with when it was dismisse
   assert.match(stamps[0], /^Dismissed \d{1,2}:\d\d [AP]M P[SD]T$/);
   assert.match(stamps[1], /^Dismissed [A-Z][a-z]{2} \d{1,2}(, \d{4})?$/);
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'More' } }) })`);
+  await frame(page);
   assert.equal(await page.eval(closedRows), 50);
   assert.equal(await page.eval(`document.querySelector('#threads details.g-closed').open`), true);
 });
@@ -111,9 +115,11 @@ test('a redraw reuses the Dismissed rows whose minion did not change, and rebuil
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'More' } }) })`);
   assert.equal(await page.eval(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].every((r, i) => r === before[i]) && document.querySelector('#threads details.g-closed') === group`), true);
   for (let n = 0; n < 3; n++) await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...running, last_activity: 'Again ${n}' } }) })`);
+  await frame(page);
   assert.equal(await page.eval(`document.getElementById('threads').childNodes.length`), nodes); // no empty text nodes pile up
   // A dismissed minion that changes gets a new row in its place; its neighbours keep theirs.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...closed[5], title: 'Renamed', updated_at: closed[5].updated_at + 1 } }) })`);
+  await frame(page);
   const same = await page.eval<boolean[]>(`[...document.querySelectorAll('#threads details.g-closed .thread-row')].map((r, i) => r === before[i])`);
   assert.equal(same.length, 50);
   assert.equal(same.filter((x) => !x).length, 1);

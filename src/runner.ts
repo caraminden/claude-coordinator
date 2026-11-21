@@ -28,7 +28,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
-import { isAuthFailure, type TurnPlace } from './claude-link.ts';
+import { type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
@@ -61,7 +61,8 @@ import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { turnPayer } from './access.ts';
-import { MinionQueue, migrateQueues, type Steer } from './minion-queue.ts';
+import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
+import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -146,8 +147,10 @@ export interface QueuedMessage {
  * this, or resumes it if its process died too.
  */
 interface TurnState {
-  /** Auto-resumes in a row that led to this turn; 0 for a turn people or GitHub started. */
-  resumes: number;
+  /** Auto-resumes in a row that led to this turn, by kind (src/turn-outcome.ts); absent for a turn people or GitHub started. */
+  retries?: Retries;
+  /** A row saved before the retries record kept its counts in these four (read with retriesOf). */
+  resumes?: number;
   stopped?: true;
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
@@ -167,11 +170,8 @@ interface TurnState {
   result?: { error: boolean; text: string | null };
   /** Its minion's deploy went live mid-turn (see deployLive). */
   deployed?: true;
-  /** Usage-limit resumes in a row that led to this turn. */
   limitTries?: number;
-  /** Network-outage resumes in a row that led to this turn (#366). */
   netTries?: number;
-  /** Kill resumes in a row that led to this turn (#1364). */
   killTries?: number;
   /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
   codex?: true;
@@ -379,10 +379,10 @@ export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
 export const COLD_HOLD_MAX_MS = MSG_DEFAULTS.holdH * 3600_000;
 
-/** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
-export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|invalid api key|run \/login|organization has been disabled/i;
+// How a turn ended, and the caps on resuming it, are src/turn-outcome.ts's (#1379); these names stay for the tests.
+export { ACCOUNT_ERROR, isNetworkFailure };
 /** Usage-limit resumes in a row before a minion waits for a person. */
-export const MAX_LIMIT_RESUMES = 3;
+export const MAX_LIMIT_RESUMES = RETRIES.limit.cap;
 const LIMIT_RESUMES = 'limit-resumes';
 /** One linked Claude account's limit: `here` is the one this minion's turn hit, `kind` what Claude called it ('weekly', '5-hour'). */
 export interface LimitedAccount { n: number; label: string; until: number; here?: boolean; kind?: string }
@@ -428,18 +428,8 @@ export function allLimitedText(accounts: LimitedAccount[], at: number): string {
   return `${[...accounts].sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until).map(out).join(' ')} This minion carries on at ${clockTime(at)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
 }
 
-/**
- * Words for a turn that died because the network or the model's API was unreachable (#366): Claude
- * Code's "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)" and
- * "Connection error.", Node's socket and DNS codes, and Codex's "stream disconnected" / "error sending request".
- */
-const NETWORK_ERROR = /\b(EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b|can['’]t reach the api server|unable to connect to api|API Error: (Connection error|Request timed out)|stream disconnected|error sending request|failed to lookup address|dns error/i;
-/** Whether a failed turn's words say the network or the API was unreachable. An HTTP status means the server answered ("stream disconnected … unexpected status 401"): not an outage. */
-export function isNetworkFailure(text: string): boolean {
-  return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
-}
 /** Network-outage resumes in a row before a thread is left in error for a person. */
-export const MAX_NET_RESUMES = 3;
+export const MAX_NET_RESUMES = RETRIES.net.cap;
 const NET_RESUMES = 'net-resumes';
 /** Threads waiting for the network to come back, in the settings table so the wait outlives a restart. */
 interface NetResume {
@@ -452,12 +442,8 @@ const NET_NOTE = 'Network outage: resumes once it is back';
 const RESUME_NET_PROMPT =
   `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a ship, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
 
-/**
- * A turn killed from outside (out of memory, a container stop, a stray signal) is resumed by the server once (RL1, #1364).
- * Cara, 2026-11-20: "So if it crashes again would it stop for good? I dont want to get in restart loops": a second kill in
- * a row stops for good, with the error and a push.
- */
-export const MAX_KILL_RESUMES = 1;
+/** A turn killed from outside (out of memory, a container stop, a stray signal) is resumed by the server once (RL1, #1364). */
+export const MAX_KILL_RESUMES = RETRIES.kill.cap;
 const KILL_RESUMES = 'kill-resumes';
 /** Killed turns waiting for their resume, in the settings table so the wait outlives a restart. */
 interface KillResume {
@@ -487,7 +473,16 @@ export async function apiReachable(): Promise<boolean> {
 }
 
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
-export const MAX_RESUMES = 2;
+export const MAX_RESUMES = RETRIES.restart.cap;
+
+/** A resume owed until its turn is saved (seam 1's queue keeps the shape it had before the retries record). */
+function owedOf(via: RetryKind, r: Retries): OwedResume {
+  return { resumes: r.restart ?? 0, ...(r.limit ? { limitTries: r.limit } : {}), ...(r.kill ? { killTries: r.kill } : {}), ...(r.switch ? { switchTries: r.switch } : {}), ...(via === 'switch' ? { onAccount: true as const } : {}) };
+}
+/** The retries an owed resume's turn starts with. */
+function owedRetries(o: OwedResume): Retries {
+  return { ...retriesOf({ resumes: o.resumes, limitTries: o.limitTries, killTries: o.killTries }), ...(o.switchTries ? { switch: o.switchTries } : {}) };
+}
 
 function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
@@ -1450,7 +1445,7 @@ export class Runner {
     const kept = this.keptOpen(ticketId);
     if (!kept?.startsWith('its state')) return null;
     this.closing.delete(ticketId);
-    const { closing: _, ...turn } = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? { resumes: 0 };
+    const { closing: _, ...turn } = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? {};
     this.store.setSetting(turnKey(ticketId), turn);
     this.emit(ticketId, 'note', { text: `Claude's close_self was cancelled: ${kept}, so it stays open.` });
     if (byOther) this.store.setSetting(closeCancelledKey(ticketId), kept);
@@ -1496,7 +1491,7 @@ export class Runner {
           // one turn, not a plain one and then the resume.
           if (!owed && this.queue.size(t.id)) later.push(() => this.next(t.id));
         }
-        if (owed) later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount, owed.killTries ?? 0));
+        if (owed) later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
         if (cut) {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
@@ -1524,30 +1519,29 @@ export class Runner {
           this.store.deleteSetting(turnKey(t.id));
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
+          // The same rows as a watched turn's end (src/turn-outcome.ts), under the restart's own cap.
+          const out = outcome({ turn, exit: null, stderr: [], closing: false, ran: { unit: false, container: false }, cut: { rerun } });
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
           // what came after waits for a turn of its own.
-          if (turn?.stopped) {
+          if (out.kind === 'stopped') {
             this.queue.done(t.id);
             if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
             continue;
           }
-          if (rerun) {
+          if (out.followUps.includes('rerun')) {
             later.push(() => !this.isRunning(t.id) && this.next(t.id));
             continue;
           }
-          const resumes = turn?.resumes ?? 0;
-          let skipped: string | null = null;
-          if (turn && 'closing' in turn) skipped = 'It was set to be dismissed, so it was not resumed.';
-          else if (resumes >= MAX_RESUMES) skipped = `It was not resumed: it had already been resumed ${resumes} times in a row.`;
-          if (skipped) {
+          const resumed = out.retry;
+          if (!resumed) {
+            const skipped = out.spent ? `It was not resumed: it had already been resumed ${out.spent.tries} times in a row.` : 'It was set to be dismissed, so it was not resumed.';
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
             this.queue.done(t.id);
             if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
           } else {
-            // A kill resume's count rides along, so a kill after the restart still counts as the second in a row.
-            const killTries = turn?.killTries ?? 0;
-            this.queue.owe(t.id, { resumes: resumes + 1, ...(killTries ? { killTries } : {}) });
-            later.push(() => this.resume(t.id, resumes + 1, 0, false, 0, false, killTries));
+            // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
+            this.queue.owe(t.id, owedOf(resumed.via, resumed.retries));
+            later.push(() => this.resume(t.id, resumed.via, resumed.retries));
           }
         }
         if (/^Using \w+$/.test(t.last_activity ?? '')) {
@@ -1638,10 +1632,11 @@ export class Runner {
   }
 
   /**
-   * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
-   * that were queued behind the cut-off one.
+   * Start an auto-resume turn of kind `via` (a restart, a kill, the usage limit, a network outage, an account switch),
+   * its turn starting with `retries`, with any messages that were queued behind the cut-off one.
    */
-  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0, onAccount = false, killTries = 0, killLine = false): Promise<void> | undefined {
+  private resume(ticketId: number, via: RetryKind, retries: Retries, onCodex = false): Promise<void> | undefined {
+    const killLine = via === 'kill';
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
     const token = this.limitStarting.get(ticketId);
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
@@ -1656,7 +1651,7 @@ export class Runner {
         return this.queue.owe(ticketId, null);
       }
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
-      if (netTries && !this.netWait(ticketId)) return;
+      if (via === 'net' && !this.netWait(ticketId)) return;
       // So does one from the kill line (#1364).
       if (killLine && !this.killWait(ticketId)) return;
       // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
@@ -1669,10 +1664,10 @@ export class Runner {
         this.queue.owe(ticketId, null);
         return;
       }
-      // An account switch's note went with the turn that stopped (switchAccount); a kill resume's with the kill (one line).
-      if (!onAccount && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
+      // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
+      if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : 'Resumed after a server restart' });
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : onAccount ? RESUME_ACCOUNT_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, resumes, limitTries, netTries, killTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, retries);
     }));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
     if (token) void ran.then(() => ours() && this.cancelLimitWait(ticketId));
@@ -1793,7 +1788,7 @@ export class Runner {
   /** The wait stays saved until the resume's turn takes it (takeQueue), so a restart during the last turn's save still resumes. */
   private netResume(ticketId: number) {
     const w = this.netWait(ticketId);
-    if (w) this.resume(ticketId, 0, 0, false, w.tries);
+    if (w) this.resume(ticketId, 'net', { net: w.tries });
   }
 
   private killResumes(): KillResume[] {
@@ -1809,11 +1804,11 @@ export class Runner {
    * A turn killed from outside joins the line of kill resumes, holding the messages queued behind it. One chat line says
    * so; no push: a kill wave costs minutes, not messages (#1364).
    */
-  private waitForKillResume(ticketId: number, live: LiveTurn, turn: TurnState, killed: string) {
+  private waitForKillResume(ticketId: number, live: LiveTurn, retries: Retries, killed: string) {
     // What is left of it goes first: a claude whose wrapper alone was killed (no unit) would race its resume on the session.
     this.signal(live, 'SIGKILL');
     const list = this.killResumes().filter((w) => w.ticket !== ticketId);
-    list.push({ ticket: ticketId, tries: (turn.killTries ?? 0) + 1, resumes: turn.resumes ?? 0 });
+    list.push({ ticket: ticketId, tries: retries.kill ?? 1, resumes: retries.restart ?? 0 });
     this.store.setSetting(KILL_RESUMES, list);
     this.killStarted.delete(ticketId);
     this.emit(ticketId, 'note', { text: `${killed}\nCitadel resumes it by itself in a moment, once: killed again, it stops for good. Messages queued behind it go into that resume.` });
@@ -1872,7 +1867,7 @@ export class Runner {
     this.killStarted.set(w.ticket, Date.now());
     let ran: Promise<void> | undefined;
     try {
-      ran = this.resume(w.ticket, w.resumes, 0, false, 0, false, w.tries, true);
+      ran = this.resume(w.ticket, 'kill', { kill: w.tries, ...(w.resumes ? { restart: w.resumes } : {}) });
     } catch (err: any) {
       console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${err?.message ?? err}`);
     }
@@ -1981,12 +1976,12 @@ export class Runner {
     // wait does: a restart while the resume restores the session still resumes (A2, #1286).
     this.limitStarting.set(w.ticket, {});
     this.armLimitTimer();
-    this.resume(w.ticket, 0, w.tries, !!w.codex);
+    this.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
   }
 
   /** Merge into the saved state of a ticket's running turn. */
   private saveTurn(ticketId: number, patch: Partial<TurnState>) {
-    const turn = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? { resumes: 0 };
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? {};
     this.store.setSetting(turnKey(ticketId), { ...turn, ...patch });
   }
 
@@ -2848,7 +2843,9 @@ export class Runner {
     return started;
   }
 
-  private launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0, killTries = 0) {
+  private launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}) {
+    // An account switch alone isn't a resume here: it carries on its person's own turn on another account.
+    const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill);
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -2889,7 +2886,7 @@ export class Runner {
     // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
-    const askers = [...(resumes || limitTries || netTries || killTries || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const askers = [...(resumed || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
     const asker = askers.find((a) => !this.store.isAdmin(this.store.getUser(a))) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
@@ -2916,7 +2913,7 @@ export class Runner {
     // the effort of the turn whose cache it keeps warm, so its launch matches that turn's.
     const light = !codex && ticket.kind !== 'coordinator' && (keepalive
       ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light
-      : !resumes && !limitTries && !netTries && !killTries && batch.length > 0 && batch.every((m) => m.light));
+      : !resumed && batch.length > 0 && batch.every((m) => m.light));
     const effort = light ? 'low' : itsEffort;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
@@ -3070,7 +3067,7 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(killTries ? { killTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = { ...(Object.keys(retries).length ? { retries } : {}), dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
@@ -3432,13 +3429,9 @@ export class Runner {
     // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
     if (turn?.codex) this.keepCodexLog(ticketId, live.dir);
     const code = exit?.code ?? null;
-    const signal = exit ? exit.signal : 'SIGKILL';
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
     this.statuses.delete(ticketId);
-    const sawResult = !!turn?.result;
-    const resultIsError = !!turn?.result?.error;
-    const resultError = turn?.result?.error ? turn.result.text : null;
     let stderr: string[] = [];
     try {
       stderr = readFileSync(join(live.dir, 'stderr.log'), 'utf8').split('\n').filter(Boolean);
@@ -3446,85 +3439,61 @@ export class Runner {
       // No stderr.
     }
     this.approvals.endTurn(ticketId, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
-    let status: 'idle' | 'error' = 'idle';
-    // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
-    const killed = !stopped && exit && (exit.signal || code === 143)
-      ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${live.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
-      // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).
-      : !stopped && !exit
-        ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${live.container ? 'container' : live.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
-        : null;
+    const closing = this.closing.has(ticketId);
+    const closeReason = this.closing.get(ticketId);
+    this.closing.delete(ticketId);
+    // What the ending means is src/turn-outcome.ts's (#1379); this carries it out.
+    const end: TurnEnd = { turn, exit, stderr, closing, ran: { unit: !!live.unit, container: !!live.container } };
+    let out = outcome(end);
     // A row that outlives the chat's (#1325): kill waves (systemd-oomd's, most often) are counted from these.
-    if (killed) {
+    if (out.killed) {
       const at = Date.now(), how = exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted');
       const row = (oom: boolean) => this.store.addHealthEvent('turn-killed', at, null, `minion ${ticketId}${live.unit ? ` (${live.unit})` : ''}: ${oom ? 'out of memory, says the journal: ' : ''}${how}`);
       if (live.unit) void oomKilled(live.unit).then(row, () => row(false));
       else row(false);
     }
-    if (stopped || (signal && !killed)) {
-      // Stopped by the user; leave it waiting for the next message.
-    } else if (killed || !sawResult || code !== 0 || resultIsError) {
-      status = 'error';
-      // A container's sign-in that stopped working: their messages wait until they link again.
-      // Not a Codex turn's: its 401 is OpenAI's, and says nothing about the Claude sign-in.
-      // A host turn on the server login's own account 1 has no sign-in of Citadel's to expire.
-      const authFailed = !!turn?.person && !turn.codex && (!!turn.container || (turn.account ?? 1) > 1) && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`);
-      if (authFailed) this.onAuthFailure?.(turn!.person!, turn!.account);
-      const payer = this.payerOf(turn?.person);
-      const usage = this.store.getSetting<Usage>(accountUsageKey(payer, turn?.account));
-      const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
-      const reason = killed || resultError?.trim() || startError;
-      const switched = turn ? this.switchAccount(ticketId, turn, reason, usage, authFailed) : null;
-      if (authFailed && switched !== true) this.emit(ticketId, 'note', { text: `${this.store.getUser(turn!.person!)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
-      // Killed from outside before it finished: the server resumes it once (#1364); a second kill in a row stops.
-      // A fresh-start step or a turn set to close isn't carried on, as after a restart (recover).
-      const resumable = !!killed && !!turn && !sawResult && !authFailed && !turn.fresh && !('closing' in turn);
-      const again = resumable && (turn!.killTries ?? 0) >= MAX_KILL_RESUMES;
-      if (switched !== true && resumable && !again) this.waitForKillResume(ticketId, live, turn!, killed!);
-      else if (switched !== true) this.turnFailed(ticketId, again ? `${reason}\nIt was already resumed once after a kill, so it stopped for good: send a message to carry on.` : reason, hideSecrets(stderr.slice(-10).join('\n'), secrets), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0, switched ?? undefined);
-    } else if (turn?.handBack) {
-      // Claude has the Codex turns now.
-      this.store.deleteSetting(codexThreadKey(ticketId));
-    }
+    const cleared = out.followUps.includes('cleared');
+    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' ? 'idle' : 'error';
+    if (status === 'error') out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
+    // Claude has the Codex turns now.
+    else if (cleared && turn?.handBack) this.store.deleteSetting(codexThreadKey(ticketId));
     // A hand-back turn that failed or was stopped may still have done work Codex's thread never saw: the next Codex turn starts a new one from the hand-over.
     const back = turn?.handBack ? this.store.getSetting<CodexThread>(codexThreadKey(ticketId)) : null;
     if (back?.thread) this.store.setSetting(codexThreadKey(ticketId), { ...back, thread: null });
     // A fresh session's handoff is in its transcript once the session exists (#406); then the fresh start's own step, if any.
     if (turn?.handoff && this.store.getTicket(ticketId)?.session_id) this.store.deleteSetting(handoffKey(ticketId));
-    this.endFresh(ticketId, turn ?? null, status === 'idle' && !stopped && !signal, stopped);
+    this.endFresh(ticketId, turn ?? null, cleared, stopped);
     // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);
     if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);
-    if (status === 'idle' && !stopped && !signal) this.clearFailNote(ticketId);
+    if (cleared) this.clearFailNote(ticketId);
     const ran = this.store.getTicket(ticketId);
     const ranIn = ran && this.store.getProject(ran.project_id);
-    if (status === 'idle' && !stopped && !signal && !turn?.codex && ran && ranIn) {
+    if (cleared && !turn?.codex && ran && ranIn) {
       if (turn?.person && turn.account) this.onCleared?.(turn.person, turn.account);
       this.limitCleared(this.payerOf(turn?.person), turnSettings(ran, ranIn).model);
     }
-    const closing = this.closing.has(ticketId);
-    const reason = this.closing.get(ticketId);
-    this.closing.delete(ticketId);
     // Checked again here: the turn may have posted a card or set try/ready after close_self.
     // A notice that needs no action (the PR it just merged, #619) doesn't count as a new message; it stays in the chat, unrun.
+    const close = out.followUps.includes('close');
     const asks = this.queue.msgs(ticketId).some((m) => !m.fyi);
-    const keep = closing && status === 'idle' && !stopped && !signal ? (asks ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
-    if (closing && status === 'idle' && !stopped && !signal && !keep) {
-      this.close(ticketId, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
+    const keep = close ? (asks ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
+    if (close && !keep) {
+      this.close(ticketId, `Claude dismissed this minion${closeReason ? `: ${closeReason}` : '.'}`);
     } else {
       if (keep) this.emit(ticketId, 'note', { text: `Claude asked to dismiss this minion, but ${keep}, so it stays open.` });
       // The note is for people; the next turn hears it too, so the minion doesn't sit open unaware (#619).
       if (keep) this.store.setSetting(closeCancelledKey(ticketId), keep);
       this.setStatus(ticketId, status);
     }
-    if (turn && status === 'idle' && !stopped && !signal && !closing) this.freshAtTurnEnd(ticketId, turn);
-    if (turn && status === 'idle' && !stopped && !signal && !closing && !turn.fresh && !turn.keepalive) this.seamEnrol(ticketId);
+    if (turn && out.followUps.includes('fresh')) this.freshAtTurnEnd(ticketId, turn);
+    if (out.followUps.includes('seam')) this.seamEnrol(ticketId);
     // A real turn that ended well starts a keepalive series from the prefix it cached (#862); anything else ends the series.
-    if (turn?.fp && turn.fpParts && status === 'idle' && !stopped && !signal && !closing) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
+    if (turn?.fp && turn.fpParts && out.followUps.includes('keepalive')) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
     else this.store.deleteSetting(keepaliveKey(ticketId));
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
-    if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
+    if (this.deployedMidTurn.delete(ticketId) && out.followUps.includes('deploy-note')) this.deployLive(ticketId);
     rmSync(live.dir, { recursive: true, force: true });
     this.onFilesMayChange(ticketId);
     // The emulator lease (#1128) ends with the turn that took it.
@@ -3598,11 +3567,46 @@ export class Runner {
   }
 
   /**
+   * Carry out a failed ending (`out`): its account's sign-in, a switch onto another of its person's accounts, the kill
+   * line, or turnFailed's note, wait or error. `turn` is null only for one that never started. Returns the outcome
+   * after the account pick.
+   */
+  private endFailed(ticketId: number, live: LiveTurn, turn: TurnState | null, end: TurnEnd, out: Outcome, stderr: string, code: number | null): Outcome {
+    // A container's sign-in that stopped working: their messages wait until they link again.
+    if (out.authFailed) this.onAuthFailure?.(turn!.person!, turn!.account);
+    const payer = this.payerOf(turn?.person);
+    const usage = this.store.getSetting<Usage>(accountUsageKey(payer, turn?.account));
+    const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
+    const limit = !!out.reason && USAGE_LIMIT.test(out.reason);
+    let pick: ReturnType<Runner['pickAccount']> = null;
+    if (out.askAccount) {
+      pick = this.pickAccount(turn!, out.reason, usage, limit);
+      out = outcome({ ...end, account: pick ? ('resetAt' in pick ? 'all-limited' : 'ready') : null });
+    }
+    if (out.kind === 'switch-account' && out.retry && pick && !('resetAt' in pick)) {
+      const why = limit ? out.reason! : `This account's Claude sign-in expired: link it again in Settings → Your account.`;
+      this.emit(ticketId, 'note', { text: `${why}\nCarrying on with ${pick.label} (account ${pick.n}): this turn picks up where it stopped.` });
+      // Owed until its turn takes it (takeQueue): it waits behind this turn's save, and the turn's own record is gone,
+      // so a restart meanwhile would otherwise leave nothing to say it carries on (A1, #1286).
+      this.queue.owe(ticketId, owedOf('switch', out.retry.retries));
+      this.resume(ticketId, 'switch', out.retry.retries);
+      return out;
+    }
+    if (out.switchesSpent) this.emit(ticketId, 'note', { text: `It has already switched Claude accounts ${out.switchesSpent} times in a row, so it stops switching.` });
+    if (out.authFailed) this.emit(ticketId, 'note', { text: `${this.store.getUser(turn!.person!)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
+    // Killed from outside before it finished: the server resumes it once (#1364); a second kill in a row stops.
+    if (out.kind === 'killed' && out.retry) this.waitForKillResume(ticketId, live, out.retry.retries, out.killed!);
+    else this.turnFailed(ticketId, out, stderr, code, usage, codexReset, pick && 'resetAt' in pick ? pick : undefined);
+    return out;
+  }
+
+  /**
    * Say why a turn failed, leading with Claude's own words (its result's error, else its last stderr
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0, allLimited?: AllLimited) {
+  private turnFailed(ticketId: number, out: Outcome, stderr: string, code: number | null, usage = this.usage, codexReset?: number | null, allLimited?: AllLimited) {
+    const reason = out.spent?.via === 'kill' ? `${out.reason}\nIt was already resumed once after a kill, so it stopped for good: send a message to carry on.` : out.reason;
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -3610,8 +3614,9 @@ export class Runner {
     const short = (s: string) => (s.length > 60 ? s.slice(0, 59) + '…' : s);
     // A deploy still waiting to go live keeps its state, so the deploy can dismiss the minion.
     const keepState = this.store.getTicket(ticketId)?.state === 'pending-deploy';
-    if (reason && USAGE_LIMIT.test(reason)) {
-      if (limitTries >= MAX_LIMIT_RESUMES) {
+    if (out.kind === 'limit' && reason) {
+      if (out.spent) {
+        const limitTries = out.spent.tries;
         this.emit(ticketId, 'note', { text: `${reason}\nIt has already resumed ${limitTries} times in a row after the usage limit, so it waits for a message now.` });
         if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit: gave up after ${limitTries} tries, send a message` });
         this.onTurnError(ticketId, `Usage limit: gave up after ${limitTries} resumes in a row`);
@@ -3620,13 +3625,13 @@ export class Runner {
       // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
       // Every one of several accounts limited (#779): the first of them to reset.
       const resetAt = allLimited?.resetAt ?? this.limitResetAt(reason, usage, codexReset);
-      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, allLimited?.accounts);
+      const at = this.waitForLimit(ticketId, resetAt, out.retry!.retries.limit!, allLimited?.accounts);
       const tail = allLimited?.accounts.length ? allLimitedText(allLimited.accounts, at) : `It resumes by itself at ${clockTime(at)}, or sooner once a turn on this plan gets through (a reset, say); a person's message tries now.`;
       this.emit(ticketId, 'note', { text: `${reason}\n${tail}` });
       if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at)}` });
       return;
     }
-    if (reason && ACCOUNT_ERROR.test(reason)) {
+    if (out.kind === 'account-error') {
       this.emit(ticketId, 'error', { text: `${text}\nThis needs a person to sort out the Claude account; it won't retry by itself.` });
       if (!keepState) this.setFailNote(ticketId, { state: 'blocked', note: short(`Needs a person: ${first.replace(/^API Error: \d+ /, '')}`) });
       const last = this.accountPushes.get(first);
@@ -3637,16 +3642,15 @@ export class Runner {
       return;
     }
     // Unreachable network or API: one probe loop waits for it to come back, then resumes (#366). No push: an outage hits everyone at once.
-    // Claude's own result words decide when it has them (why); stderr only when it has none.
-    const netDown = isNetworkFailure(why);
-    if (netDown && netTries < MAX_NET_RESUMES) {
-      this.waitForNetwork(ticketId, netTries + 1);
+    if (out.kind === 'net' && out.retry) {
+      this.waitForNetwork(ticketId, out.retry.retries.net!);
       this.emit(ticketId, 'note', { text: `${text}\nThe network or the API was unreachable, so it resumes by itself once it's back; messages queued behind this turn go into that resume.` });
       this.store.updateTicket(ticketId, { note: NET_NOTE });
       return;
     }
-    const event = this.emit(ticketId, 'error', { text: netDown ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
-    this.setFailNote(ticketId, { note: netDown ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
+    const netTries = out.kind === 'net' ? out.spent!.tries : 0;
+    const event = this.emit(ticketId, 'error', { text: netTries ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
+    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
     this.onTurnError(ticketId, text, event.id);
   }
 
@@ -3658,40 +3662,25 @@ export class Runner {
   }
 
   /**
-   * A Claude turn on one of its person's accounts hit that account's usage limit, or lost its sign-in (#779): the
-   * account is marked, and when another is ready the turn carries on with it now, a switch that isn't one of
-   * MAX_LIMIT_RESUMES (true). Else, on a limit with several accounts, when the first of them resets; null otherwise.
+   * The account pick for a Claude turn on one of its person's accounts that hit that account's usage limit (`limit`),
+   * or else lost its sign-in (#779): the account is marked, and another that is ready is named. Else, on a limit with
+   * several accounts, when the first of them resets; null otherwise.
    */
-  private switchAccount(ticketId: number, turn: TurnState, reason: string | null, usage: Usage | null, authFailed: boolean): true | AllLimited | null {
-    const person = turn.person;
-    if (!person || turn.codex || turn.account === undefined || turn.stopped) return null;
-    const limit = !!reason && USAGE_LIMIT.test(reason);
-    if (!limit && !authFailed) return null;
+  private pickAccount(turn: TurnState, reason: string | null, usage: Usage | null, limit: boolean): { n: number; label: string } | AllLimited | null {
+    const person = turn.person!;
     const several = (this.claudeAccounts?.(person)?.accounts.length ?? 0) > 1;
-    let next: { n: number; label: string } | null = null;
     if (limit) {
-      const r = this.onLimit?.(person, turn.account, this.limitResetAt(reason!, usage));
+      const r = this.onLimit?.(person, turn.account!, this.limitResetAt(reason!, usage));
       if (!r) return null;
-      if (!r.next) {
-        if (!several) return null;
-        const kind = /weekly/i.test(reason!) ? 'weekly' : /(\d+)-hour/i.exec(reason!)?.[0].toLowerCase();
-        const accounts = (r.limits ?? []).map((l) => ({ ...l, ...(l.n === turn.account ? { here: true, ...(kind ? { kind } : {}) } : {}) }));
-        return { resetAt: r.resetAt, accounts };
-      }
-      next = r.next;
-    } else {
-      const acc = this.claudeAccounts?.(person);
-      const n = acc?.inUse;
-      next = n && n !== turn.account ? acc!.accounts.find((a) => a.n === n) ?? null : null;
-      if (!next) return null;
+      if (r.next) return r.next;
+      if (!several) return null;
+      const kind = /weekly/i.test(reason!) ? 'weekly' : /(\d+)-hour/i.exec(reason!)?.[0].toLowerCase();
+      const accounts = (r.limits ?? []).map((l) => ({ ...l, ...(l.n === turn.account ? { here: true, ...(kind ? { kind } : {}) } : {}) }));
+      return { resetAt: r.resetAt, accounts };
     }
-    const why = limit ? reason! : `This account's Claude sign-in expired: link it again in Settings → Your account.`;
-    this.emit(ticketId, 'note', { text: `${why}\nCarrying on with ${next.label} (account ${next.n}): this turn picks up where it stopped.` });
-    // Owed until its turn takes it (takeQueue): it waits behind this turn's save, and the turn's own record is gone,
-    // so a restart meanwhile would otherwise leave nothing to say it carries on (A1, #1286).
-    this.queue.owe(ticketId, { resumes: 0, ...(turn.limitTries ? { limitTries: turn.limitTries } : {}), onAccount: true });
-    this.resume(ticketId, 0, turn.limitTries ?? 0, false, 0, true);
-    return true;
+    const acc = this.claudeAccounts?.(person);
+    const n = acc?.inUse;
+    return (n && n !== turn.account ? acc!.accounts.find((a) => a.n === n) : null) ?? null;
   }
 
   /** The secrets of `ticketId`'s running turn: as launched, or (a turn followed after a restart) read now. */

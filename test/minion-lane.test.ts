@@ -254,6 +254,22 @@ test("the boot sweep's session save holds the minion's next turn until it is don
   await until('the turn to run after the sweep', () => turnsRun() === 1 && !r.isRunning(id));
 });
 
+test("the boot sweep saves an open minion's session but never a dismissed one's, so the nightly prune's deletes stay deleted (#1486)", async () => {
+  const r = makeRunner();
+  const saved = (id: number) => store.listClaudeState(project.id, id).length;
+  const [open, closed] = [minion(), minion()];
+  for (const m of [open, closed]) {
+    store.updateTicket(m.id, { session_id: 'idle' });
+    mkdirSync(join(config, 'projects', projectSlug(m.cwd)), { recursive: true });
+    writeFileSync(join(config, 'projects', projectSlug(m.cwd), 'idle.jsonl'), '{}\n');
+  }
+  store.updateTicket(closed.id, { status: 'closed' });
+  await r.saveIdleSession(open.id, config);
+  await r.saveIdleSession(closed.id, config);
+  assert.equal(saved(open.id), 1, "an open minion's transcript is saved");
+  assert.equal(saved(closed.id), 0, "a dismissed minion's files on disk don't go back into the database");
+});
+
 test("an older copy of a session file never replaces the database's newer one (the boot sweep on a stale login)", async () => {
   const { id, cwd } = minion();
   store.updateTicket(id, { session_id: 'fork' });

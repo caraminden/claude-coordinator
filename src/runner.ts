@@ -1357,13 +1357,15 @@ export class Runner {
   /**
    * The boot sweep's copy of an idle minion's session into the database (nothing pruned): on its lane,
    * so a turn that a message starts meanwhile waits for it. Null when the lane is busy (a turn runs).
+   * A dismissed minion is skipped: its last turn's save has its state, and putting back rows the nightly
+   * prune deleted, from the files still on disk, undid the prune on every boot (#1486).
    */
   saveIdleSession(ticketId: number, configDir: string): Promise<void> | null {
     if (this.lanes.busy(ticketId)) return null;
     return track('session saves', this.lanes.run(ticketId, 'session sweep', () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
-      if (ticket?.session_id && project) return this.saveSession(this.store, ticket, project, configDir, null);
+      if (ticket?.session_id && ticket.status !== 'closed' && project) return this.saveSession(this.store, ticket, project, configDir, null);
     }));
   }
 

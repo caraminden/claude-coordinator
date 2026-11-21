@@ -91,10 +91,10 @@ export async function showTicket(ticketId) {
 const panelTabs = (...labels) => {
   const box = tabs({ items: [['minions', labels[0]], ['orders', labels[1]]], current: 'minions', className: 'label panel-tabs',
     onSelect: (name) => clickPanelTab(box.element.closest('.sidebar'), name) });
-  box.element.querySelectorAll('button').forEach((b) => {
-    b.classList.add('panel-tab', `${b.dataset.key}-tab`);
-    b.dataset.part = `${b.dataset.key}-tab`;
-  });
+  const [minionsTab, ordersTab] = box.element.querySelectorAll('button');
+  minionsTab.dataset.part = 'minions-tab'; // literal names: test/show-parts.test.ts greps for them
+  ordersTab.dataset.part = 'orders-tab';
+  for (const b of [minionsTab, ordersTab]) b.classList.add('panel-tab', `${b.dataset.key}-tab`);
   return box.element;
 };
 

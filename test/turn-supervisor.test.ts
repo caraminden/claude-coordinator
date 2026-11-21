@@ -36,6 +36,7 @@ const bin = join(root, 'bin');
 mkdirSync(bin);
 writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh
 echo "$*" >> "${bin}/calls"
+case "$*" in *turn-wrapper.mjs*) date +%s%3N >> "${bin}/unit-at";; esac
 scope= expand=1
 while [ $# -gt 0 ]; do case $1 in
   --) shift; break;;
@@ -47,6 +48,7 @@ while [ $# -gt 0 ]; do case $1 in
 esac; shift; done
 # The real one turns a command's \$\$ into \$ unless told not to. hang-scope: a scope slow to start, failing once it goes.
 if [ -n "$scope" ]; then
+  [ -f "${bin}/hang-scope" ] && : > "${bin}/scope-hanging"
   while [ -f "${bin}/hang-scope" ]; do sleep 0.05; [ -f "${bin}/hang-scope" ] || exit 1; done
   [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
@@ -188,20 +190,8 @@ test('a supervisor killed mid-turn: the turn finishes and its reply is recorded,
   rmSync(join(t.dir, 'release'), { force: true });
 });
 
-/**
- * How long a turn takes to start in its wrapper with no supervisor at all, right now: the bar the fallback tests measure
- * against, so a loaded machine (a slow node start) doesn't read as the runner waiting on its supervisor.
- */
-async function wrapperStartMs() {
-  const r = server();
-  r.supervisor = false;
-  const t = newTicket();
-  const t0 = Date.now();
-  await started(r, t);
-  const ms = Date.now() - t0;
-  await finished(r, t);
-  return ms;
-}
+/** When the runner last ran systemd-run for a wrapper unit, in ms: the fallback tests time the runner's choice, not node's start. */
+const unitAt = () => Number(readFileSync(join(bin, 'unit-at'), 'utf8').trim().split('\n').at(-1));
 
 /** Point the runner's supervisor.json at a stand-in that seems to run, at `port`, for the length of `fn`. */
 async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
@@ -228,12 +218,11 @@ test('a turn the supervisor can\'t take starts in its wrapper at once', async ()
       probe.close(() => res(p));
     });
   });
-  const bar = await wrapperStartMs();
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(Date.now() - t0 < bar + 1_000, `started in ${Date.now() - t0} ms, a wrapper alone in ${bar} ms`);
+    assert.ok(unitAt() - t0 < 1_000, `its wrapper unit started ${unitAt() - t0} ms after the message`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -244,12 +233,12 @@ test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, 
   const hung = createServer(() => {}); // takes the request and never answers
   servers.push(hung);
   const port = await new Promise<number>((res) => hung.listen(0, '127.0.0.1', () => res((hung.address() as { port: number }).port)));
-  const bar = await wrapperStartMs();
   await standIn(r, port, async () => {
     const t = newTicket();
     const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(Date.now() - t0 < bar + 1_000, `started in ${Date.now() - t0} ms, a wrapper alone in ${bar} ms: the wait for an answer is short`);
+    // The hand-off waits 500 ms for an answer.
+    assert.ok(unitAt() - t0 < 1_500, `its wrapper unit started ${unitAt() - t0} ms after the message: the wait for an answer is short`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -291,6 +280,8 @@ test('a supervisor that dies after taking a turn and before starting it: the run
     r.send(t.id, 'Cara', 'build it');
     const dir = turnDir(r, t.id);
     await until('the supervisor took the turn', () => existsSync(join(dir, `spec.json.${sup.pid}`)));
+    // Killed only once its systemd-run runs: killed before spawning it, nothing would start the turn, and the runner rightly restarts it at once.
+    await until('its systemd-run is starting the scope', () => existsSync(join(bin, 'scope-hanging')));
     process.kill(sup.pid, 'SIGKILL');
     // Its systemd-run, still starting the scope, names the folder: nothing is restarted while it might yet run the turn.
     const ticks = (r as any).turns.get(t.id).ticks;
@@ -304,6 +295,7 @@ test('a supervisor that dies after taking a turn and before starting it: the run
     assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')));
   } finally {
     rmSync(join(bin, 'hang-scope'), { force: true });
+    rmSync(join(bin, 'scope-hanging'), { force: true });
   }
 });
 

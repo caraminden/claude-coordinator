@@ -264,6 +264,7 @@ interface Running {
 export class UltraReviews {
   private live = new Map<string, Running>();
   private timers = new Map<string, NodeJS.Timeout>();
+  private prepping = new Map<number, Promise<unknown>>();
   private deps: Deps;
   private jobs: HostJobs;
 
@@ -536,13 +537,17 @@ export class UltraReviews {
       repo: a.repo, base: a.base, size: a.size, state: 'prepping', pr: { slug, head, base: `${head}-base` }, at: Date.now(),
     };
     this.saveBatch([...this.batch(), row]);
-    void this.openPr(uid, { mode: 'area', repo: a.repo, base: a.base, paths: a.paths }, row.pr!, { name: a.name, question: a.question, by }).then(
+    // One clone and push at a time per person: a 20-area batch shouldn't run 20 clones at once on the shared box.
+    const turn = (this.prepping.get(uid) ?? Promise.resolve()).then(() => (this.batch().some((x) => x.id === id) ? this.openPr(uid, { mode: 'area', repo: a.repo, base: a.base, paths: a.paths }, row.pr!, { name: a.name, question: a.question, by }) : null)).then(
       (pr) => {
+        if (!pr) return; // discarded while it waited its turn
         // Discarded while it prepped: close what it just made.
         if (!this.editRow(id, (x) => Object.assign(x, { state: 'ready', pr }))) this.cleanUp(uid, ticketId, pr);
       },
-      (err) => this.editRow(id, (x) => Object.assign(x, { state: 'failed', error: String(err?.message ?? err).slice(0, 500), pr: undefined })),
+      (err) => void this.editRow(id, (x) => Object.assign(x, { state: 'failed', error: String(err?.message ?? err).slice(0, 500), pr: undefined })),
     );
+    this.prepping.set(uid, turn);
+    void turn.then(() => this.prepping.get(uid) === turn && this.prepping.delete(uid));
     return row;
   }
 

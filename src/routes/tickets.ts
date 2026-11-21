@@ -1179,9 +1179,9 @@ export const ticketRoutes: Route[] = [
       const { id } = ticket;
       const { runner } = app;
       const stopped = runner.stop(id);
-      // Its test-box job still waiting for the screen leaves the line, as it did when its turn ended (#1425).
-      if (stopped) app.machines.minionStopped(id);
-      return json(res, 200, { stopped });
+      // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
+      const followed = app.machines.minionStopped(id);
+      return json(res, 200, { stopped: stopped || followed > 0 });
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.

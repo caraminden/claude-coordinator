@@ -201,6 +201,7 @@ function followed() {
   const { store, relay, box } = world();
   const owner = store.createProject('Peek', null, null);
   const minion = store.createTicket({ project_id: owner.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setMachineProjects(box.id, [owner.id]);
   const agent = stream();
   relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
   relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
@@ -228,7 +229,7 @@ function followed() {
     for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
     return agent.sent.filter((m) => m.session === s && m.message?.id).at(-1).message;
   };
-  return { store, relay, box, minion, agent, proxy, wakes, minionCalls, opened, answer };
+  return { store, relay, box, owner, minion, agent, proxy, wakes, minionCalls, opened, answer };
 }
 
 const QUEUED = 'run in w is waiting in line for the screen (job ab12cd34), 50 s so far: desktop CI job for GitHub Actions has the screen; it is next, 1 in line. Nothing has started yet.';
@@ -288,6 +289,7 @@ test('a job the minion saw start or end itself is not told again; one the box fo
   minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
   const [init] = opened(/^Citadel, following/);
   await answer(init.session, null);
+  assert.doesNotMatch(minionCalls(6, 'job', { id: 'ab12cd34' }, QUEUED), /Citadel is following/, 'said once, when it queued');
   minionCalls(6, 'job', { id: 'ab12cd34' }, RUNNING);
   await answer(init.session, RUNNING);
   assert.equal(wakes.length, 0, 'it saw the start');
@@ -299,7 +301,7 @@ test('a job the minion saw start or end itself is not told again; one the box fo
   const [again] = opened(/^Citadel, following job cd34ef56/);
   await answer(again.session, null);
   await answer(again.session, 'No job cd34ef56 here. Jobs are forgotten when the agent restarts; their logs stay in C:\\jobs.');
-  assert.match(wakes[0].text, /^Your job cd34ef56 on box \(run in w\) is gone: the box's agent restarted and forgot it, so it never ran\./);
+  assert.match(wakes[0].text, /^Your job cd34ef56 on box \(run in w\) is gone: the box's agent restarted and forgot it, so whether it ran is unknown/);
   assert.deepEqual(relay.boxWatches(), []);
 });
 
@@ -319,4 +321,28 @@ test('a restart carries on following the jobs it was following (#1425)', async (
   assert.ok(agent.sent.some((m) => m.message?.method === 'initialize' && /^Citadel, following job ab12cd34/.test(m.who)));
   relay.minionStopped(minion.id);
   next.minionStopped(minion.id);
+});
+
+test('a followed job ends on its report\'s head, not on box words its own output quotes; a box no longer lent to the scheme takes its job out of the line (#1425)', async () => {
+  const { relay, wakes, minionCalls, opened, answer } = followed();
+  minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+  const [init] = opened(/^Citadel, following/);
+  await answer(init.session, null);
+  await answer(init.session, `${RUNNING}\n--- latest output ---\nlog: x. Job ab12cd34; full log on that computer: C:\\y`);
+  assert.equal(relay.boxWatches().length, 1, 'its output quoting an end is no end');
+  assert.match(wakes[0].text, /has the screen now/);
+  await answer(init.session, `${ENDED}\nrun in w is waiting in line for the screen (job ab12cd34), 1 s so far`);
+  assert.deepEqual(relay.boxWatches(), [], 'its tail quoting a wait is no wait');
+  assert.match(wakes[1].text, /has ended\. Its report/);
+
+  const next = followed();
+  next.minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+  const [watch] = next.opened(/^Citadel, following/);
+  await next.answer(watch.session, null);
+  next.store.setMachineProjects(next.box.id, []);
+  await next.answer(watch.session, QUEUED);
+  const [stopper] = next.opened(/^Citadel, for Peek #1 \(the box is no longer lent to its scheme\)$/);
+  assert.deepEqual((await next.answer(stopper.session, null)).params, { name: 'stop_job', arguments: { id: 'ab12cd34' } });
+  assert.match(next.wakes[0].text, /no longer lent to this scheme, so the job left the line/);
+  assert.equal(next.relay.minionStopped(next.minion.id), 0, 'nothing left to stop');
 });

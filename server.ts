@@ -385,6 +385,8 @@ if (!BOOT_CHECK && !PREVIEW && runner.units) {
 // old timed-wakes key in, resends what a killed server left mid-send, and sends what came due while it was down.
 const outbox = new Outbox(store, runner, { author: APP_NAME, log: (msg) => console.error(msg) });
 const timedWakes = new TimedWakes(store, outbox);
+// News of a minion's test-box job (#1425, machines.watchBoxes below): its start, its end with the exit code and last lines.
+outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.payload.text).slice(0, 120)}`, deliver: (rows, ctx) => rows.map((r) => ctx.send(r, String(r.payload.text))) });
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
@@ -492,8 +494,8 @@ const jobs = new MachineJobs({
   },
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
-// A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat (#1425).
-if (!BOOT_CHECK) machines.watchBoxes((id, text) => runner.send(id, APP_NAME, text, [], {}, true));
+// A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
+if (!BOOT_CHECK) machines.watchBoxes((id, text) => { const now = outbox.clock(); outbox.add({ project_id: store.getTicket(id)?.project_id ?? 0, kind: 'box_job', to_kind: 'minion', to_id: id, when_kind: 'at', when_arg: now, due: now, payload: { text }, set_by: 'server' }); });
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);

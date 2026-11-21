@@ -265,7 +265,7 @@ const WATCH_RUNNING_WAIT_S = 50;
 const WATCH_ASK_MS = 90_000;
 const WATCH_RETRY_MS = 15_000;
 /** Past the line's worst case (CI's 40 minute take and 30 minute holds) and a 30 minute run: Citadel stops and says so. */
-const WATCH_MAX_MS = 3 * 60 * 60_000;
+const WATCH_MAX_MS = 12 * 60 * 60_000;
 /** The agent's words (public/machine-agent.mjs report()) for a job waiting, running, ended, or forgotten by a restart. */
 export const JOB_WORDS = {
   queued: /waiting in line for the screen \(job ([0-9a-f]+)\)/,
@@ -275,6 +275,8 @@ export const JOB_WORDS = {
 };
 const { queued: QUEUED_JOB, running: RUNNING_JOB, ended: ENDED_JOB, gone: NO_JOB } = JOB_WORDS;
 const replyText = (reply: any): string => String(reply?.result?.content?.[0]?.text ?? reply?.error?.message ?? '');
+/** A job reply's head, without the output tail, which can quote any of JOB_WORDS. */
+const replyHead = (text: string): string => text.split('\n--- ')[0];
 const watchKey = (w: Pick<BoxWatch, 'machine' | 'job'>) => `${w.machine}:${w.job}`;
 
 function cleanWatches(v: unknown): BoxWatch[] {
@@ -742,8 +744,10 @@ export class MachineRelay {
   }
 
   /** A person stopped this minion's turn: Citadel stops following its jobs, and one still waiting for the screen leaves the line. */
-  minionStopped(ticketId: number) {
-    for (const w of [...this.watches.values()]) if (w.ticket === ticketId) this.unwatch(w, 'stopped');
+  minionStopped(ticketId: number): number {
+    const mine = [...this.watches.values()].filter((w) => w.ticket === ticketId);
+    for (const w of mine) this.unwatch(w, 'stopped');
+    return mine.length;
   }
 
   /** Follow a job for a minion; false if another minion's watch has it. */
@@ -762,13 +766,14 @@ export class MachineRelay {
   }
 
   /** Stop following a job. A minion stopped or closed takes a job still waiting for the screen out of the line, as its turn ending did before. */
-  private unwatch(w: LiveWatch, why: 'seen' | 'told' | 'stopped' | 'closed') {
+  private unwatch(w: LiveWatch, why: 'seen' | 'told' | 'stopped' | 'closed' | 'unlent') {
     if (w.done) return;
     w.done = true;
     if (this.watches.get(watchKey(w)) === w) this.watches.delete(watchKey(w));
     this.saveWatches();
     w.cancel?.();
-    if ((why === 'stopped' || why === 'closed') && !w.started) this.stopJob(w.machine, w.job, `Citadel, for ${this.minionName(w.ticket)} (${why === 'stopped' ? 'its turn was stopped' : 'it was closed'})`);
+    const because = { stopped: 'its turn was stopped', closed: 'it was closed', unlent: 'the box is no longer lent to its scheme' } as Record<string, string>;
+    if (because[why] && !w.started) this.stopJob(w.machine, w.job, `Citadel, for ${this.minionName(w.ticket)} (${because[why]})`);
   }
 
   private minionName(ticketId: number): string {
@@ -799,6 +804,11 @@ export class MachineRelay {
       this.unwatch(w, 'closed');
       return true;
     }
+    if (!this.store.machineGranted(w.machine, t.project_id)) {
+      this.unwatch(w, 'unlent');
+      this.tell(w, `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}): that computer is no longer lent to this scheme${w.started ? '' : ', so the job left the line'}.`);
+      return true;
+    }
     if (Date.now() - w.since > WATCH_MAX_MS) {
       this.unwatch(w, 'told');
       this.tell(w, `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${WATCH_MAX_MS / 3_600_000} hours. Call job with id "${w.job}" there to see where it is.`);
@@ -827,8 +837,9 @@ export class MachineRelay {
       if (w.done) break;
       const text = replyText(reply);
       if (reply?.error) throw new Error(text || JSON.stringify(reply.error));
-      if (QUEUED_JOB.test(text)) continue;
-      if (RUNNING_JOB.test(text)) {
+      const head = replyHead(text);
+      if (QUEUED_JOB.exec(head)?.[1] === w.job) continue;
+      if (RUNNING_JOB.exec(head)?.[1] === w.job) {
         if (!w.started) {
           w.started = true;
           this.saveWatches();
@@ -836,10 +847,11 @@ export class MachineRelay {
         }
         continue;
       }
-      this.unwatch(w, 'told');
-      if (ENDED_JOB.test(text)) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) ${w.started ? 'has ended' : 'got the screen and has ended'}. Its report:\n${asData(box, text)}`);
-      else if (NO_JOB.test(text)) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) is gone: the box's agent restarted and forgot it, so it ${w.started ? 'may not have finished' : 'never ran'}. Run it again if you still need it.`);
+      // Told before the watch is dropped: a restart between the two repeats the message rather than losing it.
+      if (ENDED_JOB.exec(head)?.[1] === w.job) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) ${w.started ? 'has ended' : 'got the screen and has ended'}. Its report:\n${asData(box, text)}`);
+      else if (NO_JOB.test(head)) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) is gone: the box's agent restarted and forgot it, so whether it ${w.started ? 'finished' : 'ran'} is unknown (its log, if any, stays on that computer). Run it again if you still need it.`);
       else this.tell(w, `Citadel stopped following your job ${w.job} on ${box} (${w.what}): the box answered\n${asData(box, text)}`);
+      this.unwatch(w, 'told');
     }
     return [];
   }
@@ -847,10 +859,12 @@ export class MachineRelay {
   /** A minion heard of a job (#1425): one waiting for the screen gets a watch, and the reply says so; one it saw start or end needs no message for that. */
   private heardJob(s: Session, reply: any): any {
     if (s.ticketId === null || !this.wake || reply?.error) return reply;
-    const text = replyText(reply);
+    const text = replyHead(replyText(reply));
     const queued = QUEUED_JOB.exec(text)?.[1];
     if (queued) {
       const what = /^(.+?) is waiting in line for the screen/.exec(text)?.[1]?.slice(0, 200) ?? 'a task';
+      const had = this.watches.get(watchKey({ machine: s.machineId, job: queued }));
+      if (had) return reply; // already followed: said once, in the reply that queued it
       if (!this.watch({ machine: s.machineId, job: queued, ticket: s.ticketId, what, since: Date.now() })) return reply;
       const note = `\n\nCitadel is following job ${queued} for you, which keeps its place in line: you can end your turn now. A message comes to this chat when it gets the screen and again when it ends, with its exit code and last lines. Calling job yourself still works too.`;
       const content = [...reply.result.content];

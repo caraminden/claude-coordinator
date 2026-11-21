@@ -95,8 +95,9 @@ queue_outside() {
 # from an older branch runs the older queue_lock, which waits for every lower ticket, so ranking it could deadlock.
 # The 6th, "train" ($QUEUE_TRAIN, set by land.sh), says it can ride in the ship train of the landing at the front (#1166):
 # it reads that landing's verdict on it from <state>/train/<ticket>. One without it is never taken on a train.
+# The 7th, "yield" ($QUEUE_YIELD, land.sh's retry in place, #1360), says it lets the next waiter take the lock first.
 queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so nobody reads half a ticket
-  printf '%s\n' "$2" "$3" "$4" "$5" order "${QUEUE_TRAIN:-}" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
+  printf '%s\n' "$2" "$3" "$4" "$5" order "${QUEUE_TRAIN:-}" ${QUEUE_YIELD:+yield} >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
 }
 
 queue_phase() {
@@ -148,9 +149,13 @@ queue_ordinal() {
   case $1 in 1) echo next ;; 2) echo 2nd ;; 3) echo 3rd ;; *) echo "${1}th" ;; esac
 }
 
+# QUEUE_KEEP=<its ticket> (land.sh's retry in place, #1360): wait on that ticket, so in the same place in line, instead
+# of a new one at the back. QUEUE_YIELD=yield with it: every other waiter counts as ahead (and they pass over this one)
+# until one of them has taken the lock, nobody else is in line, or QUEUE_YIELD_MAX s went by (a waiter from a branch
+# older than this rule counts it ahead regardless). So it goes right after the next ship, or rides in its train.
 queue_lock() {
   # The stall is timed in microseconds: $SECONDS ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last change (#790).
-  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by=""
+  local q=$1/queue label=$2 n me t l ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
   local -A QUEUE_RANK=()
   local QUEUE_OLD=()
   local QUEUE_ORDER_BY=""
@@ -163,7 +168,10 @@ queue_lock() {
   me=$(queue_proc $$)
   # The ticket and its number, under a lock of its own that is only ever held for these few lines: the
   # ticket is in the folder before the next number goes out, so nobody behind it can miss it.
-  n=$(
+  if [ -n "${QUEUE_KEEP:-}" ] && [ -e "$QUEUE_KEEP" ]; then
+    n=${QUEUE_KEEP##*/}
+    queue_write "$q/$n" "$me" 0 "$label" waiting
+  else n=$(
     exec 8>"$q/.seq.lock"
     flock 8
     n=$(cat "$q/.seq" 2>/dev/null) || n=0
@@ -178,14 +186,14 @@ queue_lock() {
     queue_write "$q/$n" "$me" 0 "$label" waiting
     echo "$((10#$n))" >"$q/.seq"
     echo "$n"
-  )
+  ); fi
   export DEPLOY_QUEUE_TICKET="$q/$n"
   trap queue_done EXIT
 
   queue_order "$q"
   by=$QUEUE_ORDER_BY # an order set before this joined is no news to it
   while :; do
-    ahead=0 head="" headkey=""
+    ahead=0 head="" headkey="" took=""
     queue_order "$q"
     if [ "$QUEUE_ORDER_BY" != "$by" ]; then
       by=$QUEUE_ORDER_BY
@@ -203,16 +211,23 @@ queue_lock() {
       fi
       # The holder is ahead of everyone; a waiter only if it comes before this one in the line's order.
       if [ "${l[1]:-0}" = 0 ]; then
+        [ "${l[6]:-}" != yield ] || continue # it lets the next one go first (QUEUE_YIELD above)
         key=$(queue_key "${t##*/}")
-        [[ $key < $mine ]] || continue
+        [[ $key < $mine ]] || [ -n "${QUEUE_YIELD:-}" ] || continue
         # A waiter that is stopped holds nothing, so it is passed over; it tries for the lock like the head once it wakes.
         [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
       else
-        key=0 # before any waiter's, so the holder is the head
+        key=0 took=1 # before any waiter's, so the holder is the head
       fi
       ahead=$((ahead + 1))
       if [ -z "$head" ] || [[ $key < $headkey ]]; then head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *} headkey=$key; fi
     done
+
+    if [ -n "${QUEUE_YIELD:-}" ] && { [ -n "$took" ] || [ "$ahead" = 0 ] || [ $((SECONDS - yield_from)) -ge "${QUEUE_YIELD_MAX:-30}" ]; }; then
+      QUEUE_YIELD=''
+      queue_write "$DEPLOY_QUEUE_TICKET" "$me" 0 "$label" "$(sed -n 4p "$DEPLOY_QUEUE_TICKET" 2>/dev/null)"
+      continue
+    fi
 
     # The caller's own check while others are ahead (land.sh's early conflict check, #770): a failure leaves the line.
     if [ "$ahead" -gt 0 ] && declare -F queue_wait_check >/dev/null && ! queue_wait_check; then

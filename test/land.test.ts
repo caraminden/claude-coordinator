@@ -622,11 +622,93 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
       const res = c.run({ ...extra, ...procAt(r), LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2' });
       assert.equal(res.status, 1, res.stderr);
       assert.match(res.stderr, /CI and perigee both busy, try again: CI: .*; perigee for 0 min: perigee's heavy slot is taken \(peek #9 cargo test\)/);
+      assert.match(res.stderr, /not your change: keeping its place.*refused by the pipeline again \(CI and perigee both busy for 0 min\), after its one retry in place/s, 'alone in line, it goes again once, then refuses');
       assert.doesNotMatch(res.stderr, /CI FALLBACK/);
       assert.equal(c.localRuns(), 0);
       assert.equal(git(r.source, 'rev-parse', 'main'), main);
     } finally { holder.kill(); }
   }
+});
+
+// #1360 (Cara, 2026-11-20, "Refused ships keep their place"): a refusal by the pipeline, not the ship's change, keeps its
+// ticket and goes again once; alone in line it goes again at once (no ship to let by: land-train.test.ts has the line).
+const retries = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · retry in place · '));
+// A test file that fails on the runs FLAKY_FAIL names (1,3: the 1st and 3rd), counted in FLAKY_COUNT.
+const flaky = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
+
+test('a ship refused because CI and perigee were both busy keeps its ticket, goes again, and lands on that run (#1360)', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const p = procAt(r, { load: 999 });
+  let flipped = false;
+  const res = await c.runAsync({ LAND_CI: '0', ...p, LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2', COORDINATOR_SHARED_DIR: shared }, (s) => {
+    if (!flipped && /not your change/.test(s)) { flipped = true; quietProc(p.LAND_QUIET_PROC); }
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /refused by the pipeline \(CI and perigee both busy for 0 min\), not your change: keeping its place in line and riding the next train, once/);
+  assert.match(res.stderr, /back at the front after its retry in place: starting over from the rebase.*CI FALLBACK/s);
+  assert.equal(c.localRuns(), 1);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  assert.equal(issued(state), 1, 'the same ticket, not a new one at the back');
+  assert.deepEqual(retries(shared).map((l) => l.replace(/^- \S+ /, '')), ['· retry in place · ticket/1-x · CI and perigee both busy for 0 min · landed']);
+  assert.equal(timings(shared).length, 1, 'one landing, one timing line');
+});
+
+test("a ship whose suite couldn't start because the heavy slot was taken goes again once, and lands (#1360)", async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const p = procAt(r);
+  mkdirSync(p.CITADEL_HEAVY_DIR, { recursive: true });
+  // A deploy build going first holds citadel-heavy up without quiet() seeing it, as one that takes the slot after it looked.
+  const first = join(p.CITADEL_HEAVY_DIR, 'first');
+  writeFileSync(first, 'deploy build: npm ci\n');
+  const fresh = setInterval(() => { if (existsSync(first)) writeFileSync(first, 'deploy build: npm ci\n'); }, 200);
+  try {
+    const res = await c.runAsync({ LAND_CI: '0', ...p, LAND_HEAVY_MAX_WAIT: '1', COORDINATOR_SHARED_DIR: shared }, (s) => {
+      if (/not your change/.test(s)) rmSync(first, { force: true });
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /refused by the pipeline \(perigee's heavy slot was taken\), not your change/);
+    assert.equal(c.localRuns(), 1);
+    assert.match(retries(shared)[0], /· retry in place · ticket\/1-x · perigee's heavy slot was taken · landed$/);
+  } finally { clearInterval(fresh); }
+});
+
+test('a perigee red of flakes only goes again once: green lands, red again refuses for good (#1360)', () => {
+  for (const [fails, status, outcome] of [['1', 0, 'landed'], ['1,3', 1, 'refused']] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'test/flaky.test.mjs', flaky);
+    const shared = join(r.dir, 'shared');
+    const main = git(r.source, 'rev-parse', 'main');
+    const res = c.run({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: fails, COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, status, res.stderr);
+    assert.match(res.stderr, /refused by the pipeline \(only flakes failed on perigee: test\/flaky\.test\.mjs\), not your change/);
+    assert.equal(readFileSync(join(r.dir, 'count'), 'utf8'), fails === '1' ? '3' : '4', 'the full run and the rerun alone, twice over at most');
+    assert.match(retries(shared)[0], new RegExp(`· retry in place · ticket/1-x · only flakes failed on perigee: test/flaky\\.test\\.mjs · ${outcome}$`));
+    if (status) {
+      assert.match(res.stderr, /refused by the pipeline again \(only flakes failed on perigee: test\/flaky\.test\.mjs\), after its one retry in place.*tests failed on the rebased branch/s);
+      assert.equal(git(r.source, 'rev-parse', 'main'), main, 'red stays red');
+    }
+  }
+});
+
+test('a perigee red with a real failure beside a flake refuses at once, with no retry (#1360)', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'test/flaky.test.mjs', flaky);
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: '1', FAIL_TESTS: '1', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /flaky\.test\.mjs: failed in the full run, passed alone/);
+  assert.match(res.stderr, /tests failed on the rebased branch/);
+  assert.doesNotMatch(res.stderr, /refused by the pipeline|retry in place/);
+  assert.equal(retries(shared).length, 0);
 });
 
 test("a busy perigee doesn't take the recent no-answer note's shortcut: it asks CI again and waits for it", () => {

@@ -36,6 +36,7 @@
 # after it stay in line. Each rider waits in line
 # as before and reads its verdict from <state>/train/<its ticket> (train_verdict below). Off: LAND_TRAIN=0, or for
 # every landing, touch <state>/train-off.
+# A ship refused by the pipeline, not its change, keeps its ticket and rides the next train, once (retry_in_place, #1360).
 #
 # Build branches (#593, specs/build-branches.md in the scheme's shared folder): a build is a branch build/<n>, checked out nowhere.
 #   tools/land.sh --into build/<n> <test files>   a feeder merges into it: rebases onto build/<n> (no rebase when it is
@@ -94,6 +95,11 @@ land_timing() (
   elif [ -n "${t[landed]}" ]; then out=landed; [ -n "${t[live]}" ] || out="landed, not live yet"
   elif [ "$rc" = 1 ]; then out="refused at $phase"
   else out="stopped at $phase"; [ "$rc" = 0 ] || out="$out (exit $rc)"; fi # a kill before the signal traps can end it with 0
+  [ -z "${retried:-}" ] || [ ! -e "$times" ] || case $out in
+    landed*) retro_log "retry in place · $branch · $retried · landed" ;;
+    refused*) retro_log "retry in place · $branch · $retried · refused" ;;
+    *) retro_log "retry in place · $branch · $retried · stopped" ;;
+  esac
   if [ -n "${t[live]}" ]; then live=$((${t[live]} - ${t[queued]:-${t[live]}})); else live=-; fi
   if [ "$mode" = into ]; then # only its own test files: no CI, no deploy
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
@@ -312,7 +318,8 @@ if [ "$mode" = build ]; then
   label="$branch · lands $build"
   ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
 fi
-unset LAND_REBASED LAND_REDO LAND_BUILD
+now_again=${LAND_RETRY_NOW:-}
+unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW
 if [ -n "$check" ]; then
   under=$(under_of)
   case $mode in
@@ -374,7 +381,7 @@ smoke() {
 }
 [ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 quiet=$resumed
-[ "$redo" != 1 ] || quiet=
+[ "$redo" != 1 ] && [ -z "$now_again" ] || quiet=
 times=$state/times-$$ # the same in the rebased copy, which is this process
 if [ -z "$resumed" ]; then
   rm -f "$times" # what a killed landing with this pid left
@@ -822,10 +829,35 @@ quiet() {
   busy=${busy%, }
   [ -z "$busy" ]
 }
+# A refusal by the pipeline, not by the ship's own change (#1360, Cara 2026-11-20, "Refused ships keep their place"): CI
+# and perigee both busy, the heavy slot taken, or a perigee red of flakes only. Once per hand-off a plain land keeps its
+# ticket instead of refusing: it lets go of the lock, the next ship in line takes it (tools/deploy-queue.sh, QUEUE_YIELD)
+# and takes this one on its train as the first rider; with no train (a pipeline change, CI down) this goes right after
+# it. Back at the front, it starts over from its rebase. Only a fully green run ships it, as ever (ADR 0006).
+# <why>: returns when it can't (a second time, or not a plain land), and the caller refuses as before.
+retried=${LAND_RETRIED:-}
+retry_in_place() {
+  [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
+  [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
+  say "refused by the pipeline ($1), not your change: keeping its place in line and riding the next train, once"
+  train_drop
+  ci_done
+  retried=$1
+  export LAND_RETRIED=$1
+  trap 'land_timing $? || true; queue_done' EXIT
+  queue_wait_check() { train_verdict || true; }
+  flock -u 9
+  QUEUE_KEEP=$DEPLOY_QUEUE_TICKET QUEUE_YIELD=yield queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+  unset -f queue_wait_check
+  train_verdict held
+  say "back at the front after its retry in place: starting over from the rebase"
+  LAND_REBASED=1 LAND_RETRY_NOW=1 exec bash "$tools/land.sh" "${args[@]}"
+}
 # Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
 busy_wait() {
   [ -n "$busy_from" ] || busy_from=$SECONDS
   local waited=$((SECONDS - busy_from))
+  [ "$waited" -lt "$QUIET_LIMIT" ] || retry_in_place "CI and perigee both busy for $((waited / 60)) min"
   [ "$waited" -lt "$QUIET_LIMIT" ] || refuse "CI and perigee both busy, try again: CI: $1; perigee for $((waited / 60)) min: $busy. So $untouched"
   # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
   if [ -z "$busy_told" ] || [ $((SECONDS - busy_told)) -ge 300 ]; then
@@ -1281,9 +1313,10 @@ else
   # quiet() looked holds it up no longer than the busy limit's rest: then citadel-heavy gives up (75), and this refuses.
   half=$(( ( ($(nproc 2>/dev/null || echo 2) + 1) / 2 + 1) / 2 ))
   left=$((QUIET_LIMIT - (SECONDS - ${busy_from:-$SECONDS})))
-  CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=$((left > 60 ? left : 60)) \
+  CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
     CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
     "$tools/citadel-heavy" --here "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  [ "$trc" != 75 ] || retry_in_place "perigee's heavy slot was taken"
   [ "$trc" != 75 ] || refuse "CI and perigee both busy, try again: CI: $why; perigee's heavy slot was taken just before the suite could start, and stayed taken (citadel-heavy's lines above), so no test ran. So $untouched"
   [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so $untouched"
   if [ "$trc" != 0 ]; then
@@ -1292,6 +1325,8 @@ else
     find "$state" -maxdepth 1 -name 'land-red-*.log' -mtime +14 -delete 2>/dev/null || true
     kept="$state/land-red-${branch//\//-}.log"
     cp "$log" "$kept" 2>/dev/null || kept=$log
+    failed=$(cat "$kept" 2>/dev/null) || failed=''
+    ! flakes=$(flake_only) || retry_in_place "only flakes failed on perigee: $flakes"
     refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
   fi
 fi

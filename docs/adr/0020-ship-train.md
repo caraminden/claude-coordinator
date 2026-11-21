@@ -54,6 +54,12 @@ No train forms when CI can't answer (no remote, `LAND_CI=0`, a recent ci-down no
 rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all perigee should take on. CI giving no
 answer partway through sends the riders back in line, and the front falls back alone.
 
+A ship refused by the pipeline rather than by its own change (#1360, Cara 2026-11-20, "Refused ships keep their place":
+CI and perigee both busy, perigee's heavy slot taken, or a perigee red of flakes only) keeps its ticket once per
+hand-off. It lets go of the lock with a `yield` line on its ticket (`tools/deploy-queue.sh`), so the next ship takes the
+front and takes it as its train's first rider; with no train, it goes right after that ship. Alone in line it goes
+again at once. A second pipeline refusal refuses it, and only a fully green run ships it (ADR 0006).
+
 Rollbacks: the moving file lists every ship in the train (`tools/deploy-queue.sh`), so when main goes back, each
 ship's commit is recorded as taken back under its own branch. A rider whose minion is stopped while the train is
 tested is dropped, with every ship after it. The train then ships up to the ship before it, and deploy.sh tests

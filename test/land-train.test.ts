@@ -1,10 +1,11 @@
 // The ship train (#1166, tools/land.sh): the landing at the front of the line takes the plain lands waiting behind it,
 // tests them in one CI run and ships them in one deploy; a red train is bisected, and its first red ship refused.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ci, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
+import { ci, git, setup, landAsync, tickets, issued, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
 
 type Ship = { change?: [string, string]; env?: Record<string, string>; on?: number };
@@ -298,5 +299,45 @@ test("a train whose restart is rolled back: its riders go back in line and land 
     assert.doesNotMatch(done[i - 1].stderr, /shipped in ticket\/2-x's ship train/);
   }
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4']);
+  l.done();
+});
+
+// #1360 (Cara, 2026-11-20, "Refused ships keep their place"): ship 2, at the front, is refused by the pipeline (no CI and a
+// busy perigee); it keeps its ticket, lets ship 3 take the lock, and rides ship 3's train as its first rider.
+const busy = (): Record<string, string> => {
+  const dir = mkdtempSync(join(tmpdir(), 'land-busy-'));
+  const proc = quietProc(join(dir, 'proc'), { load: 999 });
+  return { LAND_CI: '0', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy'), LAND_QUIET_LIMIT: '0', LAND_QUIET_POLL: '0.2' };
+};
+const retried = (l: Awaited<ReturnType<typeof line>>) => {
+  const log = join(l.r.dir, 'shared', 'retro-log');
+  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(' · retry in place · ')).map((x) => x.replace(/^- \S+ /, ''));
+};
+const shared = (dir: string) => ({ COORDINATOR_SHARED_DIR: join(dir, 'shared') });
+
+test("a front refused by the pipeline keeps its ticket and rides the next ship's train as its first rider, never ahead of it (#1360)", async () => {
+  const l = await line([{}, { env: busy() }, {}, {}], shared);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /refused by the pipeline \(CI and perigee both busy for 0 min\), not your change: keeping its place in line and riding the next train, once/);
+  assert.match(done[2].stderr, /ship train: ticket\/3-x takes the 2 ships waiting behind it \(ticket\/2-x ticket\/4-x\)/, 'ship 2 first, ship 3 at the front');
+  shipped(l, done[1], 2, 3, 3);
+  shipped(l, done[3], 4, 3, 3);
+  assert.doesNotMatch(done[1].stderr, /back at the front/, 'it never took the lock again');
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f2.txt: 2', 'f4.txt: 4']);
+  assert.equal(issued(l.state), 4, 'no new ticket');
+  assert.deepEqual(retried(l), ['· retry in place · ticket/2-x · CI and perigee both busy for 0 min · landed']);
+  l.done();
+});
+
+test('a retried ship whose train goes red is bisected like any rider, and refused for good (#1360)', async () => {
+  const l = await line([{}, { change: ['red.txt', 'red\n'], env: busy() }, {}, {}], (d) => ({ FAKE_RED_PATH: 'red.txt', ...shared(d) }));
+  const done = await l.go();
+  assert.equal(done[1].status, 1, done[1].stderr);
+  assert.match(done[1].stderr, /not your change: keeping its place/);
+  assert.match(done[1].stderr, /land: tests failed in CI on ticket\/3-x's ship train \(https:\/\/ci\/\d+\), and its bisect found ticket\/2-x the first ship that turned it red/);
+  for (const i of [1, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4']);
+  assert.deepEqual(retried(l), ['· retry in place · ticket/2-x · CI and perigee both busy for 0 min · refused']);
   l.done();
 });

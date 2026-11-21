@@ -88,13 +88,15 @@ function Get-Line {
   return ,$out
 }
 
-# Takes the lock for $mine if it is free or broken (or, $late, whoever has it); false while someone else has it.
+# Takes the lock for this job if it is free or broken (or, $late, whoever has it); false while someone else has it.
 function Take-Lock([bool]$late) {
   for ($i = 0; $i -lt 3; $i++) {
     try {
       $f = [IO.File]::Open($lock, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
       try {
-        $bytes = $utf8.GetBytes($mine)
+        # Its since is when it took the screen, so a long wait in line doesn't count toward the 2 hours.
+        $taken = [ordered]@{ pid = $worker; what = $what; who = $who; since = (& $now); token = $token } | ConvertTo-Json -Compress
+        $bytes = $utf8.GetBytes($taken)
         $f.Write($bytes, 0, $bytes.Length)
       } finally { $f.Dispose() }
       return $true

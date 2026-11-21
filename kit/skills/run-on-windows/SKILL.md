@@ -16,7 +16,7 @@ Citadel's `tools/win-test-box/README.md`.
 
 1. **Push your branch.** The box fetches from origin and never sees your worktree.
 2. **`workspaces`.** Find your scheme's workspace (named after its repo), its tasks, and whether
-   the screen is busy.
+   who has the screen and who waits in its line.
 3. **`git_sync {workspace, ref: "<your branch>"}`.** This gives a detached checkout of
    origin/<branch>.
 4. **Run.** A box workspace has two or three tasks. Each takes one argument: a whole PowerShell command
@@ -34,7 +34,12 @@ Citadel's `tools/win-test-box/README.md`.
    For example, `run_task {workspace, task: "build", args: ["cargo build --tests"]}`. Pass the
    command as one string: quoting across several args is lost on the way to PowerShell.
 5. **Wait.** `run_task` waits up to 50 s, then hands back a job id. Call `job {id, wait: 50}`
-   until it ends. A cold Rust build takes about 10 minutes; later ones take 1–3.
+   until it ends. A cold Rust build takes about 10 minutes; later ones take 1–3. If someone has
+   the screen, a `run`, `run-gpu` or other screen task takes a place in the box's one line, which
+   CI desktop jobs share. It comes back "waiting in line for the screen (job …)", naming who has
+   the screen and how many are ahead. Keep calling `job`: it starts by itself when its turn comes,
+   and its 30 minutes count from then. A queued job nobody calls `job` on for 3 minutes leaves
+   the line when its turn comes, so don't end your turn on one. `stop_job` leaves the line.
 6. **To see the app:**
    - `run_task {task: "run", args: ["cargo run --release"], wait: 5}`. It comes back still running,
      with a job id.
@@ -94,12 +99,13 @@ point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`,
 
 ## What you get back
 
-- **Busy:**
-  - "The screen is busy: desktop CI job … for GitHub Actions" means a CI run has the screen, for
-    as long as that job takes.
-  - "busy … for #N" means another minion has it.
-
-  Do the `build` side meanwhile, or try again in a few minutes. Never stop someone else's job.
+- **Waiting in line:** "waiting in line for the screen … desktop CI job … for GitHub Actions has
+  the screen" means a CI run has it, for as long as that job takes; "… for Peek Auras #N" means
+  another minion. Wait with `job`. A queued job holds its workspace, so `build` and `git_sync`
+  there are refused until it starts and ends, or you stop it: build first, as step 4 says.
+  Never stop someone else's job.
+- **Busy:** only `screenshot` says "The screen is busy". It waits 50 s in line and can't keep a
+  place. Try again in a few minutes, or take it while your own `run` job has the screen.
 - **Pixel tests:** the box is unactivated on purpose, so an "Activate Windows" watermark may
   appear in the bottom-right corner. The first screenshots (2026-11-10) had none, but Windows can
   add it later, so keep pixel checks out of that corner.

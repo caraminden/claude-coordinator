@@ -9,7 +9,7 @@ A Hyper-V VM on Cara's gaming PC (DESKTOP-G248IJ8) for native-app schemes (#369)
   - **CI:** each scheme's GitHub **desktop runner** (the `<slug>-desktop` label) runs its desktop jobs here.
   - **Minions:** Citadel's **machine agent** lends them the box's tools, so they can sync a branch, run a command, launch the app, take a screenshot and stop it (the `citadel:run-on-windows` skill).
 
-  Whoever comes second waits: a CI job queues for up to 40 minutes, and a minion is told who has the screen. **One box serves every native-app scheme** (Cara's pick, 2026-11-07).
+  Whoever comes second waits in **one line**, `C:\citadel-box\screen-line` (#1422): CI jobs and minion tasks are served in the order they arrived. A CI job waits up to 40 minutes. A minion's `run_task` gets its place in line and a job id, and starts once its turn comes. Both see who has the screen and how many wait, as does the box's entry on the Machines page. **One box serves every native-app scheme** (Cara's pick, 2026-11-07).
 
 ## What it costs her PC
 
@@ -156,8 +156,10 @@ Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box;
   - What happened on 2026-11-10 (#461): an update's restart at 02:15 left `AutoAdminLogon` 0 and no stored password, and the box was offline for 8 hours. `stay-signed-in.ps1` now turns off Windows' own sign-in after updates, which clears those values, and keeps the password from expiring after 42 days.
 - **The box shows "Your device ran into a problem and couldn't be repaired"** (Automatic Repair, after a hard reset or a bad update). In its window: **Advanced options → Troubleshoot → Advanced options → Uninstall Updates → Uninstall latest quality update**. Once it starts, run `fix-autologon.ps1` as above.
 - **A `run-gpu` job says the GPU didn't come on.** In the box, `powershell -File C:\citadel-box\gpu.ps1 -Check` shows the GPU's state and who wants it, and `C:\citadel-box\gpu.log` what the switch did. After a driver update on her PC, run `gpu-host.ps1` again.
-- **A CI job waits on "Waiting for the screen".** A minion's run has it, for 30 minutes at most. After 40 minutes the job takes it anyway.
-- **A minion says "The screen is busy".** A CI desktop job or another minion has it. It tries again later.
+- **A CI job waits on "Waiting for the screen".** The line says who has it and how many are ahead. A minion's run holds it for 30 minutes at most. After 40 minutes the job takes it anyway.
+- **A minion's task says "waiting in line for the screen".** A CI desktop job or another minion has it, or others came first. It keeps its place while the minion calls `job`, and starts on its own when its turn comes.
+- **A minion says "The screen is busy".** Only a screenshot says this: it waits 50 s in line, then gives up. Its minion tries again later.
+- **The line looks stuck.** `Get-ChildItem C:\citadel-box\screen-line` in the box lists the waiters, oldest first. A waiter whose process is gone, or whose file wasn't touched for a minute, is dropped by whoever reads the line next, so a stuck line means its first waiter is still alive.
 - **The machine shows offline on Citadel.** In the box: `Get-Content -Tail 20 $env:USERPROFILE\coordinator-agent\machine-agent-citadel-test-box.log`. Usually it's Tailscale signed out.
 - **Take it all off:** `remove-test-box.ps1` (PowerShell as administrator on her PC) turns the VM off, removes it and deletes its disk. Then remove its runners on each repo's GitHub **Runners** page, and its machine on Citadel's Machines page.
 
@@ -175,8 +177,13 @@ Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box;
 | `screen-lock.ps1` | the box: `-Install` adds the job hooks to every `C:\actions-runner-*-desktop\.env`; `-Take`/`-Release` are those hooks |
 | `remove-test-box.ps1` | her PC, as administrator |
 
-The machine agent's side of the lock is `takeScreenLock` in `public/machine-agent.mjs`, which follows the same rules as `screen-lock.ps1`:
-- the file holds JSON `{pid, what, who, since, token}`;
-- the lock is broken when its pid is gone, when it's over 2 hours old, or when it can't be read and is over a minute old.
+The machine agent's side of the lock and the line is `tryScreenLock`, `screenLine` and `screenTurn` in `public/machine-agent.mjs`. It follows the same rules as `screen-lock.ps1`:
+- the lock file holds JSON `{pid, what, who, since, token}`, with `since` the time the screen was taken;
+- the lock is broken when its pid is gone, when it's over 2 hours old, or when it can't be read and is over a minute old;
+- the line is a folder beside the lock, with one file per waiter named `<arrival ms, 15 digits>-<token>.json`. The file holds the same JSON. Files sort by name, which is arrival order;
+- each waiter touches its file every 2 s. A reader drops a waiter whose pid is gone, or whose file is over a minute old. It skips an unreadable file under a minute old, since that one may be mid-write;
+- only the first live waiter takes the lock (create-new), then removes its file. A CI job past 40 minutes takes it without waiting its turn.
+
+An older agent or hook that predates the line ignores it, and only the lock still keeps two users off the screen at once.
 
 Change both together.

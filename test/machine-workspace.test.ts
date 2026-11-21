@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 // @ts-ignore: a plain .mjs the agent's computers download
-import { WorkspaceHost, expand, loadConfig, workspaceReply } from '../public/machine-agent.mjs';
+import { WorkspaceHost, expand, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
 
 // The agent's workspace tools against a real clone with a real origin, as on a laptop.
 const root = mkdtempSync(join(tmpdir(), 'machine-ws-'));
@@ -191,6 +191,9 @@ const shots: string[] = [];
 const box = new WorkspaceHost({
   configFile: boxFile,
   jobsDir: join(root, 'box-jobs'),
+  // A screenshot waits a second in line here, not 50, and the line is looked at often.
+  screenWaitS: 1,
+  linePollMs: 30,
   capture: async (file: string, window: string) => {
     writeFileSync(file, 'PNG!');
     shots.push(window);
@@ -262,25 +265,101 @@ test('a task whose jobs folder can\'t be made fails without leaving its workspac
   assert.deepEqual([...h.busy.keys()], []);
 });
 
-test('the screen lock: a live holder refuses screen tasks, a dead one is taken over', async () => {
+const lineDir = join(root, 'screen-line');
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A waiter in the screen's line as screen-lock.ps1 writes one: named by when it arrived. */
+const ciWaiter = (pid: number, since: number, token = `ci-${pid}`) => {
+  mkdirSync(lineDir, { recursive: true });
+  const place = join(lineDir, `${String(since).padStart(15, '0')}-${token}.json`);
+  writeFileSync(place, JSON.stringify({ pid, what: `desktop CI job ${token}`, who: 'GitHub Actions (caraminden/peek-auras)', since, token }));
+  return place;
+};
+const jobId = (text: string) => text.match(/\(job (\w+)\)/)[1];
+
+test('the screen\'s line (#1422): behind a live holder a screen task gets a place in line, not a refusal, and starts once the screen is free', async () => {
   holdLock(process.ppid);
-  await refused(boxCall('run_task', { workspace: 'peek', task: 'shell' }), /screen is busy: desktop CI job for GitHub Actions \(peek-auras\).*Nothing was started/);
-  await refused(boxCall('screenshot'), /screen is busy/);
   // A build doesn't touch the screen, so it runs beside a CI desktop job.
   assert.match((await boxCall('run_task', { workspace: 'peek', task: 'build' })).text, /succeeded/);
-  assert.equal(JSON.parse(readFileSync(lockFile, 'utf8')).pid, process.ppid);
-  assert.match((await boxCall('workspaces')).text, /Screen: busy, desktop CI job/);
-  // The workspace isn't left busy by a refused screen task.
-  assert.match((await boxCall('git_sync', { workspace: 'peek', ref: 'main' })).text, /Checked out main/);
+  const queued = await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 });
+  assert.match(queued.text, /shell in peek is waiting in line for the screen \(job \w+\), \d+ s so far: desktop CI job for GitHub Actions \(peek-auras\) has the screen, started \d+ s ago; it is next, 1 in line\. Nothing has started yet/);
+  const id = jobId(queued.text);
+  // A screenshot waits behind it, inside its call, then refuses naming the holder and the line.
+  await refused(boxCall('screenshot', {}, '#7 in Delve'), /The screen is busy: desktop CI job for GitHub Actions \(peek-auras\) has the screen, started \d+ s ago, and 1 other is in line \(1 ahead of this\)\. Waited 1 s/);
+  const listed = (await boxCall('workspaces')).text;
+  assert.match(listed, /Screen: busy, desktop CI job for GitHub Actions \(peek-auras\)/);
+  assert.match(listed, /1 in line[\s\S]*1\. task shell in peek for #121 in Peek Auras/);
+  assert.deepEqual(screenState(lockFile).line.map((w: any) => w.who), ['#121 in Peek Auras']);
+  assert.match((await boxCall('job', { id, wait: 0.2 })).text, /waiting in line for the screen.*it is next, 1 in line/);
 
+  rmSync(lockFile); // the CI job ends
+  assert.match((await boxCall('job', { id, wait: 10 })).text, /shell in peek succeeded/);
+  assert.equal(existsSync(lockFile), false, 'let go once done');
+  assert.deepEqual(readdirSync(lineDir), [], 'and out of the line');
+});
+
+test('the screen\'s line serves CI jobs and minion tasks in arrival order', async () => {
+  const ci = ciWaiter(process.ppid, Date.now() - 1000);
+  const queued = await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 });
+  assert.match(queued.text, /nobody has the screen this moment; 1 ahead of it, 2 in line/, 'the screen is free, but the CI job came first');
+  const id = jobId(queued.text);
+  // The CI job takes the screen and leaves the line, as screen-lock.ps1 does; the task is next.
+  holdLock(process.ppid, { what: 'desktop CI job ci-1', who: 'GitHub Actions (caraminden/peek-auras)' });
+  rmSync(ci);
+  // A second CI job that arrives now queues behind the task.
+  const later = ciWaiter(process.ppid, Date.now() + 5, 'ci-later');
+  assert.match((await boxCall('job', { id, wait: 0.2 })).text, /desktop CI job ci-1 for GitHub Actions \(caraminden\/peek-auras\) has the screen.*; it is next, 2 in line/);
+  rmSync(lockFile);
+  assert.match((await boxCall('job', { id, wait: 10 })).text, /succeeded/);
+  assert.deepEqual(screenLine(lockFile).map((w: any) => w.token), ['ci-later'], 'the later CI job is still waiting, now first');
+  rmSync(later);
+});
+
+test('the screen\'s line drops waiters that died or went quiet, and keeps a fresh one it can\'t read yet', () => {
+  const old = (Date.now() - 2 * 60_000) / 1000;
+  const live = ciWaiter(process.ppid, 3);
+  const dead = ciWaiter(deadPid, 1);
+  const quiet = ciWaiter(process.ppid, 2, 'ci-quiet');
+  utimesSync(quiet, old, old);
+  const writing = join(lineDir, '000000000000004-half.json');
+  writeFileSync(writing, '{"pid":');
+  const broken = join(lineDir, '000000000000005-broken.json');
+  writeFileSync(broken, 'nope');
+  utimesSync(broken, old, old);
+  assert.deepEqual(screenLine(lockFile).map((w: any) => w.token), [`ci-${process.ppid}`]);
+  assert.deepEqual(readdirSync(lineDir).sort(), [live, writing].map((p) => p.slice(lineDir.length + 1)).sort());
+  rmSync(live);
+  rmSync(writing);
+});
+
+test('a queued task leaves the line when stopped, or when its turn comes and nobody has asked after it for 3 minutes', async () => {
+  holdLock(process.ppid);
+  const a = jobId((await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0 })).text);
+  assert.match((await boxCall('stop_job', { id: a })).text, /FAILED \(Stopped by #121 in Peek Auras\)/);
+  assert.deepEqual(readdirSync(lineDir), []);
+  assert.equal(JSON.parse(readFileSync(lockFile, 'utf8')).pid, process.ppid, 'the holder keeps the screen');
+
+  const b = jobId((await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0 })).text);
+  box.jobs.get(b).seen = Date.now() - 4 * 60_000; // its minion's turn ended
+  rmSync(lockFile);
+  await sleep(300);
+  assert.match((await boxCall('job', { id: b })).text, /FAILED \(Left the screen's line: its turn came and nobody had called job for it in 3 minutes\. Nothing was started\.\)/);
+  assert.equal(existsSync(lockFile), false, 'it never took the screen');
+  assert.deepEqual(readdirSync(lineDir), []);
+});
+
+test('the screen lock: a dead holder is taken over; an unreadable fresh one is waited on', async () => {
   holdLock(deadPid);
   assert.match((await boxCall('run_task', { workspace: 'peek', task: 'shell' })).text, /succeeded/);
   assert.equal(existsSync(lockFile), false);
   holdLock(process.ppid, { since: Date.now() - 3 * 60 * 60_000 });
   assert.match((await boxCall('run_task', { workspace: 'peek', task: 'shell' })).text, /succeeded/);
   writeFileSync(lockFile, '');
-  await refused(boxCall('run_task', { workspace: 'peek', task: 'shell' }), /screen is busy/);
-  rmSync(lockFile);
+  const id = jobId((await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 })).text);
+  assert.match((await boxCall('job', { id, wait: 0.1 })).text, /waiting in line/);
+  const old = (Date.now() - 2 * 60_000) / 1000;
+  utimesSync(lockFile, old, old); // unreadable and over a minute old: broken
+  assert.match((await boxCall('job', { id, wait: 10 })).text, /succeeded/);
+  assert.equal(existsSync(lockFile), false);
 });
 
 test('screenshots: off unless the owner turns them on, shared with the screen lock, copied to the app', async () => {
@@ -294,7 +373,7 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
   const started = await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 });
   const id = started.text.match(/job (\w+)\)/)[1];
   assert.match((await boxCall('screenshot', { window: 'Peek' })).text, /Took window "Peek - Peek Auras", 800x600/);
-  await refused(boxCall('screenshot', {}, '#7 in Delve'), /screen is busy: task app in peek for #121 in Peek Auras/);
+  await refused(boxCall('screenshot', {}, '#7 in Delve'), /screen is busy: task app in peek for #121 in Peek Auras has the screen, started \d+ s ago\. Waited 1 s/);
   await boxCall('stop_job', { id });
   assert.deepEqual(shots, ['', 'Peek']);
   await refused(boxCall('screenshot', { window: 'x'.repeat(201) }), /at most 200/);

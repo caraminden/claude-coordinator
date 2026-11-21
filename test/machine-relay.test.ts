@@ -140,6 +140,37 @@ test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the
   const late = agent.sent.length;
   relay.fromAgent(box, session, { message: { jsonrpc: '2.0', id: 8, result: { content: [{ type: 'text', text: 'run-gpu in w is still running after 50 s (job 99ff0011).' }] } } });
   assert.ok(agent.sent.slice(late).some((m) => m.message?.method === 'initialize' && m.who === 'the GPU jobs switch on the Machines page'));
+
+  // So is one still waiting in the screen's line (#1422): the switch is checked before it joins, and stops it there too.
+  relay.setLend(box.id, { server: null, workspaces: ['w'] });
+  task(9, 'run-gpu');
+  relay.setLend(box.id, { server: null, workspaces: ['w'], gpu_off: true });
+  const queued = agent.sent.length;
+  relay.fromAgent(box, session, { message: { jsonrpc: '2.0', id: 9, result: { content: [{ type: 'text', text: 'run-gpu in w is waiting in line for the screen (job 77aa0011), 50 s so far: desktop CI job for GitHub Actions has the screen; it is next, 1 in line.' }] } } });
+  const stopper = agent.sent.slice(queued).find((m) => m.message?.method === 'initialize' && m.who === 'the GPU jobs switch on the Machines page');
+  relay.fromAgent(box, stopper.session, { message: { jsonrpc: '2.0', id: stopper.message.id, result: {} } });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(agent.sent.find((m) => m.session === stopper.session && m.message?.method === 'tools/call').message.params, { name: 'stop_job', arguments: { id: '77aa0011' } });
+});
+
+test('a test box\'s beats carry who has its screen and who waits (#1422), cut to size, to the Machines page', () => {
+  const { relay, box } = world();
+  relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
+  assert.equal(relay.view(box).screen, null, 'nothing said yet');
+  const changes: number[] = [];
+  (relay as any).onChange = () => changes.push(1);
+  relay.beat(box, { holder: { what: 'desktop CI job build, run 1', who: 'GitHub Actions (caraminden/peek-auras)', since: 5 }, line: [{ what: 'task run in peek', who: 'Peek Auras #777 (Cara)', since: 6 }, ...Array(60).fill({ what: 'x'.repeat(300), who: 'y', since: 7 })] });
+  const screen = relay.view(box).screen;
+  assert.equal(screen.holder.who, 'GitHub Actions (caraminden/peek-auras)');
+  assert.equal(screen.line[0].who, 'Peek Auras #777 (Cara)');
+  assert.equal(screen.line.length, 50);
+  assert.equal(screen.line[1].what.length, 200);
+  relay.beat(box, { holder: { what: 'desktop CI job build, run 1', who: 'GitHub Actions (caraminden/peek-auras)', since: 5 }, line: screen.line });
+  assert.equal(changes.length, 1, 'an unchanged screen redraws nothing');
+  relay.beat(box, { holder: 'x', line: [5, null] });
+  assert.deepEqual(relay.view(box).screen, { holder: null, line: [] });
+  relay.beat(box);
+  assert.equal(relay.view(box).screen, null, 'a beat that says nothing (an older agent) clears it');
 });
 
 test('a lend keeps gpu_off only when it is true', () => {

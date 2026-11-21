@@ -464,9 +464,9 @@ export function screenLine(file) {
 
 /**
  * One look at the line for a ticket: touches its place, and takes the screen when it is first and the lock is free.
- * Returns { lock } once taken (it has left the line), else { holder, ahead, waiting }.
+ * Returns { lock } once taken (it has left the line), else { holder, ahead, waiting }. `take` false only looks.
  */
-export function screenTurn(file, ticket) {
+export function screenTurn(file, ticket, take = true) {
   try {
     utimesSync(ticket.place, new Date(), new Date());
   } catch {
@@ -475,9 +475,11 @@ export function screenTurn(file, ticket) {
   const line = screenLine(file);
   const at = line.findIndex((w) => w.token === ticket.mine.token);
   const ahead = at < 0 ? line.length : at;
-  if (ahead === 0 && tryScreenLock(file, ticket.mine)) {
+  // The lock's since is when it took the screen, so a long wait in line doesn't count toward LOCK_STALE_MS.
+  const lock = { ...ticket.mine, since: Date.now() };
+  if (take && ahead === 0 && tryScreenLock(file, lock)) {
     leaveScreenLine(ticket);
-    return { lock: ticket.mine };
+    return { lock };
   }
   return { holder: screenHolder(file), ahead, waiting: line.length };
 }
@@ -882,11 +884,12 @@ export class WorkspaceHost {
         if (job.ended) return;
         let turn;
         try {
-          // At the front with nobody asking after it (its minion's turn ended, say): it leaves rather than run unwatched.
-          if (job.line?.ahead === 0 && !job.watching && Date.now() - job.seen > LINE_ABSENT_MS) {
+          // Its turn came with nobody asking after it (its minion's turn ended, say): it leaves rather than run unwatched.
+          const absent = !job.watching && Date.now() - job.seen > LINE_ABSENT_MS;
+          turn = screenTurn(this.screenLock, ticket, !absent);
+          if (absent && turn.ahead === 0) {
             return finish(null, `Left the screen's line: its turn came and nobody had called job for it in ${LINE_ABSENT_MS / 60_000} minutes. Nothing was started.`);
           }
-          turn = screenTurn(this.screenLock, ticket);
         } catch (err) {
           return finish(null, err.message);
         }
@@ -999,7 +1002,8 @@ export class WorkspaceHost {
         const turn = screenTurn(this.screenLock, ticket);
         if (turn.lock) return turn.lock;
         if (Date.now() >= until) {
-          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}, and ${turn.waiting - 1} other${turn.waiting === 2 ? ' is' : 's are'} in line (${turn.ahead} ahead of this). Waited ${this.screenWaitS} s; nothing was taken. A screenshot can't hold a place in line: try again in a few minutes, or take it from inside a run task once that has the screen.`);
+          const others = turn.waiting - 1;
+          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}${others > 0 ? `, and ${others} other${others === 1 ? ' is' : 's are'} in line (${turn.ahead} ahead of this)` : ''}. Waited ${this.screenWaitS} s; nothing was taken. A screenshot can't hold a place in line: try again in a few minutes, or take it from inside a run task once that has the screen.`);
         }
         await sleep(Math.max(0, Math.min(this.linePollMs, until - Date.now())));
       }

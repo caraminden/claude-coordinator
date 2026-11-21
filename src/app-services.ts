@@ -20,7 +20,7 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
 import { track } from './settled.ts';
 import { listSnapshots, restoreSnapshot, snapshotsDir, takeSnapshot, type Snapshot } from './app-snapshots.ts';
-import { THP_PROPS } from './unit-thp.ts';
+import { THP_LINE, THP_PROPS } from './unit-thp.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -194,14 +194,14 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
   files.set(`${unitName(row.name)}.service`, [
     ...head,
     '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`, 'After=network.target', 'StartLimitIntervalSec=0', '',
-    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', SLICE, '',
+    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', SLICE, THP_LINE, '',
     '[Install]', 'WantedBy=default.target', '',
   ].join('\n'));
   for (const [job, t] of Object.entries(manifest.timers)) {
     files.set(`${unitName(row.name, job)}.service`, [
       ...head,
       '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} (Citadel contraption job)`, '',
-      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, SLICE, '',
+      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, SLICE, THP_LINE, '',
     ].join('\n'));
     files.set(`${unitName(row.name, job)}.timer`, [
       ...head,

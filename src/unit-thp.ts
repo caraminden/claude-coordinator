@@ -4,5 +4,8 @@
 // database's pages with it, so the server's reads went to disk. Most of those requests came from Citadel's own groups.
 // A service unit starts from systemd, not from the server, so it doesn't inherit the server's setting (priority.conf);
 // a scope (`--scope`) does inherit from the process that starts it, and refuses the property ("Unknown assignment").
+// An app's unit files (src/app-services.ts unitFiles) carry the line and take it at the app's next deploy.
 // The setting carries across fork and exec, so a container's processes and a turn's tools get it too. systemd 260+.
-export const THP_PROPS = ['-p', 'MemoryTHP=madvise'];
+export const THP_LINE = 'MemoryTHP=madvise';
+/** systemd-run's arguments for it. A unit file Citadel writes takes THP_LINE in its [Service] section. */
+export const THP_PROPS = ['-p', THP_LINE];

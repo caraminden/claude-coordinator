@@ -74,9 +74,11 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
   assert.match(main, /^Restart=always$/m);
   assert.match(main, /^Slice=contraptions\.slice$/m, 'the app unit runs in contraptions.slice (#1238)');
   assert.match(main, /^RestartSec=5$/m);
+  assert.match(main, /^MemoryTHP=madvise$/m, 'huge pages only on request: systemd starts it, so it doesn\'t inherit the server\'s (#1458)');
   assert.match(main, /^WantedBy=default.target$/m);
   const job = files.get('citadel-app-mandate-backup.service')!;
   assert.match(job, /^Type=oneshot$/m);
+  assert.match(job, /^MemoryTHP=madvise$/m, 'and the job units too (#1458)');
   assert.match(job, /^Slice=contraptions\.slice$/m, 'the job unit runs in contraptions.slice (#1238)');
   assert.match(job, /^ExecStart=\/usr\/bin\/node "deploy\/backup.ts" "\$\{DATA_DIR\}"$/m, '${VAR} left for systemd to expand');
   assert.ok(job.includes('Environment="PORT=7341"'), 'jobs get the app\'s environment');

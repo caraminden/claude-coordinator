@@ -609,16 +609,26 @@ namespace Citadel.Desktop
 
         readonly object logLock = new object();
 
-        /// <summary>The probation watch and the feed read log from two threads, so one writes at a time.</summary>
+        /// <summary>
+        /// The probation watch and the feed read log from two threads, so one writes at a time. A few tries, since a scanner
+        /// can hold a new log open for a moment (the test box lost a line that way, #1396).
+        /// </summary>
         public void Log(string line)
         {
-            lock (logLock) try
-            {
-                string log = P("launcher.log");
-                if (File.Exists(log) && new FileInfo(log).Length > 512 * 1024) { TryDelete(log + ".1"); File.Move(log, log + ".1"); }
-                File.AppendAllText(log, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " [" + Program.Version + "] " + line + Environment.NewLine, Encoding.UTF8);
-            }
-            catch { }
+            string text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " [" + Program.Version + "] " + line + Environment.NewLine;
+            lock (logLock)
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        string log = P("launcher.log");
+                        if (File.Exists(log) && new FileInfo(log).Length > 512 * 1024) { TryDelete(log + ".1"); File.Move(log, log + ".1"); }
+                        File.AppendAllText(log, text, Encoding.UTF8);
+                        return;
+                    }
+                    catch (IOException) { Thread.Sleep(100); }
+                    catch { return; }
+                }
         }
     }
 }

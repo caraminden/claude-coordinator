@@ -209,7 +209,9 @@ test (`test/restart-anywhere.test.ts`): a server killed at each step of the send
    the retry ladder to the Taskmaster, a limit-held wake never sent twice, a refused start retried, the migration
    keeping ids with the dual read, the limits and pruning), two `wake_at` flows in `test/restart-anywhere.test.ts`,
    a real-runner wake in `test/wake.test.ts`, and the affected set (host-check, db-setup, schema-compat, db-areas,
-   db-writer, access-matrix, boot-imports). Not run: a boot against a copy of the live database's 34 rows.
+   db-writer, access-matrix, boot-imports), and the migration on the live `timed-wakes` list (41 rows on 2026-11-20)
+   in a fresh database: all 41 moved with ids and fields kept, the key emptied, a second run a no-op. Not run: a full
+   boot on a copy of the live database (625 MB and written constantly, so `.backup` never finished).
 1. **`wake_when_live`**: the `live`, `merged` and `closed` events.
 2. **`relay_when_live`**, with the grouped note to the sender's Taskmaster.
 3. **Start-after chains**, with the held rule.

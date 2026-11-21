@@ -703,9 +703,10 @@ bad_check() {
 # waits for that run, still holding the lock. Landings are one at a time whatever the lock does (the one behind
 # can't know its commit until this one moves main), so letting go of it would speed nobody up. The wait is bounded
 # instead: no runner online, GitHub not answering, a job no runner starts within LAND_CI_START seconds or a run not
-# done within LAND_CI_TIMEOUT all fall back, loudly, to the run on perigee (also LAND_CI=0, for when CI itself is
-# broken). A red run refuses, and never falls back, with one exception (#769): a red in which every failed test file
-# passed when run-tests.sh reran it alone gets one fresh CI run of the same commit, and only a fully green one lands.
+# done within LAND_CI_TIMEOUT (LAND_CI_RERUN more for a run rerunning its failed files alone, ADR 0021) all fall back,
+# loudly, to the run on perigee (also LAND_CI=0, for when CI itself is broken). A red run refuses, and never falls
+# back, with one exception (#769): a red in which every failed test file passed when run-tests.sh reran it alone gets
+# one fresh CI run of the same commit, and only a fully green one lands.
 # That reverses Cara's 2026-11-10 "Keep failing, log it" for CI: she picked "2 Rerun CI on flake-only red" on #767's
 # card, 2026-11-15 (docs/adr/0006-rerun-ci-on-flake-only-red.md).
 tip=$(git rev-parse HEAD)
@@ -798,6 +799,13 @@ CI_STEP='the full suite' # the workflow's step that runs the tests; a run that f
 CI_CLOCK_STEP="the runner's clock" # the workflow's step that fails on a skewed runner clock
 CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spares the next ones theirs
 CI_START=${LAND_CI_START:-90} CI_LIMIT=${LAND_CI_TIMEOUT:-360} CI_POLL=${LAND_CI_POLL:-5}
+# The reruns alone get a window of their own (#1374, Cara 2026-11-20: "maybe that situation should restart the timer?
+# instead of globally raising it to 10m?"). On Nov 20 a busy desktop's full run took 295-351 s, so it ended past the
+# reruns' deadline and every flake counted as a real red. So the workflow reruns the failed files in a step of its own,
+# and at CI_LIMIT a run whose full suite step failed and that has a rerun step gets CI_RERUN s more, once. A run
+# still in its full suite falls back at CI_LIMIT as before. tests.yml's RERUN_WINDOW is the same number:
+# test/ci-runner-choice.test.ts pins them together.
+CI_RERUN_STEP='rerun failed files alone' CI_RERUN=${LAND_CI_RERUN:-180}
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
@@ -886,10 +894,19 @@ ci_done() {
   [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
   ci_id='' ci_pushed=''
 }
+# 0 when the run's full suite step failed and it has a rerun step (#1374), in any state: one already ended means the
+# run ended between the gate's look and this one, and the next look reads its verdict rather than falling back on a
+# red it already has. A first pass still going, a run with no rerun step, or GitHub not answering is no.
+ci_rerunning() {
+  local steps
+  steps=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_STEP\" or .name == \"$CI_RERUN_STEP\") | [.name, .status, .conclusion // \"-\"] | @tsv] | .[]" 2>/dev/null) || return 1
+  grep -qxF "$CI_STEP"$'\t'completed$'\t'failure <<<"$steps" || return 1
+  grep -q "^$CI_RERUN_STEP"$'\t' <<<"$steps"
+}
 ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
 # 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online step stale='' started=$SECONDS waited ci_taken='' nap
+  local url online step stale='' started=$SECONDS waited ci_taken='' nap limit=$CI_LIMIT rerun_wait=''
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
@@ -926,7 +943,15 @@ ci_gate() {
     # Past a limit the suite runs here, but only on a quiet perigee: until then this keeps waiting for the run (busy_wait).
     why=''
     if [ "$ci_status" != in_progress ] && [ "$waited" -ge "$CI_START" ]; then why="no runner started the job within ${CI_START}s"
-    elif [ "$waited" -ge "$CI_LIMIT" ]; then why="CI didn't finish within ${CI_LIMIT}s"; fi
+    elif [ "$waited" -ge "$limit" ]; then
+      if [ -z "$rerun_wait" ] && ci_rerunning; then
+        rerun_wait=1 limit=$((waited + CI_RERUN))
+        say "CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to $((CI_RERUN / 60)) min $((CI_RERUN % 60)) s more for them instead of falling back at ${CI_LIMIT}s ($ci_url)"
+        queue_phase "waiting for CI's reruns alone since $(date +%H:%M)"
+      else
+        why="CI didn't finish within ${limit}s${rerun_wait:+, its reruns alone included}"
+      fi
+    fi
     nap=$CI_POLL
     # On a busy perigee it asks CI and perigee again every QUIET_POLL s, not every CI_POLL s (Josh: "re-checking every 30 s").
     if [ -n "$why" ]; then quiet && { ci_down; return 2; }; busy_wait "$why"; nap=$QUIET_POLL; fi

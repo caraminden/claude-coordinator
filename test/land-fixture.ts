@@ -98,6 +98,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // file not rerun because a real failure already made the run red).
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
+// FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
@@ -134,6 +135,7 @@ case "$*" in
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
     [ -z "\${FAKE_FLAKY_PATH:-}" ] || : >"${calls}.flaky"

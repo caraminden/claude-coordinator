@@ -552,6 +552,53 @@ test('on a busy perigee the ship keeps waiting for CI, and lands on its answer w
   }
 });
 
+// The reruns alone get a window of their own (#1374): on Nov 20 a busy desktop's full run ended at the old limit, so its
+// flakes were never rerun and counted as a real red. At its CI limit land.sh looks at the run's steps once.
+const RERUNNING = 'the full suite\tcompleted\tfailure\nrerun failed files alone\tin_progress\t-\n';
+test("a run rerunning its failed files alone at CI's limit gets the reruns' window, and a red of flakes only lands on its fresh run", async () => {
+  // Reruns that ended in the moment between the gate's two looks count too: the next look reads the run's verdict.
+  for (const steps of [RERUNNING, 'the full suite\tcompleted\tfailure\nrerun failed files alone\tcompleted\tsuccess\n']) await windowed(steps);
+});
+async function windowed(steps: string) {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const gate = join(r.dir, 'ci-gate');
+  const told = (s: string) => /rerunning the failed files alone/.test(s) && !existsSync(gate) && writeFileSync(gate, '');
+  // Quiet perigee: without the window it would fall back at the limit and run the suite here.
+  const res = await c.runAsync({ FAKE_CI: 'red', FAKE_LOG: 'flakes', FAKE_CI_RERUN: 'green', FAKE_CI_GATE: gate, FAKE_STEPS: steps, LAND_CI_TIMEOUT: '1', LAND_CI_RERUN: '60', ...procAt(r) }, told);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to 1 min 0 s more for them instead of falling back at 1s/);
+  assert.match(res.stderr, /running CI once more/);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(c.localRuns(), 0);
+}
+
+test("a run still in its full suite at CI's limit falls back then, as before: the reruns' window is only for reruns under way", () => {
+  for (const steps of ['the full suite\tin_progress\t-\nrerun failed files alone\tqueued\t-\n', '']) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = c.run({ FAKE_CI: 'running', FAKE_STEPS: steps, LAND_CI_TIMEOUT: '1', LAND_CI_RERUN: '600', ...procAt(r) });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /CI FALLBACK: CI didn't finish within 1s/);
+    assert.doesNotMatch(res.stderr, /rerunning the failed files alone/);
+    assert.equal(c.localRuns(), 1);
+  }
+});
+
+test("reruns alone that outlast their window fall back at its end, once: the window is never extended again", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'running', FAKE_STEPS: RERUNNING, LAND_CI_TIMEOUT: '1', LAND_CI_RERUN: '1', ...procAt(r) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stderr.match(/rerunning the failed files alone/g)?.length, 1, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: CI didn't finish within \d+s, its reruns alone included/);
+  assert.equal(c.localRuns(), 1);
+});
+
 test('with no runner online and a busy perigee, the ship asks CI again until a runner is back, and lands on CI', async () => {
   const r = setup();
   const c = ci(r);

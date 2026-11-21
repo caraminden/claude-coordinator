@@ -78,8 +78,13 @@ async function run(files: string[], extra: Record<string, string> = {}, prep?: (
   // A name with no fixture of its own always fails.
   for (const f of files) writeFileSync(join(dir, 'test', f), FIXTURES[f] ?? FIXTURES['always.test.mjs']);
   prep?.(dir);
+  return again(dir, extra);
+}
+
+// run-tests.sh again in the same suite (CI's second step, #1374): the counter files remember what ran.
+async function again(dir: string, extra: Record<string, string> = {}, logName = 'land-test.log') {
   const shared = join(dir, 'shared');
-  const log = join(dir, 'land-test.log');
+  const log = join(dir, logName);
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
     const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: shared, ...extra } }, (err, _out, se) =>
       resolve({ code: err ? ((err as any).code ?? null) : 0, stderr: se }),
@@ -243,6 +248,47 @@ test("a rerun alone is cut at CI's deadline, well before its own limit, and coun
   assert.match(r.log, /test\/once-then-hang\.test\.mjs: rerun alone stopped after \d+s, when CI's answer was due: counts as a real failure/);
   assert.ok(Date.now() - t0 < 40_000, `took ${Date.now() - t0} ms`);
   assert.deepEqual(flakeLines(r.retro), []);
+});
+
+// A ship's CI run under load (#1374): on Nov 20 the full run itself took 295-351 s and ended past the old deadline
+// (creation + 330 s), so every failed file was "not rerun: CI's answer is due" and a flake-only red counted as real.
+// In CI the reruns are a step of their own (DEPLOY_RERUN_LATER, then DEPLOY_RERUN_FROM) with a fresh deadline, which
+// land.sh sees and waits for.
+test("in CI the full run leaves its failed files to the next step and reruns none, whatever the old deadline says", async () => {
+  const r = await run(['once.test.mjs', 'ok.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(-1) });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /run-tests: 1 test file\(s\) failed; CI reruns each alone in its next step/);
+  assert.doesNotMatch(r.log, /rerunning each alone|not rerun|passed alone/);
+  assert.match(readFileSync(join(r.dir, 'reruns'), 'utf8'), /^1 \S+\ntest\/once\.test\.mjs\t\d+\n$/);
+});
+
+test("CI's rerun step reruns the failed files alone with its own fresh deadline: a flake is labelled, and the run stays red", async () => {
+  const r = await run(['once.test.mjs', 'ok.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(-1) });
+  const r2 = await again(r.dir, { DEPLOY_RERUN_FROM: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(150) }, 'reruns.log');
+  assert.equal(r2.code, 1, r2.log);
+  assert.doesNotMatch(r2.log, /tier |kit lane/, 'the rerun step picks no tests of its own');
+  assert.match(r2.log, /run-tests: 1 test file\(s\) failed; rerunning each alone once/, "land.sh's flake_only counts from this line");
+  assert.match(r2.log, /test\/once\.test\.mjs: failed in the full run, passed alone: likely load/);
+  assert.equal(flakeLines(r2.retro).length, 1, r2.retro);
+});
+
+test("CI's rerun step still counts a file that fails again alone as a real red", async () => {
+  const r = await run(['always.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
+  const r2 = await again(r.dir, { DEPLOY_RERUN_FROM: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(150) }, 'reruns.log');
+  assert.equal(r2.code, 1, r2.log);
+  assert.match(r2.log, /test\/always\.test\.mjs: failed again alone: a real failure/);
+});
+
+test("in CI a green full run, or one with too many failures, leaves no reruns for the next step", async () => {
+  const g = await run(['ok.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
+  assert.equal(g.code, 0, g.log);
+  assert.equal(existsSync(join(g.dir, 'reruns')), false);
+  const many = await run([1, 2, 3, 4, 5, 6].map((i) => `always${i}.test.mjs`), { DEPLOY_RERUN_LATER: 'reruns' });
+  assert.equal(many.code, 1, many.log);
+  assert.equal(existsSync(join(many.dir, 'reruns')), false);
+  const none = await again(many.dir, { DEPLOY_RERUN_FROM: 'reruns' }, 'reruns.log');
+  assert.equal(none.code, 0, 'no reruns left: the step adds nothing to the red its first step already is');
+  assert.equal(none.log, '');
 });
 
 test('more failed files than a load blip explains are not rerun, and the run fails', async () => {

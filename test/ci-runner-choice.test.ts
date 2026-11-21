@@ -57,8 +57,27 @@ test('every runner the setup script adds after the first carries the side label'
   assert.match(s, /--labels "\$labels"/);
 });
 
-test("a ship's run fits its reruns alone into the time land.sh waits for it: the deadline is land.sh's CI limit", () => {
-  const limit = read('tools/land.sh').match(/CI_LIMIT=\$\{LAND_CI_TIMEOUT:-(\d+)\}/)?.[1];
-  assert.ok(limit, "land.sh's CI limit");
-  assert.match(read('.github/workflows/tests.yml'), new RegExp(`DEPLOY_RERUN_DEADLINE=\\$\\(\\(created \\+ ${limit} - 30\\)\\)`));
+// The reruns alone are a step of their own with a fresh window (#1374): land.sh, at its CI limit, waits CI_RERUN more for
+// a run in that step, and the step ends its reruns 30 s before that (the job's end and land.sh's next look).
+test("a ship's run reruns its failed files alone in a step of its own, inside the window land.sh gives that step", () => {
+  const land = read('tools/land.sh');
+  const yml = read('.github/workflows/tests.yml');
+  const window = land.match(/CI_RERUN=\$\{LAND_CI_RERUN:-(\d+)\}/)?.[1];
+  const limit = land.match(/CI_LIMIT=\$\{LAND_CI_TIMEOUT:-(\d+)\}/)?.[1];
+  const step = land.match(/CI_RERUN_STEP='([^']+)'/)?.[1];
+  assert.ok(window && limit && step, "land.sh's rerun window, CI limit and rerun step");
+  const at = yml.indexOf(`- name: ${step}`);
+  assert.ok(at > yml.indexOf('- name: the full suite'), 'the rerun step comes after the full suite');
+  const rerun = yml.slice(at, yml.indexOf('- name:', at + 1));
+  const suite = yml.slice(yml.indexOf('- name: the full suite'), at);
+  assert.match(rerun, new RegExp(`RERUN_WINDOW: ${window}\\b`), "the step's window is land.sh's");
+  assert.match(rerun, /DEPLOY_RERUN_DEADLINE=\$\(\(\$\(date \+%s\) \+ RERUN_WINDOW - 30\)\)/, 'its deadline runs from its own start');
+  assert.match(rerun, /DEPLOY_RERUN_FROM="\$RUNNER_TEMP\/reruns"/);
+  assert.match(rerun, /if: \$\{\{ failure\(\) && steps\.suite\.conclusion == 'failure' \}\}/);
+  assert.match(suite, /id: suite/);
+  assert.match(suite, /DEPLOY_RERUN_LATER="\$RUNNER_TEMP\/reruns"/, 'the full suite leaves its reruns to that step');
+  assert.doesNotMatch(suite, /DEPLOY_RERUN_DEADLINE/, 'the full suite reruns nothing, so it needs no deadline');
+  // A land's job outlives the longest wait land.sh gives it.
+  const minutes = Number(yml.match(/timeout-minutes: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) && (\d+)/)?.[1]);
+  assert.ok(minutes * 60 >= Number(limit) + Number(window) + 60, `land runs' ${minutes} min job limit covers ${limit} + ${window} s`);
 });

@@ -5,7 +5,7 @@
 // they run its code, else to the scheme, so a scheme with no target still lists them.
 // Served at GET /api/releases and sent as a `releases` event per scheme when its part changes. Importing it
 // starts nothing: server.ts calls poll() and live().
-import { placedKey, readState, type Placed } from './ship-line-state.ts';
+import { placedKey, readState, shipLineKey, type Placed } from './ship-line-state.ts';
 import type { DeployInfo } from './auto-deploy.ts';
 import type { RollbackInfo } from './rollback.ts';
 import type { Ship } from './branch.ts';
@@ -237,7 +237,15 @@ export class Releases {
     }
     // Who placed the waiting ships (#1358), for the line's rows.
     for (const s of byScheme.values()) {
-      const { placed } = readState(this.d.store, s.projectId);
+      const state = readState(this.d.store, s.projectId);
+      const { placed } = state;
+      // A ship that left the line (shipped) lets go of its pin at once, so a follow-up from the same minion starts unpinned.
+      const here = new Set(s.targets.flatMap((tv) => tv.line.map(placedKey)));
+      const gone = Object.keys(placed).filter((k) => !here.has(k));
+      if (gone.length && s.targets.length) {
+        for (const k of gone) delete placed[k];
+        this.d.store.setSetting(shipLineKey(s.projectId), state);
+      }
       for (const tv of s.targets) tv.line = tv.line.map((e) => (!e.holds && placed[placedKey(e)] ? { ...e, placed: placed[placedKey(e)] } : e));
     }
     for (const [id, list] of copies) {

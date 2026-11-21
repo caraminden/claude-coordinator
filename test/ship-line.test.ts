@@ -89,6 +89,8 @@ test("a person's move pins its ship: a Taskmaster can't move it or pass it, and 
   // #3 ships: its line ticket goes, and a new ship with that ticket's number would start unpinned (pins are by minion).
   rmSync(join(q, '0000000003'));
   app.releases.poll();
+  app.releases.read();
+  assert.ok(!Object.keys(app.store.getSetting<{ placed: Record<string, unknown> }>(`ship-line:${p.id}`)!.placed).includes(`t${ids[2]}`), 'released on read, with no move in between');
   moveShip(app, p.id, 4, seqsFor(line(), 4, 2), CARA);
   const kept = app.store.getSetting<{ placed: Record<string, unknown> }>(`ship-line:${p.id}`)!.placed;
   assert.equal(Object.keys(kept).length, 3, 'the shipped one let go of its pin: #5, #2 and #4 are left');

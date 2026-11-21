@@ -68,7 +68,7 @@ test('reopening a cached chat keeps what it drew and appends what is new, with o
   await waitFor(page, 'the chat again', `(window.first = document.querySelector('#log [data-eid="1"]'))`);
   await page.eval('release()');
   await waitFor(page, 'the caught-up message', `document.querySelector('#log [data-eid="4"]')`);
-  await page.eval('new Promise((r) => setTimeout(r, 200))');
+  await page.eval('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))');
   assert.equal(await page.eval<boolean>('window.first.isConnected'), true, 'the chat was drawn a second time after the catch-up');
   assert.equal(await page.eval<number>('document.querySelectorAll(\'#log [data-eid]\').length'), 4);
   assert.equal(await page.eval<number>('window.afters'), 1, 'the catch-up asked the server more than once');

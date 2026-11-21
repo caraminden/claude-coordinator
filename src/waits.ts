@@ -305,8 +305,10 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
     const busy = holders.map((h) => name(h.who)).join(', ');
     const text = w.reason === 'load'
       ? 'a heavy slot is free, but the box is busy: it starts when the load eases, or within 5 min'
+      : w.reason === 'memory'
+      ? 'a heavy slot is free, but memory is short: it starts when room frees up, or within 5 min, with fewer workers'
       : `${place} in line for a heavy slot${busy ? `, all held (${busy})` : ''}`;
-    out.set(w.who, { kind: 'heavy', stage: 'slot', chip: w.reason === 'load' ? 'slot · busy box' : `slot · ${place}`, text, since: w.since, usual: usual('heavy:slot') });
+    out.set(w.who, { kind: 'heavy', stage: 'slot', chip: w.reason === 'load' ? 'slot · busy box' : w.reason === 'memory' ? 'slot · short on memory' : `slot · ${place}`, text, since: w.since, usual: usual('heavy:slot') });
   });
   return out;
 }

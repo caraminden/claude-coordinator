@@ -53,7 +53,7 @@ test_limit=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) # each test, in ms (#999); a 
 budget=${DEPLOY_RERUN_BUDGET:-300}
 deadline=${DEPLOY_RERUN_DEADLINE:-}
 later=${DEPLOY_RERUN_LATER:-} from=${DEPLOY_RERUN_FROM:-}
-concurrency=${CITADEL_TEST_CONCURRENCY:-$((($(nproc 2>/dev/null || echo 2) + 1) / 2))}
+concurrency=${CITADEL_TEST_CONCURRENCY:-$("$(dirname "${BASH_SOURCE[0]}")/mem-room" workers 2>/dev/null || echo $((($(nproc 2>/dev/null || echo 2) + 1) / 2)))} # by memory room, #1340
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 weight=${DEPLOY_TEST_CPU_WEIGHT-500}

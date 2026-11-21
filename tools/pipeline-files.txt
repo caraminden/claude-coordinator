@@ -22,6 +22,7 @@ tools/lane.sh
 tools/kit-tests.ts
 tools/citadel-wait
 tools/citadel-heavy
+tools/mem-room
 tools/heavy-ci.ts
 tools/boot-check.ts
 tools/failed-files-reporter.ts

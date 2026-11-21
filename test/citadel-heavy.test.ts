@@ -24,6 +24,8 @@ function folder(slots?: number, pressure = 5) {
   const pressureFile = `${dir}-pressure`;
   setPressure(pressureFile, psi(pressure));
   const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_WHAT: undefined,
+    // No test reads the real box's memory (#1340: test/mem-room.test.ts has the memory wait).
+    CITADEL_HEAVY_MEM_NEED: '0', CITADEL_MEM_ROOM_MB: undefined,
     // The slots as they were before #1160's small slot, and never the repo's CI (test/heavy-ci.test.ts has that).
     CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PLAIN_SLOTS: '64' };
   return { dir, env, pressureFile };
@@ -416,4 +418,34 @@ test('plain jobs share one slot at nice 19, and a priority job takes the one abo
   assert.equal(readFileSync(join(root, 'small-nice'), 'utf8').trim(), '19');
   assert.ok(existsSync(join(dir, 'slot-1')), 'the deploy took the one slot above the plain one');
   assert.ok(!existsSync(join(dir, 'slot-2')), 'deploy builds get one slot more than plain jobs, not every slot');
+});
+
+// Memory room (#1340): a free slot and a quiet CPU are not enough while the heavy slice has no room left.
+test('with too little memory room the job waits, says how much, and starts once room frees up', async () => {
+  const { env } = folder(3);
+  const fake = { ...env, CITADEL_HEAVY_MEM_NEED: '2000', CITADEL_MEM_ROOM_MB: '1200' };
+  const a = job(fake, 'Peek #7', touch(join(root, 'mem-up')));
+  await until('the job to say it waits for memory', () => /waiting for memory: 1200 MB free for heavy work, needs 2000 MB/.test(a.err()));
+  assert.ok(!existsSync(join(root, 'mem-up')), 'it waits though a slot is free');
+  assert.match(a.err(), /at most 5 min, then it starts anyway with the workers that fit/);
+  process.kill(-a.child.pid!, 'SIGTERM');
+  await a.done;
+});
+
+test('a job waiting for memory starts anyway after the bound, and says so', async () => {
+  const { env, dir } = folder(3);
+  const a = job({ ...env, CITADEL_HEAVY_MEM_NEED: '2000', CITADEL_MEM_ROOM_MB: '100', CITADEL_HEAVY_MEM_WAIT: '1' }, 'Peek #8', touch(join(root, 'mem-forced')));
+  assert.equal(await a.done, 0);
+  assert.ok(existsSync(join(root, 'mem-forced')));
+  assert.match(a.err(), /memory is still short \(waiting for memory: 100 MB free for heavy work, needs 2000 MB\) after 1 s waiting, so this starts anyway/);
+  assert.match(readFileSync(join(dir, 'history'), 'utf8'), /\tforced\t/);
+});
+
+test('enough memory room starts at once, and a priority job skips the memory wait', async () => {
+  const { env } = folder(3);
+  const ok = job({ ...env, CITADEL_HEAVY_MEM_NEED: '2000', CITADEL_MEM_ROOM_MB: '5000' }, 'Peek #9', touch(join(root, 'mem-ok')));
+  assert.equal(await ok.done, 0);
+  assert.doesNotMatch(ok.err(), /memory/);
+  const p = job({ ...env, CITADEL_HEAVY_MEM_NEED: '2000', CITADEL_MEM_ROOM_MB: '1', CITADEL_HEAVY_PRIORITY: '1' }, 'Deploy #3', touch(join(root, 'mem-prio')));
+  assert.equal(await p.done, 0);
 });

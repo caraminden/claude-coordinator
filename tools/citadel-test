@@ -66,6 +66,15 @@ done <"${CITADEL_TEST_ALWAYS:-$root/tools/always-tests.txt}"
 second=(); export CITADEL_TEST_EXTRA=0
 if [ ${#opts[@]} -gt 0 ]; then second=("${extra[@]}"); else files+=("${extra[@]}"); export CITADEL_TEST_EXTRA=${#extra[@]}; fi
 
+# Workers by the memory the heavy slice has room for (#1340: one suite at 15 workers took 2-3 GB and tipped everyone
+# else): tools/mem-room, 350 MB a worker, at least 1, at most half the cores. CITADEL_TEST_CONCURRENCY wins; without a
+# reading node's own default stands.
+conc=${CITADEL_TEST_CONCURRENCY:-$("$root/tools/mem-room" workers 2>/dev/null)}
+workers=()
+if [[ $conc =~ ^[1-9][0-9]*$ ]]; then
+  workers=("--test-concurrency=$conc")
+  [ -n "${CITADEL_TEST_CONCURRENCY:-}" ] || [ "$conc" -ge $((($(nproc 2>/dev/null || echo 2)) / 2)) ] || say "memory room is short ($("$root/tools/mem-room" mb) MB free for heavy work): running $conc worker(s) at a time"
+fi
 log=${TMPDIR:-/tmp}/citadel-test.log
 err=$(mktemp) out=$(mktemp)
 trap 'rm -f "$err" "$out"' EXIT
@@ -84,13 +93,13 @@ stop_at() {
   [ $status -eq 124 ] && kill -TERM -- "-$pg" 2>/dev/null
   return $status
 }
-stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
+stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
   --test-reporter=spec --test-reporter-destination="$log" --test-reporter="$reporter" --test-reporter-destination=stdout \
   "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
 status=$?
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
   out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2"' EXIT
-  stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
+  stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
     --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
     "${second[@]}" >"$out2" 2>>"$err"
   s2=$?; cat "$log.2" >>"$log"; rm -f "$log.2"

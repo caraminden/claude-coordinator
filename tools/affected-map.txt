@@ -49,6 +49,7 @@ test/**: test/one-until.test.ts test/raw-log-read.test.ts
 
 # The test tooling's own tests.
 tools/citadel-test: test/citadel-test.test.ts test/affected.test.ts
+tools/mem-room: test/mem-room.test.ts test/citadel-test.test.ts test/citadel-heavy.test.ts
 tools/who-touches: test/who-touches.test.ts
 tools/affected.ts: test/affected.test.ts
 tools/affected-map.txt: test/affected.test.ts

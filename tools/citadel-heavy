@@ -22,7 +22,7 @@
 # every suite slowed down and timing-sensitive tests went red. When jobs queue on a busy box, wait.
 #
 # History (#596): when a job ends it appends one tab-separated line to $CITADEL_HEAVY_DIR/history: when it
-# started (ISO), who, what, what it waited on last (none, line, slots, load or forced), the wait and the run in
+# started (ISO), who, what, what it waited on last (none, line, slots, load, memory or forced), the wait and the run in
 # seconds, the exit status and the CPU pressure it was admitted at (- without one). It answers how long jobs wait,
 # on what, per scheme and command, which nothing else keeps. One short append per line, so jobs in several
 # containers can't interleave; a failed write is ignored. Past about 5 MB the job that notices keeps the newest
@@ -138,6 +138,17 @@ load_text() {
   echo "CPU pressure $pressure% over the last minute (it waits at $max_pressure%${load:+; load $load on ${cores:-?} cores})"
 }
 
+# Memory room (#1340): the job's start waits while the room for heavy work (tools/mem-room: the smaller of MemAvailable
+# and the heavy slice's headroom) is under what the job needs, CITADEL_HEAVY_MEM_NEED MB (default 2000: one suite). After
+# CITADEL_HEAVY_MEM_WAIT s (default 300) it starts anyway and a test run sizes its own workers to the room it finds
+# (citadel-test, npm test). Without a reading it never waits. Priority jobs skip this, as they skip the load wait.
+mem_need=${CITADEL_HEAVY_MEM_NEED:-2000}
+[[ $mem_need =~ ^[0-9]+$ ]] || mem_need=2000
+mem_wait=${CITADEL_HEAVY_MEM_WAIT:-300}
+mem_room=
+mem_short() { mem_room=$("$(dirname "$0")/mem-room" mb 2>/dev/null) && [[ $mem_room =~ ^[0-9]+$ ]] && [ "$mem_room" -lt "$mem_need" ]; }
+mem_text() { echo "waiting for memory: ${mem_room:-?} MB free for heavy work, needs $mem_need MB"; }
+
 # The slots this job may use: plain jobs at most CITADEL_HEAVY_PLAIN_SLOTS of them.
 plain=${CITADEL_HEAVY_PLAIN_SLOTS:-1}
 [[ $plain =~ ^[0-9]{1,2}$ ]] && [ "$plain" -ge 1 ] || plain=1
@@ -166,19 +177,29 @@ take() {
   return 1
 }
 
-# The admission decision: succeeds holding a slot it may run in; else $waiting says on what ("slots" or "load").
-# The load clock starts the first time a free slot meets a busy box and keeps running from there.
+# The admission decision: succeeds holding a slot it may run in; else $waiting says on what ("slots", "load" or "memory").
+# The load clock starts the first time a free slot meets a busy box and keeps running from there; the memory clock is
+# the same for a box with too little memory room (#1340).
 waiting=
 load_since=
+mem_since=
 forced=
 admit() {
   if first_waits; then waiting=first; return 1; fi
   take || { waiting=slots; return 1; }
-  read_pressure && [ "$pressure" -ge "$max_pressure" ] && [ -z "$first" ] || return 0
-  load_since=${load_since:-$SECONDS}
-  if [ $((SECONDS - load_since)) -ge "$load_wait" ]; then forced=1; return 0; fi
+  [ -z "$first" ] || return 0
+  if read_pressure && [ "$pressure" -ge "$max_pressure" ]; then
+    load_since=${load_since:-$SECONDS}
+    if [ $((SECONDS - load_since)) -ge "$load_wait" ]; then forced=1; return 0; fi
+    exec 8>&-
+    waiting=load
+    return 1
+  fi
+  mem_short || return 0
+  mem_since=${mem_since:-$SECONDS}
+  if [ $((SECONDS - mem_since)) -ge "$mem_wait" ]; then forced=mem; return 0; fi
   exec 8>&-
-  waiting=load
+  waiting=memory
   return 1
 }
 
@@ -202,6 +223,8 @@ tell() {
     say "${after}$(first_who) goes first (a deploy build, ahead of the line); waiting for it to take a slot ($who: $what)"
   elif [ "$waiting" = load ]; then
     say "${after}a heavy slot is free, but the box is busy: $(load_text). Waiting for it to ease, at most $(dur "$load_wait"), then it starts anyway ($who: $what). Raising the slot count would make every suite slower, not faster."
+  elif [ "$waiting" = memory ]; then
+    say "${after}a heavy slot is free, but $(mem_text). Waiting for room, at most $(dur "$mem_wait"), then it starts anyway with the workers that fit ($who: $what)."
   else
     say "${after}all heavy slots ($(limit)) are busy; waiting for one ($who: $what)"
     holders
@@ -304,7 +327,8 @@ fi
 marked=
 exec 7>&- 6>&-
 rm -f "$waitfile"
-[ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"
+if [ "$forced" = mem ]; then say "memory is still short ($(mem_text)) after $(dur "$mem_wait") waiting, so this starts anyway in slot $((slot + 1)), with the workers that fit"
+elif [ -n "$forced" ]; then say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"; fi
 [ $((SECONDS - since)) -lt 2 ] || [ -n "$forced" ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
 
 # A Node test suite run through tools/citadel-node keeps slot-N.progress up to date with its file counts (#545),

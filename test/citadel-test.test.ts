@@ -24,9 +24,9 @@ function file(name: string, body: string): string {
 const noList = join(tmp, 'none.txt');
 writeFileSync(noList, '# no repo-wide files\n');
 
-function run(args: string[], always = noList): Promise<{ code: number | null; out: string; ms: number }> {
+function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -158,4 +158,15 @@ test('--affected with nothing changed is not a failure: it says so and runs only
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /affected: nothing has changed from HEAD/);
   assert.match(r.out, /affected: nothing to run/);
+});
+
+test('workers follow the memory room: a short room says so and runs fewer files at once (#1340)', async () => {
+  const f = file('room.test.ts', `test('one', () => {});`);
+  const short = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700' });
+  assert.equal(short.code, 0, short.out);
+  assert.match(short.out, /memory room is short \(700 MB free for heavy work\): running 2 worker\(s\) at a time/);
+  const plenty = await run([f], noList, { CITADEL_MEM_ROOM_MB: '100000' });
+  assert.doesNotMatch(plenty.out, /memory room is short/);
+  const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700', CITADEL_TEST_CONCURRENCY: '3' });
+  assert.doesNotMatch(pinned.out, /memory room is short/, 'an explicit CITADEL_TEST_CONCURRENCY wins');
 });

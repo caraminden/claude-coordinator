@@ -430,21 +430,19 @@ function tierRepo(change?: (dir: string) => void, mainName = 'main', list = TIER
 }
 const ran = (dir: string) => ['pipe', 'product'].filter((n) => existsSync(join(dir, `ran-${n}`)));
 
-test('a change that touches only product files leaves out the pipeline test files, and says so (#581)', async () => {
-  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n')));
-  assert.equal(r.code, 0, r.log);
-  assert.deepEqual(ran(r.dir), ['product']);
-  assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\): this change touches nothing in tools\/pipeline-files\.txt$/);
-});
-
-// #1477: the tier was read from the list's last line. Since #1160 put a workflow there (Nov 20), every ship ran
-// every test file, with an empty reason in the log.
-test('a list that ends in a file that is not a test still leaves the pipeline test files out of a product change (#1477)', async () => {
-  const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'main', `${TIER_LIST}.github/workflows/heavy.yml\n`));
-  assert.equal(r.code, 0, r.log);
-  assert.deepEqual(ran(r.dir), ['product']);
-  assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\)/);
-});
+// The second row is #1477: the tier was read from the list's last line. Since #1160 put a workflow there (Nov 20),
+// every ship ran every test file, with an empty reason in the log.
+for (const [what, list] of [
+  ['a list that ends in a test file', TIER_LIST],
+  ['a list that ends in a file that is not a test (#1477)', `${TIER_LIST}.github/workflows/heavy.yml\n`],
+] as const) {
+  test(`a change that touches only product files leaves out the pipeline test files, and says so (#581): ${what}`, async () => {
+    const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'main', list));
+    assert.equal(r.code, 0, r.log);
+    assert.deepEqual(ran(r.dir), ['product']);
+    assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\): this change touches nothing in tools\/pipeline-files\.txt$/);
+  });
+}
 
 test('a red pipeline test file never fails a product change: it does not run (#581)', async () => {
   const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, (dir) => {

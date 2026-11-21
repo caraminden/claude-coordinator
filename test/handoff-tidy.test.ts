@@ -91,15 +91,15 @@ test('a name clash in shipped/ never overwrites, and only a top line marks not p
   assert.equal(markedNotPicked('# H\nGoal\n\n1\n2\n3\n4\n- Not picked: option B'), false);
 });
 
-test('a start naming a moved handoff makes no second ideas row, and reconcile does not throw (#1432)', () => {
+test('a start naming a moved handoff makes no second ideas row, and reconcile does not throw (#1432)', async () => {
   const { dir, store, project, shared, file, minion } = setup();
   file('x.md', '# Handoff X\nDo it.');
-  store.ideas.sync(project, shared);
+  await store.ideas.sync(project, shared);
   tidyForClosed(store, dir, project, 'handoffs/x.md');
   const t = minion('x', `Your brief is ${shared}/handoffs/x.md`);
-  store.ideas.sync(project, shared);
+  await store.ideas.sync(project, shared);
   reconcileMoved(store, dir, project);
-  store.ideas.sync(project, shared);
+  await store.ideas.sync(project, shared);
   const rows = store.db.prepare('SELECT card, handoff, ticket_id FROM ideas WHERE project_id = ?').all(project) as any[];
   assert.equal(rows.length, 1, JSON.stringify(rows));
   assert.equal(rows[0].card, 'handoffs/shipped/x.md');

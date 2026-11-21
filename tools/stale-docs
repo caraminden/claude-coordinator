@@ -2,7 +2,8 @@
 // stale-docs (#1164): two checks for documents that have gone out of date. Plain JavaScript in one file, so the copy on a
 // turn's PATH runs in any scheme's repo; it reads, and writes only when `archive` is told to.
 //
-//   stale-docs refs [--repo <dir>] [--allow <file>]
+//   stale-docs refs [--repo <dir>] [--allow <file>] [--new-since <rev>]
+//     --new-since: report only (file, path) pairs that were not already dead at <rev> (the ship check's mode: old debt never blocks a ship).
 //     Every repo path written in backticks in the repo's own instruction files (CLAUDE.md, README.md, AGENTS.md,
 //     .claude/skills/*/SKILL.md, .claude/rules/*.md) must exist in the repo (git's tracked and untracked files). Prints
 //     `file:line  path  (why)` per dead one and exits 1. A span counts as a path when it has a slash and its first folder is
@@ -36,6 +37,7 @@ for (let i = 0; i < argv.length; i++) {
   const val = () => argv[++i] ?? die(usage);
   if (a === '--repo') opt.repo = val();
   else if (a === '--allow') opt.allow = val();
+  else if (a === '--new-since') opt.newSince = val();
   else if (a === '--dir') opt.dir = val();
   else if (a === '--pins') opt.pins = val();
   else if (a === '--list') opt.list = val();
@@ -62,7 +64,9 @@ function repoFiles(repo) {
 }
 
 function instructionFiles(repo, files) {
-  return files.filter((f) => /^(CLAUDE\.md|README\.md|AGENTS\.md)$/.test(f) || /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f) || /^\.claude\/rules\/[^/]+\.md$/.test(f));
+  // CLAUDE.md and AGENTS.md at the root or in a folder, the root README.md, each copied skill's .md files, and the rules.
+  // A file under a template/ or templates/ folder is for another repo, so its paths are not this one's to check.
+  return files.filter((f) => !/(^|\/)(templates?|node_modules)\//.test(f)).filter((f) => /(^|\/)(CLAUDE|AGENTS)\.md$/.test(f) || f === 'README.md' || /^\.claude\/skills\/[^/]+\/.+\.md$/.test(f) || /^\.claude\/rules\/.+\.md$/.test(f));
 }
 
 function readAllow(file) {
@@ -102,9 +106,13 @@ function exists(p, files, dirs, bases) {
   return files.includes(q) || dirs.has(q) || bases.has(q);
 }
 
-function refsCheck() {
-  const repo = resolve(opt.repo ?? '.');
-  const files = repoFiles(repo);
+/** Every dead backticked path in the repo's instruction files, at the working tree or (rev) at that commit. */
+function deadRefs(repo, rev) {
+  let files;
+  if (rev) {
+    try { files = execFileSync('git', ['-C', repo, 'ls-tree', '-r', '--name-only', rev], { encoding: 'utf8', maxBuffer: 64 << 20 }).split('\n').filter(Boolean); }
+    catch { die(`${rev} is not a commit in ${repo}`); }
+  } else files = repoFiles(repo);
   const dirs = new Set();
   for (const f of files) for (let d = dirname(f); d !== '.'; d = dirname(d)) dirs.add(d);
   const tops = new Set(files.map((f) => f.split('/')[0]).filter((t) => dirs.has(t)));
@@ -114,19 +122,32 @@ function refsCheck() {
   const docs = instructionFiles(repo, files);
   for (const doc of docs) {
     let fence = false;
-    lines(join(repo, doc)).forEach((line, n) => {
+    let text;
+    try { text = rev ? execFileSync('git', ['-C', repo, 'show', `${rev}:${doc}`], { encoding: 'utf8', maxBuffer: 64 << 20 }) : readFileSync(join(repo, doc), 'utf8'); } catch { continue; }
+    text.split('\n').forEach((line, n) => {
       if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return; }
       if (fence) return;
       for (const m of line.matchAll(/`([^`\n]+)`/g)) {
         const p = pathOf(m[1], tops);
         if (!p || allow.some((re) => re.test(p)) || exists(p, files, dirs, bases)) continue;
         const shared = SHARED_DIRS.includes(p.split('/')[0]) ? ' it lives only in the shared folder, which a repo doc can\'t count on: point at the repo, or allow-list it with a reason' : '';
-        dead.push(`${doc}:${n + 1}  ${p}  (not in the repo.${shared})`);
+        dead.push({ doc, p, text: `${doc}:${n + 1}  ${p}  (not in the repo.${shared})` });
       }
     });
   }
-  if (dead.length) { console.log(dead.join('\n')); console.log(`\n${dead.length} dead path${dead.length > 1 ? 's' : ''} in ${docs.length} instruction files. Fix the doc, or add the path to .stale-docs-allow with a reason.`); process.exit(1); }
-  console.log(`ok: every backticked repo path in ${docs.length} instruction files exists`);
+  return { dead, docs };
+}
+
+function refsCheck() {
+  const repo = resolve(opt.repo ?? '.');
+  let { dead, docs } = deadRefs(repo);
+  if (opt.newSince) {
+    // Only the lines a change added: a (file, path) pair already dead at <rev> is old debt, not this change's.
+    const old = new Set(deadRefs(repo, opt.newSince).dead.map((d) => `${d.doc}\0${d.p}`));
+    dead = dead.filter((d) => !old.has(`${d.doc}\0${d.p}`));
+  }
+  if (dead.length) { console.log(dead.map((d) => d.text).join('\n')); console.log(`\n${dead.length} ${opt.newSince ? 'new ' : ''}dead path${dead.length > 1 ? 's' : ''} in ${docs.length} instruction files. Fix the doc, or add the path to .stale-docs-allow with a reason.`); process.exit(1); }
+  console.log(`ok: every backticked repo path in ${docs.length} instruction files exists${opt.newSince ? ' (or was already dead before this change)' : ''}`);
 }
 
 // ---------- shared ----------

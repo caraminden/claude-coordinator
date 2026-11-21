@@ -39,6 +39,26 @@ test('refs: dead paths are named with file and line; real, allowed, placeholder 
   assert.equal((r.stdout.match(/CLAUDE\.md:\d/g) ?? []).length, 3);
 });
 
+test('refs --new-since: old dead paths pass, a newly added one fails; copied skills, nested docs and templates are read or skipped', () => {
+  const repo = join(dir, 'since');
+  execFileSync('git', ['init', '-q', repo]);
+  const git = (...a: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  put(repo, 'tools/real.sh', 'x\n');
+  put(repo, 'CLAUDE.md', 'Old debt `docs/gone.md`.\n');
+  git('add', '-A'); git('commit', '-qm', 'base');
+  const base = git('rev-parse', 'HEAD').trim();
+  assert.equal(run('refs', '--repo', repo, '--new-since', base).status, 0);
+  put(repo, '.claude/skills/s/references/x.md', 'Live `tools/real.sh`, example `<scheme>/a.md`, dead `src/new-gone.ts`.\n');
+  put(repo, 'sub/AGENTS.md', 'Dead `tools/nested-gone.sh`.\n');
+  put(repo, 'kit/template/CLAUDE.md', 'For another repo `src/not-ours.ts`.\n');
+  const r = run('refs', '--repo', repo, '--new-since', base);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /\.claude\/skills\/s\/references\/x\.md:1  src\/new-gone\.ts/);
+  assert.match(r.stdout, /sub\/AGENTS\.md:1  tools\/nested-gone\.sh/);
+  assert.doesNotMatch(r.stdout, /not-ours|real\.sh|docs\/gone|<scheme>/);
+  assert.match(r.stdout, /2 new dead paths/);
+});
+
 test('refs: an allow-list line without a reason is an error; a clean repo says ok', () => {
   const repo = join(dir, 'clean');
   execFileSync('git', ['init', '-q', repo]);

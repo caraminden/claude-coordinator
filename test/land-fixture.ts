@@ -106,6 +106,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // hang run-tests.sh stopped (the same interrupt, but a verdict); FAKE_CUT_KIND: how those runs were cut off, interrupt
 // (default), killed (#1393: run-tests.sh's line for an outside SIGKILL, exit 137) or bare (the whole step killed, only
 // GitHub's exit 137 line); FAKE_LOG=killed-red: killed from outside, but after a test had failed (a verdict);
+// FAKE_LOG=killed-rerun: as after-real, but test/busy.test.ts's rerun alone was killed from outside (no label, #1393);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
 // JSON, which the --jq filter is run on.
 // FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
@@ -198,7 +199,7 @@ case "$*" in
     case \${FAKE_LOG:-mixed} in
       many) printf '%b 7 test files failed: too many for load, so none is rerun\\n' "$p" ;;
       *)
-        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$([ "\${FAKE_LOG:-mixed}" = after-real ] && echo 3 || echo 2)"
+        printf '%b %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\\n' "$p" "$(case \${FAKE_LOG:-mixed} in after-real | killed-rerun) echo 3 ;; *) echo 2 ;; esac)"
         printf '%b test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
         if [ "\${FAKE_LOG:-mixed}" = flakes ]; then
           printf '%b test/busy.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\\n' "$p"
@@ -207,6 +208,7 @@ case "$*" in
         else
           printf '%b test/real.test.ts: failed again alone: a real failure\\n' "$p"
           [ "\${FAKE_LOG:-mixed}" != after-real ] || printf '%b test/busy.test.ts: not rerun: a real failure already makes this run red\\n' "$p"
+          [ "\${FAKE_LOG:-mixed}" != killed-rerun ] || printf '%b test/busy.test.ts: killed (exit 137) when rerun alone after 2s, before its 120s limit: stopped from outside, so it has no label (an unlabelled file keeps the run red)\\n' "$p"
         fi ;;
     esac
     [ -z "\${FAKE_LEAK:-}" ] || printf 'The tests left 1 process(es) running (now killed). Stop what a test starts before deleting its folder\\n'

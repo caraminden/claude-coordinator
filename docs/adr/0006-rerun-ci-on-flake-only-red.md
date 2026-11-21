@@ -41,7 +41,8 @@ never read as the answer.
   leaves Node no summary, so here no test failed means no `✖` anywhere in the log. On perigee's own fallback run it
   keeps its place and goes again once, as a red of flakes only does (#1360).
 - run-tests.sh is unchanged in what it does: its rerun alone still only labels, and its exit code stays red. A red run of
-  the fallback on perigee still refuses at once.
+  the fallback on perigee refuses, except that a red of flakes only (#1360) or a run killed from outside (#1393) keeps
+  its place and goes again once.
 
 ## Consequences
 

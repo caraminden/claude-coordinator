@@ -338,8 +338,9 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
     return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
   if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output))
     return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
-  // Only when every rerun-alone label is "passed alone": one "failed again alone" or "hung" makes it a real red.
-  if (/: failed in the full run, passed alone/.test(output) && !/: (failed again alone|hung when rerun alone)/.test(output))
+  // Only when every rerun-alone label is "passed alone": one "failed again alone" or "hung" makes it a real red, and a
+  // rerun killed from outside (#1393) leaves its file unlabelled, so that red isn't all flakes either.
+  if (/: failed in the full run, passed alone/.test(output) && !/: (failed again alone|hung when rerun alone|killed \(exit \d+\) when rerun alone)/.test(output))
     return k('flake', 'Kind: flake (the failed files passed alone, so load, not your change). Not yours: hand off again; no code change needed.');
   const always = failedFiles.filter((f) => ALWAYS_TESTS.some((a) => f.includes(a)));
   if (always.length)

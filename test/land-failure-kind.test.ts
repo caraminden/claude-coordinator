@@ -36,6 +36,9 @@ test('a flake: the second red whose files all passed alone', () => {
   // CI's failed log carries a job/step prefix on every line, and one real red among the flakes is not a flake
   const mixed = `build\ttests\t2026-11-18T10:00:00Z run-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nbuild\ttests\t2026-11-18T10:00:01Z run-tests: test/b.test.ts: failed again alone: a real failure\nland: tests failed on the rebased branch in CI (https://x/3), so main is untouched`;
   assert.equal(kind(mixed), null);
+  // #1393: a rerun alone killed from outside has no label, so the red is not all flakes either
+  const killed = `run-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nrun-tests: test/b.test.ts: killed (exit 137) when rerun alone after 2s, before its 120s limit: stopped from outside, so it has no label (an unlabelled file keeps the run red)\nland: tests failed on the rebased branch in CI (https://x/4), so main is untouched`;
+  assert.equal(kind(killed), null);
 });
 
 test('a burn-in red (#1443) is the ship\'s own, even when the failing copy quotes a passed-alone line', () => {

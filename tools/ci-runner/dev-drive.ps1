@@ -39,11 +39,12 @@ function Get-RunnerPath([string]$name) {
   }
 }
 
-function Assert-Ready {
+function Assert-Ready([bool]$needDrive) {
   if ($Test) { return }
   # keep-runners.ps1 starts stopped runner services in the first 30 minutes after a boot, which would race a move.
   $up = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
   if ($up.TotalMinutes -lt 31) { throw "The PC started $([int]$up.TotalMinutes) minutes ago: wait until 31 minutes have passed, so nothing restarts a stopped runner mid-move" }
+  if (-not $needDrive) { return }  # Back works with R: gone, which is when it's needed most
   $v = Get-Volume -DriveLetter R -ErrorAction SilentlyContinue
   if (-not $v -or $v.FileSystemLabel -ne 'ci-runners' -or $v.FileSystemType -ne 'ReFS') { throw "R: isn't the ci-runners Dev Drive: run -Do MakeDrive, or -Do Attach after a power cut" }
 }
@@ -80,6 +81,9 @@ function Move-Runner($p) {
       if (-not $i) { "$($p.Name): no $f, skipping"; continue }
       if (Test-Path $old) { throw "$old is already there: move it aside by hand first" }
       # owners kept (git refuses a checkout NETWORK SERVICE doesn't own); /B needs the admin's backup right, which -Test may lack
+      if (Test-Path $new) {  # left from a move before a Back: start clean, so files deleted since don't come back
+        cmd /c rmdir /s /q "$new"; if (Test-Path $new) { throw "couldn't clear the old copy $new" }
+      }
       $keep = if ($Test) { @('/COPY:DAT') } else { @('/COPY:DATO', '/B') }
       robocopy $live $new /E $keep /DCOPY:DAT /SJ /SL /MT:16 /R:1 /W:1 /NFL /NDL /NP | Select-Object -Last 12
       if ($LASTEXITCODE -ge 8) { throw "copying $f failed (robocopy $LASTEXITCODE); $f is untouched" }
@@ -168,7 +172,7 @@ switch ($Do) {
   }
   default {
     if (-not $Runner) { throw "-Do $Do needs -Runner" }
-    Assert-Ready
+    Assert-Ready ($Do -ne 'Back')
     foreach ($n in $Runner) {
       $p = Get-RunnerPath $n
       switch ($Do) { 'Move' { Move-Runner $p } 'Back' { Move-Back $p } 'Cleanup' { Remove-Old $p } }

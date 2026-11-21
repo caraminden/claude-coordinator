@@ -34,10 +34,18 @@ try {
   Invoke-Step Back
 
   Invoke-Step Move
+  Rename-Item "$t\R" 'R-gone'
+  Invoke-Step Back
+  Assert-That (-not (Get-Item "$f\_work" -Force).LinkType) 'back with the drive gone: _work is a real folder again'
+  Rename-Item "$t\R-gone" 'R'
+
+  Invoke-Step Move
+  Assert-That (-not (Test-Path "$f\_work\peek-auras\target\b.rlib")) 'move after back: a file deleted since the first move stays gone'
+  'live' | Set-Content "$f\_work\peek-auras\target\c.rlib"
   Invoke-Step Cleanup
   Assert-That (-not (Test-Path "$f\mise.pre-devdrive")) 'cleanup: the old copy is gone'
   Assert-That ((Get-Content "$f\mise\installs\rust\1.0\rustc.txt") -eq 'tool') 'cleanup: the link inside the old copy was not followed into live files'
-  Assert-That ((Get-Content "$f\_work\peek-auras\target\b.rlib") -eq 'new') 'cleanup: live files intact'
+  Assert-That ((Get-Content "$f\_work\peek-auras\target\c.rlib") -eq 'live') 'cleanup: live files intact'
 
   $refused = $false
   try { Invoke-Step Back } catch { $refused = "$_" -match 'gone' }

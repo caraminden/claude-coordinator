@@ -136,7 +136,9 @@ test('a stopped turn is not resumed, even if the server restarts before it ends'
   before.send(id, 'Cara', 'build it');
   before.send(id, 'Cara', 'never mind');
   // Stopped once its claude has its prompt, and so its SIGTERM handler: a stop while it still starts lands as it starts (#470).
-  await until("readFileSync(prompts, 'utf8').includes('build it')", () => readFileSync(prompts, 'utf8').includes('build it'));
+  // And once the runner has read its first line: the stop's SIGINT ends the fake, and crash waiting on that line would
+  // let this runner wrap the dead turn up and delete its folder first (#1428).
+  await until("the turn's first line", () => store.getSetting<any>(`turn:${id}`)?.offset > 0);
   before.stop(id);
   await crash(before, id);
 

@@ -8,6 +8,7 @@ import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
 import { until } from './wait.ts';
+import { settled as settledInProcess } from '../src/settled.ts';
 import { isTurnNote } from '../src/codex.ts';
 
 /**
@@ -144,6 +145,16 @@ export function agentToken(data: string, id: number): string {
 
 export { until };
 
+/**
+ * Wait until this process's own background work is done (#1437): its DB write workers' queues, session saves and
+ * restores, WAL checkpoint rounds. For a test with an in-process Store; a booted server has `srv.settled()`. Throws,
+ * naming what was still busy, after `ms`.
+ */
+export async function settled(ms = 30_000): Promise<void> {
+  const busy = await settledInProcess(ms);
+  if (busy.length) throw new Error(`Still busy after ${ms} ms: ${busy.join(', ')}`);
+}
+
 /** A call's answer's body, or a throw naming its status and error: for a test that treats any non-2xx as a failure. */
 export function ok(r: { status: number; data: any }): any {
   if (r.status < 200 || r.status >= 300) throw new Error(`${r.status} ${r.data?.error ?? JSON.stringify(r.data)}`);
@@ -165,7 +176,16 @@ export type Booted = {
   call: Caller;
   /** The same call as someone else: a session `cookie` or a Bearer `token` (a minion's, from `agentToken`). */
   as: (who: { cookie?: string; token?: string }) => Caller;
-  /** Kill the server and its turns (all but `keepTurns`, for a restart), then delete the scratch folder. */
+  /**
+   * Wait until the server has finished everything it was doing (#1437): its DB write queue, session saves and restores,
+   * WAL checkpoint rounds and every other request. Wait on this, not on a first sign of the work (a row, a log line).
+   * Throws, naming what was still busy, after `ms`.
+   */
+  settled: (ms?: number) => Promise<void>;
+  /**
+   * Wait for the server to settle, kill it and its turns (all but `keepTurns`, for a restart), then delete the scratch
+   * folder. Throws, after cleaning up, naming what the server was still doing if it didn't settle.
+   */
   stop: (opts?: { keepTurns?: boolean }) => Promise<void>;
 };
 
@@ -193,15 +213,35 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // server reads a pressure file that isn't there (no reading, so never starved), or the full suite's own load would
       // hold back the index a test waits on (overlord.test.ts, #1349). A test of the gate passes its own file.
       CITADEL_PSI_CPU: join(root, 'no-psi-cpu'), CITADEL_PSI_MEMORY: join(root, 'no-psi-memory'),
+      // GET /api/test/settled, for settled() and stop() below (#1437).
+      CITADEL_TEST_SETTLED: '1',
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', err],
   });
   if (typeof err === 'number') closeSync(err);
+  let base = '';
+  const busy = async (ms = 30_000): Promise<string[]> => {
+    const r = await fetch(`${base}/api/test/settled?ms=${ms}`);
+    // The route answers before sign-in, so these mean a server without it (CITADEL_TEST_SETTLED unset, or a copy from before it).
+    if (r.status === 401 || r.status === 404) return [];
+    if (!r.ok) return [`the settled check answered ${r.status}`];
+    return (await r.json()).busy;
+  };
+  const settled = async (ms = 30_000) => {
+    const left = await busy(ms);
+    if (left.length) throw new Error(`The server was still busy after ${ms} ms: ${left.join(', ')}`);
+  };
   const stop = async ({ keepTurns = false } = {}) => {
+    // A server killed mid-write leaves its folder half-written; drain first (no maxRetries on the delete standing in for it).
+    let left: string[] = [];
+    if (base && proc.exitCode === null && proc.signalCode === null) {
+      left = await busy().catch((e) => (proc.exitCode === null && proc.signalCode === null ? [`the settled check failed: ${e?.message ?? e}`] : []));
+    }
     await stopProcs([proc]);
     if (!keepTurns) await stopTurns(data);
     if (!opts.root) rmSync(root, { recursive: true, force: true });
+    if (left.length) throw new Error(`The server was still busy when the test stopped it: ${left.join(', ')}`);
   };
   if (opts.stdout) proc.stdout!.pipe(process.stdout);
   if (opts.log) proc.stdout!.pipe(createWriteStream(opts.log, { flags: 'a' }));
@@ -209,7 +249,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     await stop();
     throw err;
   });
-  const base = `http://127.0.0.1:${port}`;
+  base = `http://127.0.0.1:${port}`;
   const login = await fetch(`${base}/api/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: opts.name ?? 'Cara', password: PASSWORD }),
   });
@@ -235,7 +275,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     return { status: res.status, data };
   };
   const call = as({ cookie });
-  return { base, port, root, data, proc, cookie, call, as, stop };
+  return { base, port, root, data, proc, cookie, call, as, settled, stop };
 }
 
 /** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there (<unit>.failed: its last run failed). */

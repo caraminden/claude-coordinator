@@ -10,6 +10,7 @@ import { endianness } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
+import { busySource } from './settled.ts';
 
 export const CHECKPOINT_MS = 10_000;
 /** A WAL this long (8 MB of 4 KB pages; live writes 10 to 50 pages a second) is checkpointed, or any WAL after MAX_WAIT_MS. */
@@ -42,11 +43,15 @@ export function walFrames(dbPath: string): number | null {
  */
 export function checkpointOffThread(store: Store, everyMs = CHECKPOINT_MS, walPages = WAL_PAGES, maxWaitMs = MAX_WAIT_MS): Worker | null {
   if (!store.statePath) return null;
-  const worker = new Worker(new URL(import.meta.url), { workerData: { checkpoint: { paths: [store.path, store.statePath], everyMs, walPages, maxWaitMs } } });
+  // 1 while a round is fsyncing or checkpointing, for settled() (src/settled.ts).
+  const busy = new Int32Array(new SharedArrayBuffer(4));
+  const worker = new Worker(new URL(import.meta.url), { workerData: { checkpoint: { paths: [store.path, store.statePath], everyMs, walPages, maxWaitMs, busy } } });
   worker.unref();
   store.autoCheckpoint(false);
+  const unlist = busySource(() => (Atomics.load(busy, 0) ? ['a WAL checkpoint round'] : []));
   worker.on('error', (err) => console.error(`WAL checkpoint worker failed: ${err?.message ?? err}`));
   worker.once('exit', (code) => {
+    unlist();
     store.autoCheckpoint(true);
     console.error(`WAL checkpoint worker stopped (exit code ${code}); the server's connection checkpoints itself again, on the event loop.`);
   });
@@ -54,10 +59,11 @@ export function checkpointOffThread(store: Store, everyMs = CHECKPOINT_MS, walPa
 }
 
 if (!isMainThread && workerData?.checkpoint) {
-  const { paths, everyMs, walPages, maxWaitMs } = workerData.checkpoint as { paths: string[]; everyMs: number; walPages: number; maxWaitMs: number };
+  const { paths, everyMs, walPages, maxWaitMs, busy } = workerData.checkpoint as { paths: string[]; everyMs: number; walPages: number; maxWaitMs: number; busy: Int32Array };
   const dbs = paths.map((p) => new DatabaseSync(p, { timeout: 5000 }));
   const last = paths.map(() => Date.now());
   setInterval(() => {
+    Atomics.store(busy, 0, 1);
     dbs.forEach((db, i) => {
       try {
         const frames = walFrames(paths[i]);
@@ -75,6 +81,7 @@ if (!isMainThread && workerData?.checkpoint) {
         console.error(`WAL checkpoint of ${paths[i]}: ${err?.message ?? err}`);
       }
     });
+    Atomics.store(busy, 0, 0);
     parentPort!.postMessage('checkpointed');
   }, everyMs);
 }

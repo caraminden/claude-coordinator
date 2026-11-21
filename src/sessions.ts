@@ -9,6 +9,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
 import { gunzipSync, gzip, gzipSync } from 'node:zlib';
+import { track } from './settled.ts';
 import { StateDb, type ClaudeStateRow, type Project, type Store, type Ticket } from './db.ts';
 
 const gz = promisify(gzip);
@@ -232,13 +233,13 @@ type Job = { kind: 'restore'; configDir: string; paths: string[] } | { kind: 'pu
 
 /** Run a job on a worker thread of its own, with its own connection to state.db. */
 function sessionWorker(statePath: string, job: Job): Promise<unknown> {
-  return new Promise((resolve, reject) => {
+  return track(job.kind === 'put' ? 'session saves' : 'session restores', new Promise((resolve, reject) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: { sessionJob: { statePath, job } } });
     worker.once('message', resolve);
     worker.once('error', reject);
     // After a message this is a no-op; without one the worker died before it finished.
     worker.once('exit', (code) => reject(new Error(`the session worker stopped (exit code ${code}) before it finished`)));
-  });
+  }));
 }
 
 if (!isMainThread && workerData?.sessionJob) {

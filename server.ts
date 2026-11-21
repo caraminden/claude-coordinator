@@ -144,6 +144,7 @@ import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
 import { writeOffThread } from './src/db-writer.ts';
+import { busySource, settled } from './src/settled.ts';
 import { moveToNoCow } from './src/db-nocow.ts';
 import { Presence } from './src/presence.ts';
 
@@ -1794,10 +1795,23 @@ setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref(
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
+// Requests not yet answered, for settled() (src/settled.ts): an event stream stays open by design, so it doesn't count.
+const inFlight = new Map<ServerResponse, string>();
+busySource(() => [...inFlight].filter(([res]) => !/^text\/event-stream/.test(String(res.getHeader('content-type') ?? ''))).map(([, what]) => `request ${what}`));
+// A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
+const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
+
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets); anything else asking is served as usual.
 const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
+  inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
+  res.once('close', () => inFlight.delete(res));
   try {
+    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/settled')) {
+      inFlight.delete(res);
+      const busy = await settled(Math.min(Number(requestUrl(req).searchParams.get('ms')) || 30_000, 120_000));
+      return json(res, 200, { busy });
+    }
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
     if (apps.onAppHost(req)) {
       const path = (req.url ?? '/').split('?')[0];

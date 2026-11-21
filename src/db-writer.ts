@@ -9,6 +9,7 @@ import type { StatementSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { Store } from './db.ts';
 import { writes } from './http.ts';
+import { busySource } from './settled.ts';
 
 /** The Store's writes the worker runs: none returns a value its callers use, and every argument survives postMessage. */
 export const WRITES = [
@@ -101,6 +102,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // get-then-set (merge goes, turn nonces) would write back a list without the update before it.
   const unwritten = new Map<string, { seq: number; json: string | null }>();
   const applied = () => Number(Atomics.load(shared, 0));
+  const unlist = busySource(() => (alive && seq > applied() ? [`${seq - applied()} queued DB writes`] : []));
 
   const waitFor = (target: number, ms: number) => {
     const until = Date.now() + ms;
@@ -235,6 +237,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   });
   worker.once('exit', (code) => {
     alive = false;
+    unlist();
     unwritten.clear();
     const lost = seq - applied();
     seq = applied();

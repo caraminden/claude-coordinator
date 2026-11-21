@@ -1,7 +1,7 @@
-# Proof that a flake fix held (#1120): one test file, 50 runs in a row, on the desktop runner (never GitHub's own).
+# Proof that a flake fix held (#1120): one test file, 50 clean runs as 5 batches of 10 copies at once (#1443: the ship's burn-in has the same shape), on the desktop runner (never GitHub's own).
 # Started by hand or by a fix minion on its branch: gh workflow run flake-proof.yml --ref <branch> -f file=test/x.test.ts
 # The Test health tab reads this run's steps (src/flakes.ts cleanRuns): one step per 10 runs, named "<n> clean runs …",
-# and marks the fix held when the run is green. A red step stops the run: the clean runs must be in a row.
+# and marks the fix held when the run is green. A red step stops the run: every batch must be clean.
 name: flake-proof
 run-name: flake-proof ${{ inputs.file }}
 on:

@@ -137,6 +137,20 @@ test("a suspect found through what the failing test imports is refused, and a sh
   l.done();
 });
 
+// #1443: a red burn-in names its racy file, so the ship that added or changed it is the suspect, with no bisect.
+test('a train red in its burn-in: the ship that changed the racy test is refused with the burn-in\'s words, and the rest ship', async () => {
+  const l = await line([{}, {}, { change: ['test/real.test.ts', 'racy\n'] }, {}], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn' });
+  const done = await l.go();
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.match(done[2].stderr, /land: a new or changed test failed its burn-in in CI on ticket\/2-x's ship train \(https:\/\/ci\/\d+\): test\/real\.test\.ts, which ticket\/3-x changed or which imports what it changed, so it is likely the cause, and it was taken off the train/);
+  assert.match(done[1].stderr, /suspects: #3 \(test\/real\.test\.ts\)/);
+  assert.doesNotMatch(done[1].stderr, /bisect|running CI once more/);
+  for (const i of [1, 2, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  shipped(l, done[3], 4, 2, 2);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f4.txt: 4']);
+  l.done();
+});
+
 test('a refilled train red again on the same test: the guess was wrong, so the bisect finds the ship', async () => {
   // Ship 4 touched the failing test, but ship 5 is what turns CI red.
   const l = await line([{}, {}, {}, { change: ['test/real.test.ts', 'x\n'] }, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '3' });

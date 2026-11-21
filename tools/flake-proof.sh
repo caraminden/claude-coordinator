@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# One batch of a flake proof (#1120, .github/workflows/flake-proof.yml): runs a test file N times in a row, each run under CPU
-# load (the flakes this counts failed in a full run at load 12 to 26 and passed alone, so a quiet box would pass an unfixed one).
+# One batch of a flake proof (#1120, .github/workflows/flake-proof.yml): runs a test file as N copies at once, each with its own
+# TMPDIR, under CPU load (the flakes this counts failed in a full run at load 12 to 26 and passed alone, so a quiet box would pass
+# an unfixed one). Copies at once, not one after another (#1443): the ship's burn-in has the same shape (tools/burn-in.sh, which
+# runs them), and #1327 measured runs in a row catching 0 or 1 in 10 where copies at once caught 9 or 10.
 # Before the batch it waits while a ship's tests run (tests.yml on a land branch) is queued or running, and everything it starts
 # (burners and test runs) is nice 19, so a ship's run on the same desktop gets the CPU first (#1359). The proof still runs under
 # load: a quiet box would pass an unfixed flake.
-# Stops at the first red run. Usage: tools/flake-proof.sh test/x.test.ts [runs] [burners]
+# A batch fails when any copy fails or hangs. Usage: tools/flake-proof.sh test/x.test.ts [runs] [burners]
 set -uo pipefail
 file=${1:?usage: flake-proof.sh test/x.test.ts [runs] [burners]}
 runs=${2:-10}
@@ -35,7 +37,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pids=()
 for _ in $(seq "$burners"); do nice -n 19 bash -c 'while :; do :; done' & pids+=($!); done
 trap 'kill "${pids[@]}" 2>/dev/null' EXIT
-for i in $(seq "$runs"); do
-  nice -n 19 "$here/citadel-node" --test --test-force-exit "$file" || { echo "flake-proof: $file failed on run $i of $runs under load"; exit 1; }
-done
-echo "flake-proof: $file: $runs clean runs under load"
+if [ "$runs" -gt 0 ]; then
+  BURN_IN_NICE='nice -n 19' "$here/burn-in.sh" "$file" "$runs" || { echo "flake-proof: $file failed in its batch of $runs copies at once under load"; exit 1; }
+fi
+echo "flake-proof: $file: $runs clean runs at once under load"

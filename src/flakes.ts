@@ -42,7 +42,7 @@ export const FLAKE_WINDOW_MS = 14 * 24 * 60 * 60_000;
 /** The third sighting of one file inside this window starts its fix minion (#1120). */
 export const FLAKE_REPEAT = 3;
 export const FLAKE_REPEAT_MS = 7 * 24 * 60 * 60_000;
-/** A fix is held after this many clean runs in a row of the file on the desktop runner. */
+/** A fix is held after this many clean runs of the file on the desktop runner: 5 batches of 10 copies at once, no batch red (#1443). */
 export const PROOF_RUNS = 50;
 /** The proof workflow runs the file in batches, one step each, so a run's steps say how many runs were clean without reading its log. */
 export const PROOF_BATCH = 10;
@@ -97,7 +97,7 @@ export function flakeBrief(file: string, count: number, details: { at: number; d
     title: `Flaky test: ${file}`,
     message: `Fix the flaky test file ${file}. It failed in a full run and then passed alone ${count} time${count === 1 ? '' : 's'} in the last 14 days (the Test health tab on the CI page counts these).\n\n`
       + `Open the citadel:diagnosing-bugs skill first: a flake has a cause (shared state, a fixed port, a timing assumption, load), and a longer wait or a retry is not the fix. Find the cause, fix it in the test or the code under test, and show the file passing repeatedly under load.\n\n`
-      + `**Prove the fix held before you ship it** (#1120): a fix counts only after ${PROOF_RUNS} clean runs in a row of this file on the desktop runner. Rebase your branch onto main (the run uses your branch's copy of the workflow, and main's keeps the ship runner free: #1240), push it and dispatch the \`flake-proof.yml\` workflow on it with \`file=${file}\` (\`gh workflow run flake-proof.yml --ref <your branch> -f file=${file}\`); the Test health tab shows its clean-run count, and the run's result wakes you. Ship only on a green run. Do not skip, quarantine or loosen the test (Cara, 2026-11-10: "Keep failing, log it").\n\n`
+      + `**Prove the fix held before you ship it** (#1120): a fix counts only after ${PROOF_RUNS} clean runs of this file on the desktop runner, ${PROOF_BATCH} copies at once per batch (the crowd a flake fails in). Rebase your branch onto main (the run uses your branch's copy of the workflow, and main's keeps the ship runner free: #1240), push it and dispatch the \`flake-proof.yml\` workflow on it with \`file=${file}\` (\`gh workflow run flake-proof.yml --ref <your branch> -f file=${file}\`); the Test health tab shows its clean-run count, and the run's result wakes you. Ship only on a green run. Do not skip, quarantine or loosen the test (Cara, 2026-11-10: "Keep failing, log it").\n\n`
       + seen
       + `The last ${details.length || 'no'} failing output${details.length === 1 ? '' : 's'}:\n\n${outputs}\n`,
   };

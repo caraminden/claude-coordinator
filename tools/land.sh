@@ -530,6 +530,7 @@ train_verdict() {
       [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
       queue_done
       land_timing 1 || true
+      [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
       [ "$c" != likely ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect), and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Look into it: fix it if it is yours, re-test, commit, then run this again"
       refuse "tests failed in CI on $a's ship train ($b), and its bisect found $branch the first ship that turned it red, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
     *)
@@ -904,9 +905,13 @@ CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30} # how often a job waiting past CI_STAR
 # still in its full suite falls back at CI_LIMIT as before. tests.yml's RERUN_WINDOW is the same number:
 # test/ci-runner-choice.test.ts pins them together.
 CI_RERUN_STEP='rerun failed files alone' CI_RERUN=${LAND_CI_RERUN:-180}
+# The burn-in (#1443, tools/burn-in.sh): the ship's new and changed tests as 10 copies at once, in a step before the full
+# suite. It needs the ship's base, which goes to GitHub as CI_BASE_REF beside CI_REF. Its red is the ship's own: never a
+# flake, a cut-off or a known flake. At CI_LIMIT the run gets the step's time more (CI_BURN at most), once.
+CI_BURN_STEP='burn in new and changed tests' CI_BURN=${LAND_CI_BURN:-180} CI_BASE_REF=land-base/$branch
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
-ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why=''
+ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned=''
 # Perigee runs a ship's suite only while it is quiet (#1254, Josh 2026-11-20: "only if and when perigee has plenty of
 # resources, just make sure we play nice and that it doesnt affect performance"): CPU pressure (some avg60) under
 # QUIET_PSI %, the 1-minute load under half the cores, at least QUIET_MEM % of memory available, and citadel-heavy's
@@ -1018,7 +1023,7 @@ ci_run() {
 # Leaves nothing behind on GitHub: a run nobody waits for is cancelled, and the scratch branch goes.
 ci_done() {
   [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
-  [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" >/dev/null 2>&1 || true
+  [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" ":refs/heads/$CI_BASE_REF" >/dev/null 2>&1 || true
   ci_id='' ci_pushed=''
 }
 # 0 when the run's full suite step failed and it has a rerun step (#1374), in any state: one already ended means the
@@ -1029,6 +1034,20 @@ ci_rerunning() {
   steps=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_STEP\" or .name == \"$CI_RERUN_STEP\") | [.name, .status, .conclusion // \"-\"] | @tsv] | .[]" 2>/dev/null) || return 1
   grep -qxF "$CI_STEP"$'\t'completed$'\t'failure <<<"$steps" || return 1
   grep -q "^$CI_RERUN_STEP"$'\t' <<<"$steps"
+}
+# 0, with its seconds in $burned (CI_BURN at most, or CI_BURN while it still runs), when the run has a burn-in step that took
+# any time (#1443). One that skipped, a run without the step, or GitHub not answering is no. Timestamps go through date, which
+# reads GitHub's milliseconds and offsets.
+ci_burned() {
+  local st a b
+  read -r st a b < <(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_BURN_STEP\") | [.status, .started_at // \"-\", .completed_at // \"-\"] | @tsv][0] // empty" 2>/dev/null) || : # no answer leaves st empty
+  case $st in
+    in_progress) burned=$CI_BURN ;;
+    completed) a=$(date -d "$a" +%s 2>/dev/null) && b=$(date -d "$b" +%s 2>/dev/null) || return 1; burned=$((b - a)) ;;
+    *) return 1 ;;
+  esac
+  [ "$burned" -le "$CI_BURN" ] || burned=$CI_BURN
+  [ "$burned" -gt 0 ]
 }
 # Only when no runner is online, GitHub errors (#1361) or a runner's clock is off (#900): a late start or a slow run says
 # nothing about the next ship's.
@@ -1042,7 +1061,7 @@ ci_online() {
 }
 # 0: green on this commit. 1: red. 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online='' online_at='' step stale='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' ran
+  local url online='' online_at='' step stale='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
@@ -1065,8 +1084,9 @@ ci_gate() {
     [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
     [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
     ci_pushed=1
-    # Forced on purpose: land/<branch> is a scratch branch only this script writes and deletes, so there is no one's work to overwrite.
-    hub git push -q "$REMOTE" "+$tip:refs/heads/$CI_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
+    # Forced on purpose: land/<branch> and land-base/<branch> are scratch branches only this script writes and deletes, so
+    # there is no one's work to overwrite. Atomic, so the run never starts without the base its burn-in compares with.
+    hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
   fi
   say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet)"
   queue_phase "waiting for CI since $(date +%H:%M)"
@@ -1086,7 +1106,10 @@ ci_gate() {
     if [ -n "$ci_taken" ]; then
       ran=$((SECONDS - taken_at))
       if [ "$ran" -ge "$limit" ]; then
-        if [ -z "$rerun_wait" ] && ci_rerunning; then
+        if [ -z "$burn_wait" ] && ci_burned; then
+          burn_wait=1 limit=$((limit + burned))
+          say "CI's burn-in of new and changed tests took ${burned}s before its full suite, so this waits that much more ($ci_url)"
+        elif [ -z "$rerun_wait" ] && ci_rerunning; then
           rerun_wait=1 limit=$((ran + CI_RERUN))
           say "CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to $((CI_RERUN / 60)) min $((CI_RERUN % 60)) s more for them instead of falling back at ${CI_LIMIT}s ($ci_url)"
           queue_phase "waiting for CI's reruns alone since $(date +%H:%M)"
@@ -1128,6 +1151,7 @@ ci_gate() {
       step=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // empty' 2>/dev/null) || step=''
       # A skewed clock (#900) lasts hours, until the distro behind it stops: the note spares the next landings a run each.
       [ "$step" != "$CI_CLOCK_STEP" ] || { why="runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran ($ci_url); a systemd-timesyncd in a WSL distro on Cara's desktop must be masked (tools/ci-runner/README.md)"; ci_down; return 2; }
+      [ "$step" != "$CI_BURN_STEP" ] || { burn_red=1; return 1; } # the ship's own red (#1443)
       [ "${step:-$CI_STEP}" = "$CI_STEP" ] || { why="the CI run failed in its setup step \"$step\", before any test ran ($ci_url): the runner needs fixing"; return 2; }
       return 1 ;;
     timed_out) return 1 ;;
@@ -1141,11 +1165,14 @@ ci_failed() {
   local f load
   failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
   tail -n 40 <<<"$failed" >&2
+  [ -z "$burn_red" ] || return 0 # a burn-in's log may quote run-tests.sh's lines (test/land.test.ts does): no flakes from it
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI${train_br[*]:+ · with ${train_br[*]}}" # riders: one run (#1419)
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
   done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
 }
+# The burn-in's verdict in $failed (#1443): "<file>: failed in <n> of <N> copies at once" for each red file; nothing otherwise.
+burn_lines() { sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies at once\).*/\1/p' <<<"$failed" | sort -u; }
 # The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
 # counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
 # Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
@@ -1297,7 +1324,7 @@ train_build() {
 gate() {
   local rc=0
   ci_done
-  tip=$1 short=$(git rev-parse --short "$1") failed='' reran=''
+  tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
   ci_gate || rc=$?
   # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
   # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
@@ -1308,7 +1335,9 @@ gate() {
   local cut=''
   if [ "$rc" = 1 ]; then
     ci_failed
-    if cut_off; then
+    if [ -n "$burn_red" ]; then
+      retro_log "burn-in red · $branch${train_br[*]:+ · with ${train_br[*]}} · $(burn_lines | paste -sd';' -) · $ci_url"
+    elif cut_off; then
       cut=$ci_url
     elif ! reran=$(flake_only); then
       reran=''
@@ -1337,7 +1366,7 @@ gate() {
       ci_gate || rc=$?
       if [ "$rc" = 1 ]; then
         ci_failed
-        ! cut_off || { why="CI was cut off twice before any test failed ($cut, $ci_url)"; [ -n "$cut" ] || why="CI's one fresh run after a red of flakes only ($reran) was cut off before any test failed ($ci_url)"; rc=2; }
+        [ -n "$burn_red" ] || ! cut_off || { why="CI was cut off twice before any test failed ($cut, $ci_url)"; [ -n "$cut" ] || why="CI's one fresh run after a red of flakes only ($reran) was cut off before any test failed ($ci_url)"; rc=2; }
       fi
       case $rc in 0) result=green ;; 1) result=red ;; *) result='no answer' ;; esac
       if [ -n "$cut" ]; then retro_log "cut-off rerun · $branch · $cut · $result"; else retro_log "flake rerun · $branch · $reran · $result"; fi
@@ -1360,6 +1389,7 @@ suspect_tests='' train_refused=' ' train_refused_tips=''
 # on it, and the next round sees it. Fails when there are none, or the log doesn't label every failed file.
 train_real() {
   local at n out
+  [ -z "$burn_red" ] || { burn_lines | sed 's/: failed in .*//' | grep .; return; } # each burn-in red file is a real failure (#1443)
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
   n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
@@ -1434,7 +1464,7 @@ known_flakes() {
   known_why=$(sed ':a;N;$!ba;s/\n/, /g' <<<"$out")
 }
 train_suspects() {
-  local round prev=' ' f m i t v line real=() hits=() keep=() was=() chg=()
+  local round prev=" " f m i t v kind line real=() hits=() keep=() was=() chg=()
   local -A sus=()
   for ((round = 1; round <= 3; round++)); do
     mapfile -t real < <(train_real) || true
@@ -1466,7 +1496,8 @@ train_suspects() {
     for ((i = 0; i < ${#train_n[@]}; i++)); do
       if [ -n "${sus[$((i + 1))]:-}" ]; then
         v=${sus[$((i + 1))]}
-        train_say "$i" "refused $branch $ci_url likely ${v//, /,}" "$(tail -n 40 <<<"$failed")"
+        kind=likely; [ -z "$burn_red" ] || kind=burn
+        train_say "$i" "refused $branch $ci_url $kind ${v//, /,}" "$(tail -n 40 <<<"$failed")"
         train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
       else keep+=("${train_n[$i]}"); fi
     done
@@ -1569,7 +1600,10 @@ elif [ "$rc" = 0 ]; then
   ci_done
   tested=$tip # CI ran the commit and nothing else, so a stray file in this worktree was never part of it
 elif [ "$rc" = 1 ]; then
+  burn_said=$(burn_lines | paste -sd';' - | sed 's/;/; /g')
+  [ -z "$suspect_tests" ] || [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause: the ships behind it went back in line, so $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"
+  [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI ($ci_url): $burn_said, so it never reached the full suite and $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again. This is the ship's own red, never a known flake"
   [ -z "$reran" ] || flake_keep
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red of flakes only ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
@@ -1578,6 +1612,7 @@ else
   fellback=$why
   say "=========================================================================="
   say "CI FALLBACK: $why. Running the full suite on perigee instead."
+  say "BURN-IN SKIPPED: new and changed tests were not run as 10 copies at once, since that runs only on CI, never on perigee (#1443)"
   say "=========================================================================="
   retro_log "ci fallback · $branch · $why"
   say "running the tests"

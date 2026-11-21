@@ -80,7 +80,7 @@ function errorLines(f) {
 
 function flakeBlock(s, flakes, refresh) {
   const total = flakes.reduce((n, f) => n + f.count, 0);
-  // The fix (#1120): owner and age, and the clean runs of the 50 in a row the desktop needs before it counts as held.
+  // The fix (#1120): owner and age, and the clean runs of the 50 (5 batches of 10 copies at once, #1443) the desktop needs before it counts as held.
   const fixLine = (fx) => {
     const owner = fx.owner ? `${fx.owner}'s ` : '';
     const age = ago(fx.startedAt);

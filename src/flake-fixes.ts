@@ -3,7 +3,7 @@
 //     the table held 4 rows against about 98 log lines in 9 days, because a minion's own test runs and a deploy's never reach it.
 //  2. The third sighting of one test file inside 7 days starts one bug minion for it. A file whose fix was held and then flaked
 //     again is reopened (a new minion at once: it was fixed once already).
-//  3. A fix is held only once the flake-proof workflow (50 runs of the file in a row, on the desktop runner) is green on the fix
+//  3. A fix is held only once the flake-proof workflow (50 runs of the file, 5 batches of 10 copies at once, on the desktop runner) is green on the fix
 //     minion's branch; the Test health tab shows the clean runs so far.
 // No test is skipped or quarantined (Cara, 2026-11-10: "Keep failing, log it").
 import { readdirSync, readFileSync } from 'node:fs';

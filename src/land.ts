@@ -330,6 +330,9 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
     return k('conflict', 'Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions\' changes, re-test, commit, hand off again.');
   if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output))
     return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
+  // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
+  if (/failed its burn-in in CI/.test(output))
+    return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   const testsRed = /tests failed on the rebased branch/.test(output) || failedFiles.length > 0;
   if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output))
     return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');

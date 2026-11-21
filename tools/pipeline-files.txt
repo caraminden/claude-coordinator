@@ -9,6 +9,7 @@ tools/land.sh
 tools/ship-numbers.ts
 tools/ship-numbers.attributes
 tools/known-flakes.ts
+tools/burn-in.sh
 tools/deploy.sh
 tools/deploy-queue.sh
 tools/kit-land-drift.sh
@@ -47,6 +48,8 @@ test/land-numbers.test.ts
 test/land-queue.test.ts
 test/land-train.test.ts
 test/land-known-flakes.test.ts
+test/land-burn-in.test.ts
+test/burn-in.test.ts
 test/land-deploy.test.ts
 test/land-recover.test.ts
 test/land-boot-check.test.ts

@@ -1379,7 +1379,7 @@ CREATE TABLE IF NOT EXISTS flake_events (
   class TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS flake_events_scheme ON flake_events(project_id, at);
--- One row per fix of a flaky test file (#1120): started by the file's third sighting in 7 days, held only after 50 clean runs in a row
+-- One row per fix of a flaky test file (#1120): started by the file's third sighting in 7 days, held only after 50 clean runs (5 batches of 10 copies at once)
 -- on the desktop runner (state 'held'), and reopened (state 'open' again, reopened + 1) by the next sighting.
 CREATE TABLE IF NOT EXISTS flake_fixes (
   id INTEGER PRIMARY KEY,

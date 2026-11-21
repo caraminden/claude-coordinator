@@ -79,5 +79,27 @@ test("a ship's run reruns its failed files alone in a step of its own, inside th
   assert.doesNotMatch(suite, /DEPLOY_RERUN_DEADLINE/, 'the full suite reruns nothing, so it needs no deadline');
   // A land's job outlives the longest wait land.sh gives it.
   const minutes = Number(yml.match(/timeout-minutes: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) && (\d+)/)?.[1]);
-  assert.ok(minutes * 60 >= Number(limit) + Number(window) + 60, `land runs' ${minutes} min job limit covers ${limit} + ${window} s`);
+  const burn = land.match(/CI_BURN=\$\{LAND_CI_BURN:-(\d+)\}/)?.[1];
+  assert.ok(burn, "land.sh's burn-in extension");
+  assert.ok(minutes * 60 >= Number(limit) + Number(window) + Number(burn) + 60, `land runs' ${minutes} min job limit covers ${limit} + ${window} + ${burn} s`);
+});
+
+// The burn-in (#1443): a land's run burns in its new and changed tests before the full suite, against the base land.sh
+// pushes beside it; land.sh reads a red in that step, by name, as the ship's own, and waits its time more at CI_LIMIT.
+test("a ship's run burns in its new and changed tests before the full suite, in the step land.sh names, within land.sh's extension", () => {
+  const land = read('tools/land.sh');
+  const yml = read('.github/workflows/tests.yml');
+  const step = land.match(/CI_BURN_STEP='([^']+)'/)?.[1];
+  const burn = Number(land.match(/CI_BURN=\$\{LAND_CI_BURN:-(\d+)\}/)?.[1]);
+  const base = land.match(/CI_BASE_REF=([^ \n]+)\/\$branch/)?.[1];
+  assert.ok(step && burn && base, "land.sh's burn-in step, extension and base ref");
+  const at = yml.indexOf(`- name: ${step}`);
+  assert.ok(at > 0 && at < yml.indexOf('- name: the full suite'), 'the burn-in comes before the full suite');
+  assert.ok(at > yml.indexOf('- name: wait for the lands'), 'and after the wait for the lands, on the runner the suite gets');
+  const body = yml.slice(at, yml.indexOf('- name:', at + 1));
+  assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \}\}/, 'lands only');
+  assert.ok(body.includes(`base=origin/${base}/\${GITHUB_REF_NAME#land/}`), "it compares with the base land.sh pushes");
+  assert.match(body, /tools\/burn-in\.sh --ship "\$base"/);
+  const own = Number(read('tools/burn-in.sh').match(/limit=\$\{BURN_IN_LIMIT:-(\d+)\}/)?.[1]);
+  assert.ok(own > 0 && own + 30 <= burn, `its ${own} s limit (plus the last copies' kill) fits land.sh's ${burn} s extension`);
 });

@@ -473,7 +473,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       const shared = join(r.dir, 'shared');
       const res = c.run({ COORDINATOR_SHARED_DIR: shared, ...extra });
       assert.equal(res.status, 0, res.stderr);
-      assert.match(res.stderr, /={20,}\nland: CI FALLBACK: .*Running the full suite on perigee instead\.\nland: ={20,}\nland: running the tests/);
+      assert.match(res.stderr, /={20,}\nland: CI FALLBACK: .*Running the full suite on perigee instead\.\nland: BURN-IN SKIPPED: new and changed tests were not run as 10 copies at once, since that runs only on CI, never on perigee \(#1443\)\nland: ={20,}\nland: running the tests/);
       assert.match(res.stderr, why);
       assert.match(res.stderr.trimEnd().split('\n').at(-1)!, /landed on perigee's own test run, not CI: /, 'the last line says it again');
       assert.match(landLog(shared), /^- \d\d:\d\d:\d\dZ · ci fallback · ticket\/1-x · /m);

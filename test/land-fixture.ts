@@ -99,6 +99,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
+// FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
+// FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
 // hang run-tests.sh stopped (the same interrupt, but a verdict);
@@ -154,6 +156,7 @@ case "$*" in
   *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
+  *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
     [ -z "\${FAKE_FLAKY_PATH:-}" ] || : >"${calls}.flaky"
@@ -171,6 +174,14 @@ case "$*" in
       exit 0
     fi
     [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
+    if [ "\${FAKE_LOG:-}" = burn ]; then # the burn-in step's log: a land test burned in quotes run-tests.sh's lines
+      printf '%b burn-in: test/real.test.ts, copy 2 of 10 (its output from the failing tests on):\n' "$p"
+      echo "not ok 1 - the red test's output (run $3)"
+      printf '%b land: run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\n' "$p"
+      printf '%b burn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p"
+      printf '%b burn-in: refused: a copy of test/real.test.ts failed when run 10 at once, so it is racy (its output is above); fix the race, not the wait\n' "$p"
+      exit 0
+    fi
     echo "not ok 1 - the red test's output (run $3)"
     p="$p run-tests:"
     case \${FAKE_LOG:-mixed} in

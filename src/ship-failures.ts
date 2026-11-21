@@ -63,7 +63,7 @@ export function failureDetail(output: string, code: number | null): FailureDetai
     : cls === 'boot-copy' ? 'boot check'
     : /^land: smoke: .*, before the line/m.test(output) ? 'smoke check'
     : cls === 'flake' ? 'flaky tests'
-    : cls === 'own-test' || cls === 'always-test' || tests.length || /tests failed/.test(output) ? 'tests failed'
+    : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output) ? 'tests failed'
     : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output) ? 'deploy or boot'
     : 'failed';
   const all = kind === 'merge conflict' ? conflicts : tests.length ? tests : files;

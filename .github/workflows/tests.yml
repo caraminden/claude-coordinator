@@ -31,9 +31,9 @@ jobs:
     # below holds its runner, which on the lands' runner would keep the land it waits for from starting.
     runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')) }}
     # land.sh gives up on the run 6 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361), the clock step's up to 2 min included, or 3 more
-    # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
+    # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
     # up to 30 more for the lands.
-    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 12 || 45 }}
+    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 15 || 45 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,6 +150,21 @@ jobs:
             sleep 30
           done
           echo "lands kept running (or GitHub unread) for 30 minutes: starting anyway, niced"
+      # The burn-in (#1443): a ship's new and changed test files, and up to 3 tests tools/affected-map.txt maps its changed
+      # source files to, each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
+      # here, with that copy's output, and land.sh refuses the ship on it as its own red, never a flake. land.sh pushes the
+      # ship's base (main as it was) as land-base/<branch> beside land/<branch>, so only this ship's changes count; at its
+      # CI limit it gives the run this step's time more, once. With no runner the ship's suite runs on perigee, and the
+      # burn-in not at all (land.sh says so).
+      - name: burn in new and changed tests
+        if: ${{ startsWith(github.ref, 'refs/heads/land/') }}
+        run: |
+          base=origin/land-base/${GITHUB_REF_NAME#land/}
+          if ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then
+            echo "burn-in: no $base ref from land.sh, so it compares with GitHub's main, which may lack the last ship or two"
+            base=$(git merge-base HEAD origin/main)
+          fi
+          tools/burn-in.sh --ship "$base"
       # The run land.sh makes on perigee when this can't answer: it always ends (a leaked handle hangs a bare
       # `npm test` here), and labels a file that fails under load. Perigee skips no test, so a skip here means this
       # runner lacks something a test needs, and the gate would be weaker than the one it replaces: that is red too.

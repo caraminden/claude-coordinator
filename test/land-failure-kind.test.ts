@@ -38,6 +38,13 @@ test('a flake: the second red whose files all passed alone', () => {
   assert.equal(kind(mixed), null);
 });
 
+test('a burn-in red (#1443) is the ship\'s own, even when the failing copy quotes a passed-alone line', () => {
+  const out = `burn-in: test/real.test.ts, copy 3 of 10 (its output from the failing tests on):\n✖ test/real.test.ts › races › on a shared path (12ms)\nrun-tests: test/old.test.ts: failed in the full run, passed alone: likely load\nburn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 3 7), in 19 s\nland: refused: a new or changed test failed its burn-in in CI (https://x/4): test/real.test.ts failed in 3 of 10 copies at once, so it never reached the full suite`;
+  const c = classifyLandFailure(out);
+  assert.equal(c?.kind, 'burn-in');
+  assert.match(c!.line, /Yours: fix the race/);
+});
+
 test('after a retry in place (#1360), only the second attempt is read: its real red is not a flake', () => {
   const first = `run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change\nland: refused by the pipeline (only flakes failed on perigee: test/a.test.ts), not your change: keeping its place in line and riding the next train, once`;
   assert.notEqual(kind(`${first}\nland: back at the front\n✖ test/b.test.ts › x › y (3ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`), 'flake');

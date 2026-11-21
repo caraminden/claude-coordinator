@@ -154,7 +154,7 @@ switch ($Do) {
     Initialize-Disk -Number $disk.Number -PartitionStyle GPT
     $dev = @{ DevDrive = $true }  # splatted: the lint's Windows 10 profiles lack -DevDrive; the check above refuses a Windows without it
     New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter R | Out-Null
-    Format-Volume -DriveLetter R @dev -FileSystemLabel ci-runners -Confirm:$false | Out-Null  # piping the partition in fails to bind on 26100
+    Format-Volume -DriveLetter R @dev -NewFileSystemLabel ci-runners -Confirm:$false | Out-Null
     $act = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -Command `"if (-not (Get-DiskImage -ImagePath $vhd).Attached) { Mount-DiskImage -ImagePath $vhd }`""
     Register-ScheduledTask -TaskName $task -Action $act -Trigger (New-ScheduledTaskTrigger -AtStartup) -User SYSTEM -RunLevel Highest | Out-Null
     fsutil devdrv query R:

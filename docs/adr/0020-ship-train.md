@@ -51,8 +51,10 @@ Who is passed over (each keeps its place, and ships on its own when it reaches t
 - merges into a build, `--full` and `--build` runs.
 
 No train forms when CI can't answer (no remote, `LAND_CI=0`, a recent ci-down note), while deploys are refusing or
-rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all perigee should take on. CI giving no
-answer partway through sends the riders back in line, and the front falls back alone.
+rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all perigee should take on. A train keeps its
+riders while it waits, for a busy runner or for a quiet perigee (#1361, Cara 2026-11-20, "Wait for a busy desktop"):
+only once the gate gives up for good, to run the suite on perigee, do the riders go back in line, and the front falls
+back alone.
 
 A ship refused by the pipeline rather than by its own change (#1360, Cara 2026-11-20, "Refused ships keep their place":
 CI and perigee both busy, perigee's heavy slot taken, or a perigee red of flakes only) keeps its ticket once per

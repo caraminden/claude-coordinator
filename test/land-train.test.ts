@@ -232,6 +232,62 @@ test('CI gives no answer on a train: the riders go back in line, and each lands 
   l.done();
 });
 
+// #1361 (Cara 2026-11-20, "Wait for a busy desktop"): a train keeps its riders while it waits for a busy runner, or for a
+// runner to come back while perigee is busy, and they go back only when the gate gives up for good. 1 s stands for the
+// 90 s bound, and the few seconds the job sits queued for a 3-min wait.
+test('a train keeps its riders while a busy runner takes its time to start the job, and ships them in one CI run', async () => {
+  const l = await line([{}, {}, {}], (dir) => ({ FAKE_CI_FILE: join(dir, 'ci-state'), LAND_CI_START: '1', LAND_CI_START_ONLINE: '60' }), (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'));
+  const file = join(l.r.dir, 'ci-state');
+  writeFileSync(file, 'queued');
+  const all = l.go();
+  await until('the train waits for the busy runner', () => /ship train: ticket\/2-x takes the 1 ships/.test(l.out[1]) && /runner is online but hasn't started the job/.test(l.out[1]), 30_000);
+  await new Promise((ok) => setTimeout(ok, 2500));
+  writeFileSync(file, 'green');
+  const done = await all;
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done[1].stderr, /goes back in line|CI FALLBACK/);
+  shipped(l, done[2], 3, 2, 2);
+  assert.equal(l.deployed().length, 2, "ship 1's deploy and the train's");
+  l.done();
+});
+
+test('a train keeps its riders while perigee is busy and CI gives no answer, and ships them once CI answers', async () => {
+  const l = await line([{}, {}, {}], (dir) => {
+    const proc = quietProc(join(dir, 'proc'));
+    return { FAKE_CI_FILE: join(dir, 'ci-state'), LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
+  }, (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'));
+  writeFileSync(join(l.r.dir, 'ci-state'), 'down');
+  quietProc(join(l.r.dir, 'proc'), { load: 999 });
+  const all = l.go();
+  await until('the train waits on a busy perigee', () => /ship train: ticket\/2-x takes the 1 ships/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]), 30_000, () => l.out[1]);
+  await new Promise((ok) => setTimeout(ok, 1000));
+  writeFileSync(join(l.r.dir, 'ci-state'), 'green');
+  const done = await all;
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done[1].stderr, /goes back in line|CI FALLBACK/);
+  shipped(l, done[2], 3, 2, 2);
+  l.done();
+});
+
+test("a red train's bisect keeps its riders while CI gives no answer on a busy perigee, and finds the ship once CI answers", async () => {
+  const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }, {}, {}], (dir) => {
+    const proc = quietProc(join(dir, 'proc'), { load: 999 });
+    // GitHub stops answering from the bisect's first probe: the third commit asked about, after ship 1's and the train's.
+    return { FAKE_RED_PATH: 'red.txt', FAKE_CI_DOWN_AT: '3', FAKE_CI_UP: join(dir, 'ci-up'), LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
+  });
+  const all = l.go();
+  await until('the bisect waits on a busy perigee', () => /finding the first ship that turned it red/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]), 30_000, () => l.out[1]);
+  await new Promise((ok) => setTimeout(ok, 1000));
+  writeFileSync(join(l.r.dir, 'ci-up'), '');
+  const done = await all;
+  assert.doesNotMatch(done[1].stderr, /goes back in line|CI FALLBACK/);
+  assert.match(done[1].stderr, /the bisect found ticket\/4-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
+  assert.equal(done[3].status, 1, done[3].stderr);
+  for (const i of [1, 2, 3, 5, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  shipped(l, done[2], 3, 2, 2);
+  l.done();
+});
+
 test('a rider stopped while its train is tested: the train ships up to the ship before it, and the rest go back in line', async () => {
   const gate = (r: ReturnType<typeof setup>) => join(r.dir, 'ci-gate');
   const l = await line([{}, {}, {}, {}, {}], (dir) => ({ FAKE_CI_GATE: join(dir, 'ci-gate') }), (r) => writeFileSync(gate(r), ''));

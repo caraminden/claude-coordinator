@@ -12,13 +12,14 @@ import { clock, type Problem } from './ci-problems.ts';
 export const LAND_STREAK = 2;
 // #1342: the line, not a ship, is what is slow. A ship 15th in line waits over an hour with nothing wrong, so the clock is
 // how long the line has been still (its head land, that land's phase or CI run, and who is in it all unchanged), not a
-// ship's age. Quiet after 20 min still (a ship's slowest honest step, the 6-min CI cap plus a 4-min suite, is ~10 min), ring after 40.
+// ship's age. Quiet after 20 min still (a ship's slowest honest step is the 15-min wait for a busy runner, #1361; the CI run's
+// start moves the line), ring after 40.
 export const LAND_SLOW_MS = 20 * 60_000;
 // #968 (Cara: "Quiet, ring after 1 h"): those make a quiet item; these ring.
 export const LAND_RING_STREAK = 4;
 export const LAND_RING_MS = 40 * 60_000;
-// land.sh's CI_LIMIT is 360 s: a run still going this far into the CI wait was cut off by it.
-export const LAND_CAP_MS = 5 * 60_000;
+// land.sh's CI_LIMIT is 600 s from the run's start: a run still going this far into the CI wait was cut off by it.
+export const LAND_CAP_MS = 9 * 60_000;
 
 /** A landing in the line as Waits.poll sees it. */
 export interface LandSeen {
@@ -57,7 +58,7 @@ export function fellBackWhy(l: Landing, now: number): string {
   if (!l.ci) return 'GitHub never started its run';
   if (l.ci === 'queued') return 'no runner started its job';
   if (l.ci === 'failed') return 'its run failed before the tests ran';
-  if (l.ci === 'jobs' && now - (l.ciSince ?? now) >= LAND_CAP_MS) return 'the desktop suite hit the 6-min cap';
+  if (l.ci === 'jobs' && now - (l.ciSince ?? now) >= LAND_CAP_MS) return 'the desktop suite hit the 10-min cap';
   return 'CI gave no verdict';
 }
 

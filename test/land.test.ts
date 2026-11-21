@@ -400,7 +400,7 @@ test('a red with no rerun labels (too many files failed) refuses at once, and a 
   const c2 = ci(r2);
   r2.commit(r2.wt, 'b.txt', 'mine\n');
   const shared = join(r2.dir, 'shared');
-  res = c2.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'queued', LAND_CI_START: '1', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
+  res = c2.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /running CI once more.*CI FALLBACK: no runner started the job within 1s/s);
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · .* · no answer$/m);
@@ -455,8 +455,9 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
     ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],
     ['GitHub down', { FAKE_CI: 'down' }, /GitHub didn't answer/],
     ['the runner list fails', { FAKE_RUNNERS: 'down' }, /didn't say which runners are online/],
-    ['no runner starts the job', { FAKE_CI: 'queued', LAND_CI_START: '1' }, /no runner started the job within 1s/],
-    ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s/],
+    ['no runner starts the job, and none is online', { FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, /no runner started the job within 1s, and no citadel-ci-linux runner is online/],
+    ['a runner is online but starts no job in the longer bound', { FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_START_ONLINE: '2' }, /no runner started the job within 2s, though a citadel-ci-linux runner is online/],
+    ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s of starting/],
     ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
     ['the run failed before the tests', { FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd" }, /failed in its setup step "the runner user's systemd", before any test ran/],
     ['the runner\'s clock stayed skewed', { FAKE_CI: 'red', FAKE_STEP: "the runner's clock" }, /CI FALLBACK: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran/],
@@ -536,14 +537,14 @@ test('after CI gave no answer in time, the landings of the next minutes skip the
   const c = ci(r);
   const down = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
   r.commit(r.wt, 'b.txt', 'one\n');
-  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1' });
+  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' });
   assert.equal(res.status, 0, res.stderr);
   assert.ok(existsSync(down), 'the first landing leaves a note');
   const asked = c.calls();
   r.commit(r.wt, 'b.txt', 'two\n');
   res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '30' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(no runner started the job within 1s\), so this one doesn't wait for it \(it is asked again from \d\d:\d\d\)/);
+  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(no runner started the job within 1s, and no citadel-ci-linux runner is online .*\), so this one doesn't wait for it \(it is asked again from \d\d:\d\d\)/);
   assert.equal(c.calls(), asked, 'GitHub is not asked');
   assert.equal(c.localRuns(), 2);
   r.commit(r.wt, 'b.txt', 'three\n');
@@ -566,7 +567,7 @@ test('on a quiet perigee the fallback runs the suite in citadel-heavy\'s slot, n
   r.commit(r.wt, 'b.txt', 'mine\n');
   const p = procAt(r);
   const seen = join(r.dir, 'seen');
-  const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', TEST_SEEN: seen, ...p });
+  const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0', TEST_SEEN: seen, ...p });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /CI FALLBACK: no runner started the job within 1s/);
   const cores = Number(spawnSync('nproc', { encoding: 'utf8' }).stdout.trim());
@@ -588,7 +589,7 @@ test('on a busy perigee the ship keeps waiting for CI, and lands on its answer w
     const gate = join(r.dir, 'ci-gate');
     const res = await c.runAsync({ FAKE_CI: 'green', FAKE_CI_GATE: gate, LAND_CI_TIMEOUT: '1', LAND_QUIET_POLL: '0.2', ...procAt(r, o) }, once(() => writeFileSync(gate, '')));
     assert.equal(res.status, 0, `${name}: ${res.stderr}`);
-    assert.match(res.stderr, /waiting for CI or a quiet perigee: CI: CI didn't finish within 1s, but perigee is busy \(.+\), so this keeps asking CI/, name);
+    assert.match(res.stderr, /waiting for CI or a quiet perigee: CI: CI didn't finish within 1s of starting, but perigee is busy \(.+\), so this keeps asking CI/, name);
     assert.match(res.stderr, /CI passed/, name);
     assert.doesNotMatch(res.stderr, /CI FALLBACK/, name);
     assert.equal(c.localRuns(), 0, name);
@@ -638,7 +639,7 @@ test("reruns alone that outlast their window fall back at its end, once: the win
   const res = c.run({ FAKE_CI: 'running', FAKE_STEPS: RERUNNING, LAND_CI_TIMEOUT: '1', LAND_CI_RERUN: '1', ...procAt(r) });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(res.stderr.match(/rerunning the failed files alone/g)?.length, 1, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: CI didn't finish within \d+s, its reruns alone included/);
+  assert.match(res.stderr, /CI FALLBACK: CI didn't finish within \d+s of starting, its reruns alone included/);
   assert.equal(c.localRuns(), 1);
 });
 
@@ -657,7 +658,7 @@ test('with no runner online and a busy perigee, the ship asks CI again until a r
 });
 
 test('a busy perigee that turns quiet runs the suite then, whether CI was waited on or never asked', async () => {
-  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1' }, { LAND_CI: '0' }]) {
+  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, { LAND_CI: '0' }]) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, 'b.txt', 'mine\n');
@@ -697,7 +698,7 @@ test('quiet is under half the cores to the hundredth of a load, and a missing re
 });
 
 test('CI with no answer and a perigee busy past the limit refuse the ship: main untouched, no suite run', async () => {
-  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1' }, { LAND_CI: '0' }]) {
+  for (const extra of [{ FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, { LAND_CI: '0' }]) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, 'b.txt', 'mine\n');
@@ -820,7 +821,7 @@ test("a busy perigee doesn't take the recent no-answer note's shortcut: it asks 
   const r = setup();
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'one\n');
-  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', ...procAt(r) });
+  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0', ...procAt(r) });
   assert.equal(res.status, 0, res.stderr);
   r.commit(r.wt, 'b.txt', 'two\n');
   res = c.run({ ...procAt(r, { load: 999 }) });
@@ -1250,4 +1251,75 @@ test("--check reads main's .gitattributes, so both appending to a union file is 
   r.commit(r.source, 'log.md', 'base\ntheirs\n');
   const res = r.run({}, ['--check']);
   assert.equal(res.status, 0, res.stderr);
+});
+
+// #1361 (Cara 2026-11-20, "Wait for a busy desktop"): while a runner is online, a ship waits LAND_CI_START_ONLINE for
+// it to start the job, not LAND_CI_START; only no runner online (or GitHub erring) writes ci-down. Here 1 s stands for
+// the 90 s, and a job that starts a few seconds in stands for one that starts 5 min in, after another ship's run.
+const startsLater = (file: string, ms = 2500) => {
+  let done = false;
+  return (s: string) => {
+    if (done || !/runner is online but hasn't started the job/.test(s)) return;
+    done = true;
+    setTimeout(() => { writeFileSync(file, 'running'); setTimeout(() => writeFileSync(file, 'green'), 500); }, ms);
+  };
+};
+const ciDown = (r: ReturnType<typeof setup>) => join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
+
+test('a runner online but busy past the short bound: the ship waits for it, lands on CI, runs no suite here and writes no ci-down', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const state = join(r.dir, 'ci-state');
+  writeFileSync(state, 'queued');
+  const shared = join(r.dir, 'shared');
+  const res = await c.runAsync({ FAKE_CI_FILE: state, LAND_CI_START: '1', LAND_CI_START_ONLINE: '60', LAND_CI_ONLINE_POLL: '0', COORDINATOR_SHARED_DIR: shared, ...procAt(r) }, startsLater(state));
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /a citadel-ci-linux runner is online but hasn't started the job \(busy with another run, most likely\), so this waits for it: up to 1 min/);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|no runner started/);
+  assert.equal(c.localRuns(), 0, 'no suite on perigee');
+  assert.ok(!existsSync(ciDown(r)), 'no ci-down note');
+  const queued = Number(landLog(shared).match(/· timing · ticket\/1-x · .* · ci-queue (\d+) · /)?.[1]);
+  assert.ok(queued >= 2, `it waited past the 1 s bound in the queue (${queued} s)`);
+});
+
+test('a busy perigee: the busy limit counts no time while a runner is online and CI still waits on it', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const state = join(r.dir, 'ci-state');
+  writeFileSync(state, 'queued');
+  // A 1 s busy limit: before #1361 the wait past the short bound counted, and this ship was refused.
+  const res = await c.runAsync({ FAKE_CI_FILE: state, LAND_CI_START: '1', LAND_CI_START_ONLINE: '60', LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2', ...procAt(r, { load: 999 }) }, startsLater(state));
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /both busy|not your change|CI FALLBACK/);
+  assert.equal(c.localRuns(), 0);
+});
+
+test('a late start or a slow run falls back on a quiet perigee but leaves no ci-down, so the next ship asks CI; no runner online leaves one', () => {
+  for (const [name, extra] of [['late start', { FAKE_CI: 'queued', LAND_CI_START: '0', LAND_CI_START_ONLINE: '1' }], ['slow run', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }]] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'one\n');
+    let res = c.run({ ...extra, ...procAt(r) });
+    assert.equal(res.status, 0, `${name}: ${res.stderr}`);
+    assert.match(res.stderr, /CI FALLBACK: (no runner started the job within 1s, though a citadel-ci-linux runner is online|CI didn't finish within 1s of starting)/, name);
+    assert.ok(!existsSync(ciDown(r)), `${name}: no ci-down note`);
+    r.commit(r.wt, 'b.txt', 'two\n');
+    res = c.run({ ...procAt(r) });
+    assert.equal(res.status, 0, `${name}: ${res.stderr}`);
+    assert.match(res.stderr, /CI passed/, `${name}: the next ship asked CI`);
+    assert.equal(c.localRuns(), 1, name);
+  }
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'one\n');
+  const t0 = Date.now();
+  const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_START_ONLINE: '60', FAKE_RUNNERS_WAIT: '0', ...procAt(r) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 1s, and no citadel-ci-linux runner is online/);
+  assert.ok(Date.now() - t0 < 30_000, 'it fell back at the short bound, not the long one');
+  assert.ok(existsSync(ciDown(r)), 'no runner online: the note is written');
 });

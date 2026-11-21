@@ -103,6 +103,9 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
 // hang run-tests.sh stopped (the same interrupt, but a verdict);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask.
+// FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
+// Nth commit it is asked about and any after it, until the file FAKE_CI_UP exists. The wait's own runner checks (runners?per_page=,
+// #1361) start no run, and answer FAKE_RUNNERS_WAIT when it is set, else as the check before a push.
 export function ci(r: ReturnType<typeof setup>) {
   const hub = join(r.dir, 'hub.git');
   git(r.dir, 'init', '-q', '--bare', hub);
@@ -115,12 +118,17 @@ echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
     sha=\${2#*head_sha=} sha=\${sha%%&*}
+    [ -z "\${FAKE_CI_FILE:-}" ] || FAKE_CI=$(cat "\$FAKE_CI_FILE")
     [ "\${FAKE_CI:-}" != down ] || exit 1
     [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
     n=$(grep -c '/actions/runners ' "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
+    if [ -n "\${FAKE_CI_DOWN_AT:-}" ] && [ ! -e "\$FAKE_CI_UP" ]; then
+      grep -qx "$sha" "${calls}.shas" 2>/dev/null || echo "$sha" >>"${calls}.shas"
+      [ "$(grep -nx "$sha" "${calls}.shas" | cut -d: -f1)" -lt "\$FAKE_CI_DOWN_AT" ] || exit 1
+    fi
     [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
     # (a commit GitHub hasn't got yet has no run)
     if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
@@ -143,6 +151,7 @@ case "$*" in
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
+  *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;

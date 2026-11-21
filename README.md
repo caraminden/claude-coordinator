@@ -563,8 +563,9 @@ a run (the defaults are set for perigee; each script's comments say more):
 
 | Variable | Default | What it limits |
 |---|---|---|
-| `LAND_CI_START` | 90 s | `land.sh`: wait for a runner to take the CI job, then fall back |
-| `LAND_CI_TIMEOUT` | 360 s | `land.sh`: wait for the CI run to finish, then fall back |
+| `LAND_CI_START` | 90 s | `land.sh`: wait for a runner to take the CI job while none is online, then fall back |
+| `LAND_CI_START_ONLINE` | 900 s | `land.sh`: the same wait while a runner is online but busy |
+| `LAND_CI_TIMEOUT` | 600 s | `land.sh`: wait for the CI run to finish once a runner took it, then fall back |
 | `LAND_CI_DOWN` | 600 s | `land.sh`: after a landing's CI wait ran out, the next landings skip CI for this long |
 | `LAND_BUILD_WAIT` | 3600 s | `land.sh --into`, `--full`, `--build`: wait for the run on the same build ahead of it |
 | `DEPLOY_QUEUE_STALL` | 900 s | the line: give up when nothing at its head has moved for this long |

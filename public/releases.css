@@ -105,6 +105,9 @@ b.waits { color: var(--held); }
 .rel-grid .rel-card-sm { background: var(--panel); }
 .rel-grid .rel-card-sm:not(:hover, .hl) { border-color: color-mix(in srgb, var(--tint, var(--line)) 40%, var(--line)); }
 .rel-all-narrow { display: none; flex-direction: column; gap: 0.75rem; }
+/* Beside the page's list (#1423) the board's column is narrower than the screen: it takes the phone layout by its own width. */
+.rel-tab { container-type: inline-size; }
+@container (max-width: 52rem) { .rel-all-wide { display: none; } .rel-all-narrow { display: flex; } }
 @media (max-width: 800px) {
   .rel-head .close-view.wide-only { display: none; }
   .ticket-head.rel-head > .row > h2 { flex: 1 1 0; }

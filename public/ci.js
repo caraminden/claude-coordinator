@@ -320,7 +320,7 @@ export function releasesShell() {
     const s = ciRead?.schemes.find((x) => x.id === id);
     const words = (st, n, noun = 'problem') => (n ? `${n} ${noun}${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]);
     if (tab === 'status') {
-      if (!statusData) return { st: 'none', line: '' };
+      if (!statusData) return { st: 'none', line: 'reading…' }; // a line now, so the read arriving moves nothing
       // A scheme's dot is its apps'; the server's verdict sits only on the row of the scheme that ships it.
       const apps = statusData.apps.filter((a) => a.scheme === id);
       const verdicts = [...(id === serverScheme() ? [statusData.citadel.verdict] : []), ...apps.map((a) => a.verdict)];
